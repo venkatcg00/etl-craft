@@ -22,9 +22,9 @@ From another terminal, create a run with an explicit key:
 
 ```bash
 etl-craft --config /srv/etl-craft/craft-connector.yml run \
-  --pipeline_code SALES --init-only --run-key daily:2026-10-07 --run-date 2026-10-07
+  --pipeline-code SALES --init-only --run-key daily:2026-10-07 --run-date 2026-10-07
 etl-craft --config /srv/etl-craft/craft-connector.yml history \
-  --pipeline_code SALES --run-key daily:2026-10-07 --format json
+  --pipeline-code SALES --run-key daily:2026-10-07 --format json
 ```
 
 Initialization performs the usual admission checks. The controller picks up an unowned

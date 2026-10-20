@@ -1,7 +1,7 @@
 """Real token authorization and shared operation documents on both Engine DBs."""
 
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -11,20 +11,29 @@ from sqlalchemy import inspect as sql_inspect
 
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind, current_actor
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import transitions
-from etl_craft.services.operations import (
-    OperationContext,
-    api_reads,
-    inspect,
-    to_json,
-    tokens,
+from etl_craft.services.operations import OperationContext, to_json, tokens
+from etl_craft.services.operations.actions import ACTIONS, invoke
+from etl_craft.services.operations.requests import (
+    AttemptId,
+    HistoryInput,
+    NoInput,
+    PipelineInput,
+    RunId,
+    RunSelection,
+    TaskSelection,
 )
-from etl_craft.services.operations.models import HistoryQuery
-from etl_craft.services.operations.status import explain_task
 from fixtures.metadata import add_pipeline, add_task, start_run
+
+ROLES = tuple(ApiRole)
+
+
+def create_token(ctx, name, role, expires=None):
+    request = tokens.TokenCreate(name=name, role=role, expires=expires)
+    return invoke(ctx, ActionName.TOKEN_CREATE, request)
 
 
 @pytest.fixture
@@ -42,7 +51,7 @@ def api(engine_db, tmp_path):
         run = start_run(conn, pipeline)
         summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
         attempt = transitions.queue_attempt(conn, summary, current_actor())
-    creds = {role: tokens.create_token(ctx, role, role) for role in tokens.ROLES}
+    creds = {role: create_token(ctx, role, role) for role in ROLES}
     client = TestClient(create_app(ctx))
     return ctx, client, creds, run, attempt
 
@@ -51,21 +60,34 @@ def headers(credential):
     return {"Authorization": "Bearer " + credential.token}
 
 
-@pytest.mark.parametrize("role", tokens.ROLES)
+@pytest.mark.parametrize("role", ROLES)
 def test_read_routes_require_token_and_share_cli_documents(api, role):
     ctx, client, creds, run, attempt = api
     h = headers(creds[role])
+    selected = f"pipeline_code=P&run_id={run}"
     docs = {
         "/api/v1/health": {"schema": "etl-craft/health/1", "status": "ok"},
-        "/api/v1/pipelines": to_json(inspect.list_pipelines(ctx)),
-        "/api/v1/pipelines/P": to_json(api_reads.get_pipeline(ctx, "P")),
-        "/api/v1/pipelines/P/runs": to_json(
-            inspect.run_history(ctx, "P", HistoryQuery(all_runs=True))
+        "/api/v1/pipelines": to_json(invoke(ctx, ActionName.PIPELINES, NoInput())),
+        "/api/v1/pipelines/P": to_json(
+            invoke(ctx, ActionName.PIPELINE, PipelineInput(pipeline_code="P"))
         ),
-        f"/api/v1/runs/{run}": to_json(api_reads.get_run_status(ctx, run).run),
-        f"/api/v1/runs/{run}/tasks": to_json(inspect.pipeline_steps(ctx, "P")),
-        f"/api/v1/runs/{run}/tasks/T/explain": to_json(explain_task(ctx, "P", "T")),
-        f"/api/v1/attempts/{attempt}": to_json(api_reads.get_attempt(ctx, attempt)),
+        "/api/v1/history?pipeline_code=P&all=true": to_json(
+            invoke(ctx, ActionName.HISTORY, HistoryInput(pipeline_code="P", all=True))
+        ),
+        f"/api/v1/runs/{run}": to_json(invoke(ctx, ActionName.RUN_DETAIL, RunId(run_id=run))),
+        f"/api/v1/steps?{selected}": to_json(
+            invoke(ctx, ActionName.STEPS, RunSelection(pipeline_code="P", run_id=run))
+        ),
+        f"/api/v1/explanations?{selected}&task_code=T": to_json(
+            invoke(
+                ctx,
+                ActionName.EXPLAIN,
+                TaskSelection(pipeline_code="P", task_code="T", run_id=run),
+            )
+        ),
+        f"/api/v1/attempts/{attempt}": to_json(
+            invoke(ctx, ActionName.ATTEMPT, AttemptId(attempt_id=attempt))
+        ),
     }
     for path, expected in docs.items():
         assert client.get(path).status_code == 401
@@ -79,7 +101,10 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
     assert client.get("/api/v1/runs/999999", headers=h).status_code == 404
     assert client.get("/api/v1/attempts/999999", headers=h).status_code == 404
     assert client.get("/api/v1/pipelines/missing", headers=h).status_code == 404
-    assert client.get("/api/v1/pipelines/P/runs?limit=101", headers=h).status_code == 422
+    refused = client.get("/api/v1/history?pipeline_code=P&limit=101", headers=h)
+    assert refused.status_code == 400 and "`limit`" in refused.json()["message"]
+    unknown = client.get("/api/v1/history?pipeline_code=P&unknown=1", headers=h)
+    assert unknown.status_code == 400 and "`unknown`" in unknown.json()["message"]
     assert (
         client.get("/api/v1/openapi.json").json()["components"]["securitySchemes"]["HTTPBearer"][
             "scheme"
@@ -88,7 +113,33 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
     )
 
 
-@pytest.mark.parametrize("role", tokens.ROLES)
+def audit_counts(engine):
+    with engine.connect() as conn:
+        names = [n for n in sql_inspect(conn).get_table_names() if n.upper().startswith("AUD_")]
+        return {n: conn.execute(text(f'SELECT COUNT(*) FROM "{n}"')).scalar_one() for n in names}
+
+
+def test_no_read_route_records_an_audit_row(api):
+    ctx, client, creds, run, attempt = api
+    given = {"pipeline_code": "P", "task_code": "T", "run_id": run, "attempt_id": attempt}
+    given |= {"control_id": 1, "target": "staging.t"}
+    reads = [action for action in ACTIONS.values() if action.method == "GET"]
+    before = audit_counts(ctx.engine)
+    answered = {}
+    for action in reads:
+        names = {f.name for f in fields(action.request)}
+        values = {k: v for k, v in given.items() if k in names}
+        path = action.path.format(**values)
+        query = {k: v for k, v in values.items() if "{" + k + "}" not in action.path}
+        response = client.get(path, params=query, headers=headers(creds[ApiRole.ADMIN]))
+        answered[action.name] = response.status_code
+        assert audit_counts(ctx.engine) == before, action.name
+    # Most reads answer; the rest refuse this fixture's data, and neither records a row.
+    assert sum(code == 200 for code in answered.values()) > len(reads) // 2, answered
+    assert all(code < 500 for code in answered.values()), answered
+
+
+@pytest.mark.parametrize("role", ROLES)
 def test_catalog_gaps_require_viewer_and_do_not_publish_lineage(api, role):
     ctx, client, creds, _run, _attempt = api
     assert client.get("/api/v1/catalog/gaps").status_code == 401
@@ -139,77 +190,79 @@ def test_empty_catalog_does_not_claim_a_warehouse_check(api):
     assert response.json()["compared_at"] is None
 
 
-@pytest.mark.parametrize("role", tokens.ROLES)
+@pytest.mark.parametrize("role", ROLES)
 def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, monkeypatch):
     ctx, client, creds, run, _attempt = api
     calls = []
 
-    def done(caller, *args, **kwargs):
-        calls.append((caller.actor.name, args, kwargs))
-        return inspect.list_pipelines(ctx)
+    def done(caller, request):
+        calls.append((caller.actor.name, request))
+        return invoke(ctx, ActionName.PIPELINES, NoInput())
 
     cases = [
         (
-            "/api/v1/pipelines/P/tasks/T/run",
-            "etl_craft.services.operations.runs.execute_run",
-            {"run_id": run, "standalone": True},
+            ActionName.RUN,
+            {"pipeline_code": "P", "task_code": "T", "run_id": run, "standalone": True},
         ),
-        ("/api/v1/pipelines/P/runs", "etl_craft.services.operations.runs.trigger_run", {}),
+        (ActionName.RUN, {"pipeline_code": "P"}),
         (
-            "/api/v1/pipelines/P/backfills",
-            "etl_craft.services.operations.backfills.run_backfill",
-            {"first": "2026-01-01", "last": "2026-01-02", "reason": "test"},
+            ActionName.RUN,
+            {
+                "pipeline_code": "P",
+                "backfill_from": "2026-01-01",
+                "backfill_to": "2026-01-02",
+                "reason": "test",
+            },
         ),
+        (ActionName.CONTROL, {"pipeline_code": "P", "action": "PAUSE", "reason": "test"}),
+        (ActionName.CONTROL, {"pipeline_code": "P", "action": "RESUME", "reason": "test"}),
         (
-            "/api/v1/pipelines/P/pause",
-            "etl_craft.services.operations.pipelines.set_pause",
-            {"reason": "test"},
-        ),
-        (
-            "/api/v1/pipelines/P/resume",
-            "etl_craft.services.operations.pipelines.set_pause",
-            {"reason": "test"},
-        ),
-        (
-            f"/api/v1/runs/{run}/tasks/T/mark",
-            "etl_craft.services.operations.tasks.mark_task",
-            {"status": "SUCCESS", "reason": "test"},
-        ),
-        (
-            f"/api/v1/runs/{run}/tasks/T/mark",
-            "etl_craft.services.operations.tasks.mark_task",
-            {"watermark": "0", "reason": "reload"},
+            ActionName.MARK,
+            {
+                "pipeline_code": "P",
+                "run_id": run,
+                "task_code": "T",
+                "status": "SUCCESS",
+                "reason": "t",
+            },
         ),
         (
-            f"/api/v1/runs/{run}/tasks/T/rerun",
-            "etl_craft.services.operations.tasks.rerun_task",
-            {"reason": "test"},
+            ActionName.MARK,
+            {
+                "pipeline_code": "P",
+                "run_id": run,
+                "task_code": "T",
+                "watermark": "0",
+                "reason": "r",
+            },
+        ),
+        (
+            ActionName.RUN,
+            {"pipeline_code": "P", "run_id": run, "task_code": "T", "rerun": True, "reason": "t"},
         ),
     ]
-    for path, operation, body in cases:
-        monkeypatch.setattr(operation, done)
-        assert client.post(path, json=body).status_code == 401
-        response = client.post(path, json=body, headers=headers(creds[role]))
+    for name, body in cases:
+        action = ACTIONS[name]
+        monkeypatch.setitem(ACTIONS, name, replace(action, call=done))
+        assert client.post(action.path, json=body).status_code == 401
+        response = client.post(action.path, json=body, headers=headers(creds[role]))
         assert response.status_code == (403 if role == "viewer" else 200), response.text
         if role != "viewer":
-            assert calls[-1][0] == role
-            if operation.endswith("execute_run"):
-                request = calls[-1][1][0]
-                assert request.pipeline_code == "P" and request.standalone
-                assert request.selector.run_id == run
-            else:
-                assert calls[-1][1][0] == "P"
-            if "/runs/" in path:
-                assert calls[-1][2]["selector"].run_id == run
+            caller, request = calls[-1]
+            assert caller == role
+            assert request.pipeline_code == "P"
+            assert request.run_id == body.get("run_id")
     if role == "viewer":
         assert calls == []
     response = client.post(
-        "/api/v1/pipelines/P/pause", json={"reason": " "}, headers=headers(creds["operator"])
+        "/api/v1/controls",
+        json={"pipeline_code": "P", "action": "PAUSE", "reason": " "},
+        headers=headers(creds["operator"]),
     )
-    assert response.status_code == 422
+    assert response.status_code == 400 and "`reason`" in response.json()["message"]
 
 
-@pytest.mark.parametrize("role", tokens.ROLES)
+@pytest.mark.parametrize("role", ROLES)
 def test_token_admin_routes_and_immediate_revocation(api, role):
     _ctx, client, creds, _run, _attempt = api
     h = headers(creds[role])
@@ -218,19 +271,21 @@ def test_token_admin_routes_and_immediate_revocation(api, role):
         "/api/v1/tokens", headers=h, json={"name": "new", "role": "viewer", "expires": "90d"}
     )
     assert response.status_code == (200 if role == "admin" else 403)
-    response = client.post(f"/api/v1/tokens/{creds['viewer'].metadata.token_id}/revoke", headers=h)
+    response = client.post(
+        "/api/v1/tokens/revoke", headers=h, json={"token_id": creds["viewer"].metadata.token_id}
+    )
     assert response.status_code == (200 if role == "admin" else 403)
     if role == "admin":
         assert client.get("/api/v1/health", headers=headers(creds["viewer"])).status_code == 401
         assert "token_sha256" not in response.text.lower()
     assert client.get("/api/v1/tokens").status_code == 401
     assert client.post("/api/v1/tokens", json={"name": "x", "role": "viewer"}).status_code == 401
-    assert client.post("/api/v1/tokens/1/revoke").status_code == 401
+    assert client.post("/api/v1/tokens/revoke", json={"token_id": 1}).status_code == 401
 
 
 def test_tokens_store_hash_only_expiry_validation_and_audit(api):
     ctx, client, creds, _run, _attempt = api
-    value = tokens.create_token(ctx, "expires", "operator", "1d")
+    value = create_token(ctx, "expires", "operator", "1d")
     with ctx.engine.begin() as conn:
         digest = conn.execute(
             text("SELECT TOKEN_SHA256 AS digest FROM CFG_API_TOKENS WHERE TOKEN_ID=:id"),
@@ -253,23 +308,22 @@ def test_tokens_store_hash_only_expiry_validation_and_audit(api):
     assert tokens.authenticate(ctx, "x" * 257) is None
     for expires in ["0d", "-1d", "1h", "36501d", "9" * 5000 + "d"]:
         with pytest.raises(UsageError):
-            tokens.create_token(ctx, "bad", "viewer", expires)
-    with pytest.raises(UsageError):
-        tokens.create_token(ctx, "bad", "root")
-    with pytest.raises(UsageError):
-        tokens.revoke_token(ctx, 999999)
-    response = client.post(
-        "/api/v1/pipelines/P/pause",
-        headers=headers(creds["operator"]),
-        json={"reason": "maintenance"},
+            create_token(ctx, "bad", "viewer", expires)
+    root = client.post(
+        "/api/v1/tokens", headers=headers(creds["admin"]), json={"name": "bad", "role": "root"}
     )
+    assert root.status_code == 400 and "`role`" in root.json()["message"]
+    with pytest.raises(UsageError):
+        invoke(ctx, ActionName.TOKEN_REVOKE, tokens.TokenRevoke(token_id=999999))
+    pause = {"pipeline_code": "P", "action": "PAUSE", "reason": "maintenance"}
+    response = client.post("/api/v1/controls", headers=headers(creds["operator"]), json=pause)
     assert response.status_code == 200, response.text
     assert response.json()["pipeline"]["paused"]["paused_by"] == "operator"
     assert (
         client.post(
-            "/api/v1/pipelines/P/pause",
+            "/api/v1/controls",
             headers=headers(creds["operator"]),
-            json={"reason": "again"},
+            json={**pause, "reason": "again"},
         ).status_code
         == 409
     )
@@ -286,18 +340,18 @@ def test_log_streaming_offsets_and_path_boundaries(api, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_bytes(b"first\nsecond\n")
     url = f"/api/v1/attempts/{attempt}/log"
-    for role in tokens.ROLES:
+    for role in ROLES:
         assert client.get(url, headers=headers(creds[role])).status_code == 404
     with ctx.engine.begin() as conn:
         conn.execute(
             text("UPDATE AUD_TASK_ATTEMPTS SET LOG_PATH=:path WHERE ATTEMPT_ID=:id"),
             {"path": str(path), "id": attempt},
         )
-    for role in tokens.ROLES:
+    for role in ROLES:
         assert client.get(url, headers=headers(creds[role])).content == b"first\nsecond\n"
     assert client.get(url).status_code == 401
     assert client.get(url + "?offset=6", headers=headers(creds["viewer"])).content == b"second\n"
-    assert client.get(url + "?offset=-1", headers=headers(creds["viewer"])).status_code == 422
+    assert client.get(url + "?offset=-1", headers=headers(creds["viewer"])).status_code == 400
     outside = tmp_path / "secret"
     outside.write_text("secret")
     path.unlink()
@@ -317,10 +371,12 @@ def test_run_history_cursor_is_bounded_and_exact(api):
         ).scalar_one()
         second = start_run(conn, pipeline)
     h = headers(creds["viewer"])
-    first = client.get("/api/v1/pipelines/P/runs?limit=1", headers=h).json()
+    first = client.get("/api/v1/history?pipeline_code=P&all=true&limit=1", headers=h).json()
     assert first["entries"][0]["pipeline_run_id"] == second
     assert first["before"] == second
-    last = client.get(f"/api/v1/pipelines/P/runs?limit=1&before={second}", headers=h).json()
+    last = client.get(
+        f"/api/v1/history?pipeline_code=P&all=true&limit=1&before={second}", headers=h
+    ).json()
     assert last["entries"][0]["pipeline_run_id"] == run
     assert last["before"] is None
 
@@ -365,7 +421,7 @@ def test_engine_unavailable_response_does_not_echo_storage_parameters(api, monke
     def broken(*args):
         raise SQLAlchemyError("secret credential")
 
-    monkeypatch.setattr(tokens, "authenticate", broken)
+    monkeypatch.setattr("etl_craft.api.routes.authenticate", broken)
     response = client.get("/api/v1/health", headers={"Authorization": "Bearer secret"})
     assert response.status_code == 503
     assert "secret" not in response.text
@@ -410,8 +466,8 @@ def test_live_http_trigger_is_executed_by_controller_and_shutdown_is_clean(cli_p
             time.sleep(0.02)
     with urlopen(
         Request(
-            base + "/pipelines/P/runs",
-            data=b'{"reason":"HTTP refresh"}',
+            base + "/runs",
+            data=b'{"pipeline_code":"P","reason":"HTTP refresh"}',
             headers={"Authorization": "Bearer " + credential, "Content-Type": "application/json"},
         ),
         timeout=5,
@@ -456,7 +512,7 @@ def test_tokens_work_after_released_schema_upgrade(empty_engine_db, tmp_path, mo
     applied = apply_pending_migrations(db.engine)
     assert "0018_api_tokens.sql" in applied
     ctx = OperationContext(db.engine, db.config, current_actor(), role=ApiRole.ADMIN)
-    created = tokens.create_token(ctx, "upgraded", "viewer", "1d")
+    created = create_token(ctx, "upgraded", "viewer", "1d")
     assert tokens.authenticate(ctx, created.token).name == "upgraded"
     assert apply_pending_migrations(db.engine) == []
 
@@ -469,7 +525,7 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
     config = replace(
         ctx.config,
         warehouse=ConnectionProfile(
-            "WAREHOUSE", "local", "jdbc:duckdb:warehouse.duckdb", "", "none"
+            "WAREHOUSE", "local", "jdbc:duckdb:warehouse.duckdb", "", "NONE"
         ),
     )
     client = TestClient(create_app(replace(ctx, config=config)))
@@ -492,20 +548,20 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
                 ),
                 {"task": task, "name": name, "value": value},
             )
-    path = f"/api/v1/runs/{run}/tasks/T/mark"
+    path = "/api/v1/marks"
     h = headers(creds["operator"])
+    selected = {"pipeline_code": "P", "task_code": "T", "run_id": run}
     for body in (
         {"reason": "reset"},
         {"status": "SUCCESS", "watermark": "1", "reason": "reset"},
         {"watermark": "1", "rows": 1, "reason": "reset"},
     ):
-        assert client.post(path, json=body, headers=h).status_code == 400
-    assert (
-        client.post(path, json={"watermark": "1", "reason": "reset"}, headers=h).status_code == 409
-    )
+        assert client.post(path, json={**selected, **body}, headers=h).status_code == 400
+    reset = {**selected, "watermark": "1", "reason": "reset"}
+    assert client.post(path, json=reset, headers=h).status_code == 409
     with ctx.engine.begin() as conn:
         transitions.cancel_attempt(conn, attempt, current_actor(), error_message="cancelled")
-    response = client.post(path, json={"watermark": "1", "reason": "reset"}, headers=h)
+    response = client.post(path, json=reset, headers=h)
     assert response.status_code == 200, response.text
     with ctx.engine.connect() as conn:
         assert fetch_task_offset(conn, task).offset_value == "1"
@@ -538,21 +594,22 @@ def test_server_refuses_an_api_address_in_use_before_taking_leadership(cli_proje
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_CONTROLLERS")).scalar_one() == 0
 
 
-def test_task_run_refuses_unknown_control_fields(api):
+def test_run_refuses_unknown_fields_and_host_only_options(api):
     _ctx, client, creds, _run, _attempt = api
-    response = client.post(
-        "/api/v1/pipelines/P/tasks/T/run",
-        json={"standalone": True, "force": True},
-        headers=headers(creds["operator"]),
-    )
-    assert response.status_code == 422
-    assert "force" in response.text and "extra_forbidden" in response.text
+    h = headers(creds["operator"])
+    task = {"pipeline_code": "P", "task_code": "T", "standalone": True}
+    unknown = client.post("/api/v1/runs", json={**task, "unexpected": True}, headers=h)
+    assert unknown.status_code == 400 and "`unexpected`" in unknown.json()["message"]
+    forced = client.post("/api/v1/runs", json={"pipeline_code": "P", "force": True}, headers=h)
+    assert forced.status_code == 400
+    assert "`force` works only on the controller's host" in forced.json()["message"]
 
 
 def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
     _, client, creds, run, attempt = api
-    path = "/api/v1/pipelines/P/controls"
+    path = "/api/v1/controls"
     body = {
+        "pipeline_code": "P",
         "action": "HOLD",
         "task_code": "T",
         "run_id": run,
@@ -577,7 +634,7 @@ def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
         client.post(
             path, json={**body, "unexpected": True}, headers=headers(creds["operator"])
         ).status_code
-        == 422
+        == 400
     )
     stop = client.post(
         path,
@@ -592,7 +649,7 @@ def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
 def test_recovery_capabilities_and_bulk_routes_share_exact_requests(api):
     _, client, creds, run, _ = api
     viewer, operator = headers(creds["viewer"]), headers(creds["operator"])
-    caps = client.get(f"/api/v1/pipelines/P/capabilities?run_id={run}", headers=viewer)
+    caps = client.get(f"/api/v1/capabilities?pipeline_code=P&run_id={run}", headers=viewer)
     assert caps.status_code == 200 and caps.json()["schema"] == "etl-craft/capabilities/1"
     assert all(not a["available"] for a in caps.json()["actions"])
     body = {
@@ -630,7 +687,7 @@ def test_recovery_capabilities_and_bulk_routes_share_exact_requests(api):
         json={"requests": [{**body["requests"][0], "unexpected": True}]},
         headers=operator,
     )
-    assert rejected.status_code == 422
+    assert rejected.status_code == 400
 
 
 def test_attempt_endpoint_retains_failure_evidence_and_retry_policy(api):

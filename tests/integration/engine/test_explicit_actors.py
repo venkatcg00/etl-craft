@@ -10,12 +10,13 @@ from sqlalchemy.exc import DBAPIError
 
 from etl_craft.controller.supervisor import serve
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as, current_actor
-from etl_craft.core.enums import AccountKind, ApiRole, FailureClass, YesNo
+from etl_craft.core.enums import ActionName, ApiRole, FailureClass
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.failures import Failure
 from etl_craft.engine import migrations, transitions
 from etl_craft.execution.context import build_task_context
-from etl_craft.services.operations import OperationContext, accounts, sessions, tokens
+from etl_craft.services.operations import OperationContext, tokens
+from fixtures.actions import act
 from fixtures.metadata import add_pipeline, add_task
 from fixtures.released_schema import SCHEMAS, install
 
@@ -23,13 +24,15 @@ from fixtures.released_schema import SCHEMAS, install
 def test_account_proof_selects_user_or_service_kind(engine_db):
     db = engine_db
     ctx = OperationContext(db.engine, db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
-    accounts.add_account(
+    act(
         ctx,
-        accounts.Account(0, "person", AccountKind.USER, ApiRole.ADMIN, None, None, YesNo.YES),
-        "correct horse battery",
+        ActionName.ACCOUNT_ADD,
+        name="person",
+        role=ApiRole.ADMIN,
+        password="correct horse battery",
     )
-    person = sessions.sign_in(ctx, "person", "correct horse battery")
-    service = tokens.create_token(ctx, "scheduler", ApiRole.ADMIN)
+    person = act(ctx, ActionName.LOGIN, name="person", password="correct horse battery")
+    service = act(ctx, ActionName.TOKEN_CREATE, name="scheduler", role=ApiRole.ADMIN)
     for credential, kind in (
         (person.access_token, ActorKind.USER),
         (service.token, ActorKind.SERVICE),

@@ -8,7 +8,14 @@ from datetime import datetime
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection, RowMapping
 
-from etl_craft.core.enums import YesNo
+from etl_craft.core.enums import (
+    AttemptStatus,
+    FailureClass,
+    RunStatus,
+    SlaStatus,
+    TriggerKind,
+    YesNo,
+)
 from etl_craft.core.errors import RunStateError, UsageError
 from etl_craft.core.failures import retry_reason
 from etl_craft.core.time import as_utc
@@ -65,6 +72,10 @@ def run_document(row: RowMapping) -> RunView:
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
     values["backfill"] = values["backfill"] == YesNo.YES
+    values["trigger_kind"] = TriggerKind(values["trigger_kind"])
+    values["status"] = RunStatus(values["status"])
+    sla = values["sla_status"]
+    values["sla_status"] = None if sla is None else SlaStatus(sla)
     selection = values.pop("task_selection", None)
     if selection is not None:
         scope = TaskSelection.deserialize(selection)
@@ -107,6 +118,7 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
     values = dict(row)
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
+    values["status"] = RunStatus(values["status"])
     attempts = []
     for attempt in conn.execute(
         statement(conn, "operation_attempts").columns(retryable=Boolean),
@@ -129,6 +141,8 @@ def attempt_document(row: RowMapping) -> AttemptView:
         "not_before",
     ):
         captured[key] = timestamp(captured[key])
+    captured["status"] = AttemptStatus(captured["status"])
+    captured["failure_class"] = FailureClass(captured["failure_class"])
     captured["retry_reason"] = retry_reason(
         captured["failure_class"],
         captured["failure_source"],

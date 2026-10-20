@@ -198,13 +198,13 @@ def test_an_in_memory_sqlite_engine_db_is_refused(jdbc_url):
 
 
 def test_sqlite_needs_no_authentication(tmp_path):
-    profile = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "u", "password")
+    profile = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "u", "PASSWORD")
     with pytest.raises(ConfigurationError, match="sqlite Engine DB takes"):
         build_engine(engine_config(profile, tmp_path / "craft-connector.yml"))
 
 
 def test_sqlite_connections_enforce_foreign_keys_and_use_wal(tmp_path):
-    profile = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:sub/e.db", "", "none")
+    profile = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:sub/e.db", "", "NONE")
     engine = build_engine(engine_config(profile, tmp_path / "craft-connector.yml"))
     try:
         with engine.connect() as conn:
@@ -282,8 +282,8 @@ def connect(auth_mode, secret="", url="jdbc:postgresql://db:5432/etl", **extra):
 
 
 def test_password_and_token_are_the_password(psycopg_calls):
-    connect("password", "pw")
-    connect("token", "bearer")
+    connect("PASSWORD", "pw")
+    connect("TOKEN", "bearer")
     assert [call["password"] for call in psycopg_calls] == ["pw", "bearer"]
     assert psycopg_calls[0] | {"password": None} == {
         "host": "db",
@@ -295,7 +295,7 @@ def test_password_and_token_are_the_password(psycopg_calls):
 
 
 def test_the_url_query_reaches_the_driver_and_wins(psycopg_calls):
-    connect("password", "pw", "jdbc:postgresql://db/etl?sslmode=require&application_name=x")
+    connect("PASSWORD", "pw", "jdbc:postgresql://db/etl?sslmode=require&application_name=x")
     assert psycopg_calls[0]["sslmode"] == "require"
     assert psycopg_calls[0]["application_name"] == "x"
 
@@ -311,7 +311,7 @@ def test_oauth_mints_a_fresh_token_per_connection(psycopg_calls, monkeypatch):
 
     monkeypatch.setattr(credentials, "client_credentials_token", fake_token)
     creator = postgres_creator(
-        profile("oauth", client_id="cid", token_url="https://idp/token", scope="s"),
+        profile("OAUTH", client_id="cid", token_url="https://idp/token", scope="s"),
         "csecret",
         parse_postgres_url("jdbc:postgresql://db/etl"),
     )
@@ -331,16 +331,16 @@ def test_sts_uses_an_rds_token_over_tls(psycopg_calls, monkeypatch):
         return "rds-token"
 
     monkeypatch.setattr(credentials, "aws_rds_auth_token", fake_rds)
-    connect("sts", region="eu-west-1")
+    connect("STS", region="eu-west-1")
     assert seen == [("db", 5432, "etl", "eu-west-1", None)]
     assert psycopg_calls[0]["password"] == "rds-token"
     assert psycopg_calls[0]["sslmode"] == "require"
-    connect("sts", url="jdbc:postgresql://db/etl?sslmode=verify-full", region="r")
+    connect("STS", url="jdbc:postgresql://db/etl?sslmode=verify-full", region="r")
     assert psycopg_calls[1]["sslmode"] == "verify-full"
 
 
 def test_sso_hands_libpq_its_oauth_settings(psycopg_calls):
-    connect("sso", issuer="https://idp", client_id="cid", scope="openid")
+    connect("SSO", issuer="https://idp", client_id="cid", scope="openid")
     call = psycopg_calls[0]
     assert (call["oauth_issuer"], call["oauth_client_id"], call["oauth_scope"]) == (
         "https://idp",
@@ -349,13 +349,13 @@ def test_sso_hands_libpq_its_oauth_settings(psycopg_calls):
     )
     assert "password" not in call
     assert "oauth_client_secret" not in call
-    connect("sso", "client-secret", issuer="https://idp", client_id="cid")
+    connect("SSO", "client-secret", issuer="https://idp", client_id="cid")
     assert psycopg_calls[1]["oauth_client_secret"] == "client-secret"
 
 
 def test_key_file_sends_the_certificate_and_passphrase(psycopg_calls):
-    connect("key_file", "pp", key_file="/k.pem", cert_file="/c.pem")
-    connect("key_file", key_file="/k.pem")
+    connect("KEY_FILE", "pp", key_file="/k.pem", cert_file="/c.pem")
+    connect("KEY_FILE", key_file="/k.pem")
     first, second = psycopg_calls
     assert (first["sslkey"], first["sslcert"], first["sslpassword"]) == ("/k.pem", "/c.pem", "pp")
     assert second["sslpassword"] is None
@@ -368,20 +368,20 @@ def test_an_unknown_auth_mode_is_refused():
 
 
 @pytest.mark.parametrize(
-    ("mode", "error"), [("none", "postgresql Engine DB takes"), ("sts", "needs region")]
+    ("mode", "error"), [("NONE", "postgresql Engine DB takes"), ("STS", "needs Region")]
 )
 def test_config_checks_engine_auth_mode_and_fields(tmp_path, mode, error):
     with pytest.raises(ConfigurationError, match=error):
         parse_config(
             {
-                "Secrets": {"Source_type": "environment"},
+                "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {},
                 "Engine": {
                     "dev": {
-                        "jdbc_url": "jdbc:postgresql://db/etl",
-                        "schema": "public",
-                        "user": "etl",
-                        "auth_mode": mode,
+                        "Jdbc_url": "jdbc:postgresql://db/etl",
+                        "Schema": "public",
+                        "User": "etl",
+                        "Auth_mode": mode,
                     }
                 },
             },
@@ -390,7 +390,7 @@ def test_config_checks_engine_auth_mode_and_fields(tmp_path, mode, error):
 
 
 def test_a_minted_credential_recycles_pooled_connections():
-    engine = build_engine(engine_config(profile("sts", region="eu-west-1")))
+    engine = build_engine(engine_config(profile("STS", region="eu-west-1")))
     try:
         assert engine.pool._recycle == 600
         assert engine.url.password is None

@@ -22,7 +22,7 @@ pytestmark = pytest.mark.unit
 
 def config(**kwargs):
     profile = EmailProfile("EMAIL", "dev", "smtp.example.com", 587, "etl@example.com", **kwargs)
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "main", "none")
+    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "main", "NONE")
     return ConnectorConfig(
         source=SourceConfig(type="environment"),
         engine=engine,
@@ -50,7 +50,7 @@ def test_partial_recipient_refusal_is_a_warning(smtp, caplog):
     smtp.send_message.return_value = {"bad@example.com": (550, b"no such recipient")}
     with caplog.at_level(logging.WARNING):
         warning = mail.send_email(
-            config(tls_mode="none"), ["bad@example.com", "ops@example.com"], "subject", "body"
+            config(tls_mode="NONE"), ["bad@example.com", "ops@example.com"], "subject", "body"
         )
     assert "bad@example.com" in warning and "550" in warning
     assert "no such recipient" in warning
@@ -62,7 +62,7 @@ def test_total_recipient_refusal_fails(smtp):
         {"bad@example.com": (550, b"no such recipient")}
     )
     with pytest.raises(HandlerError, match=r"smtp\.example\.com:587 failed at send.*550"):
-        mail.send_email(config(tls_mode="none"), ["bad@example.com"], "subject", "body")
+        mail.send_email(config(tls_mode="NONE"), ["bad@example.com"], "subject", "body")
 
 
 def test_a_header_error_names_the_transport(smtp):
@@ -85,6 +85,6 @@ def test_a_header_error_names_the_transport(smtp):
     ],
 )
 def test_subjects_are_one_safe_line(smtp, written, expected):
-    mail.send_email(config(tls_mode="none"), ["ops@example.com"], written, "body")
+    mail.send_email(config(tls_mode="NONE"), ["ops@example.com"], written, "body")
     message = smtp.send_message.call_args.args[0]
     assert str(message["Subject"]) == expected

@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 
 
 def project_config(tmp_path, config_path=True):
-    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "none")
+    engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:e.db", "", "NONE")
     return ConnectorConfig(
         source=SourceConfig(type="environment"),
         engine=engine,

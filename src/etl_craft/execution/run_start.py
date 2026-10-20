@@ -255,7 +255,7 @@ def _select_run(
             if selected.status not in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}:
                 raise RunStateError(
                     f"{pipeline_code}: run_id={selected.pipeline_run_id} is {selected.status}; "
-                    "use --task_code --rerun with a reason, or start a new run"
+                    "use `task_code` with `rerun` and a `reason`, or start a new run"
                 )
             if selected.status == RunStatus.QUEUED:
                 kind = None
@@ -274,7 +274,7 @@ def _resume_run(
         raise RunStateError(
             f"{pipeline_code} is running backfill run pipeline_run_id={existing} as of "
             f"{kind.run_date.isoformat()}; a scheduled run starts once it ends (or end it "
-            f"with `etl-craft stop` or `abort --pipeline_code {pipeline_code} --reason ...`)"
+            f"with `etl-craft stop` or `abort --pipeline-code {pipeline_code} --reason ...`)"
         )
     if options.backfill is not None and not kind.backfill:
         raise RunStateError(
@@ -285,7 +285,7 @@ def _resume_run(
         raise RunStateError(
             f"{pipeline_code} has a run in progress (pipeline_run_id={existing}) as of "
             f"{kind.run_date.isoformat()}, not {options.run_date.isoformat()}; finish it with "
-            f"`etl-craft run --pipeline_code {pipeline_code}`, or cancel it, first"
+            f"`etl-craft run --pipeline-code {pipeline_code}`, or cancel it, first"
         )
     logger.info("%s: resuming pipeline_run_id=%d", pipeline_code, existing)
     return existing, None
@@ -353,7 +353,7 @@ def _admit_run(
         raise RunStateError(
             f"{pipeline_code}: another process started pipeline_run_id={other} while this "
             "one was checking the pipeline's dependencies; that run is left as it is. See "
-            f"`etl-craft history --pipeline_code {pipeline_code}`"
+            f"`etl-craft history --pipeline-code {pipeline_code}`"
         )
     return created
 
@@ -376,7 +376,7 @@ def paused_outcome(pipeline_code: str, pause: Pause) -> PipelineOutcome:
     """Report a pipeline that started nothing because it is paused."""
     message = (
         f"{pipeline_code}: {pause.describe()}; nothing started. `etl-craft resume "
-        f"--pipeline_code {pipeline_code}` lets it run again"
+        f"--pipeline-code {pipeline_code}` lets it run again"
     )
     logger.warning("%s", message)
     return PipelineOutcome(RunStatus.SKIPPED, message, None)

@@ -16,9 +16,9 @@ pytestmark = pytest.mark.unit
 def base_config():
     return parse_config(
         {
-            "Secrets": {"Source_type": "environment"},
+            "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {},
-            "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
+            "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
         },
         Path("craft-connector.yml"),
     )
@@ -59,7 +59,7 @@ def test_invalid_event_definitions(params, problem):
 def test_event_query_cannot_write(sql):
     config = replace(
         base_config(),
-        warehouse=ConnectionProfile("WAREHOUSE", "test", "jdbc:duckdb:test.db", "", "none"),
+        warehouse=ConnectionProfile("WAREHOUSE", "test", "jdbc:duckdb:test.db", "", "NONE"),
     )
     with pytest.raises(HandlerError, match="read-only SELECT"):
         read_event(config, {"EVENT_SQL": sql})

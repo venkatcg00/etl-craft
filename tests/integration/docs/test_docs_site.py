@@ -65,13 +65,13 @@ def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path, r
 @pytest.mark.timeout(240)
 def test_each_release_line_is_built_and_the_newest_is_latest(clone, tmp_path, record_property):
     head = _git(clone, "rev-parse", "HEAD")
-    renderer = clone / "docs" / "gen_ref_pages.py"
+    renderer = clone / "docs" / "gen_python_api.py"
     renderer.write_text(
         renderer.read_text()
         + '\nwith mkdocs_gen_files.open("api/etl_craft/index.md", "w") as handle:\n'
         '    handle.write("::: etl_craft\\n")\n'
     )
-    _git(clone, "add", "docs/gen_ref_pages.py")
+    _git(clone, "add", "docs/gen_python_api.py")
     _git(
         clone,
         "-c",

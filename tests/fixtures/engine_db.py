@@ -23,6 +23,7 @@ from etl_craft.config import (
     ConnectorConfig,
     parse_config,
 )
+from etl_craft.config.loader_helpers import shown
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.dialects.engine import EngineDialect, build_engine, for_engine
 from fixtures.services import POSTGRES_PASSWORD, POSTGRES_USER, require
@@ -47,27 +48,44 @@ def engine_config(profile: ConnectionProfile, config_path: Path | None = None) -
     """Return a config whose Engine section is ``profile``."""
     config = parse_config(
         {
-            "Secrets": {"Source_type": "environment"},
+            "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {},
             "Engine": {
                 profile.name: {
-                    "jdbc_url": profile.jdbc_url,
-                    "user": profile.user,
-                    "auth_mode": profile.auth_mode,
-                    "schema": profile.schema
+                    "Jdbc_url": profile.jdbc_url,
+                    "User": profile.user,
+                    "Auth_mode": profile.auth_mode,
+                    "Schema": profile.schema
                     or ("main" if profile.jdbc_url.startswith("jdbc:sqlite:") else "public"),
                     **(
-                        {"secret": profile.extra["secret_var"]}
+                        {"Secret": profile.extra["secret_var"]}
                         if "secret_var" in profile.extra
                         else {}
                     ),
-                    **{key: value for key, value in profile.extra.items() if key != "secret_var"},
+                    **{
+                        key[:1].upper() + key[1:]: value
+                        for key, value in profile.extra.items()
+                        if key != "secret_var"
+                    },
                 },
             },
         },
         config_path or Path("craft-connector.yml"),
     )
     return replace(config, config_path=config_path)
+
+
+def profile_block(profile: ConnectionProfile, schema: str | None) -> dict[str, object]:
+    """Return ``profile`` as a ``craft-connector.yml`` connection block."""
+    block: dict[str, object] = {
+        "Jdbc_url": profile.jdbc_url,
+        "User": profile.user,
+        "Auth_mode": str(profile.auth_mode),
+        "Schema": schema,
+    }
+    for key, value in profile.extra.items():
+        block["Secret" if key == "secret_var" else shown(key)] = value
+    return block
 
 
 def apply_schema(engine: Engine) -> int:
@@ -87,7 +105,7 @@ def apply_schema(engine: Engine) -> int:
 
 def sqlite_engine_db(directory: Path) -> EngineDb:
     """Return an Engine DB in a SQLite file under ``directory``, named relative to its config."""
-    profile = ConnectionProfile("ENGINE", "test", "jdbc:sqlite:engine.db", "", "none")
+    profile = ConnectionProfile("ENGINE", "test", "jdbc:sqlite:engine.db", "", "NONE")
     config = engine_config(profile, directory / "craft-connector.yml")
     engine = build_engine(config)
     return EngineDb(for_engine(engine), engine, config)
@@ -111,7 +129,7 @@ def postgres_engine_db(
         "test",
         f"jdbc:postgresql://{service.host}:{service.port}/{name}",
         POSTGRES_USER,
-        "password",
+        "PASSWORD",
         {"secret_var": SECRET_VAR},
     )
     config = engine_config(profile)

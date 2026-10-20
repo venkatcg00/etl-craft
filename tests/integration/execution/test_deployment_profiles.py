@@ -31,13 +31,13 @@ def test_server_workers_refuses_execution_and_starts_nothing(ctx, capsys, monkey
             {
                 "Secrets": raw["Secrets"],
                 "Orchestration": raw["Orchestration"],
-                "Deployment": {"Profile": "controller-agents"},
+                "Deployment": {"Profile": "CONTROLLER_AGENTS"},
                 "Engine": raw["Engine"],
             },
             sort_keys=False,
         )
     )
-    code = main(["--config", str(path), "run", "--pipeline_code", "P", "--init-only"])
+    code = main(["--config", str(path), "run", "--pipeline-code", "P", "--init-only"])
     error = capsys.readouterr().err
     assert code == ConfigurationError.exit_code
     shared = ctx.engine.dialect.name == "postgresql"

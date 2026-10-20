@@ -18,7 +18,7 @@ from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.services.operations.context import OperationContext
 
 if TYPE_CHECKING:
-    from etl_craft.services.operations.controls import ControlRequest
+    from etl_craft.services.operations.requests import ControlRequest
 
 RECOVERY_ACTIONS = frozenset({ControlAction.RECOVER, ControlAction.RESTART})
 IMMEDIATE_ACTIONS = (

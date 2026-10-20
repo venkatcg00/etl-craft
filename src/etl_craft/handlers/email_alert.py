@@ -60,10 +60,10 @@ OUTCOME_COLORS = {
 }
 
 STATUS_COLORS = {
-    "SUCCESS": "#1a7f37",
-    "FAILED": "#cf222e",
-    "SKIPPED": "#6e7781",
-    "IN-PROGRESS": "#0969da",
+    RunStatus.SUCCESS: "#1a7f37",
+    RunStatus.FAILED: "#cf222e",
+    RunStatus.SKIPPED: "#6e7781",
+    RunStatus.IN_PROGRESS: "#0969da",
     "PENDING": "#9a6700",
     "NEVER_RUN": "#6e7781",
     "UNKNOWN": "#6e7781",

@@ -37,7 +37,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import ingestion_script, sql_file
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import GapState, Handler, RunStatus, SqlAction
+from etl_craft.core.enums import GapState, Handler, RunStatus, SlaStatus, SqlAction
 from etl_craft.core.errors import EtlCraftError, MetadataError
 from etl_craft.core.text import is_safe_identifier
 from etl_craft.core.time import as_utc
@@ -59,7 +59,7 @@ from etl_craft.engine.repository.catalog import (
     fetch_pipeline_runs,
     fetch_task_runs,
 )
-from etl_craft.engine.repository.interventions import Intervention
+from etl_craft.engine.repository.intervention_rows import Intervention
 from etl_craft.engine.repository.lineage import (
     LineageVersion,
     fetch_lineage_versions,
@@ -76,7 +76,7 @@ from etl_craft.engine.repository.validation import (
 from etl_craft.handlers.sql.actions import writer_action
 from etl_craft.handlers.sql.spec import read_action, read_setup_for
 from etl_craft.handlers.sql.tables import AUDIT_COLUMNS
-from etl_craft.services.catalog_gaps import infers_output_columns, table_records
+from etl_craft.services.catalog.gaps import infers_output_columns, table_records
 from etl_craft.services.lineage import Edge, TaskLineage, collect, stored_edge, table_name
 from etl_craft.services.source_columns import nullable, warehouse_kind
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_dialect
@@ -695,7 +695,7 @@ def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
         succeeded=sum(1 for r in finished if r.status == RunStatus.SUCCESS),
         failed=sum(1 for r in finished if r.status != RunStatus.SUCCESS),
         sla_breached=sum(
-            1 for r in runs if isinstance(r, RunSummary) and r.sla_status == "BREACHED"
+            1 for r in runs if isinstance(r, RunSummary) and r.sla_status == SlaStatus.BREACHED
         ),
         average_seconds=sum(seconds) / len(seconds) if seconds else None,
         longest_seconds=max(seconds) if seconds else None,

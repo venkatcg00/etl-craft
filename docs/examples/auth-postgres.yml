@@ -1,15 +1,15 @@
 # Authentication types for PostgreSQL: the Engine DB and a Postgres warehouse.
 #
 # One profile per type: set ETL_CRAFT_AUTH to the one you use.
-#   password  verified
-#   key_file  verified: a client certificate: key_file, cert_file, and the key's passphrase
+#   PASSWORD  verified
+#   KEY_FILE  verified: a client certificate: Key_file, Cert_file, and the key's passphrase
 #             if it has one
-#   token     a stored bearer token presented as the password
-#   oauth     a client-credentials access token minted per connection and
+#   TOKEN     a stored bearer token presented as the password
+#   OAUTH     a client-credentials access token minted per connection and
 #             presented as the password (Azure Database for PostgreSQL + Entra ID)
-#   sso       libpq 18's own OAuth device flow: interactive, needs a server-side
+#   SSO       libpq 18's own OAuth device flow: interactive, needs a server-side
 #             OAuth validator
-#   sts       an AWS RDS/Aurora IAM token (needs etl-craft[aws]), optionally as
+#   STS       an AWS RDS/Aurora IAM token (needs etl-craft[aws]), optionally as
 #             an assumed role
 #
 # Types marked verified have run against a live service in this project. The
@@ -26,7 +26,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value
+  Source_type: ENVIRONMENT             # value
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
@@ -37,91 +37,91 @@ Orchestration:
 Engine:
   Name: Postgres                       # value
   password:
-    jdbc_url: ENGINE_JDBC_URL          # variable
-    schema: etl_craft                  # value — must already exist; the engine never creates it
-    user: ENGINE_USER                  # variable
-    auth_mode: password                # value
-    secret: ENGINE_SECRET              # variable, required: a secret is never used as written
+    Jdbc_url: ENGINE_JDBC_URL          # variable
+    Schema: etl_craft                  # value — must already exist; the engine never creates it
+    User: ENGINE_USER                  # variable
+    Auth_mode: PASSWORD                # value
+    Secret: ENGINE_SECRET              # variable, required: a secret is never used as written
   key_file:
-    jdbc_url: ENGINE_JDBC_URL          # variable
-    schema: etl_craft                  # value — must already exist; the engine never creates it
-    user: ENGINE_USER                  # variable
-    auth_mode: key_file                # value
-    key_file: ENGINE_KEY_FILE          # variable
-    cert_file: ENGINE_CERT_FILE        # variable
-    secret: ENGINE_SECRET              # variable — the key's passphrase; leave the line out for a key without one
+    Jdbc_url: ENGINE_JDBC_URL          # variable
+    Schema: etl_craft                  # value — must already exist; the engine never creates it
+    User: ENGINE_USER                  # variable
+    Auth_mode: KEY_FILE                # value
+    Key_file: ENGINE_KEY_FILE          # variable
+    Cert_file: ENGINE_CERT_FILE        # variable
+    Secret: ENGINE_SECRET              # variable — the key's passphrase; leave the line out for a key without one
   token:
-    jdbc_url: ENGINE_JDBC_URL          # variable
-    schema: etl_craft                  # value — must already exist; the engine never creates it
-    user: ENGINE_USER                  # variable
-    auth_mode: token                   # value
-    secret: ENGINE_SECRET              # variable, required: a secret is never used as written — a stored bearer token
+    Jdbc_url: ENGINE_JDBC_URL          # variable
+    Schema: etl_craft                  # value — must already exist; the engine never creates it
+    User: ENGINE_USER                  # variable
+    Auth_mode: TOKEN                   # value
+    Secret: ENGINE_SECRET              # variable, required: a secret is never used as written — a stored bearer token
   oauth:
-    jdbc_url: ENGINE_JDBC_URL          # variable
-    schema: etl_craft                  # value — must already exist; the engine never creates it
-    user: ENGINE_USER                  # variable
-    auth_mode: oauth                   # value
-    client_id: ENGINE_CLIENT_ID        # variable
-    secret: ENGINE_SECRET              # variable, required: a secret is never used as written — the client secret
-    token_url: ENGINE_TOKEN_URL        # variable — e.g. https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token
-    scope: https://ossrdbms-aad.database.windows.net/.default  # value
+    Jdbc_url: ENGINE_JDBC_URL          # variable
+    Schema: etl_craft                  # value — must already exist; the engine never creates it
+    User: ENGINE_USER                  # variable
+    Auth_mode: OAUTH                   # value
+    Client_id: ENGINE_CLIENT_ID        # variable
+    Secret: ENGINE_SECRET              # variable, required: a secret is never used as written — the client secret
+    Token_url: ENGINE_TOKEN_URL        # variable — e.g. https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token
+    Scope: https://ossrdbms-aad.database.windows.net/.default  # value
   sso:
-    jdbc_url: ENGINE_JDBC_URL          # variable
-    schema: etl_craft                  # value — must already exist; the engine never creates it
-    user: ENGINE_USER                  # variable
-    auth_mode: sso                     # value
-    issuer: ENGINE_ISSUER              # variable
-    client_id: ENGINE_CLIENT_ID        # variable
+    Jdbc_url: ENGINE_JDBC_URL          # variable
+    Schema: etl_craft                  # value — must already exist; the engine never creates it
+    User: ENGINE_USER                  # variable
+    Auth_mode: SSO                     # value
+    Issuer: ENGINE_ISSUER              # variable
+    Client_id: ENGINE_CLIENT_ID        # variable
   sts:
-    jdbc_url: ENGINE_JDBC_URL          # variable
-    schema: etl_craft                  # value — must already exist; the engine never creates it
-    user: ENGINE_USER                  # variable
-    auth_mode: sts                     # value
-    region: us-east-1                  # value
-    role_arn: ENGINE_ROLE_ARN          # variable — optional: assume this role first
+    Jdbc_url: ENGINE_JDBC_URL          # variable
+    Schema: etl_craft                  # value — must already exist; the engine never creates it
+    User: ENGINE_USER                  # variable
+    Auth_mode: STS                     # value
+    Region: us-east-1                  # value
+    Role_arn: ENGINE_ROLE_ARN          # variable — optional: assume this role first
 
 Warehouse:
   Name: Postgres                       # value
   password:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: password                # value
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: PASSWORD                # value
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   key_file:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: key_file                # value
-    key_file: WAREHOUSE_KEY_FILE       # variable
-    cert_file: WAREHOUSE_CERT_FILE     # variable
-    secret: WAREHOUSE_SECRET           # variable — the key's passphrase; leave the line out for a key without one
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: KEY_FILE                # value
+    Key_file: WAREHOUSE_KEY_FILE       # variable
+    Cert_file: WAREHOUSE_CERT_FILE     # variable
+    Secret: WAREHOUSE_SECRET           # variable — the key's passphrase; leave the line out for a key without one
   token:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: token                   # value
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — a stored bearer token
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: TOKEN                   # value
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — a stored bearer token
   oauth:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: oauth                   # value
-    client_id: WAREHOUSE_CLIENT_ID     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the client secret
-    token_url: WAREHOUSE_TOKEN_URL     # variable — e.g. https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token
-    scope: https://ossrdbms-aad.database.windows.net/.default  # value
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: OAUTH                   # value
+    Client_id: WAREHOUSE_CLIENT_ID     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the client secret
+    Token_url: WAREHOUSE_TOKEN_URL     # variable — e.g. https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token
+    Scope: https://ossrdbms-aad.database.windows.net/.default  # value
   sso:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: sso                     # value
-    issuer: WAREHOUSE_ISSUER           # variable
-    client_id: WAREHOUSE_CLIENT_ID     # variable
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: SSO                     # value
+    Issuer: WAREHOUSE_ISSUER           # variable
+    Client_id: WAREHOUSE_CLIENT_ID     # variable
   sts:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: sts                     # value
-    region: us-east-1                  # value
-    role_arn: WAREHOUSE_ROLE_ARN       # variable — optional: assume this role first
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: STS                     # value
+    Region: us-east-1                  # value
+    Role_arn: WAREHOUSE_ROLE_ARN       # variable — optional: assume this role first

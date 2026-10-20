@@ -77,7 +77,7 @@ def assert_complete(project):
 def test_parent_hard_exit_at_startup_reconciles_before_retry(cli_project, point):
     project = cli_project
     install_writer(project)
-    code, output = project.run("run", "--pipeline_code", "P", fault=point + ":kill")
+    code, output = project.run("run", "--pipeline-code", "P", fault=point + ":kill")
     assert code == 137, output
     # Advance abandoned leases rather than waiting a minute for each fault case.
     with project.engine.begin() as conn:
@@ -86,7 +86,7 @@ def test_parent_hard_exit_at_startup_reconciles_before_retry(cli_project, point)
         conn.execute(
             text("UPDATE AUD_PIPELINES_RUN_LOG SET LEASE_EXPIRES_AT=:past"), {"past": past}
         )
-    code, output = project.run("run", "--pipeline_code", "P")
+    code, output = project.run("run", "--pipeline-code", "P")
     assert code == 0, output
     assert_complete(project)
 
@@ -95,8 +95,8 @@ def test_duplicate_task_delivery_executes_one_attempt(cli_project):
     project = cli_project
     install_writer(project, hold=True)
     identity = ("--run-key", "delivery")
-    assert project.run("run", "--pipeline_code", "P", "--init-only", *identity)[0] == 0
-    arguments = ("run", "--pipeline_code", "P", "--task_code", "load", *identity)
+    assert project.run("run", "--pipeline-code", "P", "--init-only", *identity)[0] == 0
+    arguments = ("run", "--pipeline-code", "P", "--task-code", "load", *identity)
     first = project.start(*arguments)
     try:
         project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING", timeout=30)
@@ -107,7 +107,7 @@ def test_duplicate_task_delivery_executes_one_attempt(cli_project):
             assert conn.execute(text("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS")).scalar_one() == 1
         (project.config.project_dir / "release").touch()
         assert first.wait() == 0, first.output
-        code, output = project.run("run", "--pipeline_code", "P", *identity)
+        code, output = project.run("run", "--pipeline-code", "P", *identity)
         assert code == 0, output
         assert_complete(project)
     finally:
@@ -272,6 +272,6 @@ def test_postgres_outage_fences_the_supervisor_and_recovers(cli_project, monkeyp
         conn.execute(
             text("UPDATE AUD_PIPELINES_RUN_LOG SET LEASE_EXPIRES_AT=:past"), {"past": past}
         )
-    code, output = project.run("run", "--pipeline_code", "P")
+    code, output = project.run("run", "--pipeline-code", "P")
     assert code == 0, output
     assert_complete(project)

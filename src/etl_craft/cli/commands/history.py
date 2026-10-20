@@ -7,55 +7,31 @@ from collections.abc import Sequence
 
 from etl_craft.cli.commands.common import (
     Command,
-    command_context,
+    call,
     configure_output,
     configure_run_selector,
+    request_from,
 )
 from etl_craft.cli.output import Output
-from etl_craft.cli.remote import ServerClient, api_path, selector_query
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.engine.repository.interventions import Intervention
-from etl_craft.engine.runlog import RunSelector
-from etl_craft.services.operations import inspect
-from etl_craft.services.operations.models import HistoryQuery, HistoryView, RunView, TaskRunView
+from etl_craft.engine.repository.intervention_rows import Intervention
+from etl_craft.services.operations.models import HistoryView, RunView, TaskRunView
+from etl_craft.services.operations.requests import HistoryInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
     configure_run_selector(parser)
-    parser.add_argument("--pipeline_code", required=True, help="the pipeline to show")
-    parser.add_argument("--task_code", help="show this task's runs instead of the pipeline's")
-    parser.add_argument("--all", action="store_true", help="list runs instead of selecting one")
-    parser.add_argument("--limit", type=int, default=20, help="how many runs, newest first")
+    parser.add_argument("--pipeline-code", required=True, help="The pipeline to show.")
+    parser.add_argument("--task-code", help="Show this task's runs instead of the pipeline's.")
+    parser.add_argument("--all", action="store_true", help="List runs instead of selecting one.")
+    parser.add_argument("--limit", type=int, default=20, help="How many runs, newest first.")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = inspect.run_history(
-            ctx,
-            args.pipeline_code,
-            HistoryQuery(
-                args.task_code,
-                args.limit,
-                args.all,
-                selector=RunSelector(args.run_id, args.run_key),
-            ),
-        )
-    return _render(args, out, done)
-
-
-def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
-    done = server.call(
-        "GET",
-        api_path("pipelines", args.pipeline_code, "runs"),
-        HistoryView,
-        query={
-            "task_code": args.task_code,
-            "all": str(args.all).lower(),
-            "limit": args.limit,
-            **selector_query(args),
-        },
-    )
+    done = call(args, ActionName.HISTORY, request_from(args, HistoryInput))
+    assert isinstance(done, HistoryView)
     return _render(args, out, done)
 
 
@@ -164,5 +140,5 @@ COMMAND = Command(
     help="Show a pipeline's recent runs, or one task's.",
     configure=_configure,
     run=_run,
-    remote=_remote,
+    actions=(ActionName.HISTORY,),
 )

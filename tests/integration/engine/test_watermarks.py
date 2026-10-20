@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import (
     InjectedFaultError,
     RunRefusedError,
@@ -18,7 +18,7 @@ from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset,
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution.interventions import reset_watermark
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.status import explain_task
+from fixtures.actions import act
 from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline, add_task
 
@@ -100,11 +100,12 @@ def test_failed_ranges_and_success_offsets_are_atomic(engine_db, watermarked, mo
             offset=StoredOffset("NUMBER", "4"),
         )
         assert fetch_task_offset(conn, task).offset_value == "4"
-    explanation = explain_task(
+    explanation = act(
         OperationContext(engine, engine_db.config, current_actor(), role=ApiRole.ADMIN),
-        "P",
-        "T",
-        selector=RunSelector(run_id=run),
+        ActionName.EXPLAIN,
+        pipeline_code="P",
+        task_code="T",
+        run_id=run,
     )
     assert (explanation.task.watermark_from, explanation.task.watermark_to) == ("2", "4")
     assert [(a.watermark_from, a.watermark_to) for a in explanation.task.attempts] == [
@@ -141,7 +142,7 @@ def test_reset_refuses_active_attempts_and_records_old_and_new(engine_db, waterm
     config = replace(
         engine_db.config,
         warehouse=ConnectionProfile(
-            "WAREHOUSE", "local", "jdbc:duckdb:warehouse.duckdb", "", "none"
+            "WAREHOUSE", "local", "jdbc:duckdb:warehouse.duckdb", "", "NONE"
         ),
     )
     selector = RunSelector(run_id=run)
@@ -188,9 +189,9 @@ def test_cli_watermark_reset_does_not_change_run_status(metadata_project, capsys
         "mark",
         "--config",
         str(p.root / "craft-connector.yml"),
-        "--pipeline_code",
+        "--pipeline-code",
         "P",
-        "--task_code",
+        "--task-code",
         "T",
         "--run-id",
         str(run),

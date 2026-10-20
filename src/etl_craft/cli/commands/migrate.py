@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from etl_craft.cli.commands.common import Command, command_context, provisioning
+from etl_craft.cli.commands.common import Command, call, request_from
 from etl_craft.cli.output import Output
-from etl_craft.services.operations import maintenance
+from etl_craft.core.enums import ActionName
+from etl_craft.services.operations.maintenance import MigrateInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -15,14 +16,14 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         "--migrations-dir",
         type=Path,
         metavar="PATH",
-        help="the project's own *.sql migrations (default: $ETL_CRAFT_MIGRATIONS_DIR, then "
-        "migrations/ in the project directory if it exists)",
+        help="The project's own *.sql migrations (default: $ETL_CRAFT_MIGRATIONS_DIR, then "
+        "migrations/ in the project directory if it exists).",
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        applied = maintenance.migrate(ctx, args.migrations_dir, provisioning=provisioning())
+    applied = call(args, ActionName.MIGRATE, request_from(args, MigrateInput))
+    assert isinstance(applied, list)
     if not applied:
         out.line("migrate: already up to date")
     for version in applied:
@@ -35,4 +36,5 @@ COMMAND = Command(
     help="Apply the pending packaged and project migrations to the Engine DB.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.MIGRATE,),
 )

@@ -20,11 +20,11 @@ A first successful batch with ids 1 and 2 stores NUMBER 2. When id 3 arrives, th
 reads it and stores 3. A failed run leaves 2 committed. To reload corrected earlier rows:
 
 ```bash
-etl-craft mark --pipeline_code SALES --task_code events --run-id 42 \
+etl-craft mark --pipeline-code SALES --task-code events --run-id 42 \
   --watermark 0 --reason 'reload corrected source rows'
-etl-craft run --pipeline_code SALES --task_code events --run-id 42 \
+etl-craft run --pipeline-code SALES --task-code events --run-id 42 \
   --rerun --reason 'reload corrected source rows'
-etl-craft explain --pipeline_code SALES --task_code events --run-id 42
+etl-craft explain --pipeline-code SALES --task-code events --run-id 42
 ```
 
 The merge updates changed payloads and keeps one row per key. The reset and each execution's

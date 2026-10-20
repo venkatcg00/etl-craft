@@ -66,7 +66,7 @@ def test_the_packaged_directory_must_exist(engine, monkeypatch, tmp_path):
 
 
 def test_a_named_project_directory_must_exist(engine, packaged, tmp_path):
-    with pytest.raises(MigrationError, match="does not exist — pass --migrations-dir"):
+    with pytest.raises(MigrationError, match="does not exist — give `migrations_dir`"):
         migrations.migration_streams(engine, tmp_path / "nope")
 
 

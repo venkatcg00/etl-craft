@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize("serialized", ["mapping", "json", "pairs"])
 @pytest.mark.parametrize(
     "enabled,expected",
-    [("", "native"), ("iceberg", "iceberg"), ("hudi, ICEBERG", "iceberg"), ("hudi", "native")],
+    [("", "NATIVE"), ("iceberg", "ICEBERG"), ("hudi, ICEBERG", "ICEBERG"), ("hudi", "NATIVE")],
 )
 def test_delta_uniform_is_read_from_existing_properties(key, serialized, enabled, expected):
     props = {"delta.universalFormat.enabledFormats": enabled}
@@ -42,7 +42,7 @@ def test_unsupported_delta_provider_is_refused():
 
 
 @pytest.mark.parametrize("key", ["snowflake", "snowflake_iceberg"])
-@pytest.mark.parametrize("flag,expected", [("YES", "iceberg"), ("NO", "native")])
+@pytest.mark.parametrize("flag,expected", [("YES", "ICEBERG"), ("NO", "NATIVE")])
 def test_snowflake_uses_the_targets_database(key, flag, expected):
     conn = Mock()
     conn.execute.return_value.scalar_one.return_value = flag

@@ -252,3 +252,22 @@ def test_compare_to_refuses_a_baseline_that_grew_unless_allowed(tmp_path, capsys
     _write(root, "engine/long.py", _long_function("long", 20))
     quality.main(["--update", "--root", str(root)])
     assert quality.main(["--compare-to", "HEAD", "--root", str(root)]) == 0
+
+
+def test_compare_to_carries_a_renamed_modules_allowance_to_its_new_path(tmp_path, capsys):
+    root = _project(tmp_path, {"engine/long.py": _long_function("long", 90)})
+    _git(root, "init", "--quiet")
+    quality.main(["--update", "--root", str(root)])
+    _git(root, "add", ".")
+    _git(root, "commit", "--quiet", "-m", "baseline")
+
+    _git(root, "mv", "src/etl_craft/engine/long.py", "src/etl_craft/engine/longer.py")
+    quality.main(["--update", "--root", str(root)])
+    capsys.readouterr()
+    assert quality.main(["--compare-to", "HEAD", "--root", str(root)]) == 0
+
+    _write(root, "engine/longer.py", _long_function("long", 99))
+    quality.main(["--update", "--root", str(root)])
+    capsys.readouterr()
+    assert quality.main(["--compare-to", "HEAD", "--root", str(root)]) == 1
+    assert "src/etl_craft/engine/longer.py scores 19, baseline 10" in capsys.readouterr().out

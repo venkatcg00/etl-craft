@@ -17,7 +17,7 @@ from etl_craft.core.errors import MetadataError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.interventions import record_intervention
+from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.runlog import as_date
 from etl_craft.services.operations import OperationContext
 

@@ -14,9 +14,9 @@ pytestmark = pytest.mark.unit
 
 def write_config(tmp_path, **sections):
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
     }
     raw.update(sections)
     path = tmp_path / "craft-connector.yml"
@@ -42,11 +42,11 @@ def test_duplicate_keys_name_path_and_both_lines(tmp_path, section):
 @pytest.mark.parametrize("value", ["", " ", "\t\n"])
 def test_blank_secrets_are_refused_at_load_and_connection(tmp_path, monkeypatch, value):
     fields = {
-        "jdbc_url": "jdbc:postgresql://localhost/db",
-        "schema": "public",
-        "user": "etl",
-        "auth_mode": "password",
-        "secret": "ETL_CRAFT_ENGINE_SECRET",
+        "Jdbc_url": "jdbc:postgresql://localhost/db",
+        "Schema": "public",
+        "User": "etl",
+        "Auth_mode": "PASSWORD",
+        "Secret": "ETL_CRAFT_ENGINE_SECRET",
     }
     path = write_config(tmp_path, Engine={"dev": fields})
     monkeypatch.setenv("ETL_CRAFT_ENGINE_SECRET", value)
@@ -65,9 +65,9 @@ def test_blank_secrets_are_refused_at_load_and_connection(tmp_path, monkeypatch,
 @pytest.mark.parametrize("section", ["Engine", "Warehouse"])
 def test_jdbc_query_credentials_are_refused_without_echoing_value(tmp_path, key, section):
     profile = {
-        "jdbc_url": f"jdbc:postgresql://localhost/db?{key}=never-echo-me",
-        "schema": "public",
-        "auth_mode": "none",
+        "Jdbc_url": f"jdbc:postgresql://localhost/db?{key}=never-echo-me",
+        "Schema": "public",
+        "Auth_mode": "NONE",
     }
     path = write_config(tmp_path, **{section: {"dev": profile}})
     with pytest.raises(ConfigurationError) as caught:
@@ -98,7 +98,7 @@ def test_smtp_ports_are_bounded_ascii_numbers(tmp_path, port):
     path = write_config(
         tmp_path,
         Orchestration={
-            "Email": {"host": "localhost", "port": port, "from_address": "etl@example.com"},
+            "Email": {"Host": "localhost", "Port": port, "From_address": "etl@example.com"},
         },
     )
     with pytest.raises(ConfigurationError, match="port"):
@@ -110,7 +110,7 @@ def test_symlink_config_uses_link_folder_for_secrets_and_all_project_paths(tmp_p
     link = tmp_path / "link"
     target.mkdir()
     link.mkdir()
-    path = write_config(target, Secrets={"Source_type": "file", "Path": ".env"})
+    path = write_config(target, Secrets={"Source_type": "FILE", "Path": ".env"})
     (link / ".env").write_text("\ufeffexport SOME_VALUE=ok\n", encoding="utf-8")
     config_link = link / path.name
     config_link.symlink_to(path)
@@ -129,12 +129,12 @@ def test_auth_and_url_paths_are_absolute_from_config_directory(tmp_path, monkeyp
         tmp_path,
         Engine={
             "dev": {
-                "jdbc_url": "jdbc:postgresql://localhost/db?sslrootcert=certs/root.pem",
-                "schema": "public",
-                "user": "etl",
-                "auth_mode": "key_file",
-                "cert_file": "certs/client.pem",
-                "key_file": "certs/key.pem",
+                "Jdbc_url": "jdbc:postgresql://localhost/db?sslrootcert=certs/root.pem",
+                "Schema": "public",
+                "User": "etl",
+                "Auth_mode": "KEY_FILE",
+                "Cert_file": "certs/client.pem",
+                "Key_file": "certs/key.pem",
             }
         },
     )
@@ -149,14 +149,14 @@ def test_auth_and_url_paths_are_absolute_from_config_directory(tmp_path, monkeyp
 
 def test_env_bom_export_and_missing_secret_suggestions(tmp_path, monkeypatch):
     fields = {
-        "jdbc_url": "jdbc:postgresql://localhost/db",
-        "schema": "public",
-        "user": "etl",
-        "auth_mode": "password",
-        "secret": "ETL_CRAFT_ENGINE_SECRET",
+        "Jdbc_url": "jdbc:postgresql://localhost/db",
+        "Schema": "public",
+        "User": "etl",
+        "Auth_mode": "PASSWORD",
+        "Secret": "ETL_CRAFT_ENGINE_SECRET",
     }
     path = write_config(
-        tmp_path, Secrets={"Source_type": "file", "Path": ".env"}, Engine={"dev": fields}
+        tmp_path, Secrets={"Source_type": "FILE", "Path": ".env"}, Engine={"dev": fields}
     )
     env = tmp_path / ".env"
     env.write_text("\ufeffexport ETL_CRAFT_ENGINE_SECRET=valid\n", encoding="utf-8")
@@ -172,15 +172,15 @@ def test_iceberg_storage_secret_is_a_name_in_config(tmp_path, monkeypatch):
         tmp_path,
         Warehouse={
             "Name": "DuckDB",
-            "Table_format": "iceberg",
+            "Table_format": "ICEBERG",
             "dev": {
-                "jdbc_url": "jdbc:duckdb:",
-                "schema": "public",
-                "catalog": "lake",
-                "catalog_uri": "http://localhost:8181",
-                "iceberg_warehouse": "s3://warehouse/",
-                "s3_key_id": "etl",
-                "s3_secret": "LAKE_S3_SECRET",
+                "Jdbc_url": "jdbc:duckdb:",
+                "Schema": "public",
+                "Catalog": "lake",
+                "Catalog_uri": "http://localhost:8181",
+                "Iceberg_warehouse": "s3://warehouse/",
+                "S3_key_id": "etl",
+                "S3_secret": "LAKE_S3_SECRET",
             },
         },
     )
@@ -197,11 +197,11 @@ def test_doctor_reports_missing_and_readable_resolved_files(tmp_path, key):
         tmp_path,
         Engine={
             "dev": {
-                "jdbc_url": f"jdbc:postgresql://localhost/db?{key}=missing.pem",
-                "schema": "public",
-                "user": "etl",
-                "auth_mode": "key_file",
-                "key_file": "key.pem",
+                "Jdbc_url": f"jdbc:postgresql://localhost/db?{key}=missing.pem",
+                "Schema": "public",
+                "User": "etl",
+                "Auth_mode": "KEY_FILE",
+                "Key_file": "key.pem",
             }
         },
     )
@@ -242,11 +242,11 @@ def test_logged_engine_urls_drop_credential_query_values(tmp_path, monkeypatch):
         tmp_path,
         Engine={
             "dev": {
-                "jdbc_url": "jdbc:postgresql://localhost/db",
-                "schema": "public",
-                "user": "etl",
-                "auth_mode": "password",
-                "secret": "ETL_CRAFT_ENGINE_SECRET",
+                "Jdbc_url": "jdbc:postgresql://localhost/db",
+                "Schema": "public",
+                "User": "etl",
+                "Auth_mode": "PASSWORD",
+                "Secret": "ETL_CRAFT_ENGINE_SECRET",
             }
         },
     )
@@ -271,9 +271,9 @@ def test_relative_sendmail_executable_is_project_relative(tmp_path, monkeypatch)
         tmp_path,
         Orchestration={
             "Email": {
-                "transport": "sendmail",
-                "from_address": "etl@example.com",
-                "sendmail_path": "bin/sendmail",
+                "Transport": "SENDMAIL",
+                "From_address": "etl@example.com",
+                "Sendmail_path": "bin/sendmail",
             },
         },
     )

@@ -3,8 +3,8 @@
 import pytest
 
 from etl_craft.core.enums import SqlAction
-from etl_craft.services.catalog import build_catalog
-from etl_craft.services.catalog_site import write_site
+from etl_craft.services.catalog.collect import build_catalog
+from etl_craft.services.catalog.site import write_site
 from etl_craft.services.config_files import export_config, read_config_files, sync_config
 from etl_craft.services.source_columns import warehouse_columns
 from etl_craft.services.validate import validate
@@ -28,7 +28,7 @@ def test_scd_engine_columns_match_the_action_contract(sql_world, action, tmp_pat
     folder = write_site(catalog, world.config, tmp_path / "site").folder
     assert "Engine managed" in (folder / "tables" / f"{world.schema}.managed.html").read_text()
     from etl_craft.core.enums import GapState
-    from etl_craft.services.catalog_gaps import gap_snapshot
+    from etl_craft.services.catalog.gaps import gap_snapshot
 
     snapshot = gap_snapshot(catalog)
     records = [r for r in snapshot.records if r.engine_managed]

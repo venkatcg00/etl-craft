@@ -6,23 +6,30 @@ import argparse
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, fields
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from sqlalchemy.engine import Engine
 
 from etl_craft.cli.authentication import command_identity
+from etl_craft.cli.client import ControllerClient
 from etl_craft.cli.output import Output
-from etl_craft.cli.remote import ServerClient
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.config.sizing import start_role
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.core.errors import UsageError
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations import OperationContext
+from etl_craft.services.operations.actions import ACTIONS, invoke
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R", bound="DataclassInstance")
 
 
 @dataclass(frozen=True)
@@ -39,8 +46,8 @@ class Command:
     help: str
     run: Callable[[argparse.Namespace, Output], int]
     configure: Callable[[argparse.ArgumentParser], None] | None = None
-    remote: Callable[[argparse.Namespace, Output, ServerClient], int] | None = None
-    """How the command runs against a server with ``--server``; ``None`` refuses it there."""
+    actions: tuple[ActionName, ...] = ()
+    """The actions the command calls, whichever its options select."""
 
 
 def load_command_config(args: argparse.Namespace) -> ConnectorConfig:
@@ -67,8 +74,8 @@ def connect_engine_db(config: ConnectorConfig) -> Engine:
 def configure_run_selector(parser: argparse.ArgumentParser) -> None:
     """Add mutually exclusive identities for a pipeline's run."""
     selection = parser.add_mutually_exclusive_group()
-    selection.add_argument("--run-id", type=int, help="the exact pipeline run id")
-    selection.add_argument("--run-key", help="the exact run key within this pipeline")
+    selection.add_argument("--run-id", type=int, help="The exact pipeline run id.")
+    selection.add_argument("--run-key", help="The exact run key within this pipeline.")
 
 
 def configure_output(parser: argparse.ArgumentParser) -> None:
@@ -78,14 +85,8 @@ def configure_output(parser: argparse.ArgumentParser) -> None:
         dest="output_format",
         choices=("text", "json"),
         default="text",
-        help="result format (default: text)",
+        help="Result format (default: text).",
     )
-
-
-def provisioning() -> bool:
-    """Whether this command is local Engine DB setup, admitted before any admin exists."""
-    scoped = command_identity.get()
-    return scoped is not None and scoped.identity is None
 
 
 @contextmanager
@@ -112,6 +113,34 @@ def command_context(
                 if (scoped := command_identity.get()) and scoped.identity
                 else None
             ),
+            provisioning=scoped is not None and scoped.provisioning,
         )
     finally:
         engine.dispose()
+
+
+def request_from(args: argparse.Namespace, cls: type[R], **given: object) -> R:
+    """Build an action's request from the options whose names are its fields, and ``given``."""
+    values = {f.name: getattr(args, f.name) for f in fields(cls) if hasattr(args, f.name)}
+    return cls(**{**values, **given})
+
+
+def call(
+    args: argparse.Namespace,
+    name: ActionName,
+    request: object,
+    *,
+    role: Literal["run", "controller"] | None = None,
+) -> object:
+    """Run one action: on the controller with ``--controller``, else on this project."""
+    if args.controller:
+        return ControllerClient(args.controller).invoke(name, request)
+    with command_context(args, role=role) as ctx:
+        return invoke(ctx, name, request)
+
+
+def on_host(args: argparse.Namespace, name: ActionName) -> None:
+    """Refuse ``--controller`` for an action that runs only on the controller's host."""
+    if args.controller:
+        remedy = ACTIONS[name].remedy
+        raise UsageError(f"`{name}` runs on the controller's host only: {remedy}")

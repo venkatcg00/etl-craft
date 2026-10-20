@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from etl_craft.execution.supervisor import ChildResult, ChildSpec, run_child
+from etl_craft.execution.processes import ChildResult, ChildSpec, run_child
 
 pytestmark = pytest.mark.unit
 

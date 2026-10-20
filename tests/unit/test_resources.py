@@ -134,12 +134,12 @@ def test_written_settings_are_ceilings_never_requests():
 
 def write_config(tmp_path: Path, deployment: dict | None = None, **orchestration) -> Path:
     raw: dict = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {**orchestration},
     }
     if deployment is not None:
         raw["Deployment"] = deployment
-    raw["Engine"] = {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}}
+    raw["Engine"] = {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}}
     path = tmp_path / "craft-connector.yml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return path
@@ -153,14 +153,14 @@ def test_no_profile_keeps_the_configuration_and_only_logs_the_measurement(tmp_pa
 
 
 def test_a_profile_sizes_the_role_within_written_ceilings(tmp_path):
-    path = write_config(tmp_path, {"Profile": "controller"}, Local_ingestion_slots=2)
+    path = write_config(tmp_path, {"Profile": "CONTROLLER"}, Local_ingestion_slots=2)
     before = path.read_bytes()
     config = start_role(load_config(path), server=False, host=machine(8, 16 * GIB))
     assert config.sizing is not None and config.deployment == DeploymentProfile.CONTROLLER
     assert config.limits.max_parallel_tasks == 26
     assert config.limits.local_ingestion_slots == 2
     assert path.read_bytes() == before
-    capped = write_config(tmp_path, {"Profile": "controller"}, Max_parallel_tasks=4)
+    capped = write_config(tmp_path, {"Profile": "CONTROLLER"}, Max_parallel_tasks=4)
     sized = start_role(load_config(capped), server=False, host=machine(8, 16 * GIB))
     assert sized.limits.max_parallel_tasks == 4
 
@@ -175,7 +175,7 @@ def test_server_workers_refuses_to_run_here(tmp_path):
 
 
 def test_an_allocation_too_small_for_a_slot_refuses_run_and_queues_on_the_server(tmp_path, caplog):
-    config = load_config(write_config(tmp_path, {"Profile": "laptop"}))
+    config = load_config(write_config(tmp_path, {"Profile": "LAPTOP"}))
     small = machine(1, 4 * GIB)
     with pytest.raises(ConfigurationError, match=r"no task slot fits.*Raise the allocation"):
         start_role(config, server=False, host=small)
@@ -191,9 +191,9 @@ def test_an_allocation_too_small_for_a_slot_refuses_run_and_queues_on_the_server
     ("deployment", "extra", "message"),
     [
         ({"Profile": "cluster"}, {}, r"Deployment.Profile='cluster'; expected one of"),
-        ({"Profile": "controller-agents"}, {}, "agents share one PostgreSQL Engine DB"),
-        ({"Profile": "laptop"}, {"Api_address": "0.0.0.0:8730"}, "binds to loopback"),
-        ({"dev": {"Profile": "laptop"}}, {}, r"unknown key\(s\) \['dev'\] in Deployment"),
+        ({"Profile": "CONTROLLER_AGENTS"}, {}, "agents share one PostgreSQL Engine DB"),
+        ({"Profile": "LAPTOP"}, {"Api_address": "0.0.0.0:8730"}, "binds to loopback"),
+        ({"dev": {"Profile": "LAPTOP"}}, {}, r"unknown key\(s\) \['dev'\] in Deployment"),
     ],
 )
 def test_deployment_settings_are_validated(tmp_path, deployment, extra, message):
@@ -206,7 +206,7 @@ def test_doctor_reports_measurements_recommendation_and_sizes_without_a_profile(
     before = path.read_bytes()
     checks = {c.name: c for c in resource_checks(load_config(path), machine(8, 16 * GIB))}
     assert checks["Resources: CPU"].detail == "8 CPUs from CPU affinity (8 CPUs)"
-    assert "Recommended: laptop" in checks["Deployment profile"].detail
+    assert "Recommended: LAPTOP" in checks["Deployment profile"].detail
     assert checks["Sizing: task slots"].detail.startswith("14 (CPU")
     assert checks["Sizing: Engine DB pool"].detail.startswith("8 (")
     blind = {c.name: c for c in resource_checks(load_config(path), host())}
@@ -219,6 +219,6 @@ def test_doctor_reports_measurements_recommendation_and_sizes_without_a_profile(
 def test_removed_deployment_profiles_are_refused(tmp_path, profile):
     path = write_config(tmp_path, {"Profile": profile})
     with pytest.raises(
-        ConfigurationError, match=r"Deployment.Profile=.*expected one of.*controller"
+        ConfigurationError, match=r"Deployment.Profile=.*expected one of.*CONTROLLER"
     ):
         load_config(path)

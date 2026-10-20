@@ -31,17 +31,17 @@ Sign in through the server's [password or SSO flow](../deploying/security.md) an
 access token as `$ACCESS_TOKEN`. Substitute an existing pipeline, merge task, key and column:
 
 ```bash
-curl --fail-with-body "$SERVER/api/v1/pipelines/SALES/tasks/customers/values" \
+curl --fail-with-body "$SERVER/api/v1/values" \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"key":{"customer_id":42},"values":{"name":"Correct name"},"reason":"Verified with customer"}'
+  -d '{"pipeline_code":"SALES","task_code":"customers","key":{"customer_id":42},"values":{"name":"Correct name"},"reason":"Verified with customer"}'
 
-curl --fail-with-body "$SERVER/api/v1/pipelines/SALES/tasks/customers/values/provenance" \
+curl --fail-with-body "$SERVER/api/v1/values/provenance" \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"key":{"customer_id":42}}'
+  -d '{"pipeline_code":"SALES","task_code":"customers","key":{"customer_id":42}}'
 
-curl --fail-with-body "$SERVER/api/v1/pipelines/SALES/tasks/customers/values/unlock" \
+curl --fail-with-body "$SERVER/api/v1/values/unlock" \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"key":{"customer_id":42},"columns":["name"],"reason":"Return ownership to the feed"}'
+  -d '{"pipeline_code":"SALES","task_code":"customers","key":{"customer_id":42},"columns":["name"],"reason":"Return ownership to the feed"}'
 ```
 
 Edits and unlocks require admin. Provenance reads require viewer. Service accounts with admin

@@ -31,7 +31,7 @@ def parse_cloning(
         CloningScope,
         scope,
         ConfigurationError(
-            f"{path}: Cloning.Scope must be one of {sorted(CloningScope)}, got {scope!r}"
+            f"{path}: Cloning.Scope must be one of {', '.join(CloningScope)}, got {scope!r}"
         ),
     )
     enabled = parse_bool(profiled.value("Enabled"), profiled.where("Enabled"), path, default=False)

@@ -93,7 +93,7 @@ def run(task):
     return ScriptResult(row_count=max(0, rows))
 ```
 
-A single-task `run --task_code` performs one check and exits `23` (`WAITING`) if the event is
+A single-task `run --task-code` performs one check and exits `23` (`WAITING`) if the event is
 not ready; it admits no agent or execution attempt. Resume with the same run identity or let
 the local pipeline runner or controller continue. `explain` reports its durable event wait.
 

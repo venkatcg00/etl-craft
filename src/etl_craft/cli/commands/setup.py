@@ -4,31 +4,35 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context, load_command_config
+from etl_craft.cli.commands.common import Command, call, command_context
 from etl_craft.cli.commands.doctor import report
 from etl_craft.cli.output import Output
 from etl_craft.cli.prompts import interactive, password
-from etl_craft.core.enums import AccountKind, ApiRole, YesNo
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.operations import accounts
-from etl_craft.services.operations.maintenance import grants, setup_engine
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.maintenance import Grants, SetupResult
+from etl_craft.services.operations.requests import NoInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--oidc-subject", help="provider subject for the first or recovery admin")
+    parser.add_argument("--oidc-subject", help="Provider subject for the first or recovery admin.")
     parser.add_argument(
         "--print-grants",
         action="store_true",
-        help="print PostgreSQL role grants without executing them",
+        help="Print PostgreSQL role grants without executing them.",
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    config = load_command_config(args)
     if args.print_grants:
-        out.line(grants(config))
+        grants = call(args, ActionName.SETUP_GRANTS, NoInput())
+        assert isinstance(grants, Grants)
+        out.line(grants.sql)
         return ExitCode.SUCCESS
-    result = setup_engine(config)
+    result = call(args, ActionName.SETUP, NoInput())
+    assert isinstance(result, SetupResult)
     if report(out, result.checks):
         out.line("setup: nothing changed; fix the failed check(s) and run setup again")
         return ExitCode.FAILURE
@@ -43,10 +47,14 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             interactive()
             name = input("First or recovery admin account name: ")
             secret = None if args.oidc_subject else password(confirm=True)
-            admin = accounts.Account(
-                0, name, AccountKind.USER, ApiRole.ADMIN, None, args.oidc_subject, YesNo.YES
+            admin = accounts.AccountAdd(
+                name=name,
+                role=ApiRole.ADMIN,
+                oidc_subject=args.oidc_subject,
+                password=secret,
+                recovery=True,
             )
-            accounts.add_account(ctx, admin, secret, recovery=True)
+            invoke(ctx, ActionName.ACCOUNT_ADD, admin)
             out.line(f"setup: created admin {name}; run `etl-craft login`")
     return ExitCode.SUCCESS
 
@@ -56,4 +64,5 @@ COMMAND = Command(
     help="Check the configuration, then create or bring up to date the Engine DB tables.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.SETUP, ActionName.SETUP_GRANTS, ActionName.ACCOUNT_ADD),
 )

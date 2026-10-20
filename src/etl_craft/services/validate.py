@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -30,6 +30,7 @@ from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlActio
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph
 from etl_craft.core.text import is_metadata_code, qualify, suggest
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
@@ -171,8 +172,7 @@ def validate_on(
     if pipeline_code is None:
         for readiness_problem in normalization_problems(conn, catalog=catalog, dialect=dialect):
             report.warn("metadata normalization", readiness_problem)
-    table = "cfg_columns" if conn.dialect.name == "postgresql" else "CFG_COLUMNS"
-    if inspect(conn).has_table(table):
+    if for_engine(conn).has_table(conn, "CFG_COLUMNS"):
         for row in conn.execute(
             text(
                 "SELECT c.COLUMN_ID AS column_id, t.TABLE_ID AS table_id FROM CFG_COLUMNS c "

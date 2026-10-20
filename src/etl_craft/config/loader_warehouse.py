@@ -18,6 +18,7 @@ from etl_craft.config.loader_helpers import (
     auth_extra,
     check_auth_mode,
     connection_block,
+    field_keys,
     profile_schema,
     reject_unknown,
     relative_to_config,
@@ -58,11 +59,12 @@ def parse_warehouse(
         k: v for k, v in profiled.settings.items() if k in WAREHOUSE_SECTION_KEYS or k not in block
     }
     reject_unknown(settings, WAREHOUSE_SECTION_KEYS, "Warehouse", path)
+    block = field_keys(block, where, path)
     table_format = enum_value(
         TableFormat,
         profiled.text("Table_format") or TableFormat.NATIVE,
         ConfigurationError(
-            f"{path}: Warehouse.Table_format must be native or iceberg, got "
+            f"{path}: Warehouse.Table_format must be NATIVE or ICEBERG, got "
             f"{settings.get('Table_format')!r}"
         ),
     )
@@ -97,17 +99,21 @@ def _preferred_shape_profile(
 ) -> ConnectionProfile:
     """Build a Databricks or Snowflake profile from separate fields and a credential-free URL.
 
-    A ``token`` field means auth mode ``token``; any other mode is named in ``auth_mode``.
+    A ``Token`` field means ``Auth_mode`` ``TOKEN``; any other mode is named in ``Auth_mode``.
     """
     path, where, block = fields.path, fields.where, fields.block
     spec = warehouse_spec(expected_dialect, table_format)
     reject_unknown(
-        block, {*spec.preferred_fields, "auth_mode", "secret", *AUTH_EXTRA_FIELDS}, where, path
+        block,
+        {*spec.preferred_fields, "auth_mode", "secret", *AUTH_EXTRA_FIELDS},
+        where,
+        path,
+        fields=True,
     )
-    auth_mode = fields.value("auth_mode") or ("token" if "token" in block else "")
+    auth_mode = fields.value("auth_mode") or (AuthMode.TOKEN if "token" in block else "")
     check_auth_mode(auth_mode, spec.auth_modes, f"a {declared} warehouse", fields)
     if auth_mode == AuthMode.TOKEN and "secret" in block:
-        raise ConfigurationError(f"{path}: {where} names its token under `token`, not `secret`")
+        raise ConfigurationError(f"{path}: {where} names its token under `Token`, not `Secret`")
     parts = {
         name: fields.value(name, required=True) or ""
         for name in spec.preferred_fields
@@ -149,7 +155,7 @@ def _jdbc_url_profile(
     profile_fields: tuple[str, ...] = ()
     if expected_dialect == "duckdb" and table_format == TableFormat.ICEBERG:
         profile_fields = warehouse_by_key("duckdb_iceberg").profile_fields
-    reject_unknown(block, CONNECTION_FIELDS | set(profile_fields), where, path)
+    reject_unknown(block, CONNECTION_FIELDS | set(profile_fields), where, path, fields=True)
     jdbc_url = fields.value("jdbc_url", required=True) or ""
     try:
         dialect = parse_warehouse_url(jdbc_url).dialect
@@ -159,7 +165,7 @@ def _jdbc_url_profile(
     actual = dialect.split("+", 1)[0]
     if expected_dialect and actual != expected_dialect:
         raise ConfigurationError(
-            f"{path}: Warehouse.Name is {declared!r}, but its jdbc_url resolves to {actual!r}"
+            f"{path}: Warehouse.Name is {declared!r}, but its Jdbc_url resolves to {actual!r}"
         )
     if actual == "duckdb":
         jdbc_url = _duckdb_url_beside_config(jdbc_url, path)
@@ -182,7 +188,7 @@ def _jdbc_url_profile(
     url_schema = _url_schema(jdbc_url)
     if url_schema and url_schema.lower() != schema.lower():
         raise ConfigurationError(
-            f"{path}: {where}.schema is {schema!r}, but its jdbc_url names schema "
+            f"{path}: {where}.Schema is {schema!r}, but its Jdbc_url names schema "
             f"{url_schema!r}; make them the same"
         )
     return ConnectionProfile(

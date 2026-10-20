@@ -14,7 +14,7 @@ from etl_craft.handlers.sql.spec import read_action
 from etl_craft.services.source_columns import same_type
 
 if TYPE_CHECKING:
-    from etl_craft.services.catalog import Catalog, Column, TableAsset, TaskAsset
+    from etl_craft.services.catalog.collect import Catalog, Column, TableAsset, TaskAsset
 
 
 @dataclass(frozen=True)

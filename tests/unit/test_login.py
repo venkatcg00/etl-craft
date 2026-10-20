@@ -104,9 +104,9 @@ def test_xdg_path_requires_an_absolute_directory(monkeypatch):
 
 def test_auth_settings_validate_lifetime_and_issuer(tmp_path):
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}},
     }
     assert parse_config(raw, tmp_path / "c.yml").auth.session_hours == 12
     raw["Auth"] = {
@@ -242,9 +242,9 @@ def test_credentials_refuse_non_regular_files_and_wrong_owners(monkeypatch):
 def test_removed_export_auth_setting_is_unknown(tmp_path):
     removed = "Air" + "flow_connection_id"
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}},
         "Auth": {removed: "scheduler"},
     }
     with pytest.raises(ConfigurationError) as caught:

@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, urlencode
 from etl_craft.config.auth import AUTH_EXTRA_FIELDS
 from etl_craft.config.model import EXAMPLE_PATH, SourceConfig
 from etl_craft.config.resolve import Resolver
+from etl_craft.core.enums import SecretsSource, enum_value
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import SECRET_KEYS, is_safe_identifier
 
@@ -20,8 +21,6 @@ _NumberDefault = TypeVar("_NumberDefault", int, None)
 _FlagDefault = TypeVar("_FlagDefault", bool, None)
 
 SECRETS_KEYS = frozenset({"Source_type", "Path", "Profile"})
-
-_SOURCE_TYPES = ("environment", "file")
 
 
 CONNECTION_FIELDS = frozenset(
@@ -140,11 +139,32 @@ def profiled_settings(
     return Profiled(name, selected, {**base, **blocks[selected]}, resolver, path)
 
 
+def shown(key: str) -> str:
+    """Return a connection field's key as ``craft-connector.yml`` spells it: ``Jdbc_url``."""
+    return key[:1].upper() + key[1:]
+
+
+def field_keys(block: Mapping[str, object], where: str, path: Path) -> dict[str, object]:
+    """Read a block's ``Capitalized_snake`` keys as field names, refusing any other spelling."""
+    wrong = sorted(key for key in block if not key[:1].isupper())
+    if wrong:
+        raise ConfigurationError(
+            f"{path}: unknown key(s) {wrong} in {where}; keys are written Capitalized_snake, "
+            f"such as {shown(wrong[0])}"
+        )
+    return {key[:1].lower() + key[1:]: value for key, value in block.items()}
+
+
 def reject_unknown(
-    settings: Mapping[str, object], allowed: frozenset[str] | set[str], where: str, path: Path
+    settings: Mapping[str, object],
+    allowed: frozenset[str] | set[str],
+    where: str,
+    path: Path,
+    *,
+    fields: bool = False,
 ) -> None:
-    """Refuse settings outside the accepted keys for this section."""
-    unknown = sorted(set(settings) - set(allowed))
+    """Refuse settings outside the accepted keys; ``fields`` shows a block's field keys."""
+    unknown = sorted((shown(key) if fields else key) for key in set(settings) - set(allowed))
     if unknown:
         raise ConfigurationError(f"{path}: unknown key(s) {unknown} in {where}")
 
@@ -153,19 +173,21 @@ def parse_source(secrets: dict[str, object], path: Path, environment: Resolver) 
     """Read the secrets source using only process environment values."""
     reject_unknown(secrets, SECRETS_KEYS, "Secrets", path)
     written_type = environment.text(secrets.get("Source_type"), "Secrets.Source_type")
-    source_type = (written_type or "").lower()
-    if source_type not in _SOURCE_TYPES:
-        raise ConfigurationError(
-            f"{path}: Secrets.Source_type must be one of {sorted(_SOURCE_TYPES)}, "
+    source_type = enum_value(
+        SecretsSource,
+        written_type or "",
+        ConfigurationError(
+            f"{path}: Secrets.Source_type must be one of {', '.join(SecretsSource)}, "
             f"got {secrets.get('Source_type')!r}{environment.hint('Secrets.Source_type')}"
-        )
+        ),
+    )
     raw_path = environment.text(secrets.get("Path"), "Secrets.Path")
-    if source_type == "environment":
+    if source_type == SecretsSource.ENVIRONMENT:
         if raw_path is not None:
-            raise ConfigurationError(f"{path}: Secrets.Path is only used with Source_type: file")
+            raise ConfigurationError(f"{path}: Secrets.Path is only used with Source_type: FILE")
         return SourceConfig(type=source_type)
     if raw_path is None:
-        raise ConfigurationError(f"{path}: Secrets.Path is required when Source_type is file")
+        raise ConfigurationError(f"{path}: Secrets.Path is required when Source_type is FILE")
     return SourceConfig(type=source_type, path=str(relative_to_config(raw_path, path)))
 
 
@@ -184,25 +206,25 @@ class Fields:
         raw = self.block.get(key)
         if raw is None:
             if required:
-                raise ConfigurationError(f"{self.path}: {self.where} needs {key}")
+                raise ConfigurationError(f"{self.path}: {self.where} needs {shown(key)}")
             return None
         value = self.resolver.resolve(
-            raw, f"{self.where}.{key}", profile=self.profile, field_name=key
+            raw, f"{self.where}.{shown(key)}", profile=self.profile, field_name=key
         )
         text = str(value).strip() if value is not None else None
         if text is not None and key == "jdbc_url":
-            return connection_url(text, self.path, f"{self.where}.{key}")
+            return connection_url(text, self.path, f"{self.where}.{shown(key)}")
         return text
 
     def secret_var(self, key: str = "secret") -> str | None:
         """Return the name of a required, populated secret variable when present."""
         return self.resolver.secret_name(
-            self.block.get(key), f"{self.where}.{key}", profile=self.profile, field_name=key
+            self.block.get(key), f"{self.where}.{shown(key)}", profile=self.profile, field_name=key
         )
 
     def hint(self, key: str) -> str:
         """Explain an unresolved variable used as literal text."""
-        return self.resolver.hint(f"{self.where}.{key}")
+        return self.resolver.hint(f"{self.where}.{shown(key)}")
 
 
 def auth_extra(
@@ -216,12 +238,12 @@ def auth_extra(
     """Check an auth mode's fields are present and return the profile's ``extra`` for it."""
     path, where = fields.path, fields.where
     if "user" in required and not user:
-        raise ConfigurationError(f"{path}: {where} needs user for auth_mode {auth_mode}")
+        raise ConfigurationError(f"{path}: {where} needs User for Auth_mode {auth_mode}")
     extra: dict[str, str] = {}
     secret_var = fields.secret_var(secret_key)
     if "secret" in required and not secret_var:
         raise ConfigurationError(
-            f"{path}: {where} needs {secret_key} (a variable name) for auth_mode {auth_mode}"
+            f"{path}: {where} needs {shown(secret_key)} (a variable name) for Auth_mode {auth_mode}"
         )
     if secret_var:
         extra["secret_var"] = secret_var
@@ -234,7 +256,9 @@ def auth_extra(
                 else value
             )
         elif name in required:
-            raise ConfigurationError(f"{path}: {where} needs {name} for auth_mode {auth_mode}")
+            raise ConfigurationError(
+                f"{path}: {where} needs {shown(name)} for Auth_mode {auth_mode}"
+            )
     return extra
 
 
@@ -242,8 +266,8 @@ def check_auth_mode(auth_mode: str, accepted: frozenset[str], label: str, fields
     """Refuse authentication modes the selected connection does not support."""
     if auth_mode not in accepted:
         raise ConfigurationError(
-            f"{fields.path}: {fields.where}.auth_mode resolved to {auth_mode!r}; {label} "
-            f"takes {sorted(accepted)}{fields.hint('auth_mode')}"
+            f"{fields.path}: {fields.where}.Auth_mode resolved to {auth_mode!r}; {label} "
+            f"takes {', '.join(sorted(accepted))}{fields.hint('auth_mode')}"
         )
 
 
@@ -355,7 +379,7 @@ def profile_schema(fields: Fields) -> str:
     schema = fields.value("schema", required=True) or ""
     if not is_safe_identifier(schema):
         raise ConfigurationError(
-            f"{fields.path}: {fields.where}.schema must be a plain identifier (letters, digits "
+            f"{fields.path}: {fields.where}.Schema must be a plain identifier (letters, digits "
             f"and underscores), got {schema!r}{fields.hint('schema')}"
         )
     return schema

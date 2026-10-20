@@ -30,11 +30,11 @@ PROFILE_VARS = ("ETL_CRAFT_PROFILE", "ETL_CRAFT_AUTH")
 VALUES = {
     "ENGINE_JDBC_URL": "jdbc:postgresql://engine-db:5432/etl_craft",
     "ENGINE_USER": "etl_craft",
-    "ENGINE_AUTH_MODE": "password",
+    "ENGINE_AUTH_MODE": "PASSWORD",
     "ENGINE_SECRET": "s",
     "ENGINE_KEY_FILE": "/keys/engine.key",
     "WAREHOUSE_USER": "etl_craft",
-    "WAREHOUSE_AUTH_MODE": "password",
+    "WAREHOUSE_AUTH_MODE": "PASSWORD",
     "WAREHOUSE_SECRET": "s",
     "WAREHOUSE_KEY_FILE": "/keys/rsa_key.p8",
     "WAREHOUSE_CATALOG": "lake",
@@ -55,9 +55,9 @@ VALUES = {
     "EMAIL_HOST": "smtp.internal",
     "EMAIL_PORT": "587",
     "EMAIL_FROM": "etl@example.com",
-    "EMAIL_AUTH_MODE": "password",
+    "EMAIL_AUTH_MODE": "PASSWORD",
     "EMAIL_USER": "etl",
-    "EMAIL_TLS_MODE": "starttls",
+    "EMAIL_TLS_MODE": "STARTTLS",
     "EMAIL_SECRET": "s",
     # Authentication fields (docs/examples/auth-*.yml).
     "ENGINE_CERT_FILE": "/keys/engine.crt",
@@ -85,7 +85,7 @@ class Expected:
     engine: str
     warehouse: str
     warehouse_url: str | None = None
-    table_format: str = "native"
+    table_format: str = "NATIVE"
     # auth-*.yml: one profile per authentication type, selected by ETL_CRAFT_AUTH,
     # in this section; the Engine DB stays on its own fixed profile.
     auth_section: str | None = None
@@ -104,13 +104,13 @@ EXPECTED = {
     "warehouse-postgres.yml": Expected("postgresql", "postgres", POSTGRES_WAREHOUSE_URL),
     "warehouse-duckdb.yml": Expected("sqlite", "duckdb"),
     "warehouse-duckdb-iceberg.yml": Expected(
-        "postgresql", "duckdb_iceberg", table_format="iceberg"
+        "postgresql", "duckdb_iceberg", table_format="ICEBERG"
     ),
     "warehouse-trino-iceberg.yml": Expected(
         "postgresql",
         "trino_iceberg",
         "jdbc:trino://trino:8080/iceberg/analytics",
-        table_format="iceberg",
+        table_format="ICEBERG",
     ),
     "warehouse-databricks.yml": Expected(
         "postgresql",
@@ -121,11 +121,11 @@ EXPECTED = {
         "postgresql",
         "databricks_iceberg",
         "jdbc:databricks://adb-1.azuredatabricks.net:443/default;httpPath=/sql/1.0/warehouses/a",
-        table_format="iceberg",
+        table_format="ICEBERG",
     ),
     "warehouse-snowflake.yml": Expected("postgresql", "snowflake"),
     "warehouse-snowflake-iceberg.yml": Expected(
-        "postgresql", "snowflake_iceberg", table_format="iceberg"
+        "postgresql", "snowflake_iceberg", table_format="ICEBERG"
     ),
     "warehouse-snowflake-key-pair.yml": Expected(
         "postgresql",
@@ -147,11 +147,11 @@ EXPECTED = {
         "sqlite",
         "trino_iceberg",
         "jdbc:trino://trino:8443/iceberg/analytics",
-        table_format="iceberg",
+        table_format="ICEBERG",
         auth_section="Warehouse",
     ),
     "auth-duckdb-iceberg.yml": Expected(
-        "sqlite", "duckdb_iceberg", table_format="iceberg", auth_section="Warehouse"
+        "sqlite", "duckdb_iceberg", table_format="ICEBERG", auth_section="Warehouse"
     ),
     "auth-email.yml": Expected("sqlite", "", auth_section="Orchestration"),
 }
@@ -211,7 +211,7 @@ def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name
             "ETL_CRAFT_AUTH" if expected.auth_section else "ETL_CRAFT_PROFILE", profile
         )
         if name == "warehouse-snowflake-key-pair.yml":
-            clean_environment.setenv("WAREHOUSE_AUTH_MODE", "key_file")
+            clean_environment.setenv("WAREHOUSE_AUTH_MODE", "KEY_FILE")
         if expected.warehouse_url:
             clean_environment.setenv("WAREHOUSE_JDBC_URL", expected.warehouse_url)
 
@@ -219,10 +219,10 @@ def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name
 
     assert engine_for_jdbc_url(config.engine.jdbc_url).name == expected.engine
     if expected.auth_section == "Orchestration":
-        assert config.email is not None and config.email.auth_mode == profile
+        assert config.email is not None and config.email.auth_mode == profile.upper()
         return
     if expected.auth_section == "Warehouse":
-        assert config.warehouse is not None and config.warehouse.auth_mode == profile
+        assert config.warehouse is not None and config.warehouse.auth_mode == profile.upper()
     else:
         assert config.engine.name == profile
     assert config.warehouse is not None and config.warehouse.name == profile
@@ -232,14 +232,14 @@ def test_every_example_loads_for_every_profile(clean_environment, tmp_path, name
     assert active_catalog(config)
     # The Postgres auth example sets the Engine DB's login the same way.
     if name == "auth-postgres.yml":
-        assert config.engine.auth_mode == profile
+        assert config.engine.auth_mode == profile.upper()
 
 
 def test_the_secrets_file_example_reads_only_its_file(clean_environment):
     # Nothing is set in the environment: every value, the profile included,
     # comes from secrets-file.env.
     config = load_config(EXAMPLES / "secrets-file.yml")
-    assert config.source.type == "file"
+    assert config.source.type == "FILE"
     assert config.engine.name == "dev"
     assert config.engine.user == "etl_craft"
     assert config.engine.secret_var == "ENGINE_SECRET"
@@ -256,14 +256,14 @@ def test_cloning_example_follows_the_profile(clean_environment):
         scopes[profile] = (cloning.enabled, cloning.scope)
     # Scope none turns an enabled section off.
     assert scopes == {
-        "dev": (False, "cfg"),
-        "sit": (False, "none"),
-        "uat": (True, "cfg"),
-        "prod": (True, "all"),
+        "dev": (False, "CFG"),
+        "sit": (False, "NONE"),
+        "uat": (True, "CFG"),
+        "prod": (True, "ALL"),
     }
 
 
 def test_the_demo_project_config_loads(clean_environment):
     # The installed-wheel demos copy examples/demo; its file must load as the loader stands.
     config = load_config(EXAMPLES.parents[1] / "examples" / "demo" / "craft-connector.yml")
-    assert config.email is not None and config.email.tls_mode == "none"
+    assert config.email is not None and config.email.tls_mode == "NONE"

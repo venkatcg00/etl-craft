@@ -28,6 +28,7 @@ from etl_craft.config.auth import EngineSpec
 from etl_craft.core.actor import Actor
 from etl_craft.core.text import split_statements
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
+from etl_craft.dialects.engine.tables import team_config
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile, ConnectorConfig
@@ -157,6 +158,27 @@ class EngineDialect(ABC):
     def stored_name(self, table: str) -> str:
         """Return ``table`` as this Engine DB's catalog stores an unquoted name."""
         return table
+
+    def has_table(self, conn: Connection, table: str) -> bool:
+        """Return whether the unquoted table name ``table`` exists."""
+        return inspect(conn).has_table(self.stored_name(table))
+
+    def snapshot(self, conn: Connection) -> Connection:
+        """Return ``conn`` set to read related tables from one stable snapshot."""
+        return conn
+
+    def extra_write_grants(self, conn: Connection) -> list[tuple[str, str, str]]:
+        """Return grants letting PUBLIC or another ordinary login write a package table."""
+        rows = conn.execute(text(self.query("extra_write_grants"))).all()
+        return [
+            (row.table_name, row.role_name, row.privilege)
+            for row in rows
+            if not team_config(row.table_name)
+        ]
+
+    def exposed_file(self, engine: Engine) -> Path | None:
+        """Return the Engine DB file when group or others can write it."""
+        return None
 
     def table_triggers(self, conn: Connection, table: str) -> list[str]:
         """Return the names of the user triggers on ``table``."""

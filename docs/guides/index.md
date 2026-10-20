@@ -25,7 +25,7 @@ How to model and run pipelines with etl-craft.
 - [The catalog site](catalog.md): `generate-docs`, the pages, lineage graphs and search.
 - [Running a pipeline](running-pipelines.md): dependency waves, resuming a run, connection
   tests, orchestrator steps, and the SLA.
-- [Running a task and reading its logs](running-tasks.md): `etl-craft run --task_code`,
+- [Running a task and reading its logs](running-tasks.md): `etl-craft run --task-code`,
   retries, time limits, and where each attempt's log goes.
 - [Stepping in: mark, cancel, pause, backfill, rerun and bypasses](run-control.md): marking a
   task or a run, stand-in runs, cancelling, pausing, skipping a run, backfilling, running a task again or without its dependencies, relaxing

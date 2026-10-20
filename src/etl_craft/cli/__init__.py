@@ -5,34 +5,20 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 from collections.abc import Sequence
-from contextlib import nullcontext
 from pathlib import Path
 
 from etl_craft import __version__
 from etl_craft.cli.authentication import access_context
 from etl_craft.cli.commands import COMMANDS, Command
 from etl_craft.cli.output import Output
-from etl_craft.cli.remote import ServerClient
 from etl_craft.core import log
-from etl_craft.core.errors import EtlCraftError, ExitCode, UsageError
-from etl_craft.engine.audit import command_request
+from etl_craft.core.errors import EtlCraftError, ExitCode
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = "INFO"
-
-SERVER_SIDE = {
-    "config": "commit the config files to the project the server deploys and run "
-    "`etl-craft config apply` there, by CI or an admin",
-    "migrate": "commit the migration to the project the server deploys and run "
-    "`etl-craft migrate` there, by CI or an admin",
-    "init-db": "run it on the server's host",
-    "setup": "run it on the server's host",
-    "account": "an admin runs `etl-craft account` on the server's host",
-    "token": "an admin runs `etl-craft token` on the server's host",
-}
-"""Commands that change metadata or the Engine DB, and how to make the change on a server."""
 
 
 def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
@@ -51,28 +37,28 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
         "--config",
         type=Path,
         metavar="PATH",
-        help="craft-connector.yml to read",
+        help="The craft-connector.yml to read.",
         default=default(None),
     )
     group.add_argument(
-        "--server",
+        "--controller",
         metavar="URL",
-        help="operate this etl-craft controller instead of the local project (default: "
-        "$ETL_CRAFT_SERVER); https:// except to localhost",
+        help="Operate this etl-craft controller instead of the local project (default: "
+        "$ETL_CRAFT_CONTROLLER); https:// except to localhost.",
         default=default(None),
     )
     group.add_argument(
         "--log-level",
         type=str.upper,
         choices=log.LEVELS,
-        help=f"lowest level of log record written to stderr (default: {DEFAULT_LOG_LEVEL})",
+        help=f"Lowest level of log record written to stderr (default: {DEFAULT_LOG_LEVEL}).",
         default=default(DEFAULT_LOG_LEVEL),
     )
     group.add_argument(
         "--log-format",
         type=str.lower,
         choices=[member.value for member in log.LogFormat],
-        help="log records as text lines or JSON objects (default: text)",
+        help="Log records as text lines or JSON objects (default: text).",
         default=default(log.LogFormat.TEXT.value),
     )
     return parser
@@ -85,7 +71,12 @@ def build_parser(commands: Sequence[Command] = COMMANDS) -> argparse.ArgumentPar
         description="Metadata-driven ETL orchestration engine.",
         parents=[_global_options(defaults=True)],
     )
-    parser.add_argument("--version", action="version", version=f"etl-craft {__version__}")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"etl-craft {__version__}",
+        help="Print the version and exit.",
+    )
     if commands:
         subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
         shared = _global_options(defaults=False)
@@ -95,7 +86,7 @@ def build_parser(commands: Sequence[Command] = COMMANDS) -> argparse.ArgumentPar
             )
             if command.configure is not None:
                 command.configure(subparser)
-            subparser.set_defaults(handler=command.run, remote=command.remote)
+            subparser.set_defaults(handler=command.run)
     return parser
 
 
@@ -113,20 +104,14 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         parser.print_usage(out.stdout)
         return ExitCode.USAGE
     log.configure(args.log_level, args.log_format)
-    server = args.server or os.environ.get("ETL_CRAFT_SERVER")
+    args.controller = args.controller or os.environ.get("ETL_CRAFT_CONTROLLER")
     try:
-        if server:
-            return int(_on_server(args, out, server))
+        if args.controller:
+            return int(args.handler(args, out))
         with access_context(args):
-            request = (
-                nullcontext()
-                if args.command in {"login", "logout"}
-                else command_request(args.command, vars(args))
-            )
-            with request:
-                return int(args.handler(args, out))
+            return int(args.handler(args, out))
     except EtlCraftError as error:
-        out.error(str(error))
+        out.error(_as_flags(str(error), parser))
         return error.exit_code
     except Exception as error:
         logger.exception("unexpected error in etl-craft %s", args.command)
@@ -134,14 +119,23 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         return ExitCode.UNEXPECTED
 
 
-def _on_server(args: argparse.Namespace, out: Output, server: str) -> int:
-    """Run the command against a server's API; the server checks the role and records it."""
-    if args.remote is None:
-        remedy = SERVER_SIDE.get(args.command)
-        raise UsageError(
-            f"`{args.command}` changes metadata or the Engine DB, so it is refused against a "
-            f"server; {remedy}"
-            if remedy
-            else f"`{args.command}` works on a local project only; run it without --server"
-        )
-    return int(args.remote(args, out, ServerClient(server)))
+def _options(parser: argparse.ArgumentParser) -> dict[str, str]:
+    """Map every option's destination to its flag, through every subcommand."""
+    found: dict[str, str] = {}
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                found.update(_options(sub))
+        elif action.option_strings:
+            found.setdefault(action.dest, max(action.option_strings, key=len))
+    return found
+
+
+def _as_flags(message: str, parser: argparse.ArgumentParser) -> str:
+    """Show each request field a message names in backticks as the option that sets it."""
+    options = _options(parser)
+    return re.sub(
+        r"`([a-z_]+)`",
+        lambda m: f"`{options[m.group(1)]}`" if m.group(1) in options else m.group(0),
+        message,
+    )

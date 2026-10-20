@@ -4,21 +4,25 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context
+from etl_craft.cli.commands.common import Command, call
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations import documents
+from etl_craft.services.operations.documents import DocsVersions
+from etl_craft.services.operations.requests import NoInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--check", action="store_true", help="report what would change, and record nothing"
+        "--check", action="store_true", help="Report what would change, and record nothing."
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        versions = documents.documentation_versions(ctx, check=args.check)
+    name = ActionName.DOCS_VERSION_CHECK if args.check else ActionName.DOCS_VERSION
+    done = call(args, name, NoInput())
+    assert isinstance(done, DocsVersions)
+    versions = done.versions
     if not versions:
         out.empty("no task has a DOCUMENTATION parameter")
         return ExitCode.SUCCESS
@@ -34,4 +38,5 @@ COMMAND = Command(
     help="Record a new version of each task's DOCUMENTATION that changed.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.DOCS_VERSION, ActionName.DOCS_VERSION_CHECK),
 )

@@ -22,7 +22,7 @@ from etl_craft.engine import controls, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
-from etl_craft.execution.supervisor import (
+from etl_craft.execution.processes import (
     ChildResult,
 )
 

@@ -55,6 +55,14 @@ class SqliteEngineDialect(EngineDialect):
             raise RunRefusedError("controller requires a file-backed SQLite Engine DB")
         return f"{database}.controller.lock"
 
+    def exposed_file(self, engine: Engine) -> Path | None:
+        """Return the database file when group or others can write it."""
+        database = engine.url.database
+        if not database or database == ":memory:":
+            return None
+        path = Path(database)
+        return path if path.stat().st_mode & 0o022 else None
+
     def index_names(self, conn: Connection, table: str) -> list[str]:
         """Return the names of the indexes on ``table``, its primary key's excluded."""
         return [

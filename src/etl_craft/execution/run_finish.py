@@ -18,7 +18,7 @@ from etl_craft.core.enums import (
 )
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.engine import controls, runlog, transitions
-from etl_craft.engine.repository.interventions import fetch_interventions, fetch_task_rows
+from etl_craft.engine.repository.intervention_rows import fetch_interventions, fetch_task_rows
 from etl_craft.engine.repository.runs import fetch_task_statuses_for_run
 from etl_craft.execution import leases
 from etl_craft.execution.run_types import (
@@ -124,7 +124,7 @@ def finalize(
             f"{run.pipeline_code}: pipeline_run_id={run.pipeline_run_id} is {current}: "
             "it was ended "
             f"elsewhere (an operator's cancel, say) while this process was ending it {status}; "
-            f"nothing more was recorded. `etl-craft history --pipeline_code "
+            f"nothing more was recorded. `etl-craft history --pipeline-code "
             f"{run.pipeline_code}` shows "
             "who ended it"
         )
@@ -235,9 +235,9 @@ def _running_elsewhere(
     message = (
         f"{pipeline_code}: pipeline_run_id={pipeline_run_id} stays IN-PROGRESS: {listed} "
         f"{'is' if len(running) == 1 else 'are'} still IN-PROGRESS in another process. When it "
-        f"ends, `etl-craft run --pipeline_code {pipeline_code}` finishes the run. If that process "
-        f"is gone, record the task's outcome with `etl-craft mark --pipeline_code {pipeline_code} "
-        f"--task_code {first} --status FAILED --stale --reason ...`"
+        f"ends, `etl-craft run --pipeline-code {pipeline_code}` finishes the run. If that process "
+        f"is gone, record the task's outcome with `etl-craft mark --pipeline-code {pipeline_code} "
+        f"--task-code {first} --status FAILED --stale --reason ...`"
     )
     logger.warning("%s", message)
     return PipelineOutcome(RunStatus.IN_PROGRESS, message, pipeline_run_id)

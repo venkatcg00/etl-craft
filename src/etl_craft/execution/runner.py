@@ -1,4 +1,4 @@
-"""``run --task_code``: run one task of a pipeline, in its own process.
+"""``run --task-code``: run one task of a pipeline, in its own process.
 
 The caller selects the task's run by id or key, or by a single non-terminal identity.
 It runs only when it may: not again once ``SUCCESS`` or ``SKIPPED`` under the run, not
@@ -28,6 +28,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     AttemptStatus,
+    Handler,
     RunStatus,
 )
 from etl_craft.core.errors import (
@@ -69,13 +70,13 @@ from etl_craft.execution.interventions import (
 )
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.pools import AttemptSpec
-from etl_craft.execution.readiness import backfill_cross_check, describe_unready, upstream_pending
-from etl_craft.execution.reconcile import reconcile
-from etl_craft.execution.retries import refresh_retries, task_retry_policy
-from etl_craft.execution.supervisor import (
+from etl_craft.execution.processes import (
     ChildSpec,
     run_child,
 )
+from etl_craft.execution.readiness import backfill_cross_check, describe_unready, upstream_pending
+from etl_craft.execution.reconcile import reconcile
+from etl_craft.execution.retries import refresh_retries, task_retry_policy
 
 logger = logging.getLogger(__name__)
 
@@ -130,15 +131,15 @@ def run_task(
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
     reconcile(engine, pipeline_id=pipeline_id)
     if override is not None:
-        option = "--rerun" if override.rerun else "--ignore-dependencies"
+        option = "`rerun`" if override.rerun else "`ignore_dependencies`"
         check_override(config, option, override.reason)
         if force:
-            raise UsageError(f"{option} and --force are different overrides: choose one")
+            raise UsageError(f"{option} and `force` are different overrides: choose one")
     paused = open_pause(engine, pipeline_code, selector=selector)
     if paused is not None:
         return _skipped(
             f"{task_code}: {pipeline_code} is {paused.describe()}; nothing started or "
-            f"recorded. `etl-craft resume --pipeline_code {pipeline_code}` lets it run again"
+            f"recorded. `etl-craft resume --pipeline-code {pipeline_code}` lets it run again"
         )
     if override is not None:
         return _run_overridden(
@@ -173,12 +174,12 @@ def _run_local(
             conn,
             pipeline_id,
             force=options.force,
-            reason=f"--force: {task_code} runs again under the ended run",
+            reason=f"force: {task_code} runs again under the ended run",
             selector=options.selector,
         )
     decisions: tuple[trackers.GateDecision, ...] = ()
     if not options.force:
-        blocked, cross = _preflight(
+        blocked, cross = preflight(
             engine, gate, pipeline_id, task_id, task_code, pipeline_run_id, options.admission
         )
         if blocked is not None:
@@ -302,8 +303,8 @@ def _run_overridden(
         )
     if status in SETTLED_STATUSES and not override.rerun:
         return _skipped(
-            f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}; pass "
-            "--rerun to run it again"
+            f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}; give "
+            "`rerun` to run it again"
         )
     logger.warning(
         "%s: %s under pipeline_run_id=%d, without checking its dependencies: %s",
@@ -351,7 +352,7 @@ def _queued_retry(conn: Connection, pipeline_run_id: int, task_id: int) -> bool:
     )
 
 
-def _preflight(
+def preflight(
     engine: Engine,
     gate: TrackedGate,
     pipeline_id: int,
@@ -474,7 +475,7 @@ def _run_attempt(
     """Admit an attempt and run it in the foreground; see ``execute_attempt``."""
     with engine.connect() as conn:
         handler = fetch_task_execution_detail(conn, task.task_id).handler
-    if handler == "EVENT_WAIT":
+    if handler == Handler.EVENT_WAIT:
         result = check_event(
             engine,
             config,
@@ -562,7 +563,7 @@ def execute_attempt(
     """Claim an admitted attempt, run it in its own process, and record how it ended.
 
     This is the one way a task process starts on this host: in the foreground for
-    ``run --task_code``, and on the local pool's threads for everything else. Anything that fails
+    ``run --task-code``, and on the local pool's threads for everything else. Anything that fails
     after the claim (the log folder, starting the process, an interrupt) records the attempt
     ``FAILED`` with the cause, unless the task process recorded an outcome first, and is then
     raised.
@@ -602,7 +603,7 @@ def _fail_after_bind(
                 and active.attempt_id == spec.attempt_id
                 and active.owner == owner
             ):
-                from etl_craft.execution.failures import classify_failure
+                from etl_craft.execution.classify import classify_failure
 
                 transitions.record_attempt_failure(
                     conn, spec.attempt_id, classify_failure(error, config)

@@ -6,29 +6,24 @@ import argparse
 import codecs
 from collections.abc import Iterable
 
-from etl_craft.cli.commands.common import Command, command_context
+from etl_craft.cli.commands.common import Command, call, request_from
 from etl_craft.cli.output import Output
-from etl_craft.cli.remote import ServerClient, api_path
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations import api_reads
+from etl_craft.services.operations.requests import LogInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--attempt-id", type=int, required=True, help="the attempt whose log")
+    parser.add_argument("--attempt-id", type=int, required=True, help="The attempt whose log.")
     parser.add_argument(
-        "--offset", type=int, default=0, help="start this many bytes into the log (default: 0)"
+        "--offset", type=int, default=0, help="Start this many bytes into the log (default: 0)."
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        _write(out, api_reads.attempt_log(ctx, args.attempt_id, args.offset))
-    return ExitCode.SUCCESS
-
-
-def _remote(args: argparse.Namespace, out: Output, server: ServerClient) -> int:
-    path = api_path("attempts", str(args.attempt_id), "log")
-    _write(out, server.stream(path, {"offset": args.offset}))
+    chunks = call(args, ActionName.LOGS, request_from(args, LogInput))
+    assert isinstance(chunks, Iterable)
+    _write(out, chunks)
     return ExitCode.SUCCESS
 
 
@@ -41,5 +36,5 @@ def _write(out: Output, chunks: Iterable[bytes]) -> None:
 
 
 COMMAND = Command(
-    "logs", "Print one attempt's log.", run=_run, configure=_configure, remote=_remote
+    "logs", "Print one attempt's log.", run=_run, configure=_configure, actions=(ActionName.LOGS,)
 )

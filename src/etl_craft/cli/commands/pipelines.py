@@ -1,18 +1,20 @@
-"""``etl-craft list``: the active pipelines."""
+"""``etl-craft pipelines``: the active pipelines."""
 
 from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context, configure_output
+from etl_craft.cli.commands.common import Command, call, configure_output
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations import inspect
+from etl_craft.services.operations.models import PipelineListView
+from etl_craft.services.operations.requests import NoInput
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = inspect.list_pipelines(ctx)
+    done = call(args, ActionName.PIPELINES, NoInput())
+    assert isinstance(done, PipelineListView)
 
     def render_text() -> None:
         pipelines = done.pipelines
@@ -39,8 +41,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 
 COMMAND = Command(
-    name="list",
+    name="pipelines",
     help="List the active pipelines.",
     configure=configure_output,
     run=_run,
+    actions=(ActionName.PIPELINES,),
 )

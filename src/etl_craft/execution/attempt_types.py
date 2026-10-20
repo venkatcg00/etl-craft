@@ -9,7 +9,7 @@ from etl_craft.core.enums import (
     InterventionAction,
     RunStatus,
 )
-from etl_craft.execution.supervisor import (
+from etl_craft.execution.processes import (
     KILL_GRACE_SECONDS,
 )
 
@@ -22,7 +22,7 @@ CANCEL_POLL_SECONDS = 2.0
 
 @dataclass(frozen=True)
 class TaskOutcome:
-    """How ``run --task_code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why.
+    """How ``run --task-code`` ended: ``SUCCESS``, ``FAILED`` or ``SKIPPED``, and why.
 
     ``reopened`` is the status of the ended run that ``force`` put back ``IN-PROGRESS`` to run
     the task; the caller ends that run again (``pipeline.force_task``).

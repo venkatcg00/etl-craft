@@ -6,8 +6,8 @@ from time import perf_counter
 import pytest
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
-from etl_craft.services.catalog import build_catalog
-from etl_craft.services.catalog_site import write_site
+from etl_craft.services.catalog.collect import build_catalog
+from etl_craft.services.catalog.site import write_site
 from fixtures.catalog_scale import seed_catalog
 
 pytestmark = [pytest.mark.harness, pytest.mark.timeout(240)]

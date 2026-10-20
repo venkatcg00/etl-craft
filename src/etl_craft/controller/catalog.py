@@ -9,9 +9,11 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 
 from etl_craft.core.cron import next_after
+from etl_craft.core.enums import ActionName
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations import OperationContext, documents
+from etl_craft.services.operations.actions import invoke
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ class CatalogSchedule:
     def __init__(self) -> None:
         """Allocate no thread until a catalog build is due."""
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="etl-craft-catalog")
-        self.build: Future[documents.DocsBuild] | None = None
+        self.build: Future[object] | None = None
         self.next_due: datetime | None = None
 
     def refresh(self, ctx: OperationContext, now: datetime, stop: threading.Event | None) -> None:
@@ -50,12 +52,7 @@ class CatalogSchedule:
         if latest is None or latest < self.next_due:
             context = contextvars.copy_context()
             self.build = self.executor.submit(
-                context.run,
-                documents.generate_docs,
-                ctx,
-                with_warehouse=False,
-                output=None,
-                strict=False,
+                context.run, invoke, ctx, ActionName.GENERATE_DOCS, documents.DocsInput()
             )
             self.build.add_done_callback(lambda build: _report(ctx, build))
         self.next_due = next_after(schedule, now, ctx.config.timezone)
@@ -65,7 +62,7 @@ class CatalogSchedule:
         self.executor.shutdown(wait=True)
 
 
-def _report(ctx: OperationContext, build: Future[documents.DocsBuild]) -> None:
+def _report(ctx: OperationContext, build: Future[object]) -> None:
     """Log a recorded failure without raising it into the supervision loop."""
     error = build.exception()
     if error is not None:

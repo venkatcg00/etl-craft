@@ -7,9 +7,9 @@ from datetime import datetime
 
 from etl_craft.core.enums import CatalogRunKind
 from etl_craft.engine.repository.catalog import LastRun, RunSummary, TaskRunSummary
-from etl_craft.services.catalog import RunKpis, run_kpis
-from etl_craft.services.catalog_html import escape as _e
-from etl_craft.services.catalog_html import render_table
+from etl_craft.services.catalog.collect import RunKpis, run_kpis
+from etl_craft.services.catalog.html import escape as _e
+from etl_craft.services.catalog.html import render_table
 
 
 def kpi_groups(

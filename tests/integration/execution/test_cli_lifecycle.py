@@ -16,14 +16,14 @@ from sqlalchemy import text
 @pytest.mark.chaos
 def test_a_fault_after_binding_records_failure_and_allows_retry(cli_project, point):
     project = cli_project
-    assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
-    code, output = project.run("run", "--pipeline_code", "P", "--task_code", "load", fault=point)
+    assert project.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
+    code, output = project.run("run", "--pipeline-code", "P", "--task-code", "load", fault=point)
     assert code != 0, output
     project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="FAILED")
     with project.engine.connect() as conn:
         error = conn.execute(text("SELECT ERROR_MESSAGE FROM AUD_TASK_RUN_LOG")).scalar_one()
         assert point in error
-    code, output = project.run("run", "--pipeline_code", "P", "--task_code", "load")
+    code, output = project.run("run", "--pipeline-code", "P", "--task-code", "load")
     assert code == 0, output
     project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="SUCCESS")
     with project.engine.connect() as conn:
@@ -32,9 +32,9 @@ def test_a_fault_after_binding_records_failure_and_allows_retry(cli_project, poi
 
 def test_a_timeout_parse_fault_leaves_no_bound_attempt(cli_project):
     project = cli_project
-    assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
+    assert project.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
     code, output = project.run(
-        "run", "--pipeline_code", "P", "--task_code", "load", fault="runner.after_timeout"
+        "run", "--pipeline-code", "P", "--task-code", "load", fault="runner.after_timeout"
     )
     assert code != 0, output
     with project.engine.connect() as conn:
@@ -45,7 +45,7 @@ def test_a_timeout_parse_fault_leaves_no_bound_attempt(cli_project):
 @pytest.mark.chaos
 def test_a_child_failure_after_recording_success_keeps_the_recorded_outcome(cli_project, mode):
     project = cli_project
-    code, output = project.run("run", "--pipeline_code", "P", fault="child.after_outcome" + mode)
+    code, output = project.run("run", "--pipeline-code", "P", fault="child.after_outcome" + mode)
     assert code == 0, output
     project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="SUCCESS")
     project.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS")
@@ -53,14 +53,14 @@ def test_a_child_failure_after_recording_success_keeps_the_recorded_outcome(cli_
 
 def test_a_hard_exit_after_binding_does_not_fabricate_cancellation_acknowledgement(cli_project):
     project = cli_project
-    assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
+    assert project.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
     code, _ = project.run(
-        "run", "--pipeline_code", "P", "--task_code", "load", fault="runner.after_bind:kill"
+        "run", "--pipeline-code", "P", "--task-code", "load", fault="runner.after_bind:kill"
     )
     assert code == 137
     project.wait_for("SELECT STATUS FROM AUD_TASK_RUN_LOG", expected="IN-PROGRESS")
     code, output = project.run(
-        "abort", "--pipeline_code", "P", "--reason", "lost CLI", "--format", "json"
+        "abort", "--pipeline-code", "P", "--reason", "lost CLI", "--format", "json"
     )
     assert code == 0, output
     request = json.loads(output)
@@ -83,8 +83,8 @@ def test_signal_stops_the_real_cli_child_and_grandchild(cli_project, sig):
         "    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
         "    print('grandchild ready', flush=True)\n    time.sleep(60)\n"
     )
-    assert project.run("run", "--pipeline_code", "P", "--init-only")[0] == 0
-    parent = project.start("run", "--pipeline_code", "P", "--task_code", "load")
+    assert project.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
+    parent = project.start("run", "--pipeline-code", "P", "--task-code", "load")
     try:
         deadline = time.monotonic() + 10
         children = []

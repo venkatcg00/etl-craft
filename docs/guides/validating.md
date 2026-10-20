@@ -14,7 +14,7 @@ $ etl-craft validate
 checked 4 pipeline(s) and 23 task(s): 2 failed, 1 warning(s)
 ```
 
-`--pipeline_code SALES` reports on one pipeline. The command exits 1 when anything fails, so it
+`--pipeline-code SALES` reports on one pipeline. The command exits 1 when anything fails, so it
 can gate a deployment or a pull request that changes the metadata. Warnings do not change the
 exit status.
 
@@ -31,7 +31,7 @@ dependent references before upgrading. Setting a duplicate inactive is insuffici
 rows must reserve their identities in the normalized contract. These warnings do not edit rows
 or history, choose a surviving duplicate, or prevent currently supported legacy runs. SQL
 expressions, file paths and JSON parameters are not interpreted as object names.
-`--pipeline_code` omits these deployment-wide checks. The same warnings appear in `config plan`
+`--pipeline-code` omits these deployment-wide checks. The same warnings appear in `config plan`
 and `config apply` because those commands validate the resulting deployment configuration.
 The archived legacy `0006_retire_and_reuse.sql` example deliberately reuses the retired `publish` task
 code and therefore produces a readiness warning. It runs only before Engine migration 0027; give

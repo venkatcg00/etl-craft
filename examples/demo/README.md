@@ -34,10 +34,10 @@ etl-craft setup                               # checks connections and prompts f
 etl-craft login                               # stores your private session on this server
 python prepare.py metadata                    # the pipelines, as CFG_ rows, in engine.db
 etl-craft validate
-etl-craft run --pipeline_code CLIENT_ALPHA
-etl-craft run --pipeline_code CLIENT_BETA
-etl-craft run --pipeline_code SUPPORT_DM      # fails at flaky_feed; the alerts say so
-etl-craft run --pipeline_code SUPPORT_DM      # succeeds on the same client runs
+etl-craft run --pipeline-code CLIENT_ALPHA
+etl-craft run --pipeline-code CLIENT_BETA
+etl-craft run --pipeline-code SUPPORT_DM      # fails at flaky_feed; the alerts say so
+etl-craft run --pipeline-code SUPPORT_DM      # succeeds on the same client runs
 etl-craft generate-docs --with-warehouse      # then open catalog/gaps.html
 ```
 
@@ -131,9 +131,9 @@ through its [HTTP sign-in flow](../../docs/deploying/security.md). With that acc
 `ACCESS_TOKEN` and the server URL in `SERVER`, correct Ann's name:
 
 ```bash
-curl --fail-with-body "$SERVER/api/v1/pipelines/SUPPORT_DM/tasks/agents/values" \
+curl --fail-with-body "$SERVER/api/v1/values" \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"key":{"agent_code":"A01"},"values":{"agent_name":"Anne"},"reason":"Verified spelling"}'
+  -d '{"pipeline_code":"SUPPORT_DM","task_code":"agents","key":{"agent_code":"A01"},"values":{"agent_name":"Anne"},"reason":"Verified spelling"}'
 ```
 
 Run `SUPPORT_DM` again: `ds.agents` retains `Anne` while unlocked source fields still refresh.
@@ -141,9 +141,9 @@ The response and the `/values/provenance` endpoint attribute the protected name 
 ETL retains the engine identity on fields it changes. To release the correction:
 
 ```bash
-curl --fail-with-body "$SERVER/api/v1/pipelines/SUPPORT_DM/tasks/agents/values/unlock" \
+curl --fail-with-body "$SERVER/api/v1/values/unlock" \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"key":{"agent_code":"A01"},"columns":["agent_name"],"reason":"Use source spelling again"}'
+  -d '{"pipeline_code":"SUPPORT_DM","task_code":"agents","key":{"agent_code":"A01"},"columns":["agent_name"],"reason":"Use source spelling again"}'
 ```
 
 The next `SUPPORT_DM` run restores `Ann`. This opt-in walkthrough uses native DuckDB or
@@ -154,10 +154,10 @@ backing up warehouse-side evidence with the business tables.
 ## Run an individual SQL task
 
 To execute a task independently without reopening a demo pipeline run, choose its task code
-from `etl-craft steps --pipeline_code SUPPORT_DM` and run:
+from `etl-craft steps --pipeline-code SUPPORT_DM` and run:
 
 ```bash
-etl-craft run --pipeline_code SUPPORT_DM --task_code area_summary --standalone \
+etl-craft run --pipeline-code SUPPORT_DM --task-code area_summary --standalone \
   --ignore-dependencies --reason "demo inputs already verified"
 ```
 
@@ -174,10 +174,10 @@ Use the pipeline code and run id printed by the demo run. Pause a selected task 
 pausing unrelated work, or drain a run before maintenance:
 
 ```bash
-etl-craft hold --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "inspect input"
-etl-craft release --pipeline_code PIPELINE --run-id 42 --task_code TASK --reason "ready"
-etl-craft stop --pipeline_code PIPELINE --run-id 42 --reason "maintenance"
-etl-craft status --request-id 17 --format json
+etl-craft hold --pipeline-code PIPELINE --run-id 42 --task-code TASK --reason "inspect input"
+etl-craft release --pipeline-code PIPELINE --run-id 42 --task-code TASK --reason "ready"
+etl-craft stop --pipeline-code PIPELINE --run-id 42 --reason "maintenance"
+etl-craft control-request --control-id 17 --format json
 ```
 
 Replace `PIPELINE`, `TASK`, `42` and `17` with this project's code and returned identities.
@@ -189,8 +189,8 @@ Scoped recovery and restart are preparatory operations. Replace `RUN_ID` with an
 `etl-craft history`; do not use a successful run for recovery:
 
 ```bash
-etl-craft run --pipeline_code SUPPORT_DM --run-id RUN_ID --restart --request-key demo-restart --reason "new context" --format json
-etl-craft status --pipeline_code SUPPORT_DM --run-id RUN_ID --capabilities --format json
+etl-craft run --pipeline-code SUPPORT_DM --run-id RUN_ID --restart --request-key demo-restart --reason "new context" --format json
+etl-craft capabilities --pipeline-code SUPPORT_DM --run-id RUN_ID --format json
 ```
 
 Run the returned `execution_run_id` explicitly. Restart retains current checkpoints and human

@@ -31,7 +31,7 @@ theme:
 
 # The reference generators run at build time; they are not pages.
 exclude_docs: |
-  gen_ref_pages.py
+  gen_python_api.py
   gen_cli_page.py
   gen_reference_pages.py
   gen_openapi.py
@@ -62,7 +62,7 @@ plugins:
   - search
   - gen-files:
       scripts:
-        - docs/gen_ref_pages.py
+        - docs/gen_python_api.py
         - docs/gen_cli_page.py
         - docs/gen_reference_pages.py
         - docs/gen_openapi.py
@@ -123,7 +123,7 @@ nav:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
       - Scheduling runs: deploying/scheduling.md
-      - Controller: deploying/server.md
+      - Controller: deploying/controller.md
       - Deployment profiles and sizing: deploying/sizing.md
       - HTTP API: deploying/http-api.md
       - Checking a deployment, doctor and setup: deploying/doctor-and-setup.md
@@ -144,6 +144,7 @@ nav:
   - Reference:
       - reference/index.md
       - Command line: reference/cli.md
+      - Actions: reference/actions.md
       - Exit codes: reference/exit-codes.md
       - craft-connector.yml: reference/configuration.md
       - Task parameters: reference/task-parameters.md

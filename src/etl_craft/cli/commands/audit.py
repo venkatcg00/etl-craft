@@ -6,27 +6,25 @@ import argparse
 import json
 from datetime import datetime
 
-from etl_craft.cli.commands.common import Command, command_context, configure_output
+from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations import inspect
+from etl_craft.services.operations.models import AuditView
+from etl_craft.services.operations.requests import AuditInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
-    parser.add_argument("--pipeline_code", help="filter requests and related metadata rows")
+    parser.add_argument("--pipeline-code", help="Filter requests and related metadata rows.")
     parser.add_argument(
-        "--since", type=datetime.fromisoformat, help="changes since an ISO date or timestamp"
+        "--since", type=datetime.fromisoformat, help="Changes since an ISO date or timestamp."
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        done = inspect.audit(
-            ctx,
-            args.pipeline_code,
-            since=args.since,
-        )
+    done = call(args, ActionName.AUDIT, request_from(args, AuditInput))
+    assert isinstance(done, AuditView)
 
     def render_text() -> None:
         out.rows([("AT", "ACTOR", "KIND", "COMMAND", "OUTCOME", "ARGUMENTS")])
@@ -62,4 +60,5 @@ COMMAND = Command(
     "Show command requests and metadata changes with their actors.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.AUDIT,),
 )

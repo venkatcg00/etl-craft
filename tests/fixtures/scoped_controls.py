@@ -17,18 +17,18 @@ CHILD = ChildOptions(module="fixtures.task_child", kill_grace_seconds=1, cancel_
 @pytest.fixture
 def ctx(engine_db, tmp_path, monkeypatch):
     profile = engine_db.config.engine
-    block = {"jdbc_url": profile.jdbc_url, "schema": profile.schema or "public"}
-    if profile.auth_mode != "none":
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": profile.schema or "public"}
+    if profile.auth_mode != "NONE":
         block |= {
-            "user": profile.user,
-            "auth_mode": profile.auth_mode,
-            "secret": profile.secret_var,
+            "User": profile.user,
+            "Auth_mode": profile.auth_mode,
+            "Secret": profile.secret_var,
         }
     path = tmp_path / "craft-connector.yml"
     path.write_text(
         yaml.safe_dump(
             {
-                "Secrets": {"Source_type": "environment"},
+                "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {},
                 "Engine": {"test": block},
             },

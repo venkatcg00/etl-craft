@@ -6,15 +6,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
 
-from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.actor import acting_as
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
 from etl_craft.engine.repository.lineage import fetch_lineage_versions
 from etl_craft.services import doctor, lineage, validate
 from etl_craft.services.operations.config_files import resolve_as_of
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.permissions import authorize
+from etl_craft.services.operations.requests import (
+    LineageInput,
+    LineageRefreshInput,
+    NoInput,
+    ValidateInput,
+)
+from etl_craft.services.validate import Report as Report
 
 
 @dataclass(frozen=True)
@@ -26,17 +30,15 @@ class DoctorView:
     failed: bool
 
 
-def check_configuration(config: ConnectorConfig) -> DoctorView:
+def check_configuration(ctx: OperationContext, request: NoInput) -> DoctorView:
     """Report unreachable services rather than requiring an Engine DB connection first."""
-    checks = tuple(doctor.run_checks(config))
+    checks = tuple(doctor.run_checks(ctx.config))
     return DoctorView(checks, any(c.status == doctor.Status.FAIL for c in checks))
 
 
-def validate_metadata(ctx: OperationContext, pipeline_code: str | None = None) -> validate.Report:
+def validate_metadata(ctx: OperationContext, request: ValidateInput) -> validate.Report:
     """Validate metadata and files under the caller's actor without running tasks."""
-    authorize(ctx, "validate")
-    with acting_as(ctx.actor):
-        return validate.validate(ctx.engine, ctx.config, pipeline_code)
+    return validate.validate(ctx.engine, ctx.config, request.pipeline_code)
 
 
 @dataclass(frozen=True)
@@ -56,51 +58,27 @@ class LineageView:
     failed: bool
 
 
-@dataclass(frozen=True)
-class LineageQuery:
-    """Related selectors validated before collecting or reading stored lineage."""
-
-    table: str | None = None
-    column: str | None = None
-    upstream: bool = True
-    downstream: bool = True
-    depth: int | None = None
-    refresh: bool = False
-    as_of: str | None = None
-    version: int | None = None
-
-    def validate(self) -> None:
-        """Reject incompatible selectors before reading or writing the Engine DB."""
-        if self.column and not self.table:
-            raise UsageError("--column needs --table")
-        if self.depth is not None and self.depth < 1:
-            raise UsageError(f"--depth must be 1 or more, got {self.depth}")
-        if self.as_of is not None and self.version is not None:
-            raise UsageError("--as-of and --version are mutually exclusive; choose one")
-        if self.refresh and (self.as_of is not None or self.version is not None):
-            raise UsageError("--refresh cannot read history; omit it with --as-of or --version")
-        if self.version is not None and (self.table is None or self.version < 1):
-            raise UsageError(
-                f"--version needs --table and a positive version number; got table {self.table!r}, "
-                f"version {self.version}; choose a table and version"
-            )
+def trace_lineage(ctx: OperationContext, request: LineageInput) -> LineageView:
+    """Trace the stored lineage, now or at a recorded moment."""
+    return _trace(ctx, request, refresh=False)
 
 
-def trace_lineage(ctx: OperationContext, query: LineageQuery) -> LineageView:
-    """Collect and select lineage using the same validation for every caller."""
-    authorize(ctx, "lineage", {"refresh": query.refresh})
-    query.validate()
+def refresh_lineage(ctx: OperationContext, request: LineageRefreshInput) -> LineageView:
+    """Work every task's lineage out again, record it, and trace it."""
+    return _trace(ctx, request, refresh=True)
+
+
+def _trace(ctx: OperationContext, query: LineageInput, *, refresh: bool) -> LineageView:
     table, column = query.table, query.column
     upstream, downstream, depth = query.upstream, query.downstream, query.depth
     moment = None if query.as_of is None else resolve_as_of(ctx, query.as_of)
     if query.version is not None and query.table is not None:
         moment = _version_moment(ctx, query.table, query.version)
-    with acting_as(ctx.actor):
-        lineages = tuple(
-            lineage.collect(ctx.engine, ctx.config, refresh=query.refresh)
-            if moment is None
-            else lineage.historical_lineage(ctx.engine, ctx.config, moment)
-        )
+    lineages = tuple(
+        lineage.collect(ctx.engine, ctx.config, refresh=refresh)
+        if moment is None
+        else lineage.historical_lineage(ctx.engine, ctx.config, moment)
+    )
     graph = lineage.LineageGraph.of(lineages)
     if table is not None:
         catalog = active_catalog(ctx.config) if ctx.config.warehouse is not None else None

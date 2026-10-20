@@ -17,8 +17,8 @@ from etl_craft.engine.repository.catalog import (
     RunSummary,
     TaskRow,
 )
-from etl_craft.services.catalog import Catalog, Column, PipelineAsset, TableAsset, TaskAsset
-from etl_craft.services.catalog_site import write_site
+from etl_craft.services.catalog.collect import Catalog, Column, PipelineAsset, TableAsset, TaskAsset
+from etl_craft.services.catalog.site import write_site
 from etl_craft.services.lineage import Edge
 from fixtures.races import paused_after
 
@@ -32,9 +32,9 @@ MANIFEST = ".etl-craft-manifest.json"
 def scene(tmp_path):
     config = parse_config(
         {
-            "Secrets": {"Source_type": "environment"},
+            "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {},
-            "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
+            "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
         },
         tmp_path / "craft-connector.yml",
     )
@@ -228,7 +228,7 @@ def test_unreadable_cached_page_names_the_file_and_remedy(scene, monkeypatch):
 def test_comparison_age_change_rebuilds_coverage_without_changing_the_observation(
     scene, monkeypatch
 ):
-    from etl_craft.services import catalog_gaps
+    from etl_craft.services.catalog import gaps as catalog_gaps
 
     catalog, config, folder = scene
 

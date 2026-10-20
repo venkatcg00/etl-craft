@@ -3,14 +3,14 @@
 ## Running one task
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders
+etl-craft run --pipeline-code SALES_DAILY --task-code load_orders
 ```
 
 The task receives its run from its caller. Pass `--run-id` or `--run-key` to select it;
 without either, the command requires exactly one non-terminal run of the pipeline. It refuses
 when none or several exist and lists candidates. A completed run is never selected by recency.
 The whole-pipeline runner passes its selected run to every task. Use
-`history --pipeline_code SALES --all` to find completed run ids.
+`history --pipeline-code SALES --all` to find completed run ids.
 
 The task does not run when:
 
@@ -29,8 +29,8 @@ when it ends `FAILED`; every other status is listed under [Exit codes](../refere
 ## Independent manual selections
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --standalone
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --standalone --with-downstream
+etl-craft run --pipeline-code SALES_DAILY --task-code load_orders --standalone
+etl-craft run --pipeline-code SALES_DAILY --task-code load_orders --standalone --with-downstream
 ```
 
 The first command runs only the selected task. The second includes every active descendant
@@ -54,10 +54,10 @@ state: standalone execution refuses those tasks, naming the available explicit p
 path. Pipeline pause still blocks
 manual dispatch; resume the definition before starting a selection.
 
-The API exposes `POST /api/v1/pipelines/{code}/tasks/{task}/run`, requiring operator role.
-Its body accepts `standalone`, `run_id` or `run_key`, `with_downstream`, `ignore_dependencies`,
-`run_date` and `reason`. With `standalone: false`, it runs the task in the selected pipeline
-run. The CLI uses this same operation against `--server`. Execution waits for its actual
+The API exposes the same request as `POST /api/v1/runs`, requiring the operator role. Its body
+names `pipeline_code` and `task_code`, and accepts `standalone`, `run_id` or `run_key`,
+`with_downstream`, `ignore_dependencies` (with `standalone`), `run_date` and `reason`. With `standalone: false`, it runs the task in the selected pipeline
+run. The CLI uses this same operation against `--controller`. Execution waits for its actual
 outcome.
 
 Run JSON includes `selected_task_ids` (null for a whole pipeline), `ignore_dependencies` and
@@ -66,7 +66,7 @@ resumed explicitly after its ownership lease has been reconciled.
 
 ## Retries and `--force`
 
-Local pipeline runs, the controller and ordinary `run --task_code` automatically retry failed,
+Local pipeline runs, the controller and ordinary `run --task-code` automatically retry failed,
 timed-out or lost attempts when `RETRIES` permits another attempt. The task parameter overrides
 `Orchestration.Retries`; without either, no automatic retry is enabled. `RETRY_DELAY_SECONDS`
 defaults to 60 and `RETRY_BACKOFF` to 2.0. Delays grow after each failure and are capped at one
@@ -122,10 +122,10 @@ status and owner, and state found. Check the run's history before retrying the c
 When the explicitly selected run has already ended (`SKIPPED` included, except `CANCELLED`), the
 run is reopened for the task, recorded as a `REOPEN` in its history, and ended again from its tasks'
 statuses once the task ends: a forced task that fails leaves the run `FAILED`. If tasks of the run
-have never run, the run stays `IN-PROGRESS` and `run --pipeline_code <code>` resumes it.
+have never run, the run stays `IN-PROGRESS` and `run --pipeline-code <code>` resumes it.
 
 `--force` refuses a selected run that is `CANCELLED`. Start a new run with
-`etl-craft run --pipeline_code <code> --init-only`, then run the task.
+`etl-craft run --pipeline-code <code> --init-only`, then run the task.
 
 `--ignore-dependencies` and `--rerun` are the recorded, narrower overrides: see
 [Stepping in](run-control.md#run-a-task-without-its-dependencies).

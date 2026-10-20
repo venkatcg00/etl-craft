@@ -17,7 +17,7 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_dependency_edges,
     fetch_pipeline_graph,
 )
-from etl_craft.engine.repository.interventions import record_intervention
+from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.execution.attempt_types import ChildOptions
@@ -53,7 +53,7 @@ def run_manual(
         )
     ignore = options.get("ignore_dependencies", False)
     if ignore:
-        check_override(config, "--ignore-dependencies", options.get("reason") or "")
+        check_override(config, "`ignore_dependencies`", options.get("reason") or "")
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         scope = select_tasks(
@@ -125,7 +125,7 @@ def select_tasks(
     if fetch_pipeline_dependency_edges(conn, pipeline_id) and not ignore:
         raise RunRefusedError(
             f"pipeline_id={pipeline_id}: pipeline dependencies exist outside the manual selection; "
-            "use a pipeline run with recorded inputs, or --ignore-dependencies with --reason"
+            "use a pipeline run with recorded inputs, or `ignore_dependencies` with `reason`"
         )
     data = fetch_pipeline_graph(conn, pipeline_id)
     graph = build_graph(data.tasks, data.same_pipeline_edges)

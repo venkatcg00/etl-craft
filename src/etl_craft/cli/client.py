@@ -1,24 +1,23 @@
-"""Send a command to an etl-craft controller's API, as the signed-in person or a service token."""
+"""Send an action to an etl-craft controller's API, as the signed-in person or a service token."""
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
+import re
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from http.client import HTTPResponse
-from typing import TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from etl_craft.core.enums import ActionName, HttpMethod
 from etl_craft.core.errors import EtlCraftError, ServerError, UsageError
 from etl_craft.services import credentials
-from etl_craft.services.operations import from_json
-from etl_craft.services.operations.sessions import Session
-
-T = TypeVar("T")
+from etl_craft.services.operations.actions import ACTIONS
+from etl_craft.services.operations.serialization import decode, encode
+from etl_craft.services.operations.sessions import Session, TokenInput
 
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 """Hosts a server may be reached at over plain HTTP: this machine only."""
@@ -38,7 +37,7 @@ def server_url(value: str) -> str:
         port = url.port
     except ValueError as error:
         raise UsageError(
-            f"--server {value!r} is malformed; expected https://<host>[:port]"
+            f"--controller {value!r} is malformed; expected https://<host>[:port]"
         ) from error
     if (
         url.scheme not in {"https", "http"}
@@ -50,18 +49,18 @@ def server_url(value: str) -> str:
         or url.fragment
     ):
         raise UsageError(
-            f"--server {value!r}; expected https://<host>[:port] with nothing after it"
+            f"--controller {value!r}; expected https://<host>[:port] with nothing after it"
         )
     if url.scheme == "http" and url.hostname not in LOCAL_HOSTS:
         raise UsageError(
-            f"--server {value!r}: plain HTTP is refused except to localhost; use https://"
+            f"--controller {value!r}: plain HTTP is refused except to localhost; use https://"
         )
     host = f"[{url.hostname}]" if ":" in url.hostname else url.hostname
     return f"{url.scheme}://{host}" + (f":{port}" if port else "")
 
 
 def _error(status: int, body: bytes, url: str) -> EtlCraftError:
-    """Rebuild the server's error class from its exit code, so local and remote exits match."""
+    """Rebuild the controller's error class from its exit code, so local and remote exits match."""
     try:
         document = json.loads(body)
     except ValueError:
@@ -82,43 +81,43 @@ def _subclasses(cls: type[EtlCraftError]) -> Iterator[type[EtlCraftError]]:
         yield from _subclasses(sub)
 
 
-class ServerClient:
-    """One server, and the credential that proves who calls it."""
+class ControllerClient:
+    """One controller, and the credential that proves who calls it."""
 
     def __init__(self, url: str) -> None:
         """Use ``ETL_CRAFT_TOKEN`` for a service account, else this person's stored session."""
         self.url = server_url(url)
         self._service_token = os.environ.get("ETL_CRAFT_TOKEN")
 
-    def call(
-        self,
-        method: str,
-        path: str,
-        result: type[T],
-        *,
-        query: Mapping[str, object] | None = None,
-        body: Mapping[str, object] | None = None,
-        signed_in: bool = True,
-    ) -> T:
-        """Send one request and rebuild its JSON document as ``result``."""
-        with self._open(method, path, query, body, signed_in=signed_in) as response:
+    def invoke(self, name: ActionName, request: object) -> object:
+        """Send one action's request to its route and rebuild the result the action returns."""
+        action = ACTIONS[name]
+        if action.method is None or action.path is None:
+            raise UsageError(f"`{name}` runs on the controller's host only: {action.remedy}")
+        fields = encode(request)
+        assert isinstance(fields, dict)
+        path = action.path.format(
+            **{key: quote(str(fields.pop(key)), safe="") for key in _path_fields(action.path)}
+        )
+        query, body = (fields, None) if action.method == HttpMethod.GET else (None, fields)
+        signed_in = action.role is not None
+        if action.streams:
+            return self._stream(path, query or {})
+        with self._open(action.method, path, query, body, signed_in=signed_in) as response:
             payload = response.read(16 * 1024 * 1024 + 1)
+        if action.result is None:
+            return None
         if len(payload) > 16 * 1024 * 1024:
             raise ServerError(f"{self.url}{path}: response exceeds 16 MiB")
         try:
             document = json.loads(payload)
         except ValueError as error:
             raise ServerError(f"{self.url}{path}: response is not JSON; check the URL") from error
-        return from_json(result, document)
+        return decode(action.result, document)
 
-    def send(self, method: str, path: str, body: Mapping[str, object]) -> None:
-        """Send one request that answers with no content."""
-        with self._open(method, path, None, body, signed_in=False):
-            pass
-
-    def stream(self, path: str, query: Mapping[str, object]) -> Iterator[bytes]:
+    def _stream(self, path: str, query: Mapping[str, object]) -> Iterator[bytes]:
         """Yield a text response in chunks, such as an attempt's log."""
-        with self._open("GET", path, query, None, signed_in=True) as response:
+        with self._open(HttpMethod.GET, path, query, None, signed_in=True) as response:
             while chunk := response.read(65536):
                 yield chunk
 
@@ -147,8 +146,8 @@ class ServerClient:
         body: Mapping[str, object] | None,
         token: str | None,
     ) -> HTTPResponse:
-        present = {k: v for k, v in (query or {}).items() if v is not None}
-        url = self.url + path + (f"?{urlencode(present)}" if present else "")
+        present = {k: _query_value(v) for k, v in (query or {}).items() if v is not None}
+        url = self.url + path + (f"?{urlencode(present, doseq=True)}" if present else "")
         headers = {"Accept": "application/json"}
         if token is not None:
             headers["Authorization"] = f"Bearer {token}"
@@ -163,7 +162,7 @@ class ServerClient:
             raise  # an answer from the server; _open turns it into the server's own error
         except (URLError, OSError) as error:
             raise ServerError(
-                f"{self.url}: cannot reach the server ({error}); check the URL and the network"
+                f"{self.url}: cannot reach the controller ({error}); check the URL and the network"
             ) from error
         return response
 
@@ -173,18 +172,13 @@ class ServerClient:
         stored = credentials.read_server(self.url)
         if stored is None:
             raise UsageError(
-                f"not signed in to {self.url}; run `etl-craft login --server {self.url}`"
+                f"not signed in to {self.url}; run `etl-craft login --controller {self.url}`"
             )
         expires = datetime.fromisoformat(stored["access_expires_at"])
         if not renew and expires > datetime.now(UTC):
             return stored["access"]
-        session = self.call(
-            "POST",
-            "/api/v1/login/refresh",
-            Session,
-            body={"token": stored["refresh"]},
-            signed_in=False,
-        )
+        session = self.invoke(ActionName.REFRESH, TokenInput(token=stored["refresh"]))
+        assert isinstance(session, Session)
         self.store(session, refresh=stored["refresh"])
         return session.access_token
 
@@ -209,11 +203,11 @@ class ServerClient:
         return None if stored is None else stored["refresh"]
 
 
-def api_path(*parts: str) -> str:
-    """Join an API path, escaping codes so a slash in one cannot reach another route."""
-    return "/api/v1/" + "/".join(quote(part, safe="") for part in parts)
+def _path_fields(path: str) -> list[str]:
+    """Return the request fields a route carries in its path, such as ``run_id``."""
+    return re.findall(r"{([a-z_]+)}", path)
 
 
-def selector_query(args: argparse.Namespace) -> dict[str, object]:
-    """Return the run selector a command was given, as query or body fields."""
-    return {"run_id": args.run_id, "run_key": args.run_key}
+def _query_value(value: object) -> object:
+    """Write booleans as the API reads them; other values are already JSON text or numbers."""
+    return str(value).lower() if isinstance(value, bool) else value

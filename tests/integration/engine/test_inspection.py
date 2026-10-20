@@ -7,13 +7,12 @@ import pytest
 from sqlalchemy import event, text
 
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ApiRole, FailureClass, RetryOn
+from etl_craft.core.enums import ActionName, ApiRole, FailureClass, RetryOn
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.engine import transitions
 from etl_craft.engine.repository import trackers
-from etl_craft.engine.runlog import RunSelector
 from etl_craft.services.operations import OperationContext, to_json
-from etl_craft.services.operations.status import explain_task, pipeline_status
+from fixtures.actions import act
 from fixtures.metadata import (
     add_dependency,
     add_pipeline,
@@ -58,7 +57,7 @@ def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
 
     event.listen(engine, "before_cursor_execute", record)
     try:
-        status = pipeline_status(ctx, "P")
+        status = act(ctx, ActionName.STATUS, pipeline_code="P")
         assert [task.task_code for task in status.tasks] == ["after", "first", "last"]
         assert status.blocked_by_failures == ("after", "last")
         assert status.tasks[1].error == "first line"
@@ -70,14 +69,17 @@ def test_status_includes_unrun_tasks_and_transitive_failure_blocks(engine_db):
         assert recorded["failure_class"] == FailureClass.UNKNOWN
         assert recorded["retry_on"] == RetryOn.TRANSIENT
         assert recorded["retryable"] is False
-        assert explain_task(ctx, "P", "after").state == "blocked by failure"
+        assert (
+            act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="after").state
+            == "blocked by failure"
+        )
         with pytest.raises(MetadataError):
-            explain_task(ctx, "P", "missing")
+            act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="missing")
     finally:
         event.remove(engine, "before_cursor_execute", record)
     assert not {"INSERT", "UPDATE", "DELETE"} & set(statements)
     with pytest.raises(RunStateError):
-        pipeline_status(ctx, "P", selector=RunSelector(run_id=run + 99))
+        act(ctx, ActionName.STATUS, pipeline_code="P", run_id=run + 99)
 
 
 def test_explain_retains_recorded_cross_pipeline_decisions_and_retry_due(engine_db):
@@ -125,7 +127,7 @@ def test_explain_retains_recorded_cross_pipeline_decisions_and_retry_due(engine_
             ),
             attempt_id=attempt,
         )
-    done = explain_task(ctx, "P", "load")
+    done = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="load")
     assert done.state == "retry scheduled"
     assert abs((done.retry_at - due).total_seconds()) < 0.001
     assert done.dependencies[0].recorded and done.dependencies[0].met
@@ -167,7 +169,7 @@ def test_gate_waits_are_visible_and_conditional_dependencies_use_the_required_co
                     "wait_until": now + timedelta(minutes=5),
                 },
             )
-    done = explain_task(ctx, "P", "second")
+    done = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="second")
     assert done.state == "waiting on a gate"
     assert {wait.task_id for wait in done.gate_waits} == {None, second}
     with engine.begin() as conn:
@@ -175,13 +177,13 @@ def test_gate_waits_are_visible_and_conditional_dependencies_use_the_required_co
             statement(conn, "finish_gate_wait"),
             {"pipeline_run_id": run, "task_id": None, "looks": 1},
         )
-    done = explain_task(ctx, "P", "any")
+    done = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="any")
     assert done.run_condition == "ANY" and done.required_count == 1
     assert [dependency.met for dependency in done.dependencies] == [True, False]
     assert done.state == "not run"
 
 
-@pytest.mark.parametrize("policy", ["enforce", "warn", "off"])
+@pytest.mark.parametrize("policy", ["ENFORCE", "WARN", "OFF"])
 def test_pending_cross_pipeline_gates_follow_runtime_policy(engine_db, policy):
     from dataclasses import replace
 
@@ -216,20 +218,20 @@ def test_pending_cross_pipeline_gates_follow_runtime_policy(engine_db, policy):
         add_dependency(conn, pipeline, task, upstream_task, upstream_pipeline=upstream)
         add_pipeline_dependency(conn, pipeline, upstream)
         start_run(conn, pipeline)
-    done = explain_task(ctx, "P", "load")
+    done = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="load")
     gates = (*done.dependencies, *done.pipeline_dependencies)
     assert all(not gate.recorded for gate in gates)
-    assert all(gate.met == (policy == "off") for gate in gates)
-    assert done.state == ("not run" if policy == "off" else "waiting on a gate")
-    if policy != "off":
+    assert all(gate.met == (policy == "OFF") for gate in gates)
+    assert done.state == ("not run" if policy == "OFF" else "waiting on a gate")
+    if policy != "OFF":
         assert all(gate.status == "IN-PROGRESS" for gate in gates)
         assert all(gate.selected_pipeline_run_id is None for gate in gates)
     with engine.begin() as conn:
         transitions.finish_attempt(conn, live_attempt, "FAILED", current_actor(), owner="agent")
         transitions.finalize_pipeline_run(conn, live_run, "FAILED")
-    done = explain_task(ctx, "P", "load")
+    done = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="load")
     assert all(
-        gate.met == (policy != "enforce")
+        gate.met == (policy != "ENFORCE")
         for gate in (*done.dependencies, *done.pipeline_dependencies)
     )
 
@@ -249,8 +251,8 @@ def test_backfill_explanation_assumes_success_but_never_failure(engine_db):
         )
         add_pipeline_dependency(conn, pipeline, upstream)
         start_run(conn, pipeline, backfill=True)
-    assert explain_task(ctx, "P", "success").state == "not run"
-    why = explain_task(ctx, "P", "failure")
+    assert act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="success").state == "not run"
+    why = act(ctx, ActionName.EXPLAIN, pipeline_code="P", task_code="failure")
     assert why.state == "waiting on a gate"
     assert not why.dependencies[0].met
     assert why.pipeline_dependencies[0].met

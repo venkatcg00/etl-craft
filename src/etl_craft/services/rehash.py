@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import HandlerError
 from etl_craft.core.text import is_safe_identifier, qualify, split_object_ref
 from etl_craft.engine import locks
@@ -23,6 +25,7 @@ from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 class RehashResult:
     """The validated target, row count and statement, whether applied or only planned."""
 
+    SCHEMA: ClassVar[str] = "etl-craft/rehash/1"
     target: str
     rows: int
     sql: str
@@ -42,7 +45,7 @@ def rehash(
             tasks = {task_id: fetch_task_parameters(conn, task_id) for task_id in task_ids}
         contracts = set()
         for params in tasks.values():
-            if params.get("SQL_ACTION") not in {"SCD1_MERGE", "SCD2_MERGE"}:
+            if params.get("SQL_ACTION") not in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
                 continue
             if (
                 not params.get("TARGET_OBJECT")

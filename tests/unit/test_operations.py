@@ -9,28 +9,27 @@ import yaml
 from sqlalchemy import event, text
 
 from etl_craft.cli import main
-from etl_craft.cli.commands import controls as control_commands
 from etl_craft.config import load_config
 from etl_craft.core.actor import Actor, ActorKind, acting_as, current_actor
-from etl_craft.core.enums import ApiRole, ControlAction, RunStatus
+from etl_craft.core.enums import ActionName, ApiRole, ControlAction, RunStatus
 from etl_craft.core.errors import MetadataError, RunStateError, UsageError
-from etl_craft.engine import runlog, transitions
+from etl_craft.engine import transitions
 from etl_craft.engine.audit import command_request, register_engine
-from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import reruns, run_types, runner
 from etl_craft.execution.attempt_types import TaskOutcome
-from etl_craft.services.operations import (
-    OperationContext,
-    backfills,
-    inspect,
-    pipelines,
-    runs,
-    tasks,
-    to_json,
+from etl_craft.services.operations import OperationContext, to_json
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.models import GraphView
+from etl_craft.services.operations.requests import (
+    AuditInput,
+    ControlRequest,
+    HistoryInput,
+    MarkRequest,
+    NoInput,
+    PipelineInput,
+    ReconcileInput,
+    RunRequest,
 )
-from etl_craft.services.operations.controls import ControlRequest, request_control
-from etl_craft.services.operations.models import GraphView, HistoryQuery
-from etl_craft.services.operations.requests import RunRequest
 from etl_craft.services.operations.snapshots import run_view, task_run_view
 from fixtures.auth import service_token
 from fixtures.engine_db import apply_schema, sqlite_engine_db
@@ -48,9 +47,9 @@ def ctx(tmp_path, monkeypatch, engine_actor):
     path.write_text(
         yaml.safe_dump(
             {
-                "Secrets": {"Source_type": "environment"},
+                "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {},
-                "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
+                "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
             },
             sort_keys=False,
         )
@@ -65,11 +64,33 @@ def ctx(tmp_path, monkeypatch, engine_actor):
         db.engine.dispose()
 
 
-def abort(ctx, pipeline_code, reason, *, selector=runlog.ACTIVE_RUN):
-    """Request an abort the way the ``abort`` command does."""
-    return request_control(
-        ctx, ControlRequest(pipeline_code, ControlAction.ABORT, reason, selector)
+def run(ctx, **request):
+    """Request a run the way every interface does."""
+    return invoke(ctx, ActionName.RUN, RunRequest(pipeline_code=P, **request))
+
+
+def mark(ctx, **request):
+    """Request a mark the way every interface does."""
+    return invoke(ctx, ActionName.MARK, MarkRequest(pipeline_code=P, **request))
+
+
+def control(ctx, action, reason, **request):
+    """Request a control the way the ``abort``, ``pause`` and ``resume`` commands do."""
+    return invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(pipeline_code=P, action=action, reason=reason, **request),
     )
+
+
+def history(ctx, **request):
+    """Read the pipeline's history."""
+    return invoke(ctx, ActionName.HISTORY, HistoryInput(pipeline_code=P, **request))
+
+
+def audit(ctx, **request):
+    """Read the pipeline's recorded requests."""
+    return invoke(ctx, ActionName.AUDIT, AuditInput(pipeline_code=P, **request))
 
 
 def seed(ctx, *, active=False, task=False):
@@ -104,15 +125,7 @@ def test_run_lifecycle_has_one_request_per_call_and_restores_actor(ctx):
     pipeline_id, _, _, _ = seed(ctx)
     parent = Actor("caller", ActorKind.SYSTEM)
     with acting_as(parent):
-        started = runs.execute_run(
-            ctx,
-            RunRequest(
-                P,
-                init_only=True,
-                run_date=date(2026, 10, 1),
-                selector=RunSelector(run_key="api:one"),
-            ),
-        )
+        started = run(ctx, init_only=True, run_date=date(2026, 10, 1), run_key="api:one")
         assert current_actor() == parent
     assert action_count(ctx) == 1
     assert started.run.pipeline_id == pipeline_id
@@ -126,7 +139,7 @@ def test_run_lifecycle_has_one_request_per_call_and_restores_actor(ctx):
     assert document["run"]["start_date"].endswith("+00:00")
     with pytest.raises(FrozenInstanceError):
         started.run.status = "FAILED"
-    ended = runs.trigger_run(ctx, P, selector=RunSelector(run_key="api:one"))
+    ended = run(ctx, run_key="api:one")
     assert ended.run.pipeline_run_id == started.run.pipeline_run_id
     assert ended.run.status == "SUCCESS"
     assert ended.run.ended_by == "etl-craft"
@@ -136,9 +149,9 @@ def test_run_lifecycle_has_one_request_per_call_and_restores_actor(ctx):
 
 def test_trigger_skip_and_stand_in_use_their_returned_run_ids(ctx):
     seed(ctx)
-    triggered = runs.trigger_run(ctx, P, reason="operator request")
-    skipped = runs.skip_run(ctx, P, "planned maintenance")
-    stand_in = runs.stand_in_run(ctx, P, "SUCCESS", "source verified")
+    triggered = run(ctx)
+    skipped = run(ctx, skip=True, reason="planned maintenance")
+    stand_in = mark(ctx, new_run=True, status="SUCCESS", reason="source verified")
     ids = [result.run.pipeline_run_id for result in (triggered, skipped, stand_in)]
     assert len(set(ids)) == 3
     assert [result.run.status for result in (triggered, skipped, stand_in)] == [
@@ -146,19 +159,20 @@ def test_trigger_skip_and_stand_in_use_their_returned_run_ids(ctx):
         "SKIPPED",
         "SUCCESS",
     ]
-    assert (
-        inspect.run_history(ctx, P, HistoryQuery(all_runs=True)).entries[0].pipeline_run_id
-        == ids[-1]
-    )
+    assert history(ctx, all=True).entries[0].pipeline_run_id == ids[-1]
     assert action_count(ctx) == 3
-    doc = to_json(inspect.audit(ctx, P))
+    doc = to_json(audit(ctx))
     assert all(action["actor"] == "api-user" for action in doc["actions"])
-    assert doc["actions"][0]["arguments"]["reason"] == "operator request"
+    assert {action["arguments"]["reason"] for action in doc["actions"]} == {
+        None,
+        "planned maintenance",
+        "source verified",
+    }
 
 
 def test_marking_failed_is_a_successful_action_with_a_failed_run(ctx):
     _, run_id, _, _ = seed(ctx, active=True)
-    done = runs.mark(ctx, P, "FAILED", "verified", selector=RunSelector(run_id=run_id))
+    done = mark(ctx, status="FAILED", reason="verified", run_id=run_id)
     assert done.status == "SUCCESS"
     assert done.run.status == "FAILED"
     assert done.run.pipeline_run_id == run_id
@@ -167,9 +181,7 @@ def test_marking_failed_is_a_successful_action_with_a_failed_run(ctx):
 
 def test_task_mark_preserves_failed_attempt_history_and_canonical_ids(ctx):
     pipeline_id, run_id, task_id, task_run_id = seed(ctx, active=True, task=True)
-    done = runs.mark(
-        ctx, P, "SUCCESS", "verified", task_code="load", rows=7, selector=RunSelector(run_id=run_id)
-    )
+    done = mark(ctx, status="SUCCESS", reason="verified", task_code="load", rows=7, run_id=run_id)
     assert done.task.task_run_id == task_run_id
     assert done.task.pipeline_run_id == run_id
     assert done.task.pipeline_id == pipeline_id
@@ -180,9 +192,7 @@ def test_task_mark_preserves_failed_attempt_history_and_canonical_ids(ctx):
     assert done.task.attempts[0].task_run_id == task_run_id
     assert done.task.attempts[0].pipeline_run_id == run_id
     assert done.task.attempts[0].pipeline_id == pipeline_id
-    doc = to_json(
-        inspect.run_history(ctx, P, HistoryQuery("load", selector=RunSelector(run_id=run_id)))
-    )
+    doc = to_json(history(ctx, task_code="load", run_id=run_id))
     assert doc["entries"][0]["attempts"][0]["schema"] == "etl-craft/attempt/1"
     assert "run_id" not in doc["entries"][0]
     assert "T" in doc["changes"][0]["requested_at"]
@@ -191,33 +201,26 @@ def test_task_mark_preserves_failed_attempt_history_and_canonical_ids(ctx):
 
 def test_cancel_pause_resume_and_reconcile_do_not_invent_executions(ctx):
     _, run_id, _, _ = seed(ctx, active=True)
-    paused = pipelines.set_pause(ctx, P, "maintenance", verb="pause")
+    paused = control(ctx, ControlAction.PAUSE, "maintenance")
     assert paused.pipeline.paused.paused_by == "api-user"
     assert paused.run is None and paused.task is None
     assert "T" in to_json(paused)["pipeline"]["paused"]["paused_at"]
     assert to_json(paused)["pipeline"]["paused"]["pipeline_code"] == "P"
-    refused = runs.trigger_run(ctx, P)
+    refused = run(ctx)
     assert refused.run is None and refused.task is None
-    task = tasks.run_task(ctx, P, "not_started")
+    task = run(ctx, task_code="not_started")
     assert task.status == "SKIPPED" and task.task is None
-    resumed = pipelines.set_pause(ctx, P, "ready", verb="resume")
+    resumed = control(ctx, ControlAction.RESUME, "ready")
     assert resumed.pipeline.paused is None
-    cancelled = abort(ctx, P, "stop", selector=RunSelector(run_id=run_id))
+    cancelled = control(ctx, ControlAction.ABORT, "stop", run_id=run_id)
     assert cancelled.status == "COMPLETED" and cancelled.run_status == "CANCELLED"
-    report = runs.reconcile_runs(ctx, P)
+    report = invoke(ctx, ActionName.RECONCILE, ReconcileInput(pipeline_code=P))
     assert report.lost_attempt_ids == () and report.released_pipeline_run_ids == ()
 
 
 def test_backfill_preserves_dates_ids_and_one_action(ctx):
     pipeline_id, _, _, _ = seed(ctx)
-    done = runs.execute_run(
-        ctx,
-        RunRequest(
-            P,
-            backfill=(date(2026, 10, 1), date(2026, 10, 2)),
-            reason="repair",
-        ),
-    )
+    done = run(ctx, backfill_from=date(2026, 10, 1), backfill_to=date(2026, 10, 2), reason="repair")
     assert done.stopped is None and done.status == "SUCCESS"
     assert [result.run.run_date for result in done.runs] == [date(2026, 10, 1), date(2026, 10, 2)]
     assert len({result.run.pipeline_run_id for result in done.runs}) == 2
@@ -230,8 +233,8 @@ def test_backfill_preserves_dates_ids_and_one_action(ctx):
 
 def test_backfill_pause_has_a_stopped_outcome_without_a_run(ctx):
     seed(ctx)
-    pipelines.set_pause(ctx, P, "maintenance", verb="pause")
-    done = backfills.run_backfill(ctx, P, date(2026, 10, 1), date(2026, 10, 2), "repair")
+    control(ctx, ControlAction.PAUSE, "maintenance")
+    done = run(ctx, backfill_from=date(2026, 10, 1), backfill_to=date(2026, 10, 2), reason="repair")
     assert done.stopped is not None and done.stopped.run is None
     assert done.runs == (done.stopped,)
 
@@ -249,16 +252,13 @@ def test_task_result_uses_the_returned_task_id_not_another_pipelines_active_run(
         return TaskOutcome(RunStatus.FAILED, "load failed", task_run_id)
 
     monkeypatch.setattr(runner, "run_task", run_bound)
-    done = runs.execute_run(
+    done = run(
         ctx,
-        RunRequest(
-            P,
-            task_code="load",
-            ignore_dependencies=True,
-            reason="verified",
-            selector=RunSelector(run_id=run_id),
-            run_date=inspect.run_history(ctx, P).entries[0].run_date,
-        ),
+        task_code="load",
+        ignore_dependencies=True,
+        reason="verified",
+        run_id=run_id,
+        run_date=history(ctx).entries[0].run_date,
     )
     assert done.run.pipeline_id == pipeline_id
     assert done.run.pipeline_run_id == run_id
@@ -275,10 +275,8 @@ def test_task_overrides_return_the_selected_run_and_stored_summary(ctx, monkeypa
         return run_types.PipelineOutcome(RunStatus.FAILED, "still failed", run_id)
 
     monkeypatch.setattr(reruns, method, override)
-    keywords = {"selector": RunSelector(run_id=run_id)}
-    if method == "rerun_task":
-        keywords["reason"] = "verified"
-    done = getattr(tasks, method)(ctx, P, "load", **keywords)
+    keywords = {"rerun": True, "reason": "verified"} if method == "rerun_task" else {"force": True}
+    done = run(ctx, task_code="load", run_id=run_id, **keywords)
     assert done.task.task_run_id == task_run_id
     assert done.run.pipeline_run_id == run_id
     assert done.status == done.task.status == "FAILED"
@@ -289,12 +287,12 @@ def test_wrong_pipeline_and_wrong_date_are_refused_without_changing_history(ctx)
     with ctx.engine.begin() as conn:
         other = add_pipeline(conn, "OTHER")
         other_run = start_run(conn, other)
-    before = to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True)))
+    before = to_json(history(ctx, all=True))
     with pytest.raises(RunStateError):
-        runs.trigger_run(ctx, P, selector=RunSelector(run_id=other_run))
+        run(ctx, run_id=other_run)
     with pytest.raises(RunStateError, match="a run's date cannot change"):
-        runs.trigger_run(ctx, P, selector=RunSelector(run_id=run_id), run_date=date(2000, 1, 1))
-    assert to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True))) == before
+        run(ctx, run_id=run_id, run_date=date(2000, 1, 1))
+    assert to_json(history(ctx, all=True)) == before
     with ctx.engine.connect() as conn:
         with pytest.raises(RunStateError):
             run_view(conn, pipeline_id, other_run)
@@ -305,7 +303,7 @@ def test_wrong_pipeline_and_wrong_date_are_refused_without_changing_history(ctx)
 def test_refused_api_request_keeps_its_actor_and_does_not_leak_scope(ctx):
     parent = current_actor()
     with pytest.raises(MetadataError):
-        runs.initialize_run(ctx, "MISSING")
+        invoke(ctx, ActionName.RUN, RunRequest(pipeline_code="MISSING", init_only=True))
     assert current_actor() == parent
     with ctx.engine.connect() as conn:
         row = conn.execute(text("SELECT ACTOR, OUTCOME, ARGUMENTS FROM AUD_ACTIONS")).one()
@@ -318,47 +316,46 @@ def test_nested_requests_with_different_actors_are_distinct(ctx):
     outer = Actor("outer", ActorKind.SYSTEM)
     with acting_as(outer), command_request("run", {"pipeline_code": "P"}):
         register_engine(ctx.engine)
-        runs.initialize_run(ctx, P)
+        run(ctx, init_only=True)
         assert current_actor() == outer
-    actions = inspect.audit(ctx, P).actions
+    actions = audit(ctx).actions
     assert [(a.actor, a.kind) for a in actions] == [("outer", "SYSTEM"), ("api-user", "SERVICE")]
 
 
 @pytest.mark.parametrize(
-    "command,service,function,extra",
+    "command,extra",
     [
-        ("run", runs, "execute_run", ["--init-only"]),
-        ("mark", runs, "mark", ["--status", "FAILED", "--reason", "verified"]),
-        ("abort", control_commands, "request_control", ["--reason", "stop"]),
-        ("pause", pipelines, "set_pause", ["--reason", "maintenance"]),
-        ("resume", pipelines, "set_pause", ["--reason", "ready"]),
-        ("reconcile", runs, "reconcile_runs", []),
-        ("graph", inspect, "pipeline_graph", []),
-        ("steps", inspect, "pipeline_steps", []),
-        ("history", inspect, "run_history", ["--all"]),
-        ("audit", inspect, "audit", []),
-        ("list", inspect, "list_pipelines", []),
+        ("run", ["--init-only"]),
+        ("mark", ["--status", "FAILED", "--reason", "verified"]),
+        ("abort", ["--reason", "stop"]),
+        ("pause", ["--reason", "maintenance"]),
+        ("resume", ["--reason", "ready"]),
+        ("reconcile", []),
+        ("graph", []),
+        ("steps", []),
+        ("history", ["--all"]),
+        ("audit", []),
+        ("pipelines", []),
     ],
 )
-def test_cli_json_is_the_service_document_with_one_action(
-    ctx, capsys, monkeypatch, command, service, function, extra
-):
+def test_cli_json_is_the_action_document_with_one_request(ctx, capsys, monkeypatch, command, extra):
+    from etl_craft.cli.commands import common
+
     seed(ctx, active=True, task=command in {"steps", "history"})
     if command == "resume":
-        pipelines.set_pause(ctx, P, "maintenance", verb="pause")
+        control(ctx, ControlAction.PAUSE, "maintenance")
     before_actions = action_count(ctx)
     observed = []
-    original = getattr(service, function)
 
     def capture(*args, **kwargs):
-        done = original(*args, **kwargs)
+        done = invoke(*args, **kwargs)
         observed.append(done)
         return done
 
-    monkeypatch.setattr(service, function, capture)
+    monkeypatch.setattr(common, "invoke", capture)
     arguments = ["--config", str(ctx.config.config_path), command, "--format", "json"]
-    if command != "list":
-        arguments.extend(["--pipeline_code", "P"])
+    if command != "pipelines":
+        arguments.extend(["--pipeline-code", "P"])
     code = main([*arguments, *extra])
     output = capsys.readouterr()
     assert code == 0, output.err
@@ -380,9 +377,9 @@ def test_cli_json_is_the_service_document_with_one_action(
         {"force": True, "rerun": True, "task_code": "load"},
         {"with_downstream": True},
         {"skip": True, "task_code": "load"},
-        {"reason": "unused"},
-        {"backfill": (date.today(), date.today()), "skip": True},
-        {"skip": True, "selector": RunSelector(run_id=1)},
+        {"backfill_from": date.today(), "backfill_to": date.today(), "skip": True},
+        {"backfill_from": date.today()},
+        {"skip": True, "run_id": 1},
         {"run_date": date.today(), "skip": True},
         {"task_code": "load", "init_only": True},
         {"task_code": ""},
@@ -390,7 +387,7 @@ def test_cli_json_is_the_service_document_with_one_action(
 )
 def test_invalid_requests_are_rejected_before_opening_resources(kwargs):
     with pytest.raises(UsageError):
-        RunRequest(P, **kwargs)
+        RunRequest(pipeline_code=P, **kwargs)
 
 
 def test_serializer_returns_fresh_mappings_and_refuses_nondocuments():
@@ -411,10 +408,11 @@ def test_serializer_returns_fresh_mappings_and_refuses_nondocuments():
 
 def test_read_operations_leave_audit_actions_unchanged_and_keep_empty_documents(ctx):
     seed(ctx)
-    assert to_json(inspect.list_pipelines(ctx))["pipelines"][0]["pipeline_id"] > 0
-    assert to_json(inspect.run_history(ctx, P, HistoryQuery(all_runs=True)))["entries"] == []
-    assert inspect.pipeline_graph(ctx, P).waves == ()
-    assert inspect.audit(ctx, P, since=datetime(2099, 1, 1, tzinfo=UTC)).actions == ()
+    listed = invoke(ctx, ActionName.PIPELINES, NoInput())
+    assert to_json(listed)["pipelines"][0]["pipeline_id"] > 0
+    assert to_json(history(ctx, all=True))["entries"] == []
+    assert invoke(ctx, ActionName.GRAPH, PipelineInput(pipeline_code=P)).waves == ()
+    assert audit(ctx, since=datetime(2099, 1, 1, tzinfo=UTC)).actions == ()
     assert action_count(ctx) == 0
 
 
@@ -426,10 +424,10 @@ def test_json_numbers_must_be_finite():
 
 def test_missing_override_reason_is_refused_before_a_task_runs(ctx):
     seed(ctx, active=True, task=True)
-    before = to_json(inspect.run_history(ctx, P, HistoryQuery("load")))
-    with pytest.raises(UsageError, match="needs a --reason"):
-        runs.execute_run(ctx, RunRequest(P, task_code="load", ignore_dependencies=True))
-    assert to_json(inspect.run_history(ctx, P, HistoryQuery("load"))) == before
+    before = to_json(history(ctx, task_code="load"))
+    with pytest.raises(UsageError, match="needs a `reason`"):
+        run(ctx, task_code="load", ignore_dependencies=True)
+    assert to_json(history(ctx, task_code="load")) == before
     assert action_count(ctx) == 1
 
 
@@ -445,12 +443,12 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
     event.listen(ctx.engine, "before_cursor_execute", record)
     try:
         if view == "history":
-            runs.stand_in_run(ctx, P, "SUCCESS", "verified")
+            mark(ctx, new_run=True, status="SUCCESS", reason="verified")
         queries.clear()
         first = (
-            inspect.list_pipelines(ctx)
+            invoke(ctx, ActionName.PIPELINES, NoInput())
             if view == "list"
-            else inspect.run_history(ctx, P, HistoryQuery(all_runs=True))
+            else history(ctx, all=True)
         )
         baseline = len(queries)
         for number in range(1, 5):
@@ -458,12 +456,12 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
                 with ctx.engine.begin() as conn:
                     add_pipeline(conn, f"P{number}")
             else:
-                runs.stand_in_run(ctx, P, "SUCCESS", "verified")
+                mark(ctx, new_run=True, status="SUCCESS", reason="verified")
         queries.clear()
         expanded = (
-            inspect.list_pipelines(ctx)
+            invoke(ctx, ActionName.PIPELINES, NoInput())
             if view == "list"
-            else inspect.run_history(ctx, P, HistoryQuery(all_runs=True))
+            else history(ctx, all=True)
         )
         assert len(queries) == baseline
         field = "pipelines" if view == "list" else "entries"
@@ -476,9 +474,9 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
 def test_retry_evidence_survives_config_edits_in_cli_and_catalog(ctx, capsys, tmp_path):
     from etl_craft.core.enums import FailureClass
     from etl_craft.core.failures import Failure
-    from etl_craft.services.catalog import collect_catalog
-    from etl_craft.services.catalog_html import run_url
-    from etl_craft.services.catalog_site import write_site
+    from etl_craft.services.catalog.collect import collect_catalog
+    from etl_craft.services.catalog.html import run_url
+    from etl_craft.services.catalog.site import write_site
 
     with ctx.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
@@ -506,9 +504,9 @@ def test_retry_evidence_survives_config_edits_in_cli_and_catalog(ctx, capsys, tm
         "--config",
         str(ctx.config.config_path),
         "explain",
-        "--pipeline_code",
+        "--pipeline-code",
         "P",
-        "--task_code",
+        "--task-code",
         "load",
         "--run-id",
         str(run),

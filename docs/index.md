@@ -11,8 +11,8 @@ and runs the work against one **warehouse**. The controller schedules and superv
 `CFG_PIPELINE_DEPENDENCY`. Changing a pipeline means changing rows, reviewed like any other
 change.
 
-**One verb runs everything.** `etl-craft run --pipeline_code X` runs a pipeline by dispatching
-ready tasks after each completion, one child process per task. `etl-craft run --pipeline_code X --task_code Y` runs one task;
+**One verb runs everything.** `etl-craft run --pipeline-code X` runs a pipeline by dispatching
+ready tasks after each completion, one child process per task. `etl-craft run --pipeline-code X --task-code Y` runs one task;
 Run requests may also be submitted through the HTTP API.
 
 **Runs resolve themselves.** A run's id is never passed between tasks. Each task finds the

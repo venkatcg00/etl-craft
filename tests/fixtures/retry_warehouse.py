@@ -13,31 +13,20 @@ from etl_craft.engine import transitions
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.runner import run_task
 from etl_craft.warehouse.connection import warehouse_dialect
+from fixtures.engine_db import profile_block
 
 
 def save_project(world):
     """Make a fixture's connection profiles available to its real task process."""
     config = world.config
 
-    def profile(value, schema):
-        fields = {
-            "jdbc_url": value.jdbc_url,
-            "user": value.user,
-            "auth_mode": str(value.auth_mode),
-            "schema": schema,
-            **value.extra,
-        }
-        if "secret_var" in fields:
-            fields["secret"] = fields.pop("secret_var")
-        return fields
-
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60},
-        "Engine": {"dev": profile(config.engine, "main")},
+        "Engine": {"dev": profile_block(config.engine, "main")},
         "Warehouse": {
             "Table_format": str(config.warehouse_table_format),
-            "dev": profile(config.warehouse, world.schema),
+            "dev": profile_block(config.warehouse, world.schema),
         },
     }
     if config.warehouse.jdbc_url.startswith("jdbc:duckdb:"):

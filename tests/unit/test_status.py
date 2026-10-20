@@ -8,15 +8,17 @@ import pytest
 
 from etl_craft.cli import build_parser, main
 from etl_craft.cli.commands import Command
+from etl_craft.core.enums import ActionName, ControlAction
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.repository.pauses import Pause
-from etl_craft.services.operations import pipelines, runs, to_json
+from etl_craft.services.operations import to_json
+from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.requests import ControlRequest, MarkRequest, RunSelection
 from etl_craft.services.operations.status import (
     DependencyView,
     GateWaitView,
     TaskSnapshot,
     explain,
-    pipeline_status,
 )
 from unit.test_operations import ctx as ctx
 from unit.test_operations import seed
@@ -28,7 +30,7 @@ NOW = datetime(2026, 10, 9, tzinfo=UTC)
 @pytest.fixture
 def snapshot(ctx):
     seed(ctx, active=True, task=True)
-    view = pipeline_status(ctx, "P")
+    view = invoke(ctx, ActionName.STATUS, RunSelection(pipeline_code="P"))
     return TaskSnapshot(
         view.pipeline,
         view.run,
@@ -151,9 +153,9 @@ def test_optional_command_configuration_is_built_and_runs(capsys, monkeypatch):
 )
 def test_inspection_cli_json_schemas(ctx, command, schema, capsys):
     seed(ctx, active=True, task=True)
-    options = ["--pipeline_code", "P"] if command in {"status", "explain", "validate"} else []
+    options = ["--pipeline-code", "P"] if command in {"status", "explain", "validate"} else []
     if command == "explain":
-        options += ["--task_code", "load"]
+        options += ["--task-code", "load"]
     code = main(["--config", str(ctx.config.config_path), command, "--format", "json", *options])
     doc = json.loads(capsys.readouterr().out)
     assert doc["schema"] == schema
@@ -170,13 +172,21 @@ def test_waiting_and_paused_backfill_exit_codes(ctx, capsys):
     with ctx.engine.begin() as conn:
         after = add_task(conn, pipeline, "after", "PYTHON")
         add_dependency(conn, pipeline, after, task)
-    args = ["--config", str(ctx.config.config_path), "run", "--pipeline_code", "P"]
-    assert main([*args, "--task_code", "after", "--format", "json"]) == ExitCode.WAITING
+    args = ["--config", str(ctx.config.config_path), "run", "--pipeline-code", "P"]
+    assert main([*args, "--task-code", "after", "--format", "json"]) == ExitCode.WAITING
     assert json.loads(capsys.readouterr().out)["waiting"] is True
-    pipelines.set_pause(ctx, "P", "maintenance", verb="pause")
+    invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(pipeline_code="P", action=ControlAction.PAUSE, reason="maintenance"),
+    )
     assert main(args) == ExitCode.SUCCESS
     capsys.readouterr()
-    runs.mark_run(ctx, "P", "FAILED", "release the run before backfill")
+    invoke(
+        ctx,
+        ActionName.MARK,
+        MarkRequest(pipeline_code="P", status="FAILED", reason="release the run before backfill"),
+    )
     assert (
         main([*args, "--backfill", "2026-10-01:2026-10-02", "--reason", "repair"])
         == ExitCode.INCOMPLETE

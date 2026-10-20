@@ -1,6 +1,6 @@
 # Local orchestration: etl-craft dispatches ready tasks itself.
 #
-# `etl-craft run --pipeline_code X` resolves each ready wave from
+# `etl-craft run --pipeline-code X` resolves each ready wave from
 # CFG_TASK_DEPENDENCY and runs one subprocess per task, at most
 # Max_parallel_tasks limits how many task subprocesses run at once.
 #
@@ -14,7 +14,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value — variables below are read from the process environment
+  Source_type: ENVIRONMENT             # value — variables below are read from the process environment
   Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
@@ -23,7 +23,7 @@ Orchestration:
   Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value — true: email when a run misses its SLA_IN_HOURS
   dev:
-    Dependency_gates: warn             # value — enforce (default) | warn | off: whether a run waits
+    Dependency_gates: WARN             # value — ENFORCE (default) | WARN | OFF: whether a run waits
                                        # for its dependencies on other pipelines; warn and off
                                        # go ahead and record the bypass (dev lacks some upstreams)
     Retries: 1                         # value
@@ -37,29 +37,29 @@ Orchestration:
 Engine:
   Name: SQLite                         # value
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
   sit:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
   uat:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
   prod:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: DuckDB                         # value
   dev:
-    jdbc_url: jdbc:duckdb:warehouse_dev.duckdb  # value
-    schema: main                       # value — must already exist; cloning writes here
+    Jdbc_url: jdbc:duckdb:warehouse_dev.duckdb  # value
+    Schema: main                       # value — must already exist; cloning writes here
   sit:
-    jdbc_url: jdbc:duckdb:warehouse_sit.duckdb  # value
-    schema: main                       # value — must already exist; cloning writes here
+    Jdbc_url: jdbc:duckdb:warehouse_sit.duckdb  # value
+    Schema: main                       # value — must already exist; cloning writes here
   uat:
-    jdbc_url: jdbc:duckdb:warehouse_uat.duckdb  # value
-    schema: main                       # value — must already exist; cloning writes here
+    Jdbc_url: jdbc:duckdb:warehouse_uat.duckdb  # value
+    Schema: main                       # value — must already exist; cloning writes here
   prod:
-    jdbc_url: jdbc:duckdb:warehouse_prod.duckdb  # value
-    schema: main                       # value — must already exist; cloning writes here
+    Jdbc_url: jdbc:duckdb:warehouse_prod.duckdb  # value
+    Schema: main                       # value — must already exist; cloning writes here

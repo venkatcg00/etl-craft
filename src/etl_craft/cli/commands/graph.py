@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context, configure_output
+from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations import inspect
+from etl_craft.services.operations.models import GraphView
+from etl_craft.services.operations.requests import PipelineInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
-    parser.add_argument("--pipeline_code", required=True, help="the pipeline to show")
+    parser.add_argument("--pipeline-code", required=True, help="The pipeline to show.")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        graph = inspect.pipeline_graph(ctx, args.pipeline_code)
+    graph = call(args, ActionName.GRAPH, request_from(args, PipelineInput))
+    assert isinstance(graph, GraphView)
 
     def render_text() -> None:
         out.line(f"Pipeline {graph.pipeline_code}")
@@ -53,4 +55,5 @@ COMMAND = Command(
     help="Show a pipeline's task waves and dependencies.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.GRAPH,),
 )

@@ -53,7 +53,7 @@ def init_db(engine: Engine, *, force: bool = False) -> InitResult:
                     "init-db applies the "
                     "full schema to an empty database. Use `etl-craft migrate` to bring "
                     "an existing "
-                    "one up to date, or pass --force if this one should be initialized anyway."
+                    "one up to date, or give `force` if this one should be initialized anyway."
                 )
         try:
             with engine.begin() as conn:

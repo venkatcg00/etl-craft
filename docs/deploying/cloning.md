@@ -8,19 +8,19 @@ connection to the Engine DB.
 Cloning:
   prod:
     Enabled: true
-    Scope: all        # cfg | aud | all | none
+    Scope: ALL        # CFG | AUD | ALL | NONE
 ```
 
 | `Scope` | Copies |
 |---|---|
-| `cfg` | the `CFG_` tables: pipelines, tasks, dependencies, parameters, business rules |
-| `aud` | the `AUD_` tables: run logs, business-rule results, offsets, trackers, lineage, documentation versions |
-| `all` | both |
-| `none` | nothing; the same as `Enabled: false`, so a profile can turn cloning off without deleting it |
+| `CFG` | the `CFG_` tables: pipelines, tasks, dependencies, parameters, business rules |
+| `AUD` | the `AUD_` tables: run logs, business-rule results, offsets, trackers, lineage, documentation versions |
+| `ALL` | both |
+| `NONE` | nothing; the same as `Enabled: false`, so a profile can turn cloning off without deleting it |
 
 ## Where the copies go
 
-Each table is copied to the Warehouse profile's `schema`, under its own name, such as
+Each table is copied to the Warehouse profile's `Schema`, under its own name, such as
 `analytics.etl_craft.CFG_PIPELINES`. The schema must already exist: etl-craft never creates
 warehouse schemas, and `doctor` and every run's connection test check it. On Snowflake with
 Iceberg tables, set the Cloning section's `External_volume` and `Base_location` too; on Databricks,

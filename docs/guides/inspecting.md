@@ -2,11 +2,11 @@
 
 Read-only commands show what the Engine DB holds, without SQL. Tables print tab-separated columns, so their output also works with `cut`, `awk` or a spreadsheet.
 
-## `etl-craft list`
+## `etl-craft pipelines`
 
 Every active pipeline: its code, name, refresh type, schedule and SLA.
 
-## `etl-craft graph --pipeline_code SALES`
+## `etl-craft graph --pipeline-code SALES`
 
 The pipeline's order and what each task waits for:
 
@@ -28,20 +28,20 @@ Pipeline dependencies:
 A dependency on a task in another pipeline is written `PIPELINE.TASK`. See
 [Dependencies and run conditions](dependencies.md) for what waves and run conditions mean.
 
-## `etl-craft steps --pipeline_code SALES`
+## `etl-craft steps --pipeline-code SALES`
 
 The pipeline's active tasks: status under the selected run, handler, task type, run condition
 and every active parameter. Pass `--run-id` or `--run-key`; without either, exactly one
 non-terminal run must exist.
 
-## `etl-craft status --pipeline_code SALES [--run-id 42 | --run-key KEY]`
+## `etl-craft status --pipeline-code SALES [--run-id 42 | --run-key KEY]`
 
 The selected run's identity, key, trigger kind, run date, status, start, duration and SLA,
 followed by every active task's status, attempt count, rows written, duration and first error
 line. Tasks that have not run are included. The final line lists tasks blocked by failed
 upstreams, including tasks behind another blocked task.
 
-## `etl-craft explain --pipeline_code SALES --task_code load [--run-id 42 | --run-key KEY]`
+## `etl-craft explain --pipeline-code SALES --task-code load [--run-id 42 | --run-key KEY]`
 
 Why the task is in its state and what would make it run. The explanation includes the run and
 its pause, the task summary and ordered attempts, its run condition and required count,
@@ -54,7 +54,7 @@ Both commands inspect one database snapshot. They never reconcile leases, queue 
 consume upstream output or write audit actions. Without a selector, exactly one non-terminal
 run must exist; an ended run always needs its explicit id or key.
 
-## `etl-craft history --pipeline_code SALES [--run-id 42 | --run-key KEY | --all]`
+## `etl-craft history --pipeline-code SALES [--run-id 42 | --run-key KEY | --all]`
 
 The selected run, or with `--all --limit 20`, recent runs newest first: for the pipeline, each run's status, start and end, SLA status, and starting and ending actors with their kinds;
 for one task, each run's status, attempts, source and target counts, start and end, and error
@@ -63,7 +63,7 @@ message.
 A code that does not exist stops the command with exit status `4` (`METADATA`) and suggests close
 matches.
 
-## `etl-craft audit [--pipeline_code SALES] [--since 2026-10-01]`
+## `etl-craft audit [--pipeline-code SALES] [--since 2026-10-01]`
 
 Command requests show their time, actor and kind, command, request outcome and masked arguments.
 Metadata changes show their time, actor and kind, table, row key, operation, before and after JSON,

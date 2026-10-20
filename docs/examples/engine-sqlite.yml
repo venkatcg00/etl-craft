@@ -1,7 +1,7 @@
 # Engine DB on SQLite — the default.
 #
 # One file per environment, nothing to install and nothing to authenticate
-# (auth_mode is `none` whether written or not). Relative paths resolve
+# (Auth_mode is `NONE` whether written or not). Relative paths resolve
 # against this file. SQLite serves one machine: all task
 # agents elsewhere cannot open the file, so production uses PostgreSQL.
 #
@@ -15,7 +15,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value — variables below are read from the process environment
+  Source_type: ENVIRONMENT             # value — variables below are read from the process environment
   Profile: ETL_CRAFT_PROFILE           # variable — dev | sit | uat | prod, set in each environment
 
 Orchestration:
@@ -26,42 +26,42 @@ Orchestration:
 Engine:
   Name: SQLite                         # value
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-dev.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
   sit:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-sit.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
   uat:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-uat.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
   prod:
-    jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine-prod.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: Postgres                       # value
-  Table_format: native                 # value
+  Table_format: NATIVE                 # value
   dev:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: WAREHOUSE_AUTH_MODE     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   sit:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: WAREHOUSE_AUTH_MODE     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   uat:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: WAREHOUSE_AUTH_MODE     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   prod:
-    jdbc_url: WAREHOUSE_JDBC_URL       # variable
-    schema: etl_craft                  # value — must already exist; cloning writes here
-    user: WAREHOUSE_USER               # variable
-    auth_mode: WAREHOUSE_AUTH_MODE     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    Jdbc_url: WAREHOUSE_JDBC_URL       # variable
+    Schema: etl_craft                  # value — must already exist; cloning writes here
+    User: WAREHOUSE_USER               # variable
+    Auth_mode: WAREHOUSE_AUTH_MODE     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written

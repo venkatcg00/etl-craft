@@ -8,6 +8,55 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Consistent names, with no aliases: the old spellings are refused by name.
+  - Flags are kebab-case: `--pipeline-code` and `--task-code`. `list` is `pipelines`.
+  - `--server` is `--controller`, and `ETL_CRAFT_SERVER` is `ETL_CRAFT_CONTROLLER`.
+  - Every `craft-connector.yml` key is `Capitalized_snake`: `Jdbc_url`, `User`, `Secret`,
+    `Schema`, `Auth_mode`, `Key_file`, `Host`, `Port`, `From_address`, `Tls_mode`,
+    `Transport`, `Catalog`, `Token`, `Account` and the rest of each connection and email
+    block. A lowercase key is refused with its correct spelling.
+  - Every closed value is upper case and matched exactly: `Auth_mode` (`NONE`, `PASSWORD`,
+    `TOKEN`, `KEY_FILE`, `OAUTH`, `SSO`, `STS`), `Tls_mode`, `Transport`, `Table_format`,
+    `Cloning.Scope`, `Dependency_gates`, `Secrets.Source_type` (`ENVIRONMENT`, `FILE`) and
+    `Deployment.Profile` (`LAPTOP`, `CONTROLLER`, `CONTROLLER_AGENTS`). So are a variable's
+    value that sets one, and the task parameter `TABLE_FORMAT`.
+  - Help lines are one sentence with a capital and a full stop.
+  - Python modules: `api.server` is `api.serve`, `cli.remote` is `cli.client`
+    (`ControllerClient`), `execution.supervisor` is `execution.processes`,
+    `execution.failures` is `execution.classify`, `dialects.failures` is
+    `dialects.failure_evidence`, `engine.repository.interventions` is
+    `engine.repository.intervention_rows`, and the `services.catalog_*` modules are the
+    `services.catalog` package. `docs/deploying/server.md` is `controller.md`.
+
+- One action table (`etl_craft.services.operations.actions`) holds every action's role,
+  audit, placement and HTTP route; `invoke(ctx, ActionName, request)` is the only way an
+  interface reaches an operation. Operations take one request dataclass each and no longer
+  check roles themselves. `docs/reference/actions.md` is generated from the table.
+- The HTTP API has one generated route per action, with run selection in the query or body:
+  `POST /api/v1/runs` (runs, task runs, reruns, skips and backfills), `POST /api/v1/marks`,
+  `POST /api/v1/controls` (scoped controls, and `PAUSE`/`RESUME` of a definition),
+  `GET /api/v1/status`, `/steps`, `/graph`, `/explanations`, `/history`, `/capabilities`,
+  `/audit`, `/lineage`, `/validation`, `/accounts` and more; see the actions reference. The
+  `/pipelines/{code}/...` and `/runs/{id}/tasks/...` variants are removed. A malformed or
+  unknown field answers 400 naming the field.
+- Every action that can run anywhere works with `--controller`, including `token`, `account`,
+  `graph`, `steps`, `audit`, `lineage`, `validate`, `clone`, `rehash`, `upgrade-targets`,
+  `generate-docs` and `docs-version`. Host-only actions (`config`, `migrate`, `init-db`,
+  `setup`, `doctor`, `controller`, `publish-docs`) are refused there with where to run them.
+- `status --capabilities` is now `capabilities`, and `status --request-id N` is now
+  `control-request --control-id N`.
+- Messages from services name request fields (`` `task_code` ``); the CLI shows them as flags.
+- A run `reason` is accepted on any run request and recorded with it.
+- `lineage` without `--refresh` and `setup --print-grants` are reads and no longer write an
+  `AUD_ACTIONS` row; `lineage --refresh` is its own audited `lineage refresh` action. Pause
+  and resume are recorded as `control` with their action.
+- `etl-craft account` changes and `token revoke` answer with the account or token list.
+- A `mark` status other than `SUCCESS`, `FAILED` or `SKIPPED` is refused when the request is
+  read, naming `status`; over HTTP that is a 400.
+- `doctor` names file checks by their `craft-connector.yml` key (`Engine DB Key_file`,
+  `Email Ca_file`, `Email Sendmail_path`) and shows `Tls_mode=` and `Ca_file=` in the
+  email TLS check.
+
 - `Orchestration.Allow_schedule` now controls the controller: `false` in an environment's
   profile stops that environment's controller from creating scheduled runs, without affecting
   other environments. Manual runs and catalog builds continue. It was previously read only by

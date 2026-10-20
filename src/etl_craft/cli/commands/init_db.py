@@ -4,22 +4,24 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, command_context, provisioning
+from etl_craft.cli.commands.common import Command, call, request_from
 from etl_craft.cli.output import Output
-from etl_craft.services.operations import maintenance
+from etl_craft.core.enums import ActionName
+from etl_craft.engine.schema import InitResult
+from etl_craft.services.operations.maintenance import InitInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="apply the schema even though Engine DB tables already exist",
+        help="Apply the schema even though Engine DB tables already exist.",
     )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
-    with command_context(args) as ctx:
-        result = maintenance.initialize(ctx, force=args.force, provisioning=provisioning())
+    result = call(args, ActionName.INIT_DB, request_from(args, InitInput))
+    assert isinstance(result, InitResult)
     out.line(f"init-db: applied {result.statements} statement(s) from the packaged schema")
     if result.recorded_migrations:
         out.line(
@@ -34,4 +36,5 @@ COMMAND = Command(
     help="Create the Engine DB schema in an empty database.",
     configure=_configure,
     run=_run,
+    actions=(ActionName.INIT_DB,),
 )

@@ -58,7 +58,7 @@ def task_warehouse_dialect(config: ConnectorConfig, params: Mapping[str, str]) -
     """Resolve the task's storage format with the same restrictions as task execution."""
     assert config.warehouse is not None
     default = config.warehouse_table_format
-    written = (params.get("TABLE_FORMAT") or "").strip().lower()
+    written = (params.get("TABLE_FORMAT") or "").strip()
     table_format = enum_value(
         TableFormat,
         written or default,
@@ -245,20 +245,15 @@ def verify_iceberg_catalog(config: ConnectorConfig, warehouse_engine: Engine) ->
     Iceberg, so ``doctor`` checks it. Every other warehouse returns ``None``: its format is
     fixed by the connection.
     """
-    if warehouse_engine.dialect.name != "trino" or config.warehouse is None:
+    if config.warehouse is None:
         return None
+    query = warehouse_dialect(config).catalog_connector_sql
     catalog = parse_warehouse_url(config.warehouse.jdbc_url).catalog
-    if not catalog:
+    if query is None or not catalog:
         return None
     try:
         with warehouse_engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    "SELECT connector_name AS connector_name FROM system.metadata.catalogs "
-                    "WHERE catalog_name = :name"
-                ),
-                {"name": catalog},
-            ).first()
+            row = conn.execute(text(query), {"name": catalog}).first()
     except SQLAlchemyError as error:
         return f"could not check whether catalog {catalog!r} is an Iceberg catalog: {error}"
     if row is None:

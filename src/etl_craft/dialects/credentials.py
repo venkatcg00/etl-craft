@@ -99,7 +99,7 @@ def aws_rds_auth_token(
         import boto3
     except ImportError as error:
         raise ConfigurationError(
-            "auth_mode sts needs boto3 — install it with `pip install etl-craft[aws]`"
+            "Auth_mode STS needs boto3 — install it with `pip install etl-craft[aws]`"
         ) from error
     try:
         session = boto3.session.Session(region_name=region)

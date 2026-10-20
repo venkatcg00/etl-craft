@@ -41,10 +41,10 @@ def run_the_demo(demo: Demo) -> None:
     doctor = demo.run("doctor")
     assert "0 failed" in doctor.stdout.splitlines()[-1], doctor.stdout
     for pipeline in ("CLIENT_ALPHA", "CLIENT_BETA"):
-        assert "SUCCESS" in demo.ok("run", "--pipeline_code", pipeline)
-    first = demo.run("run", "--pipeline_code", "SUPPORT_DM")
+        assert "SUCCESS" in demo.ok("run", "--pipeline-code", pipeline)
+    first = demo.run("run", "--pipeline-code", "SUPPORT_DM")
     assert first.returncode == 1 and "flaky_feed (FAILED)" in first.stdout, first.stdout
-    assert "SUCCESS" in demo.ok("run", "--pipeline_code", "SUPPORT_DM")
+    assert "SUCCESS" in demo.ok("run", "--pipeline-code", "SUPPORT_DM")
 
     fact = demo.rows(
         "SELECT source_system, COUNT(*) FROM {c}.dm.support_fact GROUP BY source_system "

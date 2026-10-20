@@ -2,11 +2,13 @@
 
 from collections import defaultdict
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlglot import exp, parse_one
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
+
+from etl_craft.dialects.engine import for_engine
 
 ObjectIdentity = tuple[str | None, str, str]
 
@@ -40,8 +42,8 @@ def normalization_problems(
 ) -> list[str]:
     """Report ambiguous legacy rows without changing their data or history."""
     problems = config_identity_problems(conn)
-    legacy = "cfg_source_columns" if conn.dialect.name == "postgresql" else "CFG_SOURCE_COLUMNS"
-    if inspect(conn).has_table(legacy):
+    engine_dialect = for_engine(conn)
+    if engine_dialect.has_table(conn, "CFG_SOURCE_COLUMNS"):
         keys: dict[tuple[object, ...], list[str]] = defaultdict(list)
         positions: dict[tuple[object, ...], list[str]] = defaultdict(list)
         rows = conn.execute(
@@ -73,8 +75,7 @@ def normalization_problems(
                         "normalization; inactive rows also reserve their identity, so "
                         "deactivating a duplicate does not resolve it"
                     )
-    rules_name = "cfg_business_rules" if conn.dialect.name == "postgresql" else "CFG_BUSINESS_RULES"
-    rule_fields = {column["name"].upper() for column in inspect(conn).get_columns(rules_name)}
+    rule_fields = {name.upper() for name in engine_dialect.column_names(conn, "CFG_BUSINESS_RULES")}
     rule_sql = (
         " UNION ALL SELECT 'CFG_BUSINESS_RULES' AS table_name, BUSINESS_RULE_ID AS row_id, "
         "'TARGET_TABLE' AS field_name, TARGET_TABLE AS object_name, ACTIVE_FLAG AS active_flag "

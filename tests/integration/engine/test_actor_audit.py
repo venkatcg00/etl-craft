@@ -22,7 +22,6 @@ from etl_craft.core.enums import (
 )
 from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
-from etl_craft.engine.privileges import extra_write_grants
 from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
 from fixtures.released_schema import install
 from fixtures.services import POSTGRES_PASSWORD, POSTGRES_USER, require
@@ -37,6 +36,11 @@ def restore_logger():
     yield
     logger.handlers[:] = handlers
     logger.setLevel(level)
+
+
+def write_grants(db):
+    with db.engine.connect() as conn:
+        return db.dialect.extra_write_grants(conn)
 
 
 def test_attribution_and_immutable_command_requests(engine_db):
@@ -76,8 +80,6 @@ def test_attribution_and_immutable_command_requests(engine_db):
     for sql in ("UPDATE AUD_ACTIONS SET OUTCOME='SUCCESS'", "DELETE FROM AUD_ACTIONS"):
         with pytest.raises(DBAPIError, match=r"immutable|append-only"), engine.begin() as conn:
             conn.execute(text(sql))
-    with acting_as(ALICE), command_request("history", {}):
-        register_engine(engine)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one() == 1
 
@@ -388,19 +390,19 @@ def test_postgres_extra_write_grant_is_reported(engine_db):
         with engine_db.engine.begin() as conn:
             conn.exec_driver_sql(f'CREATE ROLE "{role}" LOGIN')
             conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TASKS TO "{role}"')
-        assert ("cfg_tasks", role, "UPDATE") in extra_write_grants(engine_db.engine)
+        assert ("cfg_tasks", role, "UPDATE") in write_grants(engine_db)
         with engine_db.engine.begin() as conn:
             conn.exec_driver_sql("CREATE TABLE CFG_TEAM (VALUE VARCHAR)")
             conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TEAM TO "{role}"')
-        assert not any(table == "cfg_team" for table, _, _ in extra_write_grants(engine_db.engine))
+        assert not any(table == "cfg_team" for table, _, _ in write_grants(engine_db))
         group = role + "_group"
         with engine_db.engine.begin() as conn:
             conn.exec_driver_sql(f'CREATE ROLE "{group}" NOLOGIN')
             conn.exec_driver_sql(f'GRANT "{group}" TO "{role}"')
             conn.exec_driver_sql(f'REVOKE UPDATE ON CFG_TASKS FROM "{role}"')
             conn.exec_driver_sql(f'GRANT UPDATE ON CFG_TASKS TO "{group}"')
-        assert ("cfg_tasks", group, "UPDATE") in extra_write_grants(engine_db.engine)
-        assert ("cfg_tasks", role, "UPDATE") not in extra_write_grants(engine_db.engine)
+        assert ("cfg_tasks", group, "UPDATE") in write_grants(engine_db)
+        assert ("cfg_tasks", role, "UPDATE") not in write_grants(engine_db)
         from etl_craft.engine.migrations import mark_packaged_migrations_applied
         from etl_craft.services.doctor import Status, _engine_state
 
@@ -418,7 +420,7 @@ def test_postgres_extra_write_grant_is_reported(engine_db):
         assert f'FROM "{group}"' in revoke
         with engine_db.engine.begin() as conn:
             conn.exec_driver_sql(revoke)
-        assert ("cfg_tasks", group, "UPDATE") not in extra_write_grants(engine_db.engine)
+        assert ("cfg_tasks", group, "UPDATE") not in write_grants(engine_db)
 
     finally:
         with engine_db.engine.begin() as conn:
@@ -441,19 +443,19 @@ def test_cli_actor_requests_and_read_only_audit(
 
     profile = engine_db.config.engine
     jdbc = profile.jdbc_url
-    if profile.auth_mode == "none":
+    if profile.auth_mode == "NONE":
         jdbc = "jdbc:sqlite:" + engine_db.engine.url.database
     metadata = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {
             "test": {
-                "jdbc_url": jdbc,
-                "user": profile.user,
-                "auth_mode": str(profile.auth_mode),
-                "schema": profile.schema or ("main" if profile.auth_mode == "none" else "public"),
+                "Jdbc_url": jdbc,
+                "User": profile.user,
+                "Auth_mode": str(profile.auth_mode),
+                "Schema": profile.schema or ("main" if profile.auth_mode == "NONE" else "public"),
                 **(
-                    {"secret": profile.extra["secret_var"]} if "secret_var" in profile.extra else {}
+                    {"Secret": profile.extra["secret_var"]} if "secret_var" in profile.extra else {}
                 ),
             }
         },
@@ -475,17 +477,17 @@ def test_cli_actor_requests_and_read_only_audit(
         result = main(["--config", str(config), *argv])
         assert result == 0, capsys.readouterr()
 
-    command("run", "--pipeline_code", "P", "--init-only")
+    command("run", "--pipeline-code", "P", "--init-only")
     with engine_db.engine.connect() as conn:
         run_id = conn.execute(
             text("SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG")
         ).scalar_one()
-    command("pause", "--pipeline_code", "P", "--reason", "wait")
-    command("resume", "--pipeline_code", "P", "--reason", "ready")
-    command("abort", "--pipeline_code", "P", "--reason", "stop")
+    command("pause", "--pipeline-code", "P", "--reason", "wait")
+    command("resume", "--pipeline-code", "P", "--reason", "ready")
+    command("abort", "--pipeline-code", "P", "--reason", "stop")
     command(
         "mark",
-        "--pipeline_code",
+        "--pipeline-code",
         "P",
         "--run-id",
         str(run_id),
@@ -495,21 +497,22 @@ def test_cli_actor_requests_and_read_only_audit(
         "verified",
     )
     capsys.readouterr()
-    command("audit", "--pipeline_code", "P", "--since", "2026-01-01")
+    command("audit", "--pipeline-code", "P", "--since", "2026-01-01")
     shown = capsys.readouterr().out
     assert actor_name in shown and "SERVICE" in shown and "REQUESTED" in shown
     assert "deleted_parameter_history" in shown
     assert "unrelated_parameter_history" not in shown
     command("setup", "--print-grants")
-    assert "file permissions" in capsys.readouterr().out if profile.auth_mode == "none" else True
-    command("history", "--pipeline_code", "P", "--run-id", str(run_id))
+    assert "file permissions" in capsys.readouterr().out if profile.auth_mode == "NONE" else True
+    command("history", "--pipeline-code", "P", "--run-id", str(run_id))
     assert "STARTED_BY" in capsys.readouterr().out
     with engine_db.engine.connect() as conn:
         actions = conn.execute(
             text("SELECT COMMAND, ACTOR, ACTOR_KIND FROM AUD_ACTIONS ORDER BY ACTION_ID")
         ).all()
         assert [tuple(row) for row in actions] == [
-            (name, actor_name, "SERVICE") for name in ("run", "pause", "resume", "abort", "mark")
+            (name, actor_name, "SERVICE")
+            for name in ("run", "control", "control", "control", "mark")
         ]
         row = conn.execute(
             text(
@@ -527,7 +530,7 @@ def test_cli_actor_requests_and_read_only_audit(
         ) == {"SERVICE"}
 
     monkeypatch.setenv("ETL_CRAFT_TOKEN", "invalid")
-    assert main(["--config", str(config), "run", "--pipeline_code", "P", "--init-only"]) == 3
+    assert main(["--config", str(config), "run", "--pipeline-code", "P", "--init-only"]) == 3
     assert "no signed-in account" in capsys.readouterr().err
     with engine_db.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one() == 5

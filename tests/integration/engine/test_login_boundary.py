@@ -9,14 +9,14 @@ from etl_craft.cli import main
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch, cli_logging):
     profile = engine_db.config.engine
-    block = {"jdbc_url": profile.jdbc_url, "schema": profile.schema or "main"}
-    if profile.auth_mode != "none":
-        block.update(user=profile.user, auth_mode=profile.auth_mode, secret=profile.secret_var)
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": profile.schema or "main"}
+    if profile.auth_mode != "NONE":
+        block.update(User=profile.user, Auth_mode=profile.auth_mode, Secret=profile.secret_var)
     path = tmp_path / "craft-connector.yml"
     path.write_text(
         yaml.safe_dump(
             {
-                "Secrets": {"Source_type": "environment"},
+                "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {},
                 "Engine": {"dev": block},
             },
@@ -29,11 +29,11 @@ def project(engine_db, tmp_path, monkeypatch, cli_logging):
 
 
 def test_read_commands_require_a_proven_account(project, capsys):
-    assert main(["list"]) == 3
+    assert main(["pipelines"]) == 3
     assert "no signed-in account" in capsys.readouterr().err
 
 
 def test_a_supplied_unknown_token_cannot_claim_an_identity(project, capsys, monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", "unregistered-token")
-    assert main(["list"]) == 3
+    assert main(["pipelines"]) == 3
     assert "set ETL_CRAFT_TOKEN for a service account" in capsys.readouterr().err

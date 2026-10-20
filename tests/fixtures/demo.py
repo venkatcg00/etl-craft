@@ -130,24 +130,24 @@ class Demo:
             self._rename_schemas()
         smtp = require("mailpit_smtp")
         raw = {
-            "Secrets": {"Source_type": "environment"},
+            "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {
                 "Task_timeout_seconds": 600,
                 "Max_parallel_tasks": 4,
                 "Enforce_sla": True,
                 "Email": {
-                    "host": smtp.host,
-                    "port": smtp.port,
-                    "from_address": "etl-craft@example.com",
-                    "from_name": "Support Insights",
-                    "tls_mode": "none",
+                    "Host": smtp.host,
+                    "Port": smtp.port,
+                    "From_address": "etl-craft@example.com",
+                    "From_name": "Support Insights",
+                    "Tls_mode": "NONE",
                 },
             },
             "Engine": {"dev": self._engine_profile()},
             "Warehouse": self._warehouse_section(),
             # Snowflake Iceberg copies need a Cloning external volume the test account lacks.
             "Cloning": {
-                "dev": {"Enabled": self.warehouse_kind != "snowflake_iceberg", "Scope": "all"}
+                "dev": {"Enabled": self.warehouse_kind != "snowflake_iceberg", "Scope": "ALL"}
             },
         }
         path = self.root / "craft-connector.yml"
@@ -177,13 +177,13 @@ class Demo:
 
     def _engine_profile(self) -> dict[str, Any]:
         if self.engine_kind == "sqlite":
-            return {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}
+            return {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}
         return {
-            "jdbc_url": f"jdbc:postgresql://{self._new_database('engine')}",
-            "schema": "public",
-            "user": POSTGRES_USER,
-            "auth_mode": "password",
-            "secret": PASSWORD_VAR,
+            "Jdbc_url": f"jdbc:postgresql://{self._new_database('engine')}",
+            "Schema": "public",
+            "User": POSTGRES_USER,
+            "Auth_mode": "PASSWORD",
+            "Secret": PASSWORD_VAR,
         }
 
     def _warehouse_section(self, schema: str | None = None) -> dict[str, Any]:
@@ -192,45 +192,45 @@ class Demo:
             return self._cloud_section(schema)
         if kind == "duckdb":
             self.catalog = "warehouse"
-            return {"dev": {"jdbc_url": "jdbc:duckdb:warehouse.duckdb", "schema": "aud"}}
+            return {"dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "aud"}}
         if kind == "postgres":
             address = self._new_database("warehouse")
             self.catalog = address.rsplit("/", 1)[1]
             profile = {
-                "jdbc_url": f"jdbc:postgresql://{address}",
-                "schema": "aud",
-                "user": POSTGRES_USER,
-                "auth_mode": "password",
-                "secret": PASSWORD_VAR,
+                "Jdbc_url": f"jdbc:postgresql://{address}",
+                "Schema": "aud",
+                "User": POSTGRES_USER,
+                "Auth_mode": "PASSWORD",
+                "Secret": PASSWORD_VAR,
             }
             return {"dev": profile}
         if kind == "trino_iceberg":
             trino = require("trino")
             self.catalog = "iceberg"
             profile = {
-                "jdbc_url": f"jdbc:trino://{trino.address}/iceberg/{self.prefix}aud",
-                "schema": f"{self.prefix}aud",
-                "user": "etl",
-                "auth_mode": "none",
+                "Jdbc_url": f"jdbc:trino://{trino.address}/iceberg/{self.prefix}aud",
+                "Schema": f"{self.prefix}aud",
+                "User": "etl",
+                "Auth_mode": "NONE",
             }
-            return {"Name": "Trino", "Table_format": "iceberg", "dev": profile}
+            return {"Name": "Trino", "Table_format": "ICEBERG", "dev": profile}
         catalog = require("iceberg_rest")
         minio = require("minio")
         self.catalog = "lake"
         profile = {
-            "jdbc_url": "jdbc:duckdb:",
-            "schema": f"{self.prefix}aud",
-            "catalog": "lake",
-            "catalog_uri": catalog.http_url,
-            "iceberg_warehouse": "s3://warehouse/",
-            "s3_endpoint": minio.address,
-            "s3_region": "us-east-1",
-            "s3_url_style": "path",
-            "s3_use_ssl": "false",
-            "s3_key_id": MINIO_USER,
-            "s3_secret": S3_VAR,
+            "Jdbc_url": "jdbc:duckdb:",
+            "Schema": f"{self.prefix}aud",
+            "Catalog": "lake",
+            "Catalog_uri": catalog.http_url,
+            "Iceberg_warehouse": "s3://warehouse/",
+            "S3_endpoint": minio.address,
+            "S3_region": "us-east-1",
+            "S3_url_style": "path",
+            "S3_use_ssl": "false",
+            "S3_key_id": MINIO_USER,
+            "S3_secret": S3_VAR,
         }
-        return {"Name": "DuckDB", "Table_format": "iceberg", "dev": profile}
+        return {"Name": "DuckDB", "Table_format": "ICEBERG", "dev": profile}
 
     def _cloud_section(self, schema: str | None) -> dict[str, Any]:
         vendor = "DATABRICKS" if self.warehouse_kind.startswith("databricks") else "SNOWFLAKE"
@@ -242,7 +242,7 @@ class Demo:
         ]
         if schema is not None:
             fields["schema"] = schema
-        table_format = "iceberg" if self.warehouse_kind.endswith("iceberg") else "native"
+        table_format = "ICEBERG" if self.warehouse_kind.endswith("iceberg") else "NATIVE"
         return {"Name": vendor.title(), "Table_format": table_format, "dev": fields}
 
     def _new_database(self, role: str) -> str:

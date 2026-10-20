@@ -102,7 +102,7 @@ downstream work consumes nothing; bypassed decisions also consume nothing. Pipel
 with their original admission decisions, while a retried task receives decisions for its new
 attempt. Skipped tasks can retain an unsatisfied decision without an execution attempt.
 
-`Orchestration.Dependency_gates: warn` or `off` relaxes these checks per profile, recording
+`Orchestration.Dependency_gates: WARN` or `off` relaxes these checks per profile, recording
 each bypass; see [Relax dependency gates](run-control.md#relax-dependency-gates).
 
 A pipeline whose dependencies are not satisfied has its run recorded `SKIPPED`. A task whose

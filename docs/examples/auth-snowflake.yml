@@ -1,13 +1,13 @@
 # Authentication types for Snowflake.
 #
 # One profile per type: set ETL_CRAFT_AUTH to the one you use.
-#   password  verified
-#   token     verified: a Programmatic Access Token (needs a network policy)
-#   key_file  RSA key pair: the private key's path, and its passphrase if it has one
-#   oauth     the connector's OAUTH_CLIENT_CREDENTIALS against your identity
+#   PASSWORD  verified
+#   TOKEN     verified: a Programmatic Access Token (needs a network policy)
+#   KEY_FILE  RSA key pair: the private key's path, and its passphrase if it has one
+#   OAUTH     the connector's OAUTH_CLIENT_CREDENTIALS against your identity
 #             provider's token_url
-#   sso       the connector's external browser login: interactive only
-#   sts       WORKLOAD_IDENTITY with the AWS provider: the ambient AWS identity,
+#   SSO       the connector's external browser login: interactive only
+#   STS       WORKLOAD_IDENTITY with the AWS provider: the ambient AWS identity,
 #             no stored secret
 #
 # Types marked verified have run against a live service in this project. The
@@ -24,7 +24,7 @@
 # file in this directory, for every profile it declares.
 
 Secrets:
-  Source_type: environment             # value
+  Source_type: ENVIRONMENT             # value
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
@@ -35,64 +35,64 @@ Orchestration:
 Engine:
   Profile: dev                         # value — this file varies only the login, not the Engine DB
   dev:
-    jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
-    schema: main                       # value — SQLite: the database file is the schema
+    Jdbc_url: jdbc:sqlite:etl-craft-engine.db  # value
+    Schema: main                       # value — SQLite: the database file is the schema
 
 Warehouse:
   Name: Snowflake                      # value
-  Table_format: native                 # value
+  Table_format: NATIVE                 # value
   password:
-    user: WAREHOUSE_USER               # variable
-    account: WAREHOUSE_ACCOUNT         # variable
-    database: WAREHOUSE_DATABASE       # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    warehouse: WAREHOUSE_WAREHOUSE     # variable
-    role: WAREHOUSE_ROLE               # variable
-    auth_mode: password                # value
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
+    User: WAREHOUSE_USER               # variable
+    Account: WAREHOUSE_ACCOUNT         # variable
+    Database: WAREHOUSE_DATABASE       # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Warehouse: WAREHOUSE_WAREHOUSE     # variable
+    Role: WAREHOUSE_ROLE               # variable
+    Auth_mode: PASSWORD                # value
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
   token:
-    user: WAREHOUSE_USER               # variable
-    account: WAREHOUSE_ACCOUNT         # variable
-    database: WAREHOUSE_DATABASE       # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    warehouse: WAREHOUSE_WAREHOUSE     # variable
-    role: WAREHOUSE_ROLE               # variable
-    token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — auth_mode is token
+    User: WAREHOUSE_USER               # variable
+    Account: WAREHOUSE_ACCOUNT         # variable
+    Database: WAREHOUSE_DATABASE       # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Warehouse: WAREHOUSE_WAREHOUSE     # variable
+    Role: WAREHOUSE_ROLE               # variable
+    Token: WAREHOUSE_TOKEN             # variable, required: a secret is never used as written — Auth_mode is TOKEN
   key_file:
-    user: WAREHOUSE_USER               # variable
-    account: WAREHOUSE_ACCOUNT         # variable
-    database: WAREHOUSE_DATABASE       # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    warehouse: WAREHOUSE_WAREHOUSE     # variable
-    role: WAREHOUSE_ROLE               # variable
-    auth_mode: key_file                # value
-    key_file: WAREHOUSE_KEY_FILE       # variable
-    secret: WAREHOUSE_SECRET           # variable — the key's passphrase; leave the line out for a key without one
+    User: WAREHOUSE_USER               # variable
+    Account: WAREHOUSE_ACCOUNT         # variable
+    Database: WAREHOUSE_DATABASE       # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Warehouse: WAREHOUSE_WAREHOUSE     # variable
+    Role: WAREHOUSE_ROLE               # variable
+    Auth_mode: KEY_FILE                # value
+    Key_file: WAREHOUSE_KEY_FILE       # variable
+    Secret: WAREHOUSE_SECRET           # variable — the key's passphrase; leave the line out for a key without one
   oauth:
-    user: WAREHOUSE_USER               # variable
-    account: WAREHOUSE_ACCOUNT         # variable
-    database: WAREHOUSE_DATABASE       # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    warehouse: WAREHOUSE_WAREHOUSE     # variable
-    role: WAREHOUSE_ROLE               # variable
-    auth_mode: oauth                   # value
-    client_id: WAREHOUSE_CLIENT_ID     # variable
-    secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the client secret
-    token_url: WAREHOUSE_TOKEN_URL     # variable
-    scope: WAREHOUSE_SCOPE             # variable
+    User: WAREHOUSE_USER               # variable
+    Account: WAREHOUSE_ACCOUNT         # variable
+    Database: WAREHOUSE_DATABASE       # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Warehouse: WAREHOUSE_WAREHOUSE     # variable
+    Role: WAREHOUSE_ROLE               # variable
+    Auth_mode: OAUTH                   # value
+    Client_id: WAREHOUSE_CLIENT_ID     # variable
+    Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written — the client secret
+    Token_url: WAREHOUSE_TOKEN_URL     # variable
+    Scope: WAREHOUSE_SCOPE             # variable
   sso:
-    user: WAREHOUSE_USER               # variable
-    account: WAREHOUSE_ACCOUNT         # variable
-    database: WAREHOUSE_DATABASE       # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    warehouse: WAREHOUSE_WAREHOUSE     # variable
-    role: WAREHOUSE_ROLE               # variable
-    auth_mode: sso                     # value
+    User: WAREHOUSE_USER               # variable
+    Account: WAREHOUSE_ACCOUNT         # variable
+    Database: WAREHOUSE_DATABASE       # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Warehouse: WAREHOUSE_WAREHOUSE     # variable
+    Role: WAREHOUSE_ROLE               # variable
+    Auth_mode: SSO                     # value
   sts:
-    user: WAREHOUSE_USER               # variable
-    account: WAREHOUSE_ACCOUNT         # variable
-    database: WAREHOUSE_DATABASE       # variable
-    schema: WAREHOUSE_SCHEMA           # variable
-    warehouse: WAREHOUSE_WAREHOUSE     # variable
-    role: WAREHOUSE_ROLE               # variable
-    auth_mode: sts                     # value
+    User: WAREHOUSE_USER               # variable
+    Account: WAREHOUSE_ACCOUNT         # variable
+    Database: WAREHOUSE_DATABASE       # variable
+    Schema: WAREHOUSE_SCHEMA           # variable
+    Warehouse: WAREHOUSE_WAREHOUSE     # variable
+    Role: WAREHOUSE_ROLE               # variable
+    Auth_mode: STS                     # value

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
 
 
@@ -24,8 +25,7 @@ class SourceColumn:
 
 def fetch_source_columns(conn: Connection) -> list[SourceColumn]:
     """Read source definitions without connecting to the warehouse."""
-    name = "cfg_columns" if conn.dialect.name == "postgresql" else "CFG_COLUMNS"
-    if not inspect(conn).has_table(name):
+    if not for_engine(conn).has_table(conn, "CFG_COLUMNS"):
         return [
             SourceColumn(*row)
             for row in conn.execute(

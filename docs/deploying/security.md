@@ -2,7 +2,7 @@
 
 ## Secrets
 
-`craft-connector.yml` never holds a secret. Every `secret` (and every other credential field)
+`craft-connector.yml` never holds a secret. Every `Secret` (and every other credential field)
 names a variable, looked up in the process environment or in the `.env`-style file
 `Secrets.Path` points at (see [Variables and values](../examples/README.md#variables-and-values)).
 A secret whose variable is not set or is empty stops every command when the file is loaded; it is never
@@ -16,7 +16,7 @@ a script that needs a credential reads it from its environment. Values in
 
 Credential query keys (`password`, `pwd`, `passwd`, `token`, `access_token`, `secret` and
 `private_key_file_pwd`, in any case) are refused in JDBC URLs; name the secret variable in
-`secret` instead. DuckDB's `s3_secret` is also stored as a variable name and resolved for each
+`Secret` instead. DuckDB's `S3_secret` is also stored as a variable name and resolved for each
 new connection, so its value is never retained in the configuration object.
 
 Duplicate YAML keys are refused with their section and both line numbers. Relative key,
@@ -87,29 +87,31 @@ server installation they sign in to it instead, and never hold its Engine DB or 
 credentials:
 
 ```bash
-etl-craft login --server https://etl.example.com      # password, or SSO when it is configured
-etl-craft status --pipeline_code SALES --server https://etl.example.com
-export ETL_CRAFT_SERVER=https://etl.example.com      # or name the server once per session
-etl-craft history --pipeline_code SALES --all
+etl-craft login --controller https://etl.example.com      # password, or SSO when it is configured
+etl-craft status --pipeline-code SALES --controller https://etl.example.com
+export ETL_CRAFT_CONTROLLER=https://etl.example.com      # or name the server once per session
+etl-craft history --pipeline-code SALES --all
 etl-craft logs --attempt-id 4812
 etl-craft logout
 ```
 
-- **Sign-in.** `login --server` sends the password once to the server, or, for SSO, shows the
+- **Sign-in.** `login --controller` sends the password once to the server, or, for SSO, shows the
   issuer's code while the server runs the device flow and verifies the ID token. The server
   issues a one-hour access token and a refresh token that lasts `Auth.Refresh_days` (default
   30). The credential file keeps both, under the server's address, and the CLI renews the access
   token when it expires. `logout`, disabling the account or revoking the refresh token ends the
   session.
-- **Only HTTPS.** `--server` refuses plain HTTP except to `localhost`, and refuses redirects.
-- **What works.** `status`, `explain`, `history`, `logs`, `whoami`, `run` (a run, a backfill
-  with `--backfill`, or a rerun with `--rerun --task_code`), `pause`, `resume`, `mark`,
-  `stop`, `abort`, `hold` and `release`, within the account's role, with the same text and JSON output and exit codes as on
-  the server's own project.
-- **What does not.** `config`, `migrate`, `init-db`, `setup`, `account` and `token` change
-  metadata or the Engine DB and are refused against a server, naming the server-side way:
-  config files and migrations reach a server only through its own deployment, by CI or an
-  admin. Other commands work on a local project only.
+- **Only HTTPS.** `--controller` refuses plain HTTP except to `localhost`, and refuses redirects.
+- **What works.** Every action the [actions reference](../reference/actions.md) marks as
+  running anywhere: `run` (a run, a backfill with `--backfill`, or a rerun with `--rerun
+  --task-code`), `mark`, `stop`, `abort`, `hold`, `release`, `pause`, `resume`, `status`,
+  `explain`, `history`, `steps`, `graph`, `pipelines`, `audit`, `lineage`, `validate`,
+  `logs`, `whoami`, `account`, `token` and the maintenance commands, within the account's role,
+  with the same text and JSON output and exit codes as on the controller's own project.
+- **What does not.** `config`, `migrate`, `init-db`, `setup`, `doctor`, `controller` and
+  `publish-docs` run on the controller's host only and are refused against a controller,
+  naming where to run them: config files and migrations reach a controller only through its own
+  deployment, by CI or an admin.
 - **Automation.** CI and external schedulers keep a service token in `ETL_CRAFT_TOKEN`, with no refresh.
 - **Errors.** A server that cannot be reached, or that answers with something other than
   etl-craft JSON, exits **27**. Every other refusal keeps its own exit code.
@@ -126,7 +128,7 @@ only where the metadata tells it to.
 |---|---|
 | Engine DB (PostgreSQL) | `USAGE` on the Engine DB schema; `CREATE` on it for `setup` and `migrate`, which a deployment account can run instead; `SELECT`, `INSERT`, `UPDATE` and `DELETE` on its tables, and `USAGE` on their sequences |
 | Warehouse | `SELECT` on the schemas tasks read; in the schemas they write, the rights to create tables (for `CREATE_TABLE` and `SETUP_TABLE`), insert, update, delete and drop them (for `DROP_TABLE`); the same in the cloning schema when [cloning](cloning.md) is on |
-| Email relay | an account that may send as `from_address`, or a relay that needs none |
+| Email relay | an account that may send as `From_address`, or a relay that needs none |
 
 Your team writes the `CFG_` rows; the account etl-craft runs as only needs to read them, but
 `setup` needs the same rights on them as on the other Engine DB tables.
@@ -141,7 +143,7 @@ review them like any code that runs in production.
 ## Connections
 
 Use TLS where the database offers it: for PostgreSQL, `sslmode=require` or `verify-full` in the
-URL, or a client certificate with `auth_mode: key_file`. The auth modes each connection accepts,
+URL, or a client certificate with `Auth_mode: KEY_FILE`. The auth modes each connection accepts,
 and which are verified against a live service here, are in
 [Authentication](../connectors/authentication.md).
 

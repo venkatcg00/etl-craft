@@ -8,10 +8,13 @@ import threading
 from importlib.util import find_spec
 from types import FrameType
 
-from etl_craft.cli.commands.common import Command, command_context
+from etl_craft.cli.commands.common import Command, command_context, on_host
 from etl_craft.cli.output import Output
 from etl_craft.controller.supervisor import serve
+from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
+from etl_craft.services.operations.actions import admitted
+from etl_craft.services.operations.requests import NoInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
@@ -19,6 +22,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
+    on_host(args, ActionName.CONTROLLER)
     stop = threading.Event()
 
     def stopping(signum: int, frame: FrameType | None) -> None:
@@ -28,11 +32,14 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         number: signal.signal(number, stopping) for number in (signal.SIGTERM, signal.SIGINT)
     }
     try:
-        with command_context(args, role="controller") as ctx:
+        with (
+            command_context(args, role="controller") as ctx,
+            admitted(ctx, ActionName.CONTROLLER, NoInput()),
+        ):
             if find_spec("fastapi") is None or find_spec("uvicorn") is None:
                 serve(ctx, stop)
             else:
-                from etl_craft.api.server import serve_http
+                from etl_craft.api.serve import serve_http
 
                 serve_http(ctx, stop)
     finally:
@@ -42,5 +49,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 
 COMMAND = Command(
-    "controller", "supervise active local pipeline runs", run=_run, configure=_configure
+    "controller",
+    "Schedule and supervise pipeline runs until stopped.",
+    run=_run,
+    configure=_configure,
+    actions=(ActionName.CONTROLLER,),
 )

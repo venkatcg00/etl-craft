@@ -10,8 +10,10 @@ from etl_craft.config.loader_helpers import (
     Profiled,
     auth_extra,
     bounded_number,
+    field_keys,
     reject_unknown,
     relative_to_config,
+    shown,
 )
 from etl_craft.config.model import DEFAULT_SENDMAIL_PATH, EmailProfile
 from etl_craft.config.resolve import Resolver
@@ -36,29 +38,31 @@ def parse_email(orchestration: Profiled, path: Path, resolver: Resolver) -> Emai
     where = orchestration.where("Email")
     if not isinstance(block, dict):
         raise ConfigurationError(f"{path}: {where} must be a mapping")
-    reject_unknown(block, EMAIL_KEYS, where, path)
+    block = field_keys(block, where, path)
+    reject_unknown(block, EMAIL_KEYS, where, path, fields=True)
     fields = Fields(block, where, orchestration.profile, resolver, path)
-    transport = fields.value("transport") or "smtp"
+    transport = fields.value("transport") or EmailTransport.SMTP
     transport = enum_value(
         EmailTransport,
         transport,
         ConfigurationError(
-            f"{path}: {where}.transport resolved to {transport!r}, which is not one of "
+            f"{path}: {where}.Transport resolved to {transport!r}, which is not one of "
             f"{', '.join(EmailTransport)}{fields.hint('transport')}"
         ),
     )
     name = orchestration.profile or "default"
-    if transport == "sendmail":
+    if transport == EmailTransport.SENDMAIL:
         smtp_only = sorted(set(block) & _SMTP_ONLY_EMAIL_KEYS)
         if smtp_only:
             raise ConfigurationError(
-                f"{path}: {where} sends through sendmail, so {', '.join(smtp_only)} would be "
-                "ignored; remove them, or set transport: smtp"
+                f"{path}: {where} sends through sendmail, so "
+                f"{', '.join(map(shown, smtp_only))} would be ignored; remove them, or set "
+                "Transport: SMTP"
             )
         return _sendmail(fields, name, path)
     if "sendmail_path" in block:
         raise ConfigurationError(
-            f"{path}: {where}.sendmail_path applies only with transport: sendmail"
+            f"{path}: {where}.Sendmail_path applies only with Transport: SENDMAIL"
         )
     port = bounded_number(
         fields.resolver.resolve(
@@ -73,25 +77,25 @@ def parse_email(orchestration: Profiled, path: Path, resolver: Resolver) -> Emai
     auth_mode = fields.value("auth_mode") or AuthMode.NONE
     if auth_mode not in EMAIL_AUTH_FIELDS:
         raise ConfigurationError(
-            f"{path}: {where}.auth_mode resolved to {auth_mode!r}, which is not one of "
-            f"{sorted(EMAIL_AUTH_FIELDS)}{fields.hint('auth_mode')}"
+            f"{path}: {where}.Auth_mode resolved to {auth_mode!r}, which is not one of "
+            f"{', '.join(sorted(EMAIL_AUTH_FIELDS))}{fields.hint('auth_mode')}"
         )
     user = fields.value("user") or ""
     extra = auth_extra(fields, auth_mode, EMAIL_AUTH_FIELDS[auth_mode], user=user)
-    tls_mode = fields.value("tls_mode") or "starttls"
+    tls_mode = fields.value("tls_mode") or TlsMode.STARTTLS
     tls_mode = enum_value(
         TlsMode,
         tls_mode,
         ConfigurationError(
-            f"{path}: {where}.tls_mode resolved to {tls_mode!r}, which is not one of "
-            f"none, starttls, ssl{fields.hint('tls_mode')}"
+            f"{path}: {where}.Tls_mode resolved to {tls_mode!r}, which is not one of "
+            f"{', '.join(TlsMode)}{fields.hint('tls_mode')}"
         ),
     )
     ca_file = fields.value("ca_file")
-    if ca_file and tls_mode == "none":
+    if ca_file and tls_mode == TlsMode.NONE:
         raise ConfigurationError(
-            f"{path}: {where}.ca_file={ca_file!r} would be ignored with tls_mode=none; "
-            "set tls_mode to starttls or ssl, or remove ca_file"
+            f"{path}: {where}.Ca_file={ca_file!r} would be ignored with Tls_mode=NONE; "
+            "set Tls_mode to STARTTLS or SSL, or remove Ca_file"
         )
     return EmailProfile(
         section="EMAIL",
@@ -116,7 +120,7 @@ def _sendmail(fields: Fields, name: str, path: Path) -> EmailProfile:
         port=0,
         from_address=fields.value("from_address", required=True) or "",
         from_name=fields.value("from_name") or "",
-        transport="sendmail",
+        transport=EmailTransport.SENDMAIL,
         sendmail_path=str(
             relative_to_config(fields.value("sendmail_path") or DEFAULT_SENDMAIL_PATH, path)
         ),

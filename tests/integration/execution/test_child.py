@@ -33,14 +33,14 @@ def bound(engine_db, tmp_path):
     """A config file, a task T with parameter X=1, and its row bound under a run."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
-    block = {"jdbc_url": profile.jdbc_url, "schema": schema}
-    if profile.auth_mode != "none":
-        block |= {"user": profile.user, "auth_mode": "password", "secret": profile.secret_var}
+    block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
+    if profile.auth_mode != "NONE":
+        block |= {"User": profile.user, "Auth_mode": "PASSWORD", "Secret": profile.secret_var}
     config_path = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent / (
         "craft-connector.yml"
     )
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
         "Engine": {"dev": block},
     }
@@ -151,7 +151,7 @@ def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch, 
     with engine.begin() as conn:
         transitions.finish_task_run(conn, task_run_id, status=RunStatus.FAILED)
         conn.execute(text("UPDATE CFG_TASKS SET HANDLER = 'EMAIL_ALERT'"))
-    code = cli_main(["run", "--pipeline_code", "P", "--task_code", "T"])
+    code = cli_main(["run", "--pipeline-code", "P", "--task-code", "T"])
     assert code == ExitCode.FAILURE
     message = "EMAIL_TO is required: one or more addresses separated by '|'"
     assert capsys.readouterr().out == f"T: FAILED — {message}\n"
@@ -159,4 +159,4 @@ def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch, 
     # A settled task is skipped and exits 0.
     with engine.begin() as conn:
         transitions.finish_task_run(conn, task_run_id, status=RunStatus.SUCCESS)
-    assert cli_main(["run", "--pipeline_code", "P", "--task_code", "T"]) == ExitCode.SUCCESS
+    assert cli_main(["run", "--pipeline-code", "P", "--task-code", "T"]) == ExitCode.SUCCESS

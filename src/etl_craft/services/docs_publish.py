@@ -42,7 +42,7 @@ from etl_craft.config import ConnectorConfig, DocsSiteConfig
 from etl_craft.config.resolve import source_values
 from etl_craft.core.errors import ConfigurationError, LockTimeoutError
 from etl_craft.engine.repository.docs_site import fetch_publication, record_publication
-from etl_craft.services.catalog_storage import MARKER, prepare_site_lock, site_lock
+from etl_craft.services.catalog.storage import MARKER, prepare_site_lock, site_lock
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +294,7 @@ def authtoken(config: ConnectorConfig) -> str:
     if name is None:
         raise ConfigurationError(
             "publishing through ngrok needs Docs_site.Authtoken: the name of the variable "
-            "holding your ngrok authtoken (or publish on this machine with --local-only)"
+            "holding your ngrok authtoken (or publish on this machine with `local_only`)"
         )
     value = source_values(config.source).get(name)
     if not value:
@@ -321,6 +321,6 @@ def _check_url(engine: Engine, url: str, *, accept_new_url: bool) -> None:
             raise ConfigurationError(
                 f"the catalog was published at {before.url}, and publishing now gives {url}; links "
                 "already shared would break. Keep Docs_site.External_url or Domain stable, or "
-                "publish with --accept-new-url to use the new one from now on"
+                "publish with `accept_new_url` to use the new one from now on"
             )
         record_publication(conn, url)

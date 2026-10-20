@@ -8,23 +8,23 @@ engine also emails when a run misses its pipeline's SLA.
 
 The `Email` block of the active `Orchestration` profile says how, in one of two ways:
 
-| `transport` | Sends through | Settings |
+| `Transport` | Sends through | Settings |
 |---|---|---|
-| `smtp` (the default) | an SMTP relay | `host`, `port`, `from_address`, `from_name`, `tls_mode`, optional `ca_file`, and `auth_mode`: `none`, `password` (`user`, `secret`) or `oauth` (SMTP XOAUTH2: `user`, `client_id`, `secret`, `token_url`) |
-| `sendmail` | the host's own `sendmail` program, the one `mailx` and `mail` use | `from_address`, `from_name`, and `sendmail_path` when it is not `/usr/sbin/sendmail` |
+| `smtp` (the default) | an SMTP relay | `Host`, `Port`, `From_address`, `From_name`, `Tls_mode`, optional `Ca_file`, and `Auth_mode`: `NONE`, `PASSWORD` (`User`, `Secret`) or `OAUTH` (SMTP XOAUTH2: `User`, `Client_id`, `Secret`, `Token_url`) |
+| `sendmail` | the host's own `sendmail` program, the one `mailx` and `mail` use | `From_address`, `From_name`, and `Sendmail_path` when it is not `/usr/sbin/sendmail` |
 
-`from_address` is the sender's address and `from_name`, optional, the name shown with it, as in
+`From_address` is the sender's address and `From_name`, optional, the name shown with it, as in
 `ETL Craft <etl@example.com>`. With `sendmail` the engine hands each message to the program, with the recipients taken from its
-headers and `from_address` as the sender, and the host's mail system delivers it. Host, port and
+headers and `From_address` as the sender, and the host's mail system delivers it. Host, port and
 login settings are refused there, since they would be ignored. Before a run starts, the engine
 checks the relay answers using its TLS mode, or the program exists and can run. A failed email
 preflight is logged and data tasks may still run; the alert task records any delivery failure.
 
-`tls_mode` is `starttls` (the default), `ssl` for implicit TLS (usually port 465), or `none`
+`Tls_mode` is `STARTTLS` (the default), `SSL` for implicit TLS (usually port 465), or `NONE`
 for an unauthenticated internal relay. Both TLS modes verify the relay's certificate and hostname.
-`ca_file` names a CA certificate file; a relative path starts at the project directory. Omit it
+`Ca_file` names a CA certificate file; a relative path starts at the project directory. Omit it
 to use system trust. `doctor` shows the mode and trust source and checks the TLS connection without
-logging in. Password and OAuth authentication require `starttls` or `ssl`; `none` is refused with
+logging in. Password and OAuth authentication require `STARTTLS` or `SSL`; `NONE` is refused with
 either login mode.
 
 With `sendmail`, TLS and login settings are refused because the host's mail system owns delivery.

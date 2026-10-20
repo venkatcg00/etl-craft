@@ -10,16 +10,16 @@ intervention, the message it had before.
 ## Choose the run
 
 `run`, `mark`, `stop`, `abort`, `hold`, `release`, `history` and `steps` accept `--run-id 42` or
-`--run-key 'manual:...'`. The identity must belong to `--pipeline_code`. Without a selector,
+`--run-key 'manual:...'`. The identity must belong to `--pipeline-code`. Without a selector,
 operations use the pipeline's single non-terminal whole-pipeline run. Independent manual
 selections always require an explicit selector to resume. When none or several exist, the command
 refuses and lists candidates with their id, key, trigger kind, run date and status. It never
 selects a completed run by recency.
 
 ```bash
-etl-craft history --pipeline_code SALES_DAILY --all
-etl-craft history --pipeline_code SALES_DAILY --run-id 42
-etl-craft steps --pipeline_code SALES_DAILY --run-id 42
+etl-craft history --pipeline-code SALES_DAILY --all
+etl-craft history --pipeline-code SALES_DAILY --run-id 42
+etl-craft steps --pipeline-code SALES_DAILY --run-id 42
 ```
 
 `history --all --limit 20` lists runs for finding an identity. `steps` shows each task's status
@@ -30,7 +30,7 @@ under the selected run alongside its current metadata parameters. Creating a run
 ## Mark a task
 
 ```bash
-etl-craft mark --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --status SUCCESS \
+etl-craft mark --pipeline-code SALES_DAILY --run-id 42 --task-code load_orders --status SUCCESS \
     --reason "loaded by hand from the 06:00 file"
 ```
 
@@ -44,8 +44,8 @@ A second whole-pipeline command refuses while the run remains owned. Every `run`
 expired leases before admission, or you can request reconciliation directly:
 
 ```bash
-etl-craft reconcile --pipeline_code SALES_DAILY
-etl-craft reconcile --pipeline_code SALES_DAILY --task_code load_orders
+etl-craft reconcile --pipeline-code SALES_DAILY
+etl-craft reconcile --pipeline-code SALES_DAILY --task-code load_orders
 ```
 
 Without filters, `reconcile` checks every pipeline. An expired local attempt becomes `LOST` and
@@ -62,7 +62,7 @@ Old attempt owners cannot write outcomes after expiry or after a newer attempt s
 marking. It refuses while the task remains live; it does not override a valid lease.
 
 ```bash
-etl-craft mark --pipeline_code SALES_DAILY --task_code load_orders --status FAILED --stale \
+etl-craft mark --pipeline-code SALES_DAILY --task-code load_orders --status FAILED --stale \
     --reason "the host restarted at 03:10"
 ```
 
@@ -70,7 +70,7 @@ If an explicitly selected run has ended, it is reopened (`IN-PROGRESS` again), a
 without running are reset, so running the pipeline again resumes it from there:
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY
+etl-craft run --pipeline-code SALES_DAILY
 ```
 
 Mark a failed task `SUCCESS` and the tasks waiting on it run; the rest of the run is not repeated.
@@ -79,14 +79,14 @@ Mark a task `FAILED` and it gets another attempt.
 A marked `SUCCESS` satisfies a `HAS_DATA` dependency only when you state the row count:
 
 ```bash
-etl-craft mark --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --status SUCCESS \
+etl-craft mark --pipeline-code SALES_DAILY --run-id 42 --task-code load_orders --status SUCCESS \
     --rows 1200 --reason "1200 rows loaded by hand"
 ```
 
 ## Reset a SQL watermark
 
 ```bash
-etl-craft mark --pipeline_code SALES --task_code events --run-id 42 \
+etl-craft mark --pipeline-code SALES --task-code events --run-id 42 \
   --watermark '2026-01-01T00:00:00' --reason 'reload corrected source history'
 ```
 
@@ -94,7 +94,7 @@ The task must be a SQL task with `WATERMARK_COLUMN`, `WATERMARK_TYPE` and `WATER
 The value is checked against that type. Select an exact existing run with `--run-id` or
 `--run-key`, or the single active run, for the intervention record. This resets the task's
 position for its next execution; it changes no status or past range. To rerun an already
-successful task, use `run --rerun --task_code ... --run-id ... --reason ...` afterwards.
+successful task, use `run --rerun --task-code ... --run-id ... --reason ...` afterwards.
 
 The request needs a reason and cannot combine `--watermark` with `--status`, `--rows`,
 `--stale` or `--new-run`. Queued, claimed and running attempts refuse the reset until they end
@@ -107,10 +107,10 @@ by a different task run: use a merge when reloading earlier successful batches.
 
 ## Mark a run
 
-Without `--task_code`, `mark` sets the run itself, ending it now if it had not ended:
+Without `--task-code`, `mark` sets the run itself, ending it now if it had not ended:
 
 ```bash
-etl-craft mark --pipeline_code SALES_DAILY --status SUCCESS --reason "load_orders is not needed today"
+etl-craft mark --pipeline-code SALES_DAILY --status SUCCESS --reason "load_orders is not needed today"
 ```
 
 The pipelines that depend on this one judge the marked status. Its tasks keep theirs, and no
@@ -123,13 +123,13 @@ dependents' gates would never pass. `mark --new-run` records a finished run of i
 really run, and the gates judge it like any other:
 
 ```bash
-etl-craft mark --pipeline_code CRM_EXPORT --new-run --status SUCCESS \
+etl-craft mark --pipeline-code CRM_EXPORT --new-run --status SUCCESS \
     --reason "CRM_EXPORT only runs in production"
-etl-craft mark --pipeline_code CRM_EXPORT --new-run --task_code publish --status SUCCESS \
+etl-craft mark --pipeline-code CRM_EXPORT --new-run --task-code publish --status SUCCESS \
     --rows 50 --reason "stand-in for a HAS_DATA dependency on CRM_EXPORT.publish"
 ```
 
-With `--task_code`, the task gets a row in the stand-in run too, for dependencies on that task.
+With `--task-code`, the task gets a row in the stand-in run too, for dependencies on that task.
 A pipeline with a run in progress is refused: mark that run, or stop or abort it.
 
 ## Stop or abort a run
@@ -141,14 +141,14 @@ A pipeline with a run in progress is refused: mark that run, or stop or abort it
 | `hold` | finish and keep their own outcome | blocked until `release` | the run stays `IN-PROGRESS` |
 
 ```bash
-etl-craft abort --pipeline_code SALES_DAILY --reason "the source sent yesterday's file"
-etl-craft stop --pipeline_code SALES_DAILY --run-id 42 --reason "drain before maintenance"
-etl-craft abort --pipeline_code SALES_DAILY --run-id 42 --task_code extract --reason "wrong input"
-etl-craft status --request-id 17 --format json
+etl-craft abort --pipeline-code SALES_DAILY --reason "the source sent yesterday's file"
+etl-craft stop --pipeline-code SALES_DAILY --run-id 42 --reason "drain before maintenance"
+etl-craft abort --pipeline-code SALES_DAILY --run-id 42 --task-code extract --reason "wrong input"
+etl-craft control-request --control-id 17 --format json
 ```
 
 Each acts on the selected run: `--run-id`, `--run-key`, or the pipeline's single active run.
-Add `--task_code TASK` to affect only that task under the selected run. Other tasks, pipelines and
+Add `--task-code TASK` to affect only that task under the selected run. Other tasks, pipelines and
 independent manual runs keep running. Abort does not undo warehouse commits. Successful results,
 counts, logs, checkpoints and recorded consumption remain intact.
 
@@ -181,10 +181,10 @@ control until its current check finishes, rather than claiming its query has sto
 ## Hold or release dispatch in a selected run
 
 ```bash
-etl-craft hold --pipeline_code SALES_DAILY --run-id 42 --reason "hold dispatch"
-etl-craft hold --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "inspect input"
-etl-craft release --pipeline_code SALES_DAILY --run-id 42 --task_code transform --reason "ready"
-etl-craft release --pipeline_code SALES_DAILY --run-id 42 --reason "resume dispatch"
+etl-craft hold --pipeline-code SALES_DAILY --run-id 42 --reason "hold dispatch"
+etl-craft hold --pipeline-code SALES_DAILY --run-id 42 --task-code transform --reason "inspect input"
+etl-craft release --pipeline-code SALES_DAILY --run-id 42 --task-code transform --reason "ready"
+etl-craft release --pipeline-code SALES_DAILY --run-id 42 --reason "resume dispatch"
 ```
 
 Holds block new admission, including force and retry claims, while existing attempts finish. A task hold
@@ -197,17 +197,17 @@ Release refuses until an earlier stop/abort in that scope has completed.
 holds are independent: `release` does not clear a definition pause, and `resume` does not release
 a hold.
 
-HTTP clients use `POST /api/v1/pipelines/{code}/controls` with `action` (`HOLD`, `RELEASE`,
+HTTP clients use `POST /api/v1/controls` with `pipeline_code`, `action` (`HOLD`, `RELEASE`,
 `STOP`, `ABORT`), `reason`, optional `run_id`/`run_key`, `task_code` and `request_key`.
-`GET /api/v1/control-requests/{control_id}` returns the same document as `status --request-id`.
-Controls require operator; inspection requires viewer. Local and `--server` commands call the
+`GET /api/v1/control-requests/{control_id}` returns the same document as `control-request`.
+Controls require operator; inspection requires viewer. Local and `--controller` commands call the
 same services and preserve the authenticated actor.
 
 ## Pause and resume a pipeline
 
 ```bash
-etl-craft pause --pipeline_code SALES_DAILY --reason "the CRM is being migrated this week"
-etl-craft resume --pipeline_code SALES_DAILY --reason "the migration is done"
+etl-craft pause --pipeline-code SALES_DAILY --reason "the CRM is being migrated this week"
+etl-craft resume --pipeline-code SALES_DAILY --reason "the migration is done"
 ```
 
 While a pipeline is paused, `etl-craft run` starts nothing of it (whole runs, single tasks and
@@ -215,14 +215,14 @@ While a pipeline is paused, `etl-craft run` starts nothing of it (whole runs, si
 scheduler that keeps calling it raises no alarm. A run in progress when the pipeline is paused
 lets its running tasks finish, starts no more, and stays `IN-PROGRESS`; the interrupted run
 command exits `22` (`INCOMPLETE`). After `resume`, the next
-`run --pipeline_code` goes on with it. `etl-craft list` and the catalog show every paused
+`run --pipeline-code` goes on with it. `etl-craft pipelines` and the catalog show every paused
 pipeline, and `AUD_PIPELINE_PAUSES` keeps every pause with who paused and resumed it, when and
 why.
 
 ## Skip a run on purpose
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --skip --reason "public holiday: no sales file"
+etl-craft run --pipeline-code SALES_DAILY --skip --reason "public holiday: no sales file"
 ```
 
 Records a run of the pipeline `SKIPPED`, running nothing, as a stand-in run does (see
@@ -232,7 +232,7 @@ did nothing: a `SUCCESS` dependency on it is not satisfied, an `ALWAYS` one is.
 ## Backfill over dates
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --backfill 2026-09-01:2026-09-07 \
+etl-craft run --pipeline-code SALES_DAILY --backfill 2026-09-01:2026-09-07 \
     --reason "the source resent the first week of September"
 ```
 
@@ -244,13 +244,13 @@ reason), and scripts get no offset and store none. The backfill stops at the fir
 not end `SUCCESS` or `SKIPPED`, and says how to take up from that date once it is fixed. It runs
 at most 366 dates, and not while the pipeline has a run in progress or is paused.
 
-A single run can be given its date too: `etl-craft run --pipeline_code SALES_DAILY --run-date
+A single run can be given its date too: `etl-craft run --pipeline-code SALES_DAILY --run-date
 2026-09-01`. `etl-craft history --all` shows each run's date, and which were backfill runs.
 
 ## Run a task without its dependencies
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --task_code load_orders --ignore-dependencies \
+etl-craft run --pipeline-code SALES_DAILY --task-code load_orders --ignore-dependencies \
     --reason "extract_orders is late; the file is already in place"
 ```
 
@@ -261,9 +261,9 @@ its pipeline or elsewhere, and consumes no upstream run. A task that already end
 ## Run a task again
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --rerun \
+etl-craft run --pipeline-code SALES_DAILY --run-id 42 --task-code load_orders --rerun \
     --reason "the source resent the file"
-etl-craft run --pipeline_code SALES_DAILY --run-id 42 --task_code load_orders --rerun --with-downstream \
+etl-craft run --pipeline-code SALES_DAILY --run-id 42 --task-code load_orders --rerun --with-downstream \
     --reason "the source resent the file"
 ```
 
@@ -273,7 +273,7 @@ dependencies being checked. With `--with-downstream`, every task after it runs a
 dependency order, each once its own dependencies are satisfied; those whose dependencies are not
 (an alert that waits for a failure, say) keep their rows. A run that had ended is reopened for
 this and ended again from its tasks' statuses; a run still in progress is left for
-`run --pipeline_code` to finish.
+`run --pipeline-code` to finish.
 
 ## Relax dependency gates
 
@@ -286,7 +286,7 @@ relaxes that per profile:
 ```yaml
 Orchestration:
   dev:
-    Dependency_gates: warn     # enforce (the default) | warn | off
+    Dependency_gates: WARN     # enforce (the default) | warn | off
 ```
 
 - `enforce` checks every dependency and skips the run or the task when one is not satisfied.
@@ -299,7 +299,7 @@ warns whenever gates are not enforced.
 
 ## What was changed
 
-`etl-craft history --pipeline_code SALES_DAILY --all` lists the interventions on the runs it shows,
+`etl-craft history --pipeline-code SALES_DAILY --all` lists the interventions on the runs it shows,
 under the runs, and the [catalog](catalog.md) lists those on each pipeline's last run.
 `AUD_RUN_INTERVENTIONS` holds marks, reruns and dependency overrides below. Historical `CANCEL`
 rows remain readable. New scoped controls, including cancellation, live in `AUD_CONTROL_REQUESTS`;
@@ -333,9 +333,9 @@ pipeline admission and records fresh dependency decisions. A manual restart reta
 selection and dependency-override intent; it never publishes or consumes pipeline outputs.
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --run-id 42 --recover \
+etl-craft run --pipeline-code SALES_DAILY --run-id 42 --recover \
     --request-key recover-42 --reason "repaired input" --format json
-etl-craft run --pipeline_code SALES_DAILY --run-id 42 --restart \
+etl-craft run --pipeline-code SALES_DAILY --run-id 42 --restart \
     --request-key restart-42 --reason "new execution with current checkpoints" --format json
 ```
 
@@ -343,7 +343,7 @@ These commands **prepare** work and return promptly with a durable `control_id` 
 `execution_run_id`. `COMPLETED` means preparation committed, not that any task succeeded.
 `pipeline_run_id` remains the source identity; inspect the execution run separately. On a server,
 the controller picks up eligible whole-pipeline contexts. Locally, execute the returned identity
-with `etl-craft run --pipeline_code SALES_DAILY --run-id EXECUTION_ID`; add `--task_code TASK`
+with `etl-craft run --pipeline-code SALES_DAILY --run-id EXECUTION_ID`; add `--task-code TASK`
 when recovering only a task in an existing run. An independent restart selection can be driven
 with `run --run-id EXECUTION_ID` without recreating its selection. Reusing a request key returns
 the original preparation even after the execution finishes. A new restart key deliberately
@@ -363,30 +363,30 @@ source fence. Successful and skipped evidence is never reset by recovery.
 For an existing exact execution, authorize a one-run exception with a reason:
 
 ```bash
-etl-craft run --pipeline_code SALES_DAILY --run-id 43 --allow-paused \
+etl-craft run --pipeline-code SALES_DAILY --run-id 43 --allow-paused \
     --request-key manual-43 --reason "approved maintenance run"
-etl-craft run --pipeline_code SALES_DAILY --run-id 43
+etl-craft run --pipeline-code SALES_DAILY --run-id 43
 ```
 
 This permission lasts for that run. The definition pause stays open and blocks automatic starts
 and other executions. It grants no release of a scoped hold, stop fence, dependency requirement
 or human data lock. To create a new context directly, omit the run selector and provide a request key:
-`run --pipeline_code SALES_DAILY --allow-paused --request-key maintenance-1 --reason ...`.
-Add `--task_code TASK` for an isolated one-task context; the existing standalone isolation and
+`run --pipeline-code SALES_DAILY --allow-paused --request-key maintenance-1 --reason ...`.
+Add `--task-code TASK` for an isolated one-task context; the existing standalone isolation and
 outside-dependency checks still apply. Creation and permission commit together, and repeated
 keys return the same context. A new whole-pipeline context is queued for ordinary dependency
 admission; isolated task contexts require explicit execution. Automatic schedules remain paused.
 
 ## Inspect capabilities and apply an explicit selection
 
-`status --capabilities` exposes the same scoped action/state/handler and role decisions as the
+`etl-craft capabilities` exposes the same scoped action/state/handler and role decisions as the
 HTTP API. A refusal includes its remedy; inspection does not request or release a control.
 An action always revalidates under the execution's locks, so an available snapshot is not a
 reservation. Existing task `explain` output describes run readiness and dependency blockers.
 
 ```bash
-etl-craft status --pipeline_code SALES_DAILY --run-id 43 --task_code transform \
-    --capabilities --format json
+etl-craft capabilities --pipeline-code SALES_DAILY --run-id 43 --task-code transform \
+    --format json
 etl-craft run --controls-file selected-controls.json --format json
 ```
 
@@ -406,11 +406,11 @@ Only selected objects are affected. Results include each accepted control or its
 refusal; this is not an all-or-nothing transaction. A nonzero CLI exit means at least one object
 refused, while earlier accepted actions remain committed. Retry the same selection with the
 same keys to inspect accepted requests safely. Bulk preparation does not wait for task execution
-or agent/query endings. The same flags support `--server`.
+or agent/query endings. The same flags support `--controller`.
 
-The shared HTTP routes are `GET /api/v1/pipelines/{code}/capabilities`,
-`POST /api/v1/pipelines/{code}/controls` (including `RECOVER`, `RESTART`, `RUN_PAUSED`) and
+The shared HTTP routes are `GET /api/v1/capabilities`,
+`POST /api/v1/controls` (including `RECOVER`, `RESTART`, `RUN_PAUSED`) and
 `POST /api/v1/controls/bulk` with `{"requests": [...]}`. Viewers can inspect capabilities and
 requests; operators can submit actions. `execution_run_id` is additive in `etl-craft/control/1`.
-Legacy external orchestrators still require their own agent/query adapter; capabilities name
-that limitation rather than claiming a native action completed.
+Server-side queries without a cancellation adapter are named as a limitation in the
+capabilities rather than claimed as stopped.

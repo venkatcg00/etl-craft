@@ -25,7 +25,7 @@
     },
     "arguments": {
       "src/etl_craft/core/text.py": 9,
-      "src/etl_craft/engine/repository/interventions.py": 5,
+      "src/etl_craft/engine/repository/intervention_rows.py": 5,
       "src/etl_craft/engine/transitions.py": 20,
       "src/etl_craft/execution/attempt_records.py": 2,
       "src/etl_craft/execution/events.py": 2,
@@ -42,9 +42,7 @@
       "src/etl_craft/services/cloning.py": 1,
       "src/etl_craft/services/docs_publish.py": 1,
       "src/etl_craft/services/operations/results.py": 3,
-      "src/etl_craft/services/operations/runs.py": 5,
-      "src/etl_craft/services/operations/status.py": 3,
-      "src/etl_craft/services/operations/tasks.py": 4
+      "src/etl_craft/services/operations/status.py": 3
     },
     "branches": {
       "src/etl_craft/core/text.py": 2,
@@ -54,7 +52,7 @@
       "src/etl_craft/services/config_files.py": 12
     },
     "broad-except": {
-      "src/etl_craft/api/server.py": 1,
+      "src/etl_craft/api/serve.py": 1,
       "src/etl_craft/cli/__init__.py": 1,
       "src/etl_craft/execution/attempt_records.py": 1,
       "src/etl_craft/execution/child.py": 1,
@@ -83,26 +81,6 @@
       "src/etl_craft/execution/scheduler.py": 5,
       "src/etl_craft/services/config_files.py": 7
     },
-    "dialect-branch": {
-      "src/etl_craft/engine/connection.py": 1,
-      "src/etl_craft/engine/repository/normalization.py": 2,
-      "src/etl_craft/engine/repository/source_columns.py": 1,
-      "src/etl_craft/services/doctor.py": 1,
-      "src/etl_craft/services/validate.py": 1,
-      "src/etl_craft/warehouse/connection.py": 1
-    },
-    "enum-literal": {
-      "src/etl_craft/engine/transitions.py": 2,
-      "src/etl_craft/execution/interventions.py": 2,
-      "src/etl_craft/execution/runner.py": 1,
-      "src/etl_craft/execution/scheduler.py": 2,
-      "src/etl_craft/handlers/email_alert.py": 4,
-      "src/etl_craft/handlers/registry.py": 4,
-      "src/etl_craft/services/catalog.py": 1,
-      "src/etl_craft/services/catalog_graph.py": 3,
-      "src/etl_craft/services/rehash.py": 2,
-      "src/etl_craft/services/upgrade_targets.py": 4
-    },
     "function-lines": {
       "src/etl_craft/core/text.py": 19,
       "src/etl_craft/engine/repository/source_contracts.py": 7,
@@ -113,26 +91,24 @@
       "src/etl_craft/handlers/python_scripts.py": 3,
       "src/etl_craft/handlers/sql/actions.py": 2,
       "src/etl_craft/handlers/sql/spec.py": 3,
-      "src/etl_craft/services/catalog.py": 31,
+      "src/etl_craft/services/catalog/collect.py": 31,
       "src/etl_craft/services/config_files.py": 27,
       "src/etl_craft/services/lineage.py": 35,
-      "src/etl_craft/services/operations/runs.py": 8,
       "src/etl_craft/services/operations/status.py": 52
     },
     "inline-sql": {
       "src/etl_craft/engine/connection.py": 1,
-      "src/etl_craft/engine/privileges.py": 1,
       "src/etl_craft/engine/repository/audit_reads.py": 4,
       "src/etl_craft/engine/repository/config_rows.py": 1,
       "src/etl_craft/engine/repository/normalization.py": 2,
       "src/etl_craft/engine/repository/source_columns.py": 1,
       "src/etl_craft/execution/connections.py": 1,
-      "src/etl_craft/services/catalog.py": 1,
+      "src/etl_craft/services/catalog/collect.py": 1,
       "src/etl_craft/services/cloning.py": 4,
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 126,
+      "src/etl_craft/engine/transitions.py": 125,
       "src/etl_craft/services/config_files.py": 13
     },
     "no-cover": {
@@ -141,13 +117,9 @@
     "noqa": {
       "src/etl_craft/core/filelock.py": 1
     },
-    "private-import": {
-      "src/etl_craft/execution/scheduler.py": 1,
-      "src/etl_craft/services/operations/tasks.py": 1
-    },
     "statements": {
       "src/etl_craft/execution/scheduler.py": 14,
-      "src/etl_craft/services/catalog.py": 9
+      "src/etl_craft/services/catalog/collect.py": 9
     },
     "type-ignore": {
       "src/etl_craft/execution/run_types.py": 1,

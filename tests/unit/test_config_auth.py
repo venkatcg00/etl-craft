@@ -51,15 +51,15 @@ def test_the_postgres_warehouse_authenticates_like_the_engine_db():
 @pytest.mark.parametrize(
     ("name", "table_format", "key"),
     [
-        ("postgresql+psycopg", "native", "postgres"),
-        ("duckdb", "native", "duckdb"),
-        ("duckdb", "iceberg", "duckdb_iceberg"),
-        ("trino", "native", "trino_iceberg"),  # the catalog decides; always Iceberg
-        ("trino", "iceberg", "trino_iceberg"),
-        ("databricks", "native", "databricks"),
-        ("databricks", "iceberg", "databricks_iceberg"),
-        ("snowflake", "native", "snowflake"),
-        ("snowflake", "iceberg", "snowflake_iceberg"),
+        ("postgresql+psycopg", "NATIVE", "postgres"),
+        ("duckdb", "NATIVE", "duckdb"),
+        ("duckdb", "ICEBERG", "duckdb_iceberg"),
+        ("trino", "NATIVE", "trino_iceberg"),  # the catalog decides; always Iceberg
+        ("trino", "ICEBERG", "trino_iceberg"),
+        ("databricks", "NATIVE", "databricks"),
+        ("databricks", "ICEBERG", "databricks_iceberg"),
+        ("snowflake", "NATIVE", "snowflake"),
+        ("snowflake", "ICEBERG", "snowflake_iceberg"),
     ],
 )
 def test_warehouse_spec(name, table_format, key):
@@ -69,7 +69,7 @@ def test_warehouse_spec(name, table_format, key):
 
 def test_postgres_has_no_iceberg_tables():
     with pytest.raises(ConfigurationError, match="always native"):
-        auth.warehouse_spec("postgresql", "iceberg")
+        auth.warehouse_spec("postgresql", "ICEBERG")
 
 
 def test_a_database_without_a_dialect_is_refused():

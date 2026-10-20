@@ -52,11 +52,11 @@ class RunSelector:
     def __post_init__(self) -> None:
         """Refuse conflicting or empty identities before looking at any run."""
         if self.run_id is not None and self.run_key is not None:
-            raise RunStateError("choose --run-id or --run-key, not both")
+            raise RunStateError("choose `run_id` or `run_key`, not both")
         if self.run_id is not None and self.run_id < 1:
-            raise RunStateError("--run-id must be a positive integer")
+            raise RunStateError("`run_id` must be a positive integer")
         if self.run_key is not None and not self.run_key.strip():
-            raise RunStateError("--run-key must not be empty")
+            raise RunStateError("`run_key` must not be empty")
 
 
 ACTIVE_RUN = RunSelector()
@@ -119,9 +119,9 @@ def select_run(
     )
     raise RunStateError(
         f"pipeline_id={pipeline_id}: run selection matched {len(matches)} runs "
-        f"(--run-id={selector.run_id!r}, --run-key={selector.run_key!r}); expected exactly one. "
-        "Pass --run-id or --run-key belonging to this pipeline, or start a new run with "
-        "--init-only. Candidates:\n" + listed
+        f"(`run_id`={selector.run_id!r}, `run_key`={selector.run_key!r}); expected exactly one. "
+        "Give `run_id` or `run_key` belonging to this pipeline, or start a new run with "
+        "`init_only`. Candidates:\n" + listed
     )
 
 

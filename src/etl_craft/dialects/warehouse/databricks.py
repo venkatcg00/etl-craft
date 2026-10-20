@@ -16,7 +16,7 @@ from etl_craft.core.enums import AuthMode, FailureClass, TableFormat
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.failures import Failure
 from etl_craft.dialects import credentials
-from etl_craft.dialects.failures import driver_error, state_class
+from etl_craft.dialects.failure_evidence import driver_error, state_class
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,

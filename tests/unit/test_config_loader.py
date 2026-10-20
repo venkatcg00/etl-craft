@@ -44,9 +44,9 @@ def _write(tmp_path: Path, raw: dict) -> Path:
 
 def _minimal(**sections) -> dict:
     raw = {
-        "Secrets": {"Source_type": "environment"},
+        "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},
-        "Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"}},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
     }
     raw.update(sections)
     return raw
@@ -55,54 +55,54 @@ def _minimal(**sections) -> dict:
 def test_the_shipped_example_loads_for_dev_with_nothing_set():
     config = load_config(EXAMPLE)
     assert config.engine.jdbc_url == "jdbc:sqlite:etl-craft-engine.db"
-    assert config.engine.auth_mode == "none"
+    assert config.engine.auth_mode == "NONE"
     assert config.warehouse is not None
     # A relative DuckDB file is found beside the config file.
     assert config.warehouse.jdbc_url == f"jdbc:duckdb:{EXAMPLE.parent / 'warehouse.duckdb'}"
-    assert config.warehouse_table_format == "native"
+    assert config.warehouse_table_format == "NATIVE"
     assert config.email is None
     assert config.cloning.enabled is False
 
 
-@pytest.mark.parametrize("mode", ["none", "starttls", "ssl"])
+@pytest.mark.parametrize("mode", ["NONE", "STARTTLS", "SSL"])
 def test_email_tls_modes_and_relative_ca_files(tmp_path, mode, monkeypatch):
     raw = _minimal()
     raw["Orchestration"]["Email"] = {
-        "host": "smtp.example.com",
-        "port": 465,
-        "from_address": "etl@example.com",
-        "tls_mode": mode,
+        "Host": "smtp.example.com",
+        "Port": 465,
+        "From_address": "etl@example.com",
+        "Tls_mode": mode,
     }
-    if mode != "none":
-        raw["Orchestration"]["Email"]["ca_file"] = "certs/ca.pem"
+    if mode != "NONE":
+        raw["Orchestration"]["Email"]["Ca_file"] = "certs/ca.pem"
     path = _write(tmp_path, raw)
     monkeypatch.chdir(tmp_path.parent)
     profile = load_config(path).email
     assert profile.tls_mode == mode
-    assert profile.ca_file == (tmp_path / "certs/ca.pem" if mode != "none" else None)
+    assert profile.ca_file == (tmp_path / "certs/ca.pem" if mode != "NONE" else None)
 
 
 @pytest.mark.parametrize("mode", ["tls", "required", "invalid"])
 def test_unknown_email_tls_modes_are_refused(tmp_path, mode):
     raw = _minimal()
     raw["Orchestration"]["Email"] = {
-        "host": "smtp.example.com",
-        "port": 587,
-        "from_address": "etl@example.com",
-        "tls_mode": mode,
+        "Host": "smtp.example.com",
+        "Port": 587,
+        "From_address": "etl@example.com",
+        "Tls_mode": mode,
     }
-    with pytest.raises(ConfigurationError, match=r"tls_mode.*not one of none, starttls, ssl"):
+    with pytest.raises(ConfigurationError, match=r"Tls_mode.*not one of NONE, STARTTLS, SSL"):
         load_config(_write(tmp_path, raw))
 
 
 def test_email_tls_defaults_to_starttls_and_use_tls_is_refused(tmp_path):
     raw = _minimal()
     raw["Orchestration"]["Email"] = {
-        "host": "smtp.example.com",
-        "port": 587,
-        "from_address": "etl@example.com",
+        "Host": "smtp.example.com",
+        "Port": 587,
+        "From_address": "etl@example.com",
     }
-    assert load_config(_write(tmp_path, raw)).email.tls_mode == "starttls"
+    assert load_config(_write(tmp_path, raw)).email.tls_mode == "STARTTLS"
     raw["Orchestration"]["Email"]["use_tls"] = False
     with pytest.raises(ConfigurationError, match="use_tls"):
         load_config(_write(tmp_path, raw))
@@ -111,15 +111,15 @@ def test_email_tls_defaults_to_starttls_and_use_tls_is_refused(tmp_path):
 @pytest.mark.parametrize(
     ("extra", "message"),
     [
-        ({"tls_mode": "none", "ca_file": "ca.pem"}, "would be ignored"),
-        ({"transport": "sendmail", "tls_mode": "ssl"}, "tls_mode would be ignored"),
+        ({"Tls_mode": "NONE", "Ca_file": "ca.pem"}, "would be ignored"),
+        ({"Transport": "SENDMAIL", "Tls_mode": "SSL"}, "Tls_mode would be ignored"),
     ],
 )
 def test_email_settings_that_conflict_or_would_be_ignored_are_refused(tmp_path, extra, message):
     raw = _minimal()
-    email = {"from_address": "etl@example.com", **extra}
-    if extra.get("transport") != "sendmail":
-        email.update(host="smtp.example.com", port=587)
+    email = {"From_address": "etl@example.com", **extra}
+    if extra.get("Transport") != "SENDMAIL":
+        email.update(Host="smtp.example.com", Port=587)
     raw["Orchestration"]["Email"] = email
     with pytest.raises(ConfigurationError, match=message):
         load_config(_write(tmp_path, raw))
@@ -136,16 +136,16 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monke
     for name, value in {
         "ENGINE_JDBC_URL": "jdbc:postgresql://db/etl",
         "ENGINE_USER": "etl",
-        "ENGINE_AUTH_MODE": "password",
+        "ENGINE_AUTH_MODE": "PASSWORD",
         "WAREHOUSE_JDBC_URL": "jdbc:postgresql://db/wh",
         "WAREHOUSE_USER": "wh",
-        "WAREHOUSE_AUTH_MODE": "password",
+        "WAREHOUSE_AUTH_MODE": "PASSWORD",
         "EMAIL_HOST": "smtp.internal",
         "EMAIL_PORT": "587",
         "EMAIL_FROM": "etl@example.com",
-        "EMAIL_AUTH_MODE": "password",
+        "EMAIL_AUTH_MODE": "PASSWORD",
         "EMAIL_USER": "etl",
-        "EMAIL_TLS_MODE": "starttls",
+        "EMAIL_TLS_MODE": "STARTTLS",
         # Secrets must be set for the selected profile; their values are
         # never read back into the config object.
         "ENGINE_SECRET": "x",
@@ -162,17 +162,17 @@ def test_the_shipped_example_prod_profile_overrides_and_resolves(tmp_path, monke
     assert config.email.port == 587
     assert config.email.secret_var == "EMAIL_SECRET"
     assert config.email_recipients == ["data-alerts@example.com"]
-    assert config.cloning.enabled is True and config.cloning.scope == "all"
+    assert config.cloning.enabled is True and config.cloning.scope == "ALL"
 
 
 def test_profile_selection_order(tmp_path, monkeypatch):
     raw = _minimal(
-        Secrets={"Source_type": "environment", "Profile": "sit"},
+        Secrets={"Source_type": "ENVIRONMENT", "Profile": "sit"},
         Engine={
             "Profile": "uat",
-            "sit": {"jdbc_url": "jdbc:sqlite:sit.db", "schema": "main"},
-            "uat": {"jdbc_url": "jdbc:sqlite:uat.db", "schema": "main"},
-            "prod": {"jdbc_url": "jdbc:sqlite:prod.db", "schema": "main"},
+            "sit": {"Jdbc_url": "jdbc:sqlite:sit.db", "Schema": "main"},
+            "uat": {"Jdbc_url": "jdbc:sqlite:uat.db", "Schema": "main"},
+            "prod": {"Jdbc_url": "jdbc:sqlite:prod.db", "Schema": "main"},
         },
     )
     path = _write(tmp_path, raw)
@@ -189,10 +189,10 @@ def test_profile_selection_order(tmp_path, monkeypatch):
 
 def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
     raw = _minimal(
-        Secrets={"Source_type": "environment", "Profile": "ACTIVE_PROFILE"},
+        Secrets={"Source_type": "ENVIRONMENT", "Profile": "ACTIVE_PROFILE"},
         Engine={
-            "dev": {"jdbc_url": "jdbc:sqlite:dev.db", "schema": "main"},
-            "prod": {"jdbc_url": "jdbc:sqlite:prod.db", "schema": "main"},
+            "dev": {"Jdbc_url": "jdbc:sqlite:dev.db", "Schema": "main"},
+            "prod": {"Jdbc_url": "jdbc:sqlite:prod.db", "Schema": "main"},
         },
     )
     path = _write(tmp_path, raw)
@@ -210,8 +210,8 @@ def test_a_profile_can_name_a_variable(tmp_path, monkeypatch):
 def test_an_unselected_multi_profile_section_is_refused(tmp_path):
     raw = _minimal(
         Engine={
-            "dev": {"jdbc_url": "jdbc:sqlite:a.db", "schema": "main"},
-            "prod": {"jdbc_url": "jdbc:sqlite:b.db", "schema": "main"},
+            "dev": {"Jdbc_url": "jdbc:sqlite:a.db", "Schema": "main"},
+            "prod": {"Jdbc_url": "jdbc:sqlite:b.db", "Schema": "main"},
         }
     )
     with pytest.raises(ConfigurationError, match="none is selected"):
@@ -219,7 +219,7 @@ def test_an_unselected_multi_profile_section_is_refused(tmp_path):
 
 
 def test_a_missing_profile_names_the_ones_that_exist(tmp_path):
-    raw = _minimal(Secrets={"Source_type": "environment", "Profile": "qa"})
+    raw = _minimal(Secrets={"Source_type": "ENVIRONMENT", "Profile": "qa"})
     with pytest.raises(ConfigurationError, match=r"no profile 'qa' \(it has \['dev'\]\)"):
         load_config(_write(tmp_path, raw))
 
@@ -256,14 +256,14 @@ def test_the_source_itself_can_come_from_the_environment(tmp_path, monkeypatch):
     (tmp_path / "deploy.env").write_text("ENGINE_URL=jdbc:sqlite:from-file.db\n", "utf-8")
     raw = _minimal(
         Secrets={"Source_type": "SECRETS_SOURCE", "Path": "SECRETS_FILE"},
-        Engine={"dev": {"jdbc_url": "ENGINE_URL", "schema": "main"}},
+        Engine={"dev": {"Jdbc_url": "ENGINE_URL", "Schema": "main"}},
     )
-    monkeypatch.setenv("SECRETS_SOURCE", "file")
+    monkeypatch.setenv("SECRETS_SOURCE", "FILE")
     monkeypatch.setenv("SECRETS_FILE", "deploy.env")
     # Everything past Secrets resolves against the file, not the environment.
     monkeypatch.setenv("ENGINE_URL", "jdbc:sqlite:from-environment.db")
     config = load_config(_write(tmp_path, raw))
-    assert config.source.type == "file"
+    assert config.source.type == "FILE"
     assert config.engine.jdbc_url == "jdbc:sqlite:from-file.db"
 
 
@@ -271,11 +271,11 @@ def test_a_secret_is_never_taken_as_written(tmp_path):
     raw = _minimal(
         Engine={
             "dev": {
-                "jdbc_url": "jdbc:postgresql://db/etl",
-                "schema": "main",
-                "user": "etl",
-                "auth_mode": "password",
-                "secret": "hunter2!",
+                "Jdbc_url": "jdbc:postgresql://db/etl",
+                "Schema": "main",
+                "User": "etl",
+                "Auth_mode": "PASSWORD",
+                "Secret": "hunter2!",
             }
         }
     )
@@ -289,18 +289,18 @@ def test_tier_scoped_variables_win_over_the_plain_name(tmp_path, monkeypatch):
     raw = _minimal(
         Engine={
             "prod": {
-                "jdbc_url": "ENGINE_JDBC_URL",
-                "schema": "main",
-                "user": "ENGINE_USER",
-                "auth_mode": "ENGINE_AUTH_MODE",
-                "secret": "ENGINE_SECRET",
+                "Jdbc_url": "ENGINE_JDBC_URL",
+                "Schema": "main",
+                "User": "ENGINE_USER",
+                "Auth_mode": "ENGINE_AUTH_MODE",
+                "Secret": "ENGINE_SECRET",
             }
         }
     )
     monkeypatch.setenv("ENGINE_JDBC_URL", "jdbc:postgresql://shared/etl")
     monkeypatch.setenv("ENGINE_PROD_JDBC_URL", "jdbc:postgresql://prod/etl")
     monkeypatch.setenv("ENGINE_USER", "etl")
-    monkeypatch.setenv("ENGINE_AUTH_MODE", "password")
+    monkeypatch.setenv("ENGINE_AUTH_MODE", "PASSWORD")
     monkeypatch.setenv("ENGINE_PROD_SECRET", "p")
     engine = load_config(_write(tmp_path, raw)).engine
     assert engine.jdbc_url == "jdbc:postgresql://prod/etl"
@@ -309,40 +309,40 @@ def test_tier_scoped_variables_win_over_the_plain_name(tmp_path, monkeypatch):
 
 def test_values_come_from_a_secrets_file_relative_to_the_config(tmp_path):
     (tmp_path / "secrets.env").write_text(
-        "WH_URL=jdbc:postgresql://wh/analytics\nWH_USER=analyst\nWH_AUTH=password\n"
+        "WH_URL=jdbc:postgresql://wh/analytics\nWH_USER=analyst\nWH_AUTH=PASSWORD\n"
         "WH_SECRET=hunter2\n",
         encoding="utf-8",
     )
     raw = _minimal(
-        Secrets={"Source_type": "File", "Path": "secrets.env"},
+        Secrets={"Source_type": "FILE", "Path": "secrets.env"},
         Warehouse={
             "Name": "Postgres",
             "dev": {
-                "jdbc_url": "WH_URL",
-                "schema": "main",
-                "user": "WH_USER",
-                "auth_mode": "WH_AUTH",
-                "secret": "WH_SECRET",
+                "Jdbc_url": "WH_URL",
+                "Schema": "main",
+                "User": "WH_USER",
+                "Auth_mode": "WH_AUTH",
+                "Secret": "WH_SECRET",
             },
         },
     )
     config = load_config(_write(tmp_path, raw))
-    assert config.source.type == "file"
+    assert config.source.type == "FILE"
     assert config.warehouse is not None
     assert config.warehouse.user == "analyst"
 
 
 def test_a_literal_jdbc_url_is_accepted_but_a_literal_secret_is_not(tmp_path, monkeypatch):
-    monkeypatch.setenv("ENGINE_AUTH_MODE", "password")
+    monkeypatch.setenv("ENGINE_AUTH_MODE", "PASSWORD")
     monkeypatch.setenv("ENGINE_USER", "etl")
     raw = _minimal(
         Engine={
             "dev": {
-                "jdbc_url": "jdbc:postgresql://db/etl",
-                "schema": "main",
-                "user": "ENGINE_USER",
-                "auth_mode": "ENGINE_AUTH_MODE",
-                "secret": "hunter2!",
+                "Jdbc_url": "jdbc:postgresql://db/etl",
+                "Schema": "main",
+                "User": "ENGINE_USER",
+                "Auth_mode": "ENGINE_AUTH_MODE",
+                "Secret": "hunter2!",
             }
         }
     )
@@ -356,15 +356,15 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
     monkeypatch.delenv("ENGINE_PROD_SECRET", raising=False)
     monkeypatch.setenv("ENGINE_USER", "etl")
     raw = _minimal(
-        Secrets={"Source_type": "environment", "Profile": "prod"},
+        Secrets={"Source_type": "ENVIRONMENT", "Profile": "prod"},
         Engine={
-            "dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "main"},
+            "dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"},
             "prod": {
-                "jdbc_url": "jdbc:postgresql://db/etl",
-                "schema": "main",
-                "user": "ENGINE_USER",
-                "auth_mode": "password",
-                "secret": "ENGINE_SECRET",
+                "Jdbc_url": "jdbc:postgresql://db/etl",
+                "Schema": "main",
+                "User": "ENGINE_USER",
+                "Auth_mode": "PASSWORD",
+                "Secret": "ENGINE_SECRET",
             },
         },
     )
@@ -372,7 +372,7 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
     # Both names it would accept are given: the profile's own and the plain one.
     with pytest.raises(
         ConfigurationError,
-        match=r"Engine\.prod\.secret names the secret variable 'ENGINE_PROD_SECRET' or "
+        match=r"Engine\.prod\.Secret names the secret variable 'ENGINE_PROD_SECRET' or "
         r"'ENGINE_SECRET', which is not set in the process environment",
     ):
         load_config(path)
@@ -382,15 +382,15 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
     # Only the selected profile's secrets are checked: dev needs none of them.
     monkeypatch.delenv("ENGINE_SECRET")
     raw["Secrets"]["Profile"] = "dev"
-    assert load_config(_write(tmp_path, raw)).engine.auth_mode == "none"
+    assert load_config(_write(tmp_path, raw)).engine.auth_mode == "NONE"
 
     # The same rule for a secrets file, and for token and s3_secret fields.
     (tmp_path / "s.env").write_text("DBX_URL=jdbc:databricks://h:443/default\n", encoding="utf-8")
     dbx = _minimal(
-        Secrets={"Source_type": "file", "Path": "s.env"},
+        Secrets={"Source_type": "FILE", "Path": "s.env"},
         Warehouse={
             "Name": "Databricks",
-            "dev": {"jdbc_url": "DBX_URL", "catalog": "main", "schema": "a", "token": "DBX_TOKEN"},
+            "dev": {"Jdbc_url": "DBX_URL", "Catalog": "main", "Schema": "a", "Token": "DBX_TOKEN"},
         },
     )
     with pytest.raises(
@@ -400,15 +400,15 @@ def test_a_secret_variable_that_is_not_set_is_a_load_time_error(tmp_path, monkey
     iceberg = _minimal(
         Warehouse={
             "Name": "DuckDB",
-            "Table_format": "iceberg",
+            "Table_format": "ICEBERG",
             "dev": {
-                "jdbc_url": "jdbc:duckdb:",
-                "schema": "main",
-                "catalog": "lake",
-                "catalog_uri": "http://localhost:8181",
-                "iceberg_warehouse": "s3://lake",
-                "s3_key_id": "minio",
-                "s3_secret": "LAKE_S3_SECRET",
+                "Jdbc_url": "jdbc:duckdb:",
+                "Schema": "main",
+                "Catalog": "lake",
+                "Catalog_uri": "http://localhost:8181",
+                "Iceberg_warehouse": "s3://lake",
+                "S3_key_id": "minio",
+                "S3_secret": "LAKE_S3_SECRET",
             },
         }
     )
@@ -422,7 +422,7 @@ def test_unknown_sections_and_profiles_are_refused_naming_the_expected_ones(tmp_
     with pytest.raises(ConfigurationError, match=r"unknown top-level section\(s\) \['Execution'"):
         load_config(_write(tmp_path, legacy))
     variables = _minimal(
-        Engine={"Profile": "dev", "Variables": {"jdbc_url": "X", "schema": "main"}}
+        Engine={"Profile": "dev", "Variables": {"Jdbc_url": "X", "Schema": "main"}}
     )
     with pytest.raises(
         ConfigurationError, match=r"Engine has no profile 'dev' \(it has \['Variables'\]\)"
@@ -452,7 +452,7 @@ def test_unknown_sections_and_keys_are_refused(tmp_path):
         load_config(_write(tmp_path, _minimal(Warehosue={})))
     with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['Retires'\]"):
         load_config(_write(tmp_path, _minimal(Orchestration={"Retires": 1})))
-    typo = _minimal(Engine={"dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main", "usr": "X"}})
+    typo = _minimal(Engine={"dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main", "usr": "X"}})
     with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['usr'\] in Engine.dev"):
         load_config(_write(tmp_path, typo))
 
@@ -461,43 +461,43 @@ def test_unknown_sections_and_keys_are_refused(tmp_path):
     ("engine", "message"),
     [
         (
-            {"Name": "Postgres", "dev": {"jdbc_url": "jdbc:sqlite:e.db", "schema": "main"}},
+            {"Name": "Postgres", "dev": {"Jdbc_url": "jdbc:sqlite:e.db", "Schema": "main"}},
             "is a sqlite URL",
         ),
         (
-            {"dev": {"jdbc_url": "jdbc:mysql://h/db", "schema": "main"}},
+            {"dev": {"Jdbc_url": "jdbc:mysql://h/db", "Schema": "main"}},
             "not a supported Engine DB URL",
         ),
         (
             {
                 "dev": {
-                    "jdbc_url": "jdbc:sqlite:e.db",
-                    "schema": "main",
-                    "auth_mode": "ENGINE_AUTH_MODE",
+                    "Jdbc_url": "jdbc:sqlite:e.db",
+                    "Schema": "main",
+                    "Auth_mode": "ENGINE_AUTH_MODE",
                 }
             },
-            "takes \\['none'\\]",
+            "takes NONE",
         ),
     ],
 )
 def test_engine_validation(tmp_path, monkeypatch, engine, message):
-    monkeypatch.setenv("ENGINE_AUTH_MODE", "password")
+    monkeypatch.setenv("ENGINE_AUTH_MODE", "PASSWORD")
     with pytest.raises(ConfigurationError, match=message):
         load_config(_write(tmp_path, _minimal(Engine=engine)))
 
 
 def test_warehouse_table_format_defaults_to_native_and_postgres_refuses_iceberg(tmp_path):
-    raw = _minimal(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:wh.duckdb", "schema": "main"}})
-    assert load_config(_write(tmp_path, raw)).warehouse_table_format == "native"
+    raw = _minimal(Warehouse={"dev": {"Jdbc_url": "jdbc:duckdb:wh.duckdb", "Schema": "main"}})
+    assert load_config(_write(tmp_path, raw)).warehouse_table_format == "NATIVE"
     iceberg_postgres = _minimal(
         Warehouse={
-            "Table_format": "iceberg",
+            "Table_format": "ICEBERG",
             "dev": {
-                "jdbc_url": "jdbc:postgresql://h/wh",
-                "schema": "main",
-                "user": "WH_USER",
-                "auth_mode": "WH_AUTH",
-                "secret": "WH_SECRET",
+                "Jdbc_url": "jdbc:postgresql://h/wh",
+                "Schema": "main",
+                "User": "WH_USER",
+                "Auth_mode": "WH_AUTH",
+                "Secret": "WH_SECRET",
             },
         }
     )
@@ -509,7 +509,7 @@ def test_warehouse_name_must_match_its_jdbc_url(tmp_path):
     raw = _minimal(
         Warehouse={
             "Name": "Snowflake",
-            "dev": {"jdbc_url": "jdbc:duckdb:w.duckdb", "schema": "main"},
+            "dev": {"Jdbc_url": "jdbc:duckdb:w.duckdb", "Schema": "main"},
         }
     )
     with pytest.raises(ConfigurationError, match="resolves to 'duckdb'"):
@@ -519,22 +519,22 @@ def test_warehouse_name_must_match_its_jdbc_url(tmp_path):
 def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, monkeypatch):
     # Refused while loading, not at the first connection: a DuckDB file has
     # nothing to present a key to, and Trino has no AWS IAM login.
-    monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "key_file")
+    monkeypatch.setenv("WAREHOUSE_AUTH_MODE", "KEY_FILE")
     duckdb = _minimal(
         Warehouse={
             "dev": {
-                "jdbc_url": "jdbc:duckdb:w.duckdb",
-                "schema": "main",
-                "auth_mode": "WAREHOUSE_AUTH_MODE",
+                "Jdbc_url": "jdbc:duckdb:w.duckdb",
+                "Schema": "main",
+                "Auth_mode": "WAREHOUSE_AUTH_MODE",
             }
         }
     )
-    with pytest.raises(ConfigurationError, match=r"DuckDB warehouse takes \['none'\]"):
+    with pytest.raises(ConfigurationError, match=r"DuckDB warehouse takes NONE"):
         load_config(_write(tmp_path, duckdb))
     trino = _minimal(
         Warehouse={
             "Name": "Trino",
-            "dev": {"jdbc_url": "jdbc:trino://t:8080/iceberg/a", "schema": "a", "auth_mode": "sts"},
+            "dev": {"Jdbc_url": "jdbc:trino://t:8080/iceberg/a", "Schema": "a", "Auth_mode": "STS"},
         }
     )
     with pytest.raises(ConfigurationError, match="Trino warehouse takes"):
@@ -547,31 +547,31 @@ def test_an_auth_mode_a_warehouse_does_not_offer_is_refused_at_load(tmp_path, mo
         # Each auth mode names the fields it needs; a missing one is reported.
         (
             {
-                "jdbc_url": "jdbc:postgresql://db/wh",
-                "schema": "main",
-                "user": "u",
-                "auth_mode": "oauth",
-                "secret": "S",
+                "Jdbc_url": "jdbc:postgresql://db/wh",
+                "Schema": "main",
+                "User": "u",
+                "Auth_mode": "OAUTH",
+                "Secret": "S",
             },
-            "client_id",
+            "Client_id",
         ),
         (
             {
-                "jdbc_url": "jdbc:postgresql://db/wh",
-                "schema": "main",
-                "user": "u",
-                "auth_mode": "sts",
+                "Jdbc_url": "jdbc:postgresql://db/wh",
+                "Schema": "main",
+                "User": "u",
+                "Auth_mode": "STS",
             },
-            "region",
+            "Region",
         ),
         (
             {
-                "jdbc_url": "jdbc:trino://t:8080/iceberg/a",
-                "schema": "a",
-                "auth_mode": "key_file",
-                "key_file": "k",
+                "Jdbc_url": "jdbc:trino://t:8080/iceberg/a",
+                "Schema": "a",
+                "Auth_mode": "KEY_FILE",
+                "Key_file": "k",
             },
-            "cert_file",
+            "Cert_file",
         ),
     ],
 )
@@ -596,9 +596,11 @@ def test_every_auth_mode_loads_with_its_fields(tmp_path, monkeypatch):
     for key, (name, url) in urls.items():
         dialect = warehouse_by_key(key)
         for mode, needed in dialect.auth_fields.items():
-            block = {"jdbc_url": url, "schema": "a", "auth_mode": mode}
+            block = {"Jdbc_url": url, "Schema": "a", "Auth_mode": str(mode)}
             for field_name in needed:
-                block[field_name] = "S" if field_name == "secret" else "value"
+                block[field_name[:1].upper() + field_name[1:]] = (
+                    "S" if field_name == "secret" else "value"
+                )
             raw = _minimal(Warehouse={"Name": name, "dev": block})
             config = load_config(_write(tmp_path, raw))
             assert config.warehouse is not None
@@ -619,28 +621,28 @@ def test_databricks_token_fields_build_a_credential_free_url(tmp_path, monkeypat
     raw = _minimal(
         Warehouse={
             "Name": "Databricks",
-            "Table_format": "iceberg",
+            "Table_format": "ICEBERG",
             "dev": {
-                "jdbc_url": "DBX_URL",
-                "catalog": "DBX_CATALOG",
-                "schema": "DBX_SCHEMA",
-                "token": "DBX_TOKEN",
+                "Jdbc_url": "DBX_URL",
+                "Catalog": "DBX_CATALOG",
+                "Schema": "DBX_SCHEMA",
+                "Token": "DBX_TOKEN",
             },
         }
     )
     config = load_config(_write(tmp_path, raw))
     assert config.warehouse is not None
     profile = config.warehouse
-    assert profile.auth_mode == "token"
+    assert profile.auth_mode == "TOKEN"
     assert profile.secret_var == "DBX_TOKEN"
     assert "dapi-leaked" not in profile.jdbc_url
     assert profile.jdbc_url.endswith(";ConnCatalog=main;ConnSchema=analytics")
-    assert config.warehouse_table_format == "iceberg"
+    assert config.warehouse_table_format == "ICEBERG"
 
 
 def test_token_fields_are_refused_for_other_warehouses_and_unused_fields(tmp_path, monkeypatch):
     raw = _minimal(
-        Warehouse={"Name": "Postgres", "dev": {"jdbc_url": "X", "schema": "main", "token": "T"}}
+        Warehouse={"Name": "Postgres", "dev": {"Jdbc_url": "X", "Schema": "main", "Token": "T"}}
     )
     with pytest.raises(
         ConfigurationError, match=r"only for Warehouse\.Name Databricks or Snowflake"
@@ -649,10 +651,10 @@ def test_token_fields_are_refused_for_other_warehouses_and_unused_fields(tmp_pat
     extra_field = _minimal(
         Warehouse={
             "Name": "Databricks",
-            "dev": {"jdbc_url": "U", "catalog": "C", "schema": "S", "token": "T", "user": "X"},
+            "dev": {"Jdbc_url": "U", "Catalog": "C", "Schema": "S", "Token": "T", "User": "X"},
         }
     )
-    with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['user'\]"):
+    with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['User'\]"):
         load_config(_write(tmp_path, extra_field))
 
 
@@ -663,13 +665,13 @@ def test_duckdb_iceberg_profile_carries_its_catalog_fields(tmp_path, monkeypatch
     raw = _minimal(
         Warehouse={
             "Name": "DuckDB",
-            "Table_format": "iceberg",
+            "Table_format": "ICEBERG",
             "dev": {
-                "jdbc_url": "jdbc:duckdb:",
-                "schema": "main",
-                "catalog": "LAKE_NAME",
-                "catalog_uri": "LAKE_URI",
-                "iceberg_warehouse": "LAKE_WAREHOUSE",
+                "Jdbc_url": "jdbc:duckdb:",
+                "Schema": "main",
+                "Catalog": "LAKE_NAME",
+                "Catalog_uri": "LAKE_URI",
+                "Iceberg_warehouse": "LAKE_WAREHOUSE",
             },
         }
     )
@@ -689,20 +691,20 @@ def test_orchestration_settings_are_type_checked(tmp_path):
 
 
 def test_cloning_scope_none_disables_it(tmp_path):
-    raw = _minimal(Cloning={"dev": {"Enabled": True, "Scope": "none"}})
+    raw = _minimal(Cloning={"dev": {"Enabled": True, "Scope": "NONE"}})
     cloning = load_config(_write(tmp_path, raw)).cloning
-    assert cloning.enabled is False and cloning.scope == "none"
+    assert cloning.enabled is False and cloning.scope == "NONE"
 
 
 def test_email_needs_user_and_secret_for_password_auth(tmp_path, monkeypatch):
-    for name, value in {"H": "smtp", "P": "25", "F": "a@b", "A": "password"}.items():
+    for name, value in {"H": "smtp", "P": "25", "F": "a@b", "A": "PASSWORD"}.items():
         monkeypatch.setenv(name, value)
     raw = _minimal(
         Orchestration={
-            "dev": {"Email": {"host": "H", "port": "P", "from_address": "F", "auth_mode": "A"}},
+            "dev": {"Email": {"Host": "H", "Port": "P", "From_address": "F", "Auth_mode": "A"}},
         }
     )
-    with pytest.raises(ConfigurationError, match="needs user for auth_mode password"):
+    with pytest.raises(ConfigurationError, match="needs User for Auth_mode PASSWORD"):
         load_config(_write(tmp_path, raw))
 
 
@@ -717,12 +719,12 @@ def test_log_dir_defaults_beside_the_config_and_can_be_set(tmp_path):
 def test_engine_and_warehouse_profiles_name_their_schema(tmp_path, monkeypatch):
     monkeypatch.setenv("ENGINE_SCHEMA", "etl_meta")
     raw = _minimal(
-        Engine={"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "ENGINE_SCHEMA"}},
+        Engine={"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "ENGINE_SCHEMA"}},
         Warehouse={
             "dev": {
-                "jdbc_url": "jdbc:trino://t:8080/iceberg/sales",
-                "schema": "sales",
-                "auth_mode": "none",
+                "Jdbc_url": "jdbc:trino://t:8080/iceberg/sales",
+                "Schema": "sales",
+                "Auth_mode": "NONE",
             }
         },
     )
@@ -734,28 +736,28 @@ def test_engine_and_warehouse_profiles_name_their_schema(tmp_path, monkeypatch):
     ("sections", "message"),
     [
         (
-            {"Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db"}}},
-            "Engine.dev needs schema",
+            {"Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db"}}},
+            "Engine.dev needs Schema",
         ),
         (
-            {"Engine": {"dev": {"jdbc_url": "jdbc:sqlite:engine.db", "schema": "etl-meta"}}},
-            "Engine.dev.schema must be a plain identifier .* got 'etl-meta'",
+            {"Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "etl-meta"}}},
+            "Engine.dev.Schema must be a plain identifier .* got 'etl-meta'",
         ),
         (
-            {"Warehouse": {"dev": {"jdbc_url": "jdbc:duckdb:w.duckdb"}}},
-            "Warehouse.dev needs schema",
+            {"Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:w.duckdb"}}},
+            "Warehouse.dev needs Schema",
         ),
         (
             {
                 "Warehouse": {
                     "dev": {
-                        "jdbc_url": "jdbc:trino://t:8080/iceberg/sales",
-                        "schema": "stage",
-                        "auth_mode": "none",
+                        "Jdbc_url": "jdbc:trino://t:8080/iceberg/sales",
+                        "Schema": "stage",
+                        "Auth_mode": "NONE",
                     }
                 }
             },
-            "Warehouse.dev.schema is 'stage', but its jdbc_url names schema 'sales'",
+            "Warehouse.dev.Schema is 'stage', but its Jdbc_url names schema 'sales'",
         ),
     ],
 )
@@ -767,7 +769,7 @@ def test_schema_mistakes_are_named(tmp_path, sections, message):
 def test_a_warehouse_profile_must_name_its_database(tmp_path):
     # A URL form without a database is refused as it is parsed.
     raw = _minimal(
-        Warehouse={"dev": {"jdbc_url": "jdbc:trino://t:8080", "schema": "s", "auth_mode": "none"}}
+        Warehouse={"dev": {"Jdbc_url": "jdbc:trino://t:8080", "Schema": "s", "Auth_mode": "NONE"}}
     )
     with pytest.raises(ConfigurationError, match=r"jdbc:<dialect>://host\[:port\]/database"):
         load_config(_write(tmp_path, raw))
@@ -775,13 +777,13 @@ def test_a_warehouse_profile_must_name_its_database(tmp_path):
     raw = _minimal(
         Warehouse={
             "Name": "DuckDB",
-            "Table_format": "iceberg",
+            "Table_format": "ICEBERG",
             "dev": {
-                "jdbc_url": "jdbc:duckdb:",
-                "schema": "s",
-                "catalog": "lake-house",
-                "catalog_uri": "http://rest:8181",
-                "iceberg_warehouse": "s3://w/",
+                "Jdbc_url": "jdbc:duckdb:",
+                "Schema": "s",
+                "Catalog": "lake-house",
+                "Catalog_uri": "http://rest:8181",
+                "Iceberg_warehouse": "s3://w/",
             },
         }
     )
@@ -792,11 +794,11 @@ def test_a_warehouse_profile_must_name_its_database(tmp_path):
 def test_a_relative_duckdb_file_is_found_beside_the_config(tmp_path):
     project = tmp_path / "etl-craft"
     project.mkdir()
-    raw = _minimal(Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:data/wh.duckdb", "schema": "main"}})
+    raw = _minimal(Warehouse={"dev": {"Jdbc_url": "jdbc:duckdb:data/wh.duckdb", "Schema": "main"}})
     config = load_config(_write(project, raw))
     assert config.warehouse.jdbc_url == f"jdbc:duckdb:{project / 'data' / 'wh.duckdb'}"
     absolute = _minimal(
-        Warehouse={"dev": {"jdbc_url": "jdbc:duckdb:/srv/wh.duckdb", "schema": "main"}}
+        Warehouse={"dev": {"Jdbc_url": "jdbc:duckdb:/srv/wh.duckdb", "Schema": "main"}}
     )
     assert load_config(_write(project, absolute)).warehouse.jdbc_url == "jdbc:duckdb:/srv/wh.duckdb"
 
@@ -804,24 +806,24 @@ def test_a_relative_duckdb_file_is_found_beside_the_config(tmp_path):
 def test_email_through_sendmail(tmp_path):
     raw = _minimal()
     raw["Orchestration"]["Email"] = {
-        "transport": "sendmail",
-        "from_address": "etl@example.com",
-        "from_name": "ETL Craft",
+        "Transport": "SENDMAIL",
+        "From_address": "etl@example.com",
+        "From_name": "ETL Craft",
     }
     email = load_config(_write(tmp_path, raw)).email
     assert (email.transport, email.sendmail_path, email.from_address, email.from_name) == (
-        "sendmail",
+        "SENDMAIL",
         "/usr/sbin/sendmail",
         "etl@example.com",
         "ETL Craft",
     )
-    raw["Orchestration"]["Email"]["host"] = "smtp.example.com"
+    raw["Orchestration"]["Email"]["Host"] = "smtp.example.com"
     with pytest.raises(
-        ConfigurationError, match="sends through sendmail, so host would be ignored"
+        ConfigurationError, match="sends through sendmail, so Host would be ignored"
     ):
         load_config(_write(tmp_path, raw))
-    raw["Orchestration"]["Email"] = {"transport": "pigeon", "from_address": "a@b.c"}
-    with pytest.raises(ConfigurationError, match="transport resolved to 'pigeon'"):
+    raw["Orchestration"]["Email"] = {"Transport": "pigeon", "From_address": "a@b.c"}
+    with pytest.raises(ConfigurationError, match="Transport resolved to 'pigeon'"):
         load_config(_write(tmp_path, raw))
 
 
@@ -862,13 +864,16 @@ def test_docs_site_publishing_settings(tmp_path):
 
 
 def test_dependency_gates_default_to_enforce_and_relax_only_in_local_mode(tmp_path):
-    assert load_config(_write(tmp_path, _minimal())).dependency_gates == "enforce"
-    for policy in ("warn", "off", "WARN"):
+    assert load_config(_write(tmp_path, _minimal())).dependency_gates == "ENFORCE"
+    for policy in ("WARN", "OFF"):
         raw = _minimal(Orchestration={"Dependency_gates": policy})
-        assert load_config(_write(tmp_path, raw)).dependency_gates == policy.lower()
-    raw = _minimal(Orchestration={"Dependency_gates": "sometimes"})
-    with pytest.raises(ConfigurationError, match="must be enforce, warn or off, got 'sometimes'"):
-        load_config(_write(tmp_path, raw))
+        assert load_config(_write(tmp_path, raw)).dependency_gates == policy
+    for policy in ("sometimes", "warn"):
+        raw = _minimal(Orchestration={"Dependency_gates": policy})
+        with pytest.raises(
+            ConfigurationError, match=f"must be ENFORCE, WARN or OFF, got '{policy}'"
+        ):
+            load_config(_write(tmp_path, raw))
 
 
 def test_how_long_a_gate_waits_is_a_setting(tmp_path):
@@ -924,21 +929,21 @@ def test_docs_annual_schedule_macros(tmp_path, schedule):
     )
 
 
-def test_email_and_orchestration_enum_settings_ignore_case_and_surrounding_spaces(tmp_path):
+def test_email_and_orchestration_enum_settings_ignore_surrounding_spaces(tmp_path):
     raw = _minimal(
         Orchestration={
             "Email": {
-                "transport": " SMTP ",
-                "tls_mode": " SSL ",
-                "host": "smtp.example.com",
-                "port": 465,
-                "from_address": "etl@example.com",
+                "Transport": " SMTP ",
+                "Tls_mode": " SSL ",
+                "Host": "smtp.example.com",
+                "Port": 465,
+                "From_address": "etl@example.com",
             },
         }
     )
     config = load_config(_write(tmp_path, raw))
-    assert config.email.transport == "smtp"
-    assert config.email.tls_mode == "ssl"
+    assert config.email.transport == "SMTP"
+    assert config.email.tls_mode == "SSL"
 
 
 def test_local_slots_per_kind_are_optional_whole_numbers(tmp_path):

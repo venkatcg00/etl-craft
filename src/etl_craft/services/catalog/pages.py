@@ -6,41 +6,41 @@ from collections.abc import Sequence
 
 from etl_craft.core.enums import DependencyType
 from etl_craft.engine.repository.catalog import Consumption, RunSummary
-from etl_craft.services.catalog import (
+from etl_craft.services.catalog.collect import (
     Catalog,
     PipelineAsset,
     TableAsset,
     TaskAsset,
     latest_run,
 )
-from etl_craft.services.catalog_gap_html import comparison_grid
-from etl_craft.services.catalog_graph import (
+from etl_craft.services.catalog.gap_html import comparison_grid
+from etl_craft.services.catalog.graph import (
     dag_drawing,
     lineage_drawing,
     lineage_history,
     render_dag_svg,
     render_svg,
 )
-from etl_craft.services.catalog_html import escape as _e
-from etl_craft.services.catalog_html import pipeline_url as pipeline_url
-from etl_craft.services.catalog_html import render_table as _table
-from etl_craft.services.catalog_html import rule_url as rule_url
-from etl_craft.services.catalog_html import run_url as run_url
-from etl_craft.services.catalog_html import script_url as script_url
-from etl_craft.services.catalog_html import slug as slug
-from etl_craft.services.catalog_html import table_url as table_url
-from etl_craft.services.catalog_html import task_url as task_url
-from etl_craft.services.catalog_incremental import (
+from etl_craft.services.catalog.html import escape as _e
+from etl_craft.services.catalog.html import pipeline_url as pipeline_url
+from etl_craft.services.catalog.html import render_table as _table
+from etl_craft.services.catalog.html import rule_url as rule_url
+from etl_craft.services.catalog.html import run_url as run_url
+from etl_craft.services.catalog.html import script_url as script_url
+from etl_craft.services.catalog.html import slug as slug
+from etl_craft.services.catalog.html import table_url as table_url
+from etl_craft.services.catalog.html import task_url as task_url
+from etl_craft.services.catalog.incremental import (
     SqlFiles,
 )
-from etl_craft.services.catalog_metrics import bars as _bars
-from etl_craft.services.catalog_metrics import counts as _counts
-from etl_craft.services.catalog_metrics import duration as _duration
-from etl_craft.services.catalog_metrics import facts as _facts
-from etl_craft.services.catalog_metrics import kpi_summary
-from etl_craft.services.catalog_metrics import status as _status
-from etl_craft.services.catalog_metrics import when as _when
-from etl_craft.services.catalog_storage import MARKER as MARKER
+from etl_craft.services.catalog.metrics import bars as _bars
+from etl_craft.services.catalog.metrics import counts as _counts
+from etl_craft.services.catalog.metrics import duration as _duration
+from etl_craft.services.catalog.metrics import facts as _facts
+from etl_craft.services.catalog.metrics import kpi_summary
+from etl_craft.services.catalog.metrics import status as _status
+from etl_craft.services.catalog.metrics import when as _when
+from etl_craft.services.catalog.storage import MARKER as MARKER
 from etl_craft.services.lineage import COPY
 
 SQL_PARAMETERS = frozenset({"SOURCE_SQL"})

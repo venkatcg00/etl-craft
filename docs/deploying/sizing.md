@@ -9,7 +9,7 @@ before, and the measurement is only logged and shown by `doctor`.
 
 ```yaml
 Deployment:
-  Profile: controller        # laptop | controller | controller-agents
+  Profile: CONTROLLER        # laptop | controller | controller-agents
 ```
 
 The `Deployment` section goes after `Orchestration`. It has no profile blocks: `Profile` names

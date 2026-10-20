@@ -42,9 +42,9 @@ class GapAttribute(StrEnum):
 
 
 def enum_value(enum: type[E], value: str, error: EtlCraftError) -> E:
-    """Read a case-insensitive enum value or raise the caller's domain diagnostic."""
+    """Read an enum value exactly as it is written, or raise the caller's domain diagnostic."""
     for member in enum:
-        if member.value.casefold() == value.strip().casefold():
+        if member.value == value.strip():
             return member
     raise error
 
@@ -113,6 +113,12 @@ class ControlAction(StrEnum):
     RECOVER = "RECOVER"
     RESTART = "RESTART"
     RUN_PAUSED = "RUN_PAUSED"
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+
+
+DEFINITION_CONTROLS = frozenset({ControlAction.PAUSE, ControlAction.RESUME})
+"""Controls of a pipeline definition rather than of one run; they are never stored as requests."""
 
 
 class ControlStatus(StrEnum):
@@ -163,6 +169,107 @@ class ApiRole(StrEnum):
     OPERATOR = "operator"
     DEVELOPER = "developer"
     ADMIN = "admin"
+
+
+class ActionName(StrEnum):
+    """Every action an interface can request; the value is its audit and role-policy name."""
+
+    LOGIN = "login"
+    LOGIN_METHODS = "login methods"
+    LOGIN_SSO = "login sso"
+    LOGIN_SSO_POLL = "login sso poll"
+    REFRESH = "refresh"
+    LOGOUT = "logout"
+    WHOAMI = "whoami"
+    HEALTH = "health"
+    PIPELINES = "pipelines"
+    PIPELINE = "pipeline"
+    GRAPH = "graph"
+    STEPS = "steps"
+    STATUS = "status"
+    RUN_DETAIL = "run detail"
+    CAPABILITIES = "capabilities"
+    CONTROL_REQUEST = "control-request"
+    EXPLAIN = "explain"
+    HISTORY = "history"
+    AUDIT = "audit"
+    ATTEMPT = "attempt"
+    LOGS = "logs"
+    CATALOG_GAPS = "catalog gaps"
+    VALIDATE = "validate"
+    DOCTOR = "doctor"
+    LINEAGE = "lineage"
+    LINEAGE_REFRESH = "lineage refresh"
+    CONFIG_PLAN = "config plan"
+    CONFIG_EXPORT = "config export"
+    CONFIG_APPLY = "config apply"
+    RUN = "run"
+    MARK = "mark"
+    CONTROL = "control"
+    CONTROL_BULK = "control bulk"
+    RECONCILE = "reconcile"
+    DATA_EDIT = "data edit"
+    DATA_UNLOCK = "data unlock"
+    DATA_PROVENANCE = "data provenance"
+    ACCOUNT_LIST = "account list"
+    ACCOUNT_ADD = "account add"
+    ACCOUNT_SET_ROLE = "account set-role"
+    ACCOUNT_DISABLE = "account disable"
+    ACCOUNT_RESET_PASSWORD = "account reset-password"
+    TOKEN_LIST = "token list"
+    TOKEN_CREATE = "token create"
+    TOKEN_REVOKE = "token revoke"
+    GENERATE_DOCS = "generate-docs"
+    DOCS_VERSION_CHECK = "docs-version check"
+    DOCS_VERSION = "docs-version"
+    REHASH_PLAN = "rehash plan"
+    REHASH = "rehash"
+    UPGRADE_TARGETS = "upgrade-targets"
+    CLONE = "clone"
+    SETUP_GRANTS = "setup grants"
+    SETUP = "setup"
+    INIT_DB = "init-db"
+    MIGRATE = "migrate"
+    CONTROLLER = "controller"
+    PUBLISH_DOCS = "publish-docs"
+
+
+class Placement(StrEnum):
+    """Where an action may run: through any interface, or only on the controller's host."""
+
+    ANYWHERE = "ANYWHERE"
+    CONTROLLER_HOST = "CONTROLLER_HOST"
+
+
+class Audit(StrEnum):
+    """Whether an action records its request, and who records it."""
+
+    NONE = "NONE"
+    REQUEST = "REQUEST"
+    BY_ACTION = "BY_ACTION"
+    """The action records its own request, once the actor it acts as is proven (sign-in)."""
+
+
+class Transport(StrEnum):
+    """How a request reached its operation."""
+
+    LOCAL = "LOCAL"
+    HTTP = "HTTP"
+
+
+class HttpMethod(StrEnum):
+    """The HTTP methods the API uses: reads are GET and changes are POST."""
+
+    GET = "GET"
+    POST = "POST"
+
+
+class LineageDirection(StrEnum):
+    """Which way a lineage trace follows its table or column."""
+
+    BOTH = "BOTH"
+    UPSTREAM = "UPSTREAM"
+    DOWNSTREAM = "DOWNSTREAM"
 
 
 class ActionOutcome(StrEnum):
@@ -220,6 +327,26 @@ class Handler(StrEnum):
     EVENT_WAIT = "EVENT_WAIT"
 
 
+class GateOutcome(StrEnum):
+    """A dependency gate's judgement; ``WAIT`` is a check still waiting, and is never recorded."""
+
+    SATISFIED = "SATISFIED"
+    UNSATISFIED = "UNSATISFIED"
+    BYPASSED = "BYPASSED"
+    WAIT = "WAIT"
+
+
+ADMITTED_OUTCOMES = frozenset({GateOutcome.SATISFIED, GateOutcome.BYPASSED})
+"""Recorded gate outcomes that let the dependent task or pipeline start."""
+
+
+class WaitKind(StrEnum):
+    """What a persisted gate wait is waiting for."""
+
+    DEPENDENCY = "DEPENDENCY"
+    EVENT = "EVENT"
+
+
 class RunCondition(StrEnum):
     """How many of a task's dependencies must be satisfied; a NULL condition means ``ALL``."""
 
@@ -261,9 +388,9 @@ class EmailFlavour(StrEnum):
 class DeploymentProfile(StrEnum):
     """The deployment shape a team declares in ``Deployment.Profile``; never inferred."""
 
-    LAPTOP = "laptop"
-    CONTROLLER = "controller"
-    CONTROLLER_AGENTS = "controller-agents"
+    LAPTOP = "LAPTOP"
+    CONTROLLER = "CONTROLLER"
+    CONTROLLER_AGENTS = "CONTROLLER_AGENTS"
 
 
 class GatePolicy(StrEnum):
@@ -273,52 +400,59 @@ class GatePolicy(StrEnum):
     anyway, recording the bypass; ``off`` does not check them, recording that too.
     """
 
-    ENFORCE = "enforce"
-    WARN = "warn"
-    OFF = "off"
+    ENFORCE = "ENFORCE"
+    WARN = "WARN"
+    OFF = "OFF"
 
 
 class AuthMode(StrEnum):
     """How a connection authenticates."""
 
-    NONE = "none"
-    PASSWORD = "password"
-    TOKEN = "token"
-    KEY_FILE = "key_file"
-    OAUTH = "oauth"
-    SSO = "sso"
-    STS = "sts"
+    NONE = "NONE"
+    PASSWORD = "PASSWORD"
+    TOKEN = "TOKEN"
+    KEY_FILE = "KEY_FILE"
+    OAUTH = "OAUTH"
+    SSO = "SSO"
+    STS = "STS"
+
+
+class SecretsSource(StrEnum):
+    """Where ``craft-connector.yml``'s variables come from: the environment or a ``.env`` file."""
+
+    ENVIRONMENT = "ENVIRONMENT"
+    FILE = "FILE"
 
 
 class TableFormat(StrEnum):
     """The table format the warehouse writes; ``native`` is the default."""
 
-    NATIVE = "native"
-    ICEBERG = "iceberg"
+    NATIVE = "NATIVE"
+    ICEBERG = "ICEBERG"
 
 
 class CloningScope(StrEnum):
     """Which Engine DB tables a clone copies."""
 
-    CFG = "cfg"
-    AUD = "aud"
-    ALL = "all"
-    NONE = "none"
+    CFG = "CFG"
+    AUD = "AUD"
+    ALL = "ALL"
+    NONE = "NONE"
 
 
 class EmailTransport(StrEnum):
     """How the mail handler delivers a message."""
 
-    SMTP = "smtp"
-    SENDMAIL = "sendmail"
+    SMTP = "SMTP"
+    SENDMAIL = "SENDMAIL"
 
 
 class TlsMode(StrEnum):
     """How an SMTP session starts TLS."""
 
-    NONE = "none"
-    STARTTLS = "starttls"
-    SSL = "ssl"
+    NONE = "NONE"
+    STARTTLS = "STARTTLS"
+    SSL = "SSL"
 
 
 class YesNo(StrEnum):

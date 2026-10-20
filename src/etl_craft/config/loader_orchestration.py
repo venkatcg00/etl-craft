@@ -41,7 +41,7 @@ def parse_dependency_gates(orchestration: Profiled, path: Path) -> GatePolicy:
         GatePolicy,
         raw,
         ConfigurationError(
-            f"{path}: Orchestration.Dependency_gates must be enforce, warn or off, got {raw!r}"
+            f"{path}: Orchestration.Dependency_gates must be ENFORCE, WARN or OFF, got {raw!r}"
             f"{orchestration.resolver.hint(orchestration.where('Dependency_gates'))}"
         ),
     )
