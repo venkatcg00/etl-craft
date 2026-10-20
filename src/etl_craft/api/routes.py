@@ -87,7 +87,15 @@ def _caller(
 async def _answer(caller: OperationContext, action: Action, request: Request) -> Response:
     given: dict[str, object] = dict(request.path_params)
     if action.method == HttpMethod.GET:
-        given.update(request.query_params)
+        properties = _adapter(action.name).json_schema().get("properties", {})
+        given.update(
+            {
+                key: request.query_params.getlist(key)
+                if properties.get(key, {}).get("type") == "array"
+                else request.query_params[key]
+                for key in request.query_params
+            }
+        )
     else:
         body = await request.json() if await request.body() else {}
         if not isinstance(body, dict):

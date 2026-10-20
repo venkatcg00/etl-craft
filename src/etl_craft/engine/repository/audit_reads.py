@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Set
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, bindparam, text
 from sqlalchemy.engine import Connection
+
+from etl_craft.engine.queries import statement
 
 
 def document(value: Any) -> Any:
@@ -19,15 +22,17 @@ def fetch_audit_records(
     conn: Connection,
     pipeline_id: int | None,
     since: datetime | None,
+    *,
+    pipeline_ids: Set[int] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Read requests and metadata changes, including tasks no longer present in CFG_TASKS."""
+    selected_ids = {pipeline_id} if pipeline_id is not None else pipeline_ids
     task_ids: set[int] = set()
-    if pipeline_id is not None:
+    if selected_ids is not None:
         task_ids.update(
-            conn.execute(
-                text("SELECT TASK_ID AS task_id FROM CFG_TASKS WHERE PIPELINE_ID=:pipeline"),
-                {"pipeline": pipeline_id},
-            ).scalars()
+            row.task_id
+            for row in conn.execute(statement(conn, "audit_task_pipelines"))
+            if row.pipeline_id in selected_ids
         )
         for before, after in conn.execute(
             text(
@@ -37,7 +42,7 @@ def fetch_audit_records(
         ):
             for captured in (before, after):
                 doc = document(captured)
-                if doc is not None and doc.get("pipeline_id") == pipeline_id:
+                if doc is not None and doc.get("pipeline_id") in selected_ids:
                     task_ids.add(doc["task_id"])
     actions = [
         dict(row._mapping)
@@ -73,13 +78,14 @@ def fetch_audit_records(
     for change in changes:
         for key in ("row_key", "before_json", "after_json"):
             change[key] = document(change[key])
-    if pipeline_id is not None:
+    if selected_ids is not None:
+        actions = [action for action in actions if action["pipeline_id"] in selected_ids]
         changes = [
             change
             for change in changes
             if any(
-                doc.get("pipeline_id") == pipeline_id
-                or doc.get("depends_on_pipeline_id") == pipeline_id
+                doc.get("pipeline_id") in selected_ids
+                or doc.get("depends_on_pipeline_id") in selected_ids
                 or doc.get("task_id") in task_ids
                 or doc.get("depends_on_task_id") in task_ids
                 for doc in (change["before_json"], change["after_json"])

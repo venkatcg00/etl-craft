@@ -1,5 +1,5 @@
 -- Every active pipeline, with its latest run.
-SELECT p.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code,
+SELECT p.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code, p.PIPELINE_PARAMETERS AS pipeline_parameters,
        p.PIPELINE_NAME AS pipeline_name, p.DESCRIPTION AS description,
        p.RUN_SCHEDULE AS run_schedule, p.SLA_IN_HOURS AS sla_in_hours,
        p.REFRESH_TYPE AS refresh_type, r.PIPELINE_RUN_ID AS pipeline_run_id,

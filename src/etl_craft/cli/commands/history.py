@@ -10,6 +10,7 @@ from etl_craft.cli.commands.common import (
     call,
     configure_output,
     configure_run_selector,
+    configure_tags,
     request_from,
 )
 from etl_craft.cli.output import Output
@@ -22,8 +23,9 @@ from etl_craft.services.operations.requests import HistoryInput
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
+    configure_tags(parser)
     configure_run_selector(parser)
-    parser.add_argument("--pipeline-code", required=True, help="The pipeline to show.")
+    parser.add_argument("--pipeline-code", help="The pipeline to show.")
     parser.add_argument("--task-code", help="Show this task's runs instead of the pipeline's.")
     parser.add_argument("--all", action="store_true", help="List runs instead of selecting one.")
     parser.add_argument("--limit", type=int, default=20, help="How many runs, newest first.")
@@ -45,6 +47,7 @@ def _render(args: argparse.Namespace, out: Output, done: HistoryView) -> int:
             out.rows(
                 [
                     (
+                        "PIPELINE_CODE",
                         "PIPELINE_RUN_ID",
                         "STATUS",
                         "RUN_DATE",
@@ -60,6 +63,7 @@ def _render(args: argparse.Namespace, out: Output, done: HistoryView) -> int:
             )
             out.rows(
                 (
+                    e.pipeline_code,
                     e.pipeline_run_id,
                     e.status,
                     f"{e.run_date} (backfill)" if e.backfill else e.run_date,

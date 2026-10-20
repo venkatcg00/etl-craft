@@ -28,13 +28,13 @@ from etl_craft.engine.repository.dependencies import (
     fetch_pipeline_dependency_edges,
     fetch_pipeline_graph,
 )
-from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+from etl_craft.engine.repository.pipelines import resolve_pipeline_id, tagged_pipelines
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.execution.gates import judge, satisfies
 from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
-from etl_craft.services.operations.requests import RunSelection, TaskSelection
+from etl_craft.services.operations.requests import RunFilter, RunSelection, TaskSelection
 from etl_craft.services.operations.snapshots import (
     pipeline_view,
     run_view,
@@ -418,7 +418,45 @@ def _dependencies(
     return tuple(found)
 
 
-def pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView:
+@dataclass(frozen=True)
+class StatusListView:
+    """Every non-terminal run across the matching active pipelines, by pipeline and run id."""
+
+    SCHEMA: ClassVar[str] = "etl-craft/status-list/1"
+    runs: tuple[StatusView, ...]
+
+
+def pipeline_status(ctx: OperationContext, request: RunFilter) -> StatusView | StatusListView:
+    """Inspect one selected run, or all current runs carrying every given tag."""
+    if request.pipeline_code is not None and not request.tag:
+        return _pipeline_status(
+            ctx,
+            RunSelection(
+                pipeline_code=request.pipeline_code, run_id=request.run_id, run_key=request.run_key
+            ),
+        )
+    with read_snapshot(ctx.engine) as conn:
+        if request.pipeline_code is not None:
+            resolve_pipeline_id(conn, request.pipeline_code)
+        codes = tagged_pipelines(conn, request.tag)
+        selections = [
+            RunSelection(pipeline_code=code, run_id=run.pipeline_run_id)
+            for code, pipeline_id in codes.items()
+            if request.pipeline_code is None or code == request.pipeline_code
+            for run in runlog.run_candidates(conn, pipeline_id)
+            if run.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}
+        ]
+    if request.pipeline_code is not None and request.pipeline_code in codes:
+        return _pipeline_status(
+            ctx,
+            RunSelection(
+                pipeline_code=request.pipeline_code, run_id=request.run_id, run_key=request.run_key
+            ),
+        )
+    return StatusListView(tuple(_pipeline_status(ctx, selection) for selection in selections))
+
+
+def _pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView:
     """Inspect an exact run; never reconcile or resolve it by recency."""
     pipeline_code, selector = request.pipeline_code, request.selector
     with read_snapshot(ctx.engine) as conn:

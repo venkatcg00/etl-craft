@@ -48,6 +48,7 @@ def pipeline_view(conn: Connection, pipeline_id: int) -> PipelineView:
         detail.run_schedule,
         detail.sla_in_hours,
         pause,
+        tuple(detail.tags or ()),
     )
 
 

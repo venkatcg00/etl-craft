@@ -26,6 +26,37 @@
     var main = document.querySelector("main");
     if (main) main.insertBefore(note, main.firstChild);
   }
+  var tagFilter = document.querySelector(".tag-filter");
+  if (tagFilter) {
+    function filterTags() {
+      var tags = new URLSearchParams(window.location.search).getAll("tag");
+      tagFilter.querySelectorAll('input[name="tag"]').forEach(function (input) {
+        input.checked = tags.indexOf(input.value) !== -1;
+      });
+      var visible = 0;
+      var pipelines = document.querySelectorAll("[data-pipeline-tags]");
+      pipelines.forEach(function (cell) {
+        var labels = cell.getAttribute("data-pipeline-tags").split(" ");
+        var matches = tags.every(function (tag) { return labels.indexOf(tag) !== -1; });
+        cell.closest("tr").hidden = !matches;
+        if (matches) visible += 1;
+      });
+      document.querySelector(".tag-result").textContent = visible + " of " +
+        pipelines.length + " pipelines match" + (tags.length ? ": " + tags.join(", ") : "");
+    }
+    tagFilter.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var url = new URL(window.location.href);
+      url.searchParams.delete("tag");
+      tagFilter.querySelectorAll('input[name="tag"]:checked').forEach(function (input) {
+        url.searchParams.append("tag", input.value);
+      });
+      window.history.pushState(null, "", url);
+      filterTags();
+    });
+    window.addEventListener("popstate", filterTags);
+    filterTags();
+  }
   var gapFilter = document.querySelector(".gap-filter");
   if (gapFilter) gapFilter.addEventListener("input", function () {
     var query = words(gapFilter.value);

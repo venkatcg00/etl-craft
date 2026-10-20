@@ -360,3 +360,12 @@ versions with their intervals and added/removed column sources. A never-traced t
 that no lineage versions are recorded. The lineage graph continues to show current edges.
 Use `etl-craft lineage --table schema.table --version NUMBER` or `--as-of TIME` to trace a
 stored historical graph; see [lineage versions](lineage.md#table-lineage-versions).
+
+## Pipeline tags
+
+Pipeline pages and the DAGs overview show the labels in `PIPELINE_PARAMETERS.TAGS` as links.
+A tag link opens `dags.html?tag=team%3Asales`; repeat `tag` in the URL to require every label.
+The overview's labelled checkboxes apply the same AND filter in the browser, keep the selection
+in the URL and restore it on Back/Forward. Unknown tags show no pipelines. Tag edits invalidate
+the pipeline and overview pages on the next catalog build. Filtering needs JavaScript; the
+complete table remains readable without it.

@@ -358,7 +358,7 @@ class BulkOutcome:
     task_code: str | None
     request_key: str
     action: ControlAction
-    control: ControlView | None
+    control: ControlView | OperationResult | None
     error: str | None
 
 
@@ -380,7 +380,7 @@ def request_bulk_controls(ctx: OperationContext, request: BulkControlRequest) ->
         control, error = None, None
         try:
             done = invoke(ctx, ActionName.CONTROL, selected)
-            assert isinstance(done, ControlView)
+            assert isinstance(done, (ControlView, OperationResult))
             control = done
         except EtlCraftError as refused:
             error = str(refused)

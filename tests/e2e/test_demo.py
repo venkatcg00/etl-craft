@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import signal
 import time
+from csv import DictReader
 from pathlib import Path
 
 import pytest
@@ -205,8 +206,11 @@ def check_the_emails(demo: Demo, *, failed: bool, outcome: str = "SUCCESS") -> N
 
 
 def check_the_reports(demo: Demo) -> None:
-    history = demo.ok("history", "--pipeline-code", "SUPPORT_DM", "--all").splitlines()
-    assert [line.split("\t")[1] for line in history[1:]] == [
+    history = DictReader(
+        demo.ok("history", "--pipeline-code", "SUPPORT_DM", "--all").splitlines(),
+        delimiter="\t",
+    )
+    assert [row["STATUS"] for row in history] == [
         "SUCCESS",
         "SKIPPED",
         "SUCCESS",

@@ -68,3 +68,14 @@ def script_url(name: str) -> str:
 def run_url(pipeline_run_id: int) -> str:
     """Return the URL of a pipeline run's page, from the site's root."""
     return f"runs/{pipeline_run_id}.html"
+
+
+def tag_chips(tags: tuple[str, ...], root: str = "") -> str:
+    """Link each exact label to a shareable filtered pipeline overview."""
+    from urllib.parse import urlencode
+
+    return " ".join(
+        f'<a class="tag-chip" href="{escape(root + "dags.html?" + urlencode({"tag": tag}))}">'
+        f"{escape(tag)}</a>"
+        for tag in tags
+    )

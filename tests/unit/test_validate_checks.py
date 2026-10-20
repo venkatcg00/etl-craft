@@ -64,7 +64,10 @@ def test_pipeline_parameters_are_typed():
         [],
     )
     assert pipeline_parameter_problems({"TAGS": "a", "CATCHUP": False}) == (
-        ['PIPELINE_PARAMETERS.TAGS="a" must be a list of strings'],
+        [
+            "TAGS='a'; expected a list of strings; write a JSON list of tags "
+            "(1 to 64 lowercase ASCII letters, digits, '-', '_' or ':')"
+        ],
         ["CATCHUP"],
     )
     assert pipeline_parameter_problems("[1]")[0] == [

@@ -1,5 +1,6 @@
 """``list``, ``graph``, ``steps`` and ``history`` on the command line, both Engine DBs."""
 
+import csv
 import logging
 
 import pytest
@@ -87,13 +88,16 @@ def test_list(project, capsys):
     code, out = run(capsys, "pipelines")
     assert code == ExitCode.SUCCESS
     assert out.splitlines() == [
-        "PIPELINE_CODE\tPIPELINE_NAME\tREFRESH_TYPE\tRUN_SCHEDULE\tSLA_IN_HOURS\tPAUSED",
-        "SALES\tSALES\tINCREMENTAL\t\t2.0\t",
-        "UP\tUP\tFULL\t\t\t",
+        "PIPELINE_CODE\tPIPELINE_NAME\tREFRESH_TYPE\tRUN_SCHEDULE\tSLA_IN_HOURS\tTAGS\tPAUSED",
+        "SALES\tSALES\tINCREMENTAL\t\t2.0\t\t",
+        "UP\tUP\tFULL\t\t\t\t",
     ]
     assert run(capsys, "pause", "--pipeline-code", "UP", "--reason", "source down")[0] == 0
     code, out = run(capsys, "pipelines")
-    assert out.splitlines()[2].startswith("UP\tUP\tFULL\t\t\tpaused since ")
+    pipelines = {
+        row["PIPELINE_CODE"]: row for row in csv.DictReader(out.splitlines(), delimiter="\t")
+    }
+    assert pipelines["UP"]["PAUSED"].startswith("paused since ")
     assert out.splitlines()[2].endswith(": source down")
 
 
@@ -132,11 +136,12 @@ def test_history(project, capsys):
     lines = out.splitlines()
     assert code == ExitCode.SUCCESS
     assert lines[0] == (
-        "PIPELINE_RUN_ID\tSTATUS\tRUN_DATE\tSTART_DATE\tEND_DATE\tSLA_STATUS"
+        "PIPELINE_CODE\tPIPELINE_RUN_ID\tSTATUS\tRUN_DATE\tSTART_DATE\tEND_DATE\tSLA_STATUS"
         "\tSTARTED_BY\tSTARTED_BY_KIND\tENDED_BY\tENDED_BY_KIND"
     )
-    assert [line.split("\t")[1] for line in lines[1:]] == ["IN-PROGRESS", "SUCCESS"]
-    assert lines[2].split("\t")[5] == "MET"
+    history = list(csv.DictReader(lines, delimiter="\t"))
+    assert [row["STATUS"] for row in history] == ["IN-PROGRESS", "SUCCESS"]
+    assert history[1]["SLA_STATUS"] == "MET"
 
     code, out = run(
         capsys, "history", "--pipeline-code", "SALES", "--task-code", "extract", "--limit", "1"

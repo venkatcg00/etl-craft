@@ -103,6 +103,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Pipeline tags: at most 20 unique labels of 1–64 lowercase ASCII letters, digits, `-`, `_`
+  or `:`. Invalid metadata fails `validate` and is refused by `config apply`, without normalization.
+- Repeatable `--tag`/`?tag=` AND filters on the existing pipeline list, status, history, audit,
+  validation and catalog-gap reads. Pipeline text/JSON includes `tags`; cross-pipeline status
+  lists non-terminal runs and history retains bounded pagination. Unknown tags match nothing.
+- `pause` and `resume` accept tag selections with `--yes`, resolve codes before mutation and
+  return one outcome per pipeline through the existing bulk-control action. Audits store codes.
+  Catalog pipeline pages and the DAGs overview show linked tag chips and a shareable URL filter.
+
 - Failure-aware automatic retries: `Orchestration.Retry_on` and task `RETRY_ON` select
   `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`. Permanent warehouse errors
   stop after one attempt by default. Scripts can declare `TransientError` or `PermanentError`

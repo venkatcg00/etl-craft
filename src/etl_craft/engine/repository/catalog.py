@@ -15,6 +15,7 @@ from etl_craft.core.time import elapsed_seconds
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.intervention_rows import Intervention
 from etl_craft.engine.repository.normalization import ObjectIdentity
+from etl_craft.engine.repository.pipelines import read_tags
 from etl_craft.engine.runlog import as_date
 
 
@@ -48,6 +49,7 @@ class PipelineRow:
     refresh_type: str
     last_run: LastRun | None
     last_run_id: int | None = None
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ def fetch_catalog_pipelines(conn: Connection) -> list[PipelineRow]:
             if r.pipeline_run_id is not None
             else None,
             None if r.pipeline_run_id is None else int(r.pipeline_run_id),
+            read_tags(r.pipeline_parameters, r.pipeline_code),
         )
         for r in conn.execute(statement(conn, "catalog_pipelines"))
     ]

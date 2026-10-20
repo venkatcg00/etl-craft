@@ -81,3 +81,25 @@ These commands accept `--format json` and return the same schema-versioned docum
 their Python service operations. Task history includes the canonical `task_run_id` and its
 ordered attempt records, including `not_before` and `retryable`. `status`, `explain`,
 `validate`, `doctor` and `lineage` also accept `--format json`. See [Service operations and JSON](service-operations.md).
+
+## Filter by tags
+
+`pipelines`, `status`, `history`, `audit` and `validate` accept repeatable `--tag` filters.
+A pipeline must carry **every** tag, matched exactly. Unknown tags match nothing. Filters use
+current active definitions, including when reading older runs; they do not change history.
+
+```bash
+etl-craft pipelines --tag team:sales --tag tier:gold --format json
+etl-craft status --tag team:sales
+etl-craft history --tag team:sales --limit 20
+etl-craft audit --tag team:sales
+```
+
+Pipeline text and JSON include `tags`. Without `--pipeline-code`, `status` lists every
+non-terminal run of the matching pipelines, with its exact identity; it does not select a run
+by recency. Its JSON has `schema: etl-craft/status-list/1` and a `runs` array. `history` lists a
+bounded page across matching pipelines, newest run id first, with the pipeline code in each row.
+Its `pipeline_id` and `pipeline_code` are null for a cross-pipeline page. The API's `before`
+cursor continues this page. A task or explicit run selector still needs `--pipeline-code`.
+Single-pipeline calls retain their existing response shape. These commands also work without
+a tag to inspect all active pipelines.

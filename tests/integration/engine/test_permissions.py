@@ -17,7 +17,12 @@ from etl_craft.services.operations.actions import ACTIONS, admitted
 from etl_craft.services.operations.config_files import ConfigDirectory
 from etl_craft.services.operations.documents import DocsInput, PublishInput
 from etl_craft.services.operations.maintenance import RehashInput
-from etl_craft.services.operations.requests import LineageRefreshInput, NoInput, RunRequest
+from etl_craft.services.operations.requests import (
+    LineageRefreshInput,
+    NoInput,
+    RunRequest,
+    TagFilter,
+)
 from fixtures.actions import act
 
 
@@ -48,7 +53,7 @@ def actions(engine):
 
 
 REQUESTS = {
-    ActionName.PIPELINES: NoInput(),
+    ActionName.PIPELINES: TagFilter(),
     ActionName.RUN: RunRequest(pipeline_code="P"),
     ActionName.CONFIG_APPLY: ConfigDirectory(),
     ActionName.ACCOUNT_LIST: NoInput(),

@@ -25,10 +25,10 @@ from etl_craft.services.operations.requests import (
     ControlRequest,
     HistoryInput,
     MarkRequest,
-    NoInput,
     PipelineInput,
     ReconcileInput,
     RunRequest,
+    TagFilter,
 )
 from etl_craft.services.operations.snapshots import run_view, task_run_view
 from fixtures.auth import service_token
@@ -408,7 +408,7 @@ def test_serializer_returns_fresh_mappings_and_refuses_nondocuments():
 
 def test_read_operations_leave_audit_actions_unchanged_and_keep_empty_documents(ctx):
     seed(ctx)
-    listed = invoke(ctx, ActionName.PIPELINES, NoInput())
+    listed = invoke(ctx, ActionName.PIPELINES, TagFilter())
     assert to_json(listed)["pipelines"][0]["pipeline_id"] > 0
     assert to_json(history(ctx, all=True))["entries"] == []
     assert invoke(ctx, ActionName.GRAPH, PipelineInput(pipeline_code=P)).waves == ()
@@ -446,7 +446,7 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
             mark(ctx, new_run=True, status="SUCCESS", reason="verified")
         queries.clear()
         first = (
-            invoke(ctx, ActionName.PIPELINES, NoInput())
+            invoke(ctx, ActionName.PIPELINES, TagFilter())
             if view == "list"
             else history(ctx, all=True)
         )
@@ -459,7 +459,7 @@ def test_inspection_reads_do_not_grow_per_pipeline_or_run(ctx, view):
                 mark(ctx, new_run=True, status="SUCCESS", reason="verified")
         queries.clear()
         expanded = (
-            invoke(ctx, ActionName.PIPELINES, NoInput())
+            invoke(ctx, ActionName.PIPELINES, TagFilter())
             if view == "list"
             else history(ctx, all=True)
         )

@@ -10,6 +10,7 @@ from etl_craft.cli.commands.common import call, request_from
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import ActionName, ControlAction
 from etl_craft.core.errors import EtlCraftError, ExitCode, UsageError
+from etl_craft.engine.controls import ControlView
 from etl_craft.services.operations.controls import BulkControlView
 from etl_craft.services.operations.requests import BulkControlRequest, ControlRequest
 
@@ -132,11 +133,11 @@ def _bulk(args: argparse.Namespace, out: Output) -> int:
     request = BulkControlRequest(requests=read_selection(args.controls_file))
     done = call(args, ActionName.CONTROL_BULK, request)
     assert isinstance(done, BulkControlView)
-    out.result(done, args.output_format, text=lambda: _render_bulk(out, done))
+    out.result(done, args.output_format, text=lambda: render_bulk(out, done))
     return ExitCode.FAILURE if any(o.error for o in done.outcomes) else ExitCode.SUCCESS
 
 
-def _render_bulk(out: Output, done: BulkControlView) -> None:
+def render_bulk(out: Output, done: BulkControlView) -> None:
     """Show each selected object's accepted identity or refusal in ordinary text output."""
     out.rows(
         (
@@ -144,7 +145,11 @@ def _render_bulk(out: Output, done: BulkControlView) -> None:
             o.task_code or "all",
             o.action,
             o.request_key,
-            f"control_id={o.control.control_id} {o.control.status}" if o.control else o.error,
+            f"control_id={o.control.control_id} {o.control.status}"
+            if isinstance(o.control, ControlView)
+            else o.control.message
+            if o.control is not None
+            else o.error,
         )
         for o in done.outcomes
     )

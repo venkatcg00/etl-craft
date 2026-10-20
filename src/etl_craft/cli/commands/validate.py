@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import argparse
 
-from etl_craft.cli.commands.common import Command, call, configure_output, request_from
+from etl_craft.cli.commands.common import (
+    Command,
+    call,
+    configure_output,
+    configure_tags,
+    request_from,
+)
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
@@ -15,6 +21,7 @@ from etl_craft.services.operations.requests import ValidateInput
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     configure_output(parser)
+    configure_tags(parser)
     parser.add_argument("--pipeline-code", help="Check only this pipeline.")
 
 

@@ -8,6 +8,7 @@ import contextvars
 import logging
 import threading
 import time
+from csv import DictReader
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -992,10 +993,10 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
     assert cli_main(["run", "--pipeline-code", "P", "--run-date", "2026-08-30"]) == 0
     capsys.readouterr()
     assert cli_main(["history", "--pipeline-code", "P", "--all"]) == ExitCode.SUCCESS
-    history = capsys.readouterr().out.splitlines()
-    assert history[0].startswith("PIPELINE_RUN_ID\tSTATUS\tRUN_DATE\t")
-    assert history[1].split("\t")[2] == "2026-08-30"
-    assert history[2].split("\t")[2] == "2026-09-02 (backfill)"
+    history = list(DictReader(capsys.readouterr().out.splitlines(), delimiter="\t"))
+    assert history[0]["PIPELINE_CODE"] == "P"
+    assert history[0]["RUN_DATE"] == "2026-08-30"
+    assert history[1]["RUN_DATE"] == "2026-09-02 (backfill)"
     for argv, message in (
         (["--backfill", "2026-09-01"], "is not FROM:TO"),
         (["--run-date", "01/09/2026"], "is not a date: write YYYY-MM-DD"),

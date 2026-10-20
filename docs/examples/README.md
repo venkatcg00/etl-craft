@@ -177,3 +177,8 @@ with `--ignore-dependencies --reason "upstream data verified"`. See
 checkpoint limits and the equivalent HTTP request.
 
 Scoped operator controls: see [holds, stop and abort](operator-controls.md).
+
+The config-file pipelines carry `TAGS` such as `sales` and `daily`.
+`etl-craft pipelines --tag sales --tag daily` requires both tags. Use the same filters with
+`status`, `history`, `audit` and `validate`, or with `pause`/`resume` and explicit `--yes`
+confirmation. Tags are current metadata labels, independent of schedules and permissions.
