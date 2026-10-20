@@ -331,3 +331,5 @@ unless you saw it pass.
 - Release evidence, gate, chaos and soak: `release/README.md`
 - Procedures (Agent Skills): `.agents/skills/roadmap-item/SKILL.md` (take an item from branch
   to merge) and `.agents/skills/pre-pr-checks/SKILL.md` (validation)
+- Test skills, one per kind of defect: `.agents/skills/test-*/SKILL.md` (ETL correctness, run
+  state, chaos and recovery, security, upgrades, failure messages)
