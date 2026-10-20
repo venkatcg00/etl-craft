@@ -1,19 +1,20 @@
 """Upgrade populated scoped controls without losing fences, identities or audit guards."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ActionName, ApiRole, ControlAction
+from etl_craft.core.actor import Actor, ActorKind, acting_as
+from etl_craft.core.enums import ActionName, ApiRole, ControlAction, ControlStatus
 from etl_craft.engine import controls, migrations
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.controls import ControlRequest
 from fixtures.actions import act
-from fixtures.metadata import add_pipeline, add_task, start_run
+from fixtures.metadata import add_pipeline, add_task, insert, start_run
 from fixtures.released_schema import install
 
 
@@ -36,22 +37,30 @@ def test_migrating_populated_controls_preserves_requests_fences_and_immutability
     ctx = OperationContext(
         db.engine, db.config, Actor("operator", ActorKind.USER), role=ApiRole.OPERATOR
     )
-    with db.engine.begin() as conn:
+    with acting_as(ctx.actor), db.engine.begin() as conn:
         p = add_pipeline(conn, "P")
         a = add_task(conn, p, "a")
         run = start_run(conn, p)
-    held = invoke(
-        ctx,
-        ActionName.CONTROL,
-        ControlRequest(
-            pipeline_code="P",
+        control_id = insert(
+            conn,
+            "INSERT INTO AUD_CONTROL_REQUESTS "
+            "(REQUEST_KEY,PIPELINE_RUN_ID,TASK_ID,ACTION,STATUS,ATTEMPT_IDS,"
+            "REQUESTED_BY,REQUESTED_BY_KIND,REASON,REQUESTED_AT,ACKNOWLEDGED_AT,"
+            "COMPLETED_AT,MESSAGE) VALUES "
+            "(:key,:run,:task,:action,:status,'[]',:actor,:kind,:reason,:now,:now,:now,:message)",
+            "CONTROL_ID",
+            key="retained-key",
+            run=run,
+            task=a,
             action=ControlAction.HOLD,
+            status=ControlStatus.COMPLETED,
+            actor=ctx.actor.name,
+            kind=ctx.actor.kind,
             reason="retained reason",
-            run_id=run,
-            task_code="a",
-            request_key="retained-key",
-        ),
-    )
+            now=datetime(2026, 1, 1, tzinfo=UTC),
+            message="HOLD: task dispatch held",
+        )
+        held = controls.get(conn, control_id)
     assert migrations.apply_pending_migrations(db.engine)
     assert act(ctx, ActionName.CONTROL_REQUEST, control_id=held.control_id) == held
     with db.engine.connect() as conn:
