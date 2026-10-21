@@ -481,6 +481,7 @@ def test_run_links_status_and_catalog_share_exact_identities(trigger_scene, tmp_
     assert status.tasks[0].explanation.state == "waiting on child"
     assert str(child.pipeline_run_id) in status.tasks[0].explanation.next_action
     catalog = collect_catalog(project.engine, project.config)
+    assert [link.child_run_id for link in catalog.trigger_links] == [child.pipeline_run_id]
     folder = tmp_path / "catalog"
     write_site(catalog, project.config, folder)
     overview = (folder / "dags.html").read_text()
