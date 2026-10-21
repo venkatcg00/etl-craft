@@ -62,6 +62,17 @@ are safe.
 Two `migrate` runs against the same Engine DB never overlap: the second waits for the first, then
 finds nothing left to apply.
 
+## Query indexes
+
+Migration `0046_query_indexes.sql` adds indexes for pending runs, gate decisions, rule runs,
+upstream consumption, interventions and documentation requests on SQLite and PostgreSQL.
+It also covers run and consumption retention. The existing attempt-number index already
+starts with `TASK_RUN_ID`, so attempt writes gain no additional index to maintain.
+
+Index creation is transactional and can block writes while it builds. Plan an upgrade
+window appropriate to the size of the run and audit tables; apply the migration before
+starting the controller and UI copies. No rows, results or configuration change.
+
 ## Pipeline and task code checks
 
 Pipeline and task codes start with an ASCII letter and contain only letters, digits and

@@ -142,14 +142,15 @@ item's text, or work done early under another item.
 | S5.AC Pipeline trigger tasks | Done | #223 | Durable child admission, controller-held WAIT outcomes, DETACH at QUEUED admission and linked run inspection |
 | S5.AD Pipeline permission groups | Done | #225 | Admin-managed groups, audited direct/tag grants, effective pipeline roles, retained SSO group IDs and child-start permission checks |
 | S5.AE One gateway | In progress | #227 | Slice 1: stateless PostgreSQL `ui`, headless health-only controller, package schema checks, `ui`/`all` extras and `--api`; agent API and deployment layouts remain with S5.C/S7.F |
-| S5.AF Indexes for every query | Planned | | Catalog query plans avoid full scans of growing tables; measured indexes, write overhead and a PostgreSQL guard |
+| S5.AF Indexes for every query | Done | #229 | Selective history indexes, bounded catalog reads and a PostgreSQL full-scan guard |
 | S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
-| S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
+| S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
+| S7.O Package and demo repositories | Planned | | A very small demo stays in package CI; Support Insights holds its project and supplies release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
 | S7.Q A generic ANSI SQL warehouse | Planned | | A `generic` dialect over SQLAlchemy for rare databases: ANSI SQL only, NULL-safe column comparison for merges, refusals for anything without an ANSI form |
 | S7.R Complete the test suite | In progress | #228 | Slice 1: recursive secret masking, merge crash windows and full-column/catalog upgrade guards; six-skill coverage audit remains after S7.A |
@@ -239,11 +240,9 @@ S5.T (resource discovery and deployment profiles), then S5.C. S5.T supplies the 
 does not move worker work ahead of the metadata, account or operator-control corrections.
 
 **Direction after S7.N (owner, 15 October 2026).**
-- **Three repositories.** etl-craft ends as three repositories:
-  - this package;
-  - the Support Insights demo (sources, generators, SQL, scripts, dashboards);
-  - a configuration repository whose CI applies the demo's `CFG_` CSV files with
-    `etl-craft config plan` and `apply`.
+- **Two repositories.** This package and the Support Insights repository. Support Insights
+  holds the demo code, its deployment and the etl-craft project in `project/`: `craft-connector.yml`,
+  `config/`, `sql_files/`, `ingestion_scripts/`, `validation_scripts/`, `migrations/` and `seeds/`.
 - **The package's CI tests the package only.** A very small demo stays in the package for its
   tests. Package CI does not run or prove the Support Insights demo; it validates the result
   evidence the demo publishes for a candidate (S7.O and the revised S8.G).
@@ -300,6 +299,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AF (#229) covers the resolved PostgreSQL query catalog with a growing-table scan guard
+and full-volume plans for 10,000 pipelines of 20 tasks with a year of daily history. Index
+plans and attempt write costs were measured. Catalog, run-inspection, trigger-link and
+controller-schedule behavior passed on both Engine DBs. Upgrades from every released SQLite and PostgreSQL schema retain rows and match fresh
+indexes and constraints. Only Engine DB SQL changes; warehouse/cloud acceptance does not apply.
 
 S7.R.1 (#228) covers nested secret and URL masking through audits, logs, CLI JSON and HTTP
 on both Engine DBs; real process loss at seven merge boundaries on all four local warehouses
@@ -584,6 +589,12 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.AF reuses the existing schedule-key index for `MAX(RUN_KEY)` and the existing
+  `(TASK_RUN_ID, ATTEMPT_NUMBER)` index for the attempt purge prefix. Neither needs a duplicate.
+  The guard explains each effective PostgreSQL query, including dialect overrides; migration-only
+  queries use their historical column shapes. `LISTEN`, `UNLISTEN`, `DROP VIEW` and `DROP TABLE`
+  have no `EXPLAIN` plan and carry explicit utility reasons in the fixture.
 
 - S7.R.1 found that unreleased SQLite migration 0035 reset AUD_TASK_ATTEMPTS.RETRYABLE to TRUE.
   It was corrected in place, with no marker, because no tag contains it. Development Engine DBs
@@ -1736,8 +1747,8 @@ flowchart LR
 | 0.4 | Overseer: `etl-craft server`, schedules with time zones, ready-set dispatch, retries, `status`, `explain`, JSON, HTTP API, versioned YAML | S4.A to S4.H | The demo runs a week with no cron or Airflow; `kill -9` of the overseer loses and doubles nothing |
 | 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB; the chaos suite passes |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
-| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, separate demo and configuration repositories, the obvious-failure catalog | S7.A to S7.P | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
-| 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its Superset dashboards and every-feature scenarios | S8.A to S8.H | Every pipeline, dashboard and feature scenario passes, with verified README walkthroughs |
+| 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, package and demo repositories, the obvious-failure catalog | S7.A to S7.P | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
+| 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its views, UI and every-feature scenarios | S8.A to S8.H | Every pipeline, view and feature scenario passes, with verified README walkthroughs |
 | 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
 
 Milestones are ordered by dependency. Do not start 0.4 before 0.3's chaos suite passes: the
@@ -4959,9 +4970,12 @@ Branch: `feat/pools-bundles`.
   pins each run to its DAG version.
 - *Change.*
   1. `etl-craft bundle publish [--project P]` builds a manifest (relative path to SHA-256) of
-     `sql_files/`, `ingestion_scripts/` and the project's `craft-connector.yml` (secrets stay variable
-     names), uploads the files to the artifact store (`Artifacts.Store: file:///shared/etl-craft` or
+     `sql_files/`, `ingestion_scripts/`, `seeds/` and the project's `craft-connector.yml`
+     (secrets stay variable names), uploads the files to the artifact store (`Artifacts.Store: file:///shared/etl-craft` or
      `s3://bucket/prefix`), and records `AUD_PROJECT_BUNDLES (BUNDLE_ID, PROJECT_ID, MANIFEST, CREATED_BY, CREATED_AT)`.
+     `etl-craft bundle publish` also works through `--api`: the API stores the files in the
+     artifact store. A CI runner needs only an API token, with no Engine DB or artifact-store
+     credentials.
   2. Each run pins the project's latest bundle when it starts (`AUD_PIPELINES_RUN_LOG.BUNDLE_ID`);
      every attempt runs that bundle. Agents cache bundles under `~/.cache/etl-craft/bundles/<id>`
      and verify every hash.
@@ -5357,7 +5371,7 @@ lists each element, its source and its data.
     - Flask: a second framework next to FastAPI, with the same Jinja2 pages.
     - A compiled TypeScript or React frontend: it needs a Node toolchain and a JavaScript
       dependency tree.
-  - **Demo stack.** The full demo stack's Docker Compose file lives in the demo repository
+  - **Demo stack.** The full demo stack's k3d manifests live in the demo repository
     (S8.A); the package needs no Docker.
 - *Pages.*
   - Projects: health per project (running, failed today, SLA misses, queued work).
@@ -5376,7 +5390,7 @@ lists each element, its source and its data.
   - Catalog: today's lineage, tables, rules and scripts pages, linked from runs.
   - Metadata: a read-only view of `CFG_` rows (pipelines, tasks, parameters, dependencies,
     rules, stewardable pipelines, groups and grants), with each row's actor, history and `validate` findings, and a link
-    to its CSV file in the configuration repository. The UI does not edit metadata. Changes
+    to its CSV file in the project repository. The UI does not edit metadata. Changes
     are made in the config files and deployed by `etl-craft config apply`, so the UI and the
     reviewed files cannot drift apart.
   - Uploads (S7.M): a drop-down of the stewardable pipelines the signed-in steward is assigned
@@ -5522,6 +5536,66 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
   - Every row an upload writes carries the uploader's account.
   - The dev team changes stewardable pipelines and validation scripts only through config
     files and the project repository.
+
+### S7.S Seed tables
+
+Branch: `feat/seed-tables`. After S7.M (stewardship uploads) and S5.F (bundles).
+
+- *Problem.* Teams keep small reference tables in their repository. They need etl-craft to
+  load them into the warehouse with an audit trail, and to hand each one to stewards once
+  business users own the data.
+- *Files.*
+  - Seeds live under `seeds/<catalog>/<schema>/<table>/` in the project directory: the
+    folders are the table's identifiers. Each folder holds:
+    - `data.csv`, read with the formats and reader of S7.M uploads;
+    - `columns.csv`, with `COLUMN_NAME`, `DATA_TYPE` and `KEY_FLAG`.
+  - Values are cast to the declared type, never inferred.
+  - `validate` refuses, naming the file, row, column and value:
+    - a catalog that is not the deployment's warehouse catalog;
+    - a missing `columns.csv`;
+    - a value that cannot be cast.
+  - S5.F bundles include `seeds/`.
+- *Applying.* `etl-craft seed apply [--project P]` and `POST /api/v1/seeds` call one
+  service in `services/operations` (the `developer` role).
+  - For each seed table, it compares the SHA-256 of both files with the last load recorded
+    in `AUD_SEED_LOADS`. That table's columns are `PROJECT_ID`, `CATALOG_NAME`,
+    `SCHEMA_NAME`, `TABLE_NAME`, `CONTENT_SHA256`, `RUN_ID`, `STATUS`, `CREATED_BY` and
+    `CREATED_AT`, with migrations in both dialects.
+  - The content hash is used instead of `git diff`, so a re-run, a fresh Engine DB or a
+    shallow clone behaves the same.
+  - The three outcomes:
+    - **unchanged:** nothing runs;
+    - **changed or never loaded:** one run on an agent replaces the table with
+      `CREATE_TABLE`, over the staged seed rows, from the pinned bundle. A seeded table
+      that a stewardable pipeline merges into is created in that merge's shape (keys,
+      audit columns, hash version);
+    - **locked:** nothing runs. The result and `AUD_SEED_LOADS` (`STATUS` `LOCKED`) say:
+      `<catalog>.<schema>.<table> is maintained through stewardship since upload <id> on`
+      `<date> (pipeline <P>); seeds/<path> was not applied. Upload changes on the UI's`
+      `Uploads page for <P>.` This is a recorded rule outcome, not a warning on a guess.
+  - The command waits for the runs it starts and reports each table's outcome. It exits 0
+    when every table is unchanged, loaded or locked, and non-zero when a load fails, naming
+    the table and the run.
+- *Locking.* Standard behaviour; no setting changes it.
+  - The first stewardship upload run that ends `SUCCESS` writing a table locks its seed.
+  - A failed or refused upload does not lock it.
+  - There is no unlock: from then on, the table changes only through stewardship.
+  - The seed lock is separate from S5.O.3's row and value locks, whose explicit unlock
+    stays as planned.
+  - Seeds may also create tables that no stewardable pipeline targets. Those are replaced
+    whenever their files change.
+- *Tests.* On both Engine DBs:
+  - an unchanged seed starts no run;
+  - a changed seed replaces the table with exactly its rows;
+  - after a successful upload, a changed seed reports `LOCKED`, exits 0 and leaves the
+    table unchanged;
+  - a failed upload does not lock;
+  - a failed load exits non-zero, naming the table and run;
+  - `validate` refuses each bad file with its four message parts.
+- *Done when.*
+  - Support Insights' reference tables are seeded from `project/seeds/`.
+  - After the first upload, the stewarded ones report `LOCKED` in the deploy workflow's
+    `seed apply`.
 
 ### S7.B Users, roles and identities (W10)
 
@@ -5767,7 +5841,7 @@ These timing-acceptance runs are deliberate manual validation, not a new repeate
 
 **Gate.** The soak passes, and S7.N meets the complete-CI target without weakening checks.
 
-### S7.O Package, demo and configuration repositories
+### S7.O Package and demo repositories
 
 Branch: one per slice: `test/e2e-small-demo`, `docs/demo-repository`,
 `feat/release-example-evidence`. Starts after the frozen 0.4 soak ends. Slice 3 comes before
@@ -5780,10 +5854,10 @@ S8.G.
     duplicates it.
   - Proving demo content in package CI ties every package change to demo data. The installed
     Iceberg demo cases are S7.N's critical path, at 290-326 seconds each.
-  - The owner's direction is three repositories:
-    - this package;
-    - the demo;
-    - a configuration repository holding the demo's `CFG_` CSV files.
+  - The owner's direction is two repositories: this package and Support Insights. The demo
+    repository holds its deployment and its etl-craft project under `project/`, including
+    `craft-connector.yml`, `config/`, `sql_files/`, `ingestion_scripts/`,
+    `validation_scripts/`, `migrations/` and `seeds/`.
 
     A very small demo stays in the package for its tests. For the Support Insights demo,
     package CI only validates the result evidence the demo publishes.
@@ -5814,16 +5888,16 @@ S8.G.
   3. **Release evidence from the demo** (replaces running the demo in S8.G).
      - The demo's acceptance workflow (S8.E) runs against a candidate wheel attached to the
        candidate's GitHub release and pinned by SHA-256. It writes a results manifest:
-       - the demo and configuration repository commits;
+       - one demo commit;
        - the wheel's SHA-256;
        - each S8.F check and S8.H scenario id with its outcome, counts and evidence links;
        - the start and end times.
      - The release pull request copies the manifest to
        `release/evidence/<version>/example-support-insights.json`.
-     - `release/example.toml` pins both commits and lists the expected check and scenario ids.
+     - `release/example.toml` pins that one demo commit and lists the expected check and scenario ids.
      - `release_gate.py` validates the manifest and fails closed. It refuses:
        - a wheel hash other than the release wheel's;
-       - commits other than the pinned ones;
+       - a demo commit other than the pinned one;
        - a missing, extra, skipped or failed check or scenario;
        - a manifest older than the wheel.
 
@@ -5837,7 +5911,7 @@ S8.G.
     `release/example.toml` and the evidence check.
   - The installed-wheel matrix still runs every combination on the small demo.
   - 1.0.0 cannot be released without demo evidence that matches the release wheel, the pinned
-    commits and the complete scenario inventory.
+    demo commit and the complete scenario inventory.
   - S7.N's timing is re-measured in both cache conditions and stays within ten minutes.
 
 ### S7.P Obvious failures do not stop 1.0.0
@@ -5969,28 +6043,25 @@ catalog rows name theirs.
 **Goal.** Prove 1.0.0 on a real project before it is released. The
 [Support Insights platform](https://github.com/venkatcg00/Supports-Insights-Docker) is rebuilt on
 etl-craft: everything etl-craft can do replaces what Airflow, PySpark and hand-written SQL do there
-today, its configuration is deployed by CI pipelines, and both Superset dashboards work from the data
-etl-craft produces. **1.0.0 is released only when every pipeline of the example runs, every chart
-of both dashboards renders correct data, and every package feature has a tested and documented
-Support Insights demonstration (S8.H).**
+today, and its project is deployed by CI. **1.0.0 is released only when every pipeline runs,
+the views match S8.F's reference queries, and every package feature has a tested and documented
+Support Insights demonstration (S8.H), visible through the README and UI.**
 
 **Depends on.** Every workstream of 0.2.0 to 0.9 merged and every defect in
 [Appendix A](#appendix-a-defect-traceability) closed. The example is built against 1.0.0 release
 candidates (`1.0.0rc1`, `1.0.0rc2`, ...); a defect it finds is fixed in etl-craft, and a new release
 candidate is cut, never worked around in the example.
 
-**Where it lives.** In two repositories outside the package (S7.O):
-- **The demo.** The Support Insights repository, on a branch `etl-craft` that replaces its
-  `master` once this stage passes. It holds the sources, generators, SQL files, ingestion
-  scripts, dashboards and acceptance checks.
-- **The configuration repository.** It holds the project's `CFG_` CSV files, one per table, and
-  the CI that plans and applies them (S8.C).
+**Where it lives.** Two repositories in total (S7.O): this package and Support Insights.
+The Support Insights repository's `etl-craft` branch replaces its `master` once this stage
+passes. It holds the demo code, deployment, acceptance checks and the etl-craft project in
+`project/`: `craft-connector.yml`, `config/`, `sql_files/`, `ingestion_scripts/`,
+`validation_scripts/`, `migrations/` and `seeds/`.
 
-Both get etl-craft from this package repository: the candidate wheel attached to the
-candidate's GitHub release, pinned by SHA-256. etl-craft goes to PyPI only when 1.0.0 is
-released and everything is done. The etl-craft repository pins both commits in
-`release/example.toml`. It validates the results manifest the demo publishes (S8.G) and never
-runs the demo itself.
+The demo installs the candidate wheel attached to this package's GitHub release, pinned by
+SHA-256. etl-craft goes to PyPI only when 1.0.0 is released and everything is done. The package
+pins one demo commit in `release/example.toml`, validates its results manifest (S8.G), and
+never runs the demo itself.
 
 ### What the example has today
 
@@ -6004,44 +6075,65 @@ runs the demo itself.
 | Run audit | `aud.dag_runs`, filled by each DAG's finalize task | **Replaced** by etl-craft's run, task and attempt tables |
 | Data errors | `aud.data_error_history`, written by the CDC-to-PRE_DM step | **Replaced** by business rules and their results |
 | Reference data sync | Triggers in `infra/sql/12_func_triggers_creation.sql` copying `ds.*` and `info.*` into `dwh.*` | **Replaced** by an etl-craft pipeline |
-| Warehouse schemas | `infra/sql/02_schema_creation.sql` | Kept: etl-craft never creates warehouse schemas |
-| Warehouse tables | `infra/sql/03` to `11` | **Replaced**: target tables are created by `SETUP_TABLE` tasks; only the reference (`ds`, `info`) seed tables keep their DDL |
-| Reference data | `infra/sql/13`, `14` inserts | Kept as seed files, loaded by an etl-craft ingestion pipeline |
+| Warehouse schemas | `infra/sql/02_schema_creation.sql` | Deployment bootstrap creates the lake schemas through the Trino CLI; etl-craft never creates warehouse schemas |
+| Warehouse tables | Target DDL | **Replaced** by `SETUP_TABLE` tasks and S7.S seeds; `aud.dag_runs`, `dwh.aud_dag_runs` and their trigger are removed |
+| Reference data | Hand-written DDL and inserts | **Replaced** by folder-addressed S7.S seeds: three stewarded `ds` tables, replaceable `ds.sources` and `info.data_dictionary`; duplicate object metadata tables and their `dwh` copies are removed |
 | Views | `vw.data_metrics_view`, `vw.customer_support_fact_view` | **Rewritten** over etl-craft's tables (`S8.D`) |
-| Superset | Two dashboards in `superset/exports/dashboard_export.zip` | Kept; datasets repointed and re-exported (`S8.D`) |
 
 ### S8.A The project layout
 
 ```
 Supports-Insights-Docker/
-├── etl-craft/                        the etl-craft project directory
-│   ├── craft-connector.yml           Engine, Warehouse, Email, Cloning; secrets as variable names
-│   ├── sql_files/                    one SELECT per SQL task, by layer and client
-│   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py, seeds.py,
+├── project/                          the etl-craft project directory
+│   ├── craft-connector.yml           secrets as variable names
+│   ├── config/                       one CSV per CFG_ table
+│   ├── sql_files/                    one SELECT per SQL task; maintenance SQL_SCRIPT files
+│   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py,
 │   │                                 steward_to_lnd.py
 │   ├── validation_scripts/           one FILE_VALIDATION script per stewardable pipeline
-│   └── seeds/                        ds and info reference data as CSV
-├── generators/                       deterministic valid, incomplete, rejectable and reportable cases (S8.H)
-├── superset/                         dashboards export (re-exported in S8.D)
+│   ├── migrations/                   project migrations
+│   └── seeds/<catalog>/<schema>/<table>/
+│       ├── data.csv                  three stewarded ds tables; replaceable sources/dictionary
+│       └── columns.csv               COLUMN_NAME, DATA_TYPE, KEY_FLAG
+├── generators/                       deterministic mixed-quality cases, UI and SQLite state
 ├── infra/
-│   ├── docker-compose.yml            postgres, mongo, kafka, minio, superset, generators UI,
-│   │                                 etl-craft controller, two etl-craft agents
-│   └── sql/                          database, schemas, reference seed tables, vw views
-└── .github/workflows/                the CI pipelines (S8.E)
-
-support-insights-config/              the configuration repository (S8.C)
-├── config/                           one CSV file per CFG_ table, merged by key
-└── .github/workflows/                plan on pull requests, apply on merge
+│   ├── kubernetes/                   S7.F manifests, counts and limits adjusted for this stack
+│   └── bootstrap/                    warehouse schemas through the Trino CLI
+└── .github/workflows/                validate.yml, deploy.yml, e2e.yml (S8.C/S8.E)
 ```
 
-Containers: one controller with 1 GB and twelve agents with 256 MB and one slot each, about
-4 GB in all. One agent plus one task process measures about 128 MB before a query runs. S5.T's
-check refuses a container too small for a slot. S5.C measures lazy imports toward 160-192 MB per
-agent.
+**Layout.** k3d on one laptop: 16 GB RAM, six cores, swap allowed; slow is acceptable.
+One job per container. SQLite wherever a component needs a database, except the Engine DB.
 
-Engine DB: a database `etl_craft` on the platform's PostgreSQL server, separate from the warehouse
-database `support_insights`. Warehouse: `support_insights` (PostgreSQL). One etl-craft project,
-`support_insights`.
+- **Engine DB:** a three-instance CloudNativePG cluster, with one synchronous replica
+  required. A PgBouncer Pooler in transaction mode serves the `ui` copies; the controller
+  connects directly to the `-rw` service.
+- **etl-craft:** `controller --no-ui` with 1 GB; two `ui` replicas behind the k3s Traefik
+  ingress; twelve agents with 256 MB and one slot each, in the pools below. Agents hold
+  agent tokens only. Reuse S7.F's Kubernetes manifests unchanged apart from counts and
+  limits. One agent plus one task process measures about 128 MB before a query runs;
+  S5.T refuses a container too small for a slot, and S5.C measures lazy imports toward
+  160-192 MB per agent.
+- **Warehouse:** Trino over Iceberg. The Iceberg REST catalog runs on SQLite. `minio-lake`
+  holds lake files, bundles and logs. Deployment bootstrap creates warehouse schemas
+  through the Trino CLI: etl-craft never creates warehouse schemas. One project,
+  `support_insights`.
+- **Sources:** Alpha in `mongodb`; Beta on `kafka` (`apache/kafka`, KRaft); Gamma's gzipped
+  CSVs in `minio-gamma`, a separate container from `minio-lake`: client storage is not the
+  lake. One `generator` container serves its UI and all three clients, with state in SQLite.
+- **Ops:** `mailpit` and `github-runner`.
+
+**Storage caps.** The generator has a fixed key space and daily row cap per client, a batch
+size and a fixed update share to bound SCD2 growth. Kafka uses one day for `retention.ms`
+and 256 MB for `retention.bytes`; MongoDB has a two-day TTL index; `minio-gamma` expires
+objects after two days; etl-craft logs follow S6 retention. Trino's `iceberg.properties`
+sets `iceberg.expire-snapshots.min-retention=1d` and
+`iceberg.remove-orphan-files.min-retention=1d`.
+
+**README.** State the RAM total (about 13 GB, measured with `kubectl top pods`), expected
+swap, a 50 GB disk budget, and the k3d flag
+`--k3s-arg "--kubelet-arg=fail-swap-on=false@server:*"`. Explain that production separates
+the warehouse from the Engine DB.
 
 ### S8.B Pipelines
 
@@ -6050,20 +6142,23 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | Pipeline | Task | Handler and action | Replaces |
 | --- | --- | --- | --- |
 | `SI_SETUP` (manual, once and on schema change) | one `SETUP_TABLE` per target table in `lnd`, `prs`, `cdc`, `pre_dm`, `dm`, `dwh` | SQL `SETUP_TABLE` | `infra/sql/06` to `11` |
-| `SI_REFERENCE` (daily) | `load_seeds` | PYTHON `seeds.py`: reads `seeds/*.csv` into `ds.*` and `info.*` | `infra/sql/13`, `14` |
-| | `ds_*_to_dwh`, `info_*_to_dwh` (one per table) | SQL `SCD1_MERGE` | the triggers in `12_func_triggers_creation.sql` |
-| `SI_CLIENT_ALPHA` (every 15 min) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
+| `SI_REFERENCE` (deploy after `seed apply`, or detached stewardship trigger; no daily schedule) | `ds_*_to_dwh`, `info_data_dictionary_to_dwh` | SQL `SCD2_MERGE` for the four `ds` tables and dictionary | reference-history triggers |
+| | `<table>_deletes_to_dwh` (one per copy) | SQL `DELETE_ROWS` (soft), selecting `dwh` keys absent from the source | the triggers' `D` rows |
+| `SI_CLIENT_ALPHA` (every 15 min outside the maintenance hour) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
 | | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
 | | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_run_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
-| | `alpha_cdc_to_predm` | SQL `OVERWRITE_TABLE`: joins `ds` lookups, maps codes | the transform half of `client_alpha_cdc_to_predm` |
-| | `alpha_rules` | BUSINESS_RULES on `pre_dm.customer_support_stage_alpha`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
+| | `alpha_predm_delete` | SQL `DELETE_ROWS`, `HARD_DELETE = true`: selects Alpha's keys from `pre_dm.customer_support_stage` | replacement of Alpha's stage rows |
+| | `alpha_cdc_to_predm` (depends on delete with `SUCCESS`) | SQL `APPEND_TABLE`: joins `ds` lookups, maps codes and writes the source column | the transform half of `client_alpha_cdc_to_predm` |
+| | `alpha_rules` | BUSINESS_RULES on only Alpha's rows in `pre_dm.customer_support_stage`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
 | | `alpha_predm_to_dm` | SQL `SCD2_MERGE` into `dm.customer_support_fact`, keyed on `source_system_identifier`, excluding rejected keys | `client_alpha_predm_to_dm` |
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
 | `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
 | `SI_CLIENT_GAMMA` | as Alpha, with `minio_to_lnd.py` (the last processed object key, `{sequence_number:10d}_...`, as a `TEXT` offset) | | `Client_Gamma_ETL_Task_Flow` |
-| `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per `ds` reference table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
+| `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per stewarded `ds` table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
 | | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads `task.upload` into the table's landing table | |
-| | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table; `SI_REFERENCE` then carries it to `dwh` | |
+| | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table | |
+| | `reference_refresh` (final task after the merge) | S5.AC `RUN_PIPELINE` for `SI_REFERENCE`, `DETACH` | carries corrections to `dwh` |
+| `SI_MAINTENANCE` (nightly, outside client schedules) | one task per layer | S5.X `SQL_SCRIPT`, explicit lake-table maintenance; `RETRY_ON = NONE` | Iceberg file and snapshot maintenance |
 | `SI_STEWARD_DM_FACT` (`STEWARDABLE_FLAG = 'Y'`; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION with the fact's own script | hand-corrected mart rows |
 | | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py` into `lnd.steward_customer_support_fact` | |
 | | `steward_to_dm` (depends on `steward_to_lnd`) | SQL `SCD2_MERGE` into `dm.customer_support_fact` as human writes under S5.O.3's locks | |
@@ -6073,76 +6168,116 @@ Rules for building them:
 1. Port each Airflow task's SQL and PySpark logic into one SELECT per SQL task. When a step needs
    something etl-craft can't express (a count, a check, an action), stop and add it to etl-craft
    with a design note in this plan, then cut a new release candidate. Example: the Data Metrics
-   dashboard needs a duplicate count per run; if the `SCD2_MERGE` dedupe step doesn't report it, add
+   view needs a duplicate count per run; if the `SCD2_MERGE` dedupe step doesn't report it, add
    `DUPLICATE_COUNT` to the action's counts rather than computing it in a script.
-2. Ingestion scripts only read the source and write landing rows (the team's responsibility, as
-   for any user); they return `ScriptResult(row_count, offset)`.
+2. Each ingestion script replaces its landing table's rows every run and returns
+   `ScriptResult(row_count, offset)`. If the scripting helper cannot replace, record a package
+   gap under rule 1. All clients share `pre_dm.customer_support_stage`, with a source column.
+   Their `<client>_predm_delete` and `<client>_cdc_to_predm` tasks commit separately: between
+   them that source has no PRE_DM rows, and a retry re-runs only the append. Rules and the DM
+   merge depend on the append; each client's rules evaluate only its own source rows. If
+   `BUSINESS_RULES` cannot scope to those rows, that is a package gap under rule 1. PRS and
+   DM stay SCD2, and CDC stays overwrite.
 3. The `dm.customer_support_fact` table is created by `SETUP_TABLE` with etl-craft's SCD2 audit
    columns. Its source-based partitions are dropped (the data is small); `is_active` becomes
    `ACTIVE_FLAG = 'Y'`, and validity comes from the business rules.
 4. Pools: ingestion tasks run in the `ingestion` pool on agent 1, SQL and rules in the `warehouse`
    pool on agent 2, so the example exercises the cluster.
 
+
+**Reference seeds.** `project/seeds/<catalog>/<schema>/<table>/` holds:
+- **Stewarded after seeding:** `ds.agents`, `ds.customer_types`, `ds.support_areas`, each with
+  its own `SI_STEWARD_DS_<TABLE>` pipeline. The first successful upload locks that seed.
+  Every `ds` table uses SCD1 for its steward merges.
+- **Replaceable, with no stewardable pipeline:** `ds.sources` (developers own the source
+  mapping used by pipelines and `vw.data_metrics_view`) and `info.data_dictionary`. The
+  dictionary keeps `SOURCE_ID`, `FIELD_NAME`, `VALUES_ALLOWED`, `DESCRIPTION`, `EXAMPLE`;
+  it drops `DATA_TYPE`, because declared types live in `CFG_COLUMNS`. S8.F fails a dictionary
+  field without a matching `CFG_COLUMNS` row for its source's landing table.
+
+Remove `info.object_types`, `info.object_names`, `info.object_load_strategies`, their `dwh`
+copies and seed inserts: `CFG_TABLES`, SQL targets and task actions already own those facts,
+and the catalog and lineage expose them. S7.S seeds create the reference tables; no separate
+reference-table DDL or insert scripts remain. Remove `dwh.aud_dag_runs` and its trigger with
+`aud.dag_runs`.
+
+`SI_REFERENCE` has no `load_seeds`, `seeds.py` or daily schedule. Its SCD2 copies retain the
+history represented by the original triggers' `is_active`, `start_date`, `end_date` and
+`dml_operation`; replaced seed values survive in `dwh`. Each copy also soft-deletes absent
+source keys. The deploy workflow runs it after `seed apply`, and each stewarded DS pipeline
+ends with a detached `RUN_PIPELINE` trigger for it.
+
+**Iceberg maintenance.** Trino has no stored procedures; its SQL routines are scalar
+functions and cannot execute `ALTER TABLE`. `SI_MAINTENANCE` runs nightly at an hour with no
+client schedule. One S5.X `SQL_SCRIPT` task per layer lists that layer's tables explicitly,
+with these statements for each table:
+- `ALTER TABLE ... EXECUTE optimize(file_size_threshold => '128MB')`;
+- `ALTER TABLE ... EXECUTE expire_snapshots(retention_threshold => '1d')`;
+- `ALTER TABLE ... EXECUTE remove_orphan_files(retention_threshold => '1d')`.
+
+Set `RETRY_ON = NONE`. S5.X's overlap warning is expected for these tasks; the README
+explains why. S8.H checks that every lake table has at most two days of snapshots after
+maintenance.
+
 ### S8.C Configuration through CI
 
-The metadata is code, kept in the configuration repository as one CSV file per `CFG_` table and
-merged by key.
-- A change to a pipeline, a rule, a stewardable pipeline or a grant is a pull
-  request that edits those files. Retiring a row sets `ACTIVE_FLAG = 'N'`.
-- On a pull request, CI migrates an empty Engine DB to the candidate's schema, runs
-  `etl-craft config plan` and `apply`, and runs `validate` for every pipeline.
-- On merge, CI runs `etl-craft config apply` against the deployed Engine DB through a GitHub
-  environment with the Engine DB secret and required reviewers.
+Metadata is code in the demo's `project/config/`, one CSV per `CFG_` table, merged by key.
+Pipeline, rule, stewardable-pipeline and grant edits are pull requests; retiring a row sets
+`ACTIVE_FLAG = 'N'`. Nobody edits the Engine DB by hand; the UI shows metadata read-only.
 
-Nobody edits the Engine DB by hand. The UI shows metadata read-only (S7.A).
+- **Pull requests:** `validate.yml` runs on a GitHub-hosted runner, with no secrets. Install
+  the candidate wheel, migrate an empty Engine DB, run `config plan`, `config apply` and
+  `validate` against the project in the same demo commit.
+- **Push to `main`, filtered to `project/**`:** `deploy.yml` runs on a self-hosted runner
+  container in the demo cluster, in a GitHub environment with required reviewers. It runs
+  `validate`, `config apply --api`, `bundle publish --api`, `seed apply --api`, then
+  `run --api` for `SI_REFERENCE`.
+- The runner holds only a `developer` token, with no Engine DB or artifact-store credentials.
+  No workflow on the self-hosted runner runs on `pull_request`.
 
-The SQL files and ingestion scripts the configuration names stay in the demo repository. Both
-repositories pin each other's commit for a deployment, and the results manifest records both.
+The results manifest records the one demo commit containing both code and project.
 
-### S8.D Dashboards
+### S8.D Views
 
-Both dashboards keep their charts and meanings; only their datasets change.
+Keep `vw.customer_support_fact_view` and `vw.data_metrics_view` as `CREATE_VIEW` tasks,
+each checked by S8.F's independent reference queries.
 
-1. **Interactions dashboard.** `vw.customer_support_fact_view` is rewritten over the etl-craft fact:
-   `ACTIVE_FLAG = 'Y'` replaces `is_active` and the date range, and rejected keys are excluded through
-   the business-rule results mirrored by cloning. Every chart (total interactions, first-contact
-   resolution, average handle time, average rating, query status treemap, interactions per agent,
-   customer type and support area sunburst, volume over time, latest interactions) must show the same
-   numbers as a reference query written for the test in `S8.F`.
-2. **Data Metrics dashboard.** `vw.data_metrics_view` is rewritten over etl-craft's audit data,
-   mirrored into the warehouse schema `aud_mirror` by cloning (this deployment runs plain PostgreSQL,
-   so cloning stays on). Column by column:
+1. **Customer support facts.** Rewrite the fact view over `dm.customer_support_fact`:
+   `ACTIVE_FLAG = 'Y'` replaces `is_active` and the date range; exclude rejected keys through
+   the business-rule results mirrored by cloning. Reference queries check interactions,
+   first-contact resolution, handle time, ratings, query status, agent/customer/support-area
+   breakdowns, volume over time and latest interactions.
+2. **Data metrics.** Rewrite the metrics view over audit data mirrored into `aud_mirror`
+   by cloning. Cloning stays demonstrated; if it cannot target Trino over Iceberg, record
+   that as a package gap under S8.B rule 1. Column by column:
 
    | Today (`aud.dag_runs`) | From etl-craft |
    | --- | --- |
    | `dag_run_id`, `run_start_date`, `run_duration` | `AUD_PIPELINES_RUN_LOG`: `PIPELINE_RUN_ID`, `START_DATE`, `END_DATE - START_DATE` |
-   | `source_name` | the pipeline (`SI_CLIENT_ALPHA` is Alpha), through a small `ds.sources` mapping |
+   | `source_name` | the pipeline through the developer-owned `ds.sources` mapping |
    | `batch_count` | the ingestion task's `SOURCE_COUNT` |
-   | `insert_count`, `update_count` | the `lnd_to_prs` task (`SCD2_MERGE`): `UPDATE_COUNT` is the keys whose version was closed (updates), and `INSERT_COUNT - UPDATE_COUNT` the new keys (inserts), because an SCD2 merge counts every opened version as an insert |
-   | `duplicate_count` | the `lnd_to_prs` task's duplicate count (see rule 1 of `S8.B`) |
-   | `valid_count`, `validity_percentage` | rows of the run in `pre_dm` minus the keys the run's `REJECT` rules flagged |
+   | `insert_count`, `update_count` | the `lnd_to_prs` task: `UPDATE_COUNT` counts closed versions; `INSERT_COUNT - UPDATE_COUNT` counts new keys |
+   | `duplicate_count` | the `lnd_to_prs` dedupe count (S8.B rule 1) |
+   | `valid_count`, `validity_percentage` | the source's run rows in PRE_DM minus that run's rejected keys |
    | `dag_run_status = 'SUCCESS'` filter | `STATUS = 'SUCCESS'` |
 
-3. Re-export the dashboards to `superset/exports/` and import them in `infra/scripts/import_superset_dashboards.sh`.
+The README and UI guide inspection; no dashboard exports or imports remain.
 
 ### S8.E The CI pipelines
 
-In the example repository's `.github/workflows/`:
+In the Support Insights repository's `.github/workflows/`:
 
 | Workflow | When | What it does |
 | --- | --- | --- |
-| Repository | Workflow | When | What it does |
-| --- | --- | --- | --- |
-| configuration | `plan.yml` | every pull request | Install the pinned candidate wheel; start PostgreSQL; `etl-craft init-db`; `etl-craft config plan` and `apply` against the empty Engine DB with the demo commit's SQL files and scripts; `etl-craft validate` for every pipeline. Fails on any error. |
-| configuration | `apply.yml` | merge to `main` | `etl-craft config apply` to the deployed Engine DB through a GitHub environment with the Engine DB secret and required reviewers; publishes the project bundle; records the deployed configuration and demo commits. |
-| demo | `validate.yml` | every pull request | Install the pinned candidate wheel; lint the scripts; apply the pinned configuration commit to an empty Engine DB and run `validate`. |
-| demo | `e2e.yml` | before release or manual dispatch | Brings up the whole stack with Docker Compose (sources, generators, warehouse, Engine DB, controller, two agents, Superset); applies the pinned configuration; runs the generators for a fixed batch; waits for the scheduled runs; runs the checks of S8.F and S8.H; writes the S7.O results manifest. Uploads it with the logs, the catalog and dashboard screenshots. |
+| `validate.yml` | every pull request, GitHub-hosted | Install the pinned candidate wheel; lint scripts; migrate an empty Engine DB; `config plan`, `config apply`, `validate`. Holds no secrets. |
+| `deploy.yml` | push to `main`, filtered to `project/**` | Self-hosted runner container in the demo cluster; required-reviewer GitHub environment; only a `developer` token. Run `validate`, `config apply --api`, `bundle publish --api`, `seed apply --api`, then `run --api` for `SI_REFERENCE`. Never runs on `pull_request`. |
+| `e2e.yml` | manual dispatch and before release, self-hosted | Bring up the S8.A k3d stack; apply the project and seed files; run generators for fixed batches; wait for scheduled runs; run S8.F and S8.H; write the S7.O results manifest. Upload logs, the generated catalog and screenshots of the UI and catalog. Never runs on `pull_request`. |
 
 ### S8.F Acceptance checks
 
 `tests/` in the example repository (run by `e2e.yml`):
 
-1. Every baseline scheduled run of the four pipelines ends `SUCCESS`; `etl-craft status` shows
+1. Every baseline scheduled client run, explicit `SI_REFERENCE` run and maintenance run ends `SUCCESS`; `etl-craft status` shows
    no unexplained failed or lost attempt. Injected failure scenarios state their expected failure
    and recovery outcomes explicitly, and assert both.
 2. Row reconciliation: for each client, the known source keys, stewardship inserts/corrections
@@ -6150,16 +6285,17 @@ In the example repository's `.github/workflows/`:
    S8.H policies. Count overlapping rule flags once per excluded key, distinguish load rejects,
    and retain reportable rows when their policy permits it. No key has two active versions.
 3. Incremental behaviour: a second generator batch is picked up from the stored offsets with no
-   duplicates in `lnd` or `prs`.
+   duplicate versions in `prs`; `lnd` contains exactly the latest batch's rows.
 4. Failure and recovery: stop MongoDB during a run; the Alpha run fails, the alert arrives in Mailpit,
-   and after MongoDB returns, `etl-craft run --pipeline_code SI_CLIENT_ALPHA --rerun` (or the next
-   scheduled run) completes with no lost or doubled rows. `kill -9` a agent mid-run; its attempt is
+   and after MongoDB returns, `etl-craft run --pipeline-code SI_CLIENT_ALPHA --run-id <failed-run>` (or the next
+   scheduled run) completes with no lost or doubled rows. `kill -9` an agent mid-run; its attempt is
    reconciled and retried.
-5. Dashboards: through the Superset API, every chart of both dashboards
-   (`GET /api/v1/chart/{id}/data/`) returns rows, no error, and the values of the reference queries.
-   A headless browser loads both dashboards and finds no chart in an error state.
-6. Catalog: `etl-craft generate-docs` builds, and every pipeline's lineage reaches
-   `dm.customer_support_fact`.
+5. Both S8.D views match independent reference queries. Browser checks verify the README
+   inspection steps and UI/catalog pages without errors. Every data dictionary field has a
+   matching `CFG_COLUMNS` row for its source's landing table.
+6. Catalog: `etl-craft generate-docs` builds; each client pipeline's lineage reaches
+   `dm.customer_support_fact`, and `SI_REFERENCE` shows the five source-to-`dwh` copies.
+   Maintenance files list their lake tables explicitly, as S8.B requires.
 7. Scenario coverage: S8.H's expected source keys, reject reasons, business-rule flags, human
    corrections and downstream counts match their fixtures. Every feature's demonstration has
    recorded results; README commands and UI inspection instructions reproduce those results.
@@ -6174,14 +6310,14 @@ acceptance runs once every required handling feature exists. A scenario without 
 package gap to resolve first.
 
 **Where.** The Support Insights repository's `generators/`, generator UI and orchestrator,
-`etl-craft/` config files, SQL and ingestion scripts, `tests/`, dashboards, and root `README.md`.
+`project/` config files, SQL and ingestion scripts, `tests/`, etl-craft UI, and root `README.md`.
 The package repository pins the tested example commit and records release evidence through
 S8.G; no example-specific workaround belongs in the package.
 
 **Slices.** Keep each implementation PR cohesive: (1) deterministic generators, truth fixtures
 and the initial README coverage matrix; (2) business-rule scenarios, reconciliation and their
-dashboard/README checks; (3) same-record stewardship, protection and permissions; (4) the final
-coverage audit and release-suite enforcement. The other feature demonstrations ship with their
+view-reference-query, UI and README checks; (3) same-record stewardship, protection and
+permissions; (4) the final coverage audit and release-suite enforcement. The other feature demonstrations ship with their
 owning S8 project items, and later package features extend their matching example scenarios.
 Slice 4 verifies that work; it does not absorb missing feature implementations into a large PR.
 Every slice updates its runnable README walkthroughs and tests in the same example-repo PR.
@@ -6201,13 +6337,15 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    Distinguish business-rule rejections from S5.K's `__rejects` for values that cannot load.
    Test overlapping flags without counting one rejected key several times. Include clean
    controls, correction and clearing of flags, recurrence, unchanged out-of-scope flags,
-   retries and thresholds. Reconciliation and dashboard reference queries follow these
+   retries and thresholds. Reconciliation and view reference queries follow these
    policies; do not assume that every flag excludes a record from the mart.
 3. Add S7.M stewardable pipelines and assigned stewards for two kinds of target, correcting
    the same Alpha, Beta and Gamma records rather than a disconnected upload-only dataset:
    - **The `dm` mart:** `SI_STEWARD_DM_FACT` into `dm.customer_support_fact`.
-   - **The `ds` reference tables:** one `SI_STEWARD_DS_<TABLE>` per table, whose corrections
-     reach `dwh` through `SI_REFERENCE`.
+   - **The `ds` reference tables:** one `SI_STEWARD_DS_<TABLE>` per stewarded table (`agents`,
+     `customer_types`, `support_areas`), whose corrections reach `dwh` through a final detached `SI_REFERENCE` trigger. A successful first upload
+     locks the seed; later deploys report `LOCKED`, exit 0 and preserve the stewarded table.
+     `ds.sources` and `info.data_dictionary` remain replaceable seeds without stewardable pipelines.
 
    Each takes one pipe-delimited CSV or TXT file or one XLSX workbook, chosen from the Uploads
    drop-down. Its own `FILE_VALIDATION` script refuses bad files before anything is processed.
@@ -6236,14 +6374,22 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
 5. Document every case in the root README: prerequisites and versions, how to generate/reset
    its data, exact commands or UI steps, source keys and expected counts/values, which rules
    and pipeline act on it, and where to inspect the result in reject tables, rule flags, audit
-   history, catalog/gap pages, upload history, lock controls and dashboards. Provide navigation
-   and screenshots where useful. Link each walkthrough to its automated assertion and explain
+   history, catalog/gap pages, upload history, lock controls, the UI and S8.F reference queries.
+   Provide navigation and screenshots where useful. Link each walkthrough to its automated assertion and explain
    replay/cleanup so a reader can reproduce it without editing the Engine DB.
 6. Run full-stack demonstrations through the demo's manual/pre-release `e2e.yml` (S8.E).
    Its results manifest is the evidence the package's S8.G gate validates. Store scenario
-   results, logs, reconciliation results and UI/dashboard evidence against the pinned demo and
-   configuration commits and the candidate wheel. A discovered package bug is fixed with a regression test and a new
+   results, logs, reconciliation results and UI/catalog evidence against the one pinned demo
+   commit and candidate wheel. A discovered package bug is fixed with a regression test and a new
    candidate, then its scenario runs again; it is not hidden in the example.
+7. After `SI_MAINTENANCE`, every lake table has at most two days of snapshots. Check the
+   explicit layer table lists, maintenance outcomes and the configured retention floors.
+8. Inject failures in this order and check each outcome from the Engine DB:
+   - kill the Engine DB primary: no committed attempt is lost, and the controller retakes
+     leadership;
+   - kill a `ui` pod: a signed-in session continues on the other `ui` copy;
+   - kill an agent mid-task: the attempt becomes `LOST`, and its retry runs on another agent;
+   - kill the controller: active runs continue after its restart.
 
 The source-error cases below are a minimum, not the full feature-coverage matrix:
 
@@ -6268,7 +6414,7 @@ Load a second batch, replay it, correct bad records and verify flags clear witho
 history. Run assigned and unauthorized stewardship cases, then source refreshes and unlocks,
 and verify protected and unprotected values, actors and SCD history. Execute every feature's
 coverage-matrix check under its documented deployment/provider prerequisites. Validate README
-walkthroughs against actual CLI/API responses, UI pages and dashboard reference queries; a
+walkthroughs against actual CLI/API responses, UI pages and view reference queries; a
 missing inventory entry or missing/failed scenario prevents the example's release evidence
 from passing. Verify that deliberately removing a feature's mapping or result fails that check.
 
@@ -6288,11 +6434,11 @@ package bug or missing feature demonstration remains hidden behind a project wor
    suites never check out or run the demo.
 2. The soak (`S7.I`) runs on this example.
 3. `release_gate.py` refuses 1.0.0 unless the manifest matches the release wheel's SHA-256 and
-   the demo and configuration commits pinned in `release/example.toml`, and lists every
+   the one demo commit pinned in `release/example.toml`, and lists every
    expected check and scenario as passed (S7.O item 3).
 
-**Gate.** The example's three workflows pass against the final release candidate, every chart of both
-dashboards renders correct data, every S8.H feature/scenario and README walkthrough is verified,
+**Gate.** The example's three workflows pass against the final release candidate, S8.F
+reference queries and UI checks pass, every S8.H feature/scenario and README walkthrough is verified,
 and the soak on the example passed. A partial coverage matrix cannot pass the release gate.
 
 ## 1.0.0 release checklist
@@ -6326,10 +6472,10 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
 - [ ] `status` and `explain` answer every state, and exit codes tell a script what happened.
 - [ ] Backup, restore and the upgrade procedure are tested.
 - [ ] The Support Insights example passes its CI pipelines against the final release candidate, and
-      every chart of both Superset dashboards renders correct data. Every package feature and
+      its views match S8.F reference queries and UI checks pass. Every package feature and
       data-quality/stewardship scenario has passing coverage and runnable instructions in that
       repository's root README (S8.H). The package gate has validated its results manifest
-      against the release wheel and the pinned demo and configuration commits (S8.G).
+      against the release wheel and the one pinned demo commit (S8.G).
 - [ ] S7.N's complete required PR checks meet the owner-approved ten-minute target with measured
       cold- and warm-cache evidence, without omitted tests, weaker coverage or removed matrix
       contracts.

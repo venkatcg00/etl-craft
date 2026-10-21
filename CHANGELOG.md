@@ -18,6 +18,10 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Engine DB scheduling, run inspection and catalog reads use selective history indexes and
+  bounded PostgreSQL lookups. Migration `0046_query_indexes.sql` adds the indexes on both
+  Engine DBs without changing results or commands.
+
 - Split HTTP from supervision with `etl-craft ui` on PostgreSQL and
   `etl-craft controller --no-ui` serving only unsigned `GET /health` with the standard library.
   All-in-one remains the default with HTTP dependencies installed; SQLite supports that layout.

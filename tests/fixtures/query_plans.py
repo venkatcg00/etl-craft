@@ -1,0 +1,244 @@
+"""Explain the resolved query catalog with non-NULL, typed representative bindings."""
+
+import re
+from contextlib import contextmanager, nullcontext
+from datetime import UTC, datetime
+
+from sqlalchemy import bindparam, text
+
+UTILITIES = {
+    "controller_listen": "LISTEN has no query plan.",
+    "controller_unlisten": "UNLISTEN has no query plan.",
+    "drop_metadata_changes_view": "DROP VIEW has no query plan.",
+    "source_contract_drop_legacy": "DROP TABLE has no query plan.",
+}
+INTEGER_NAMES = frozenset(
+    {
+        "id",
+        "key",
+        "pipeline",
+        "target",
+        "task",
+        "version_number",
+        "revision",
+        "pid",
+        "exit_code",
+        "looks",
+        "limit",
+        "column_position",
+        "current_only",
+        "version",
+    }
+)
+MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
+VALUES = {
+    "active": "Y",
+    "active_flag": "Y",
+    "backfill": "N",
+    "exclusive": "Y",
+    "kind": "SYSTEM",
+    "actor_kind": "SYSTEM",
+    "requested_by_kind": "SYSTEM",
+    "ended_by_kind": "SYSTEM",
+    "status": "SUCCESS",
+    "role": "operator",
+    "retryable": True,
+    "stopped": False,
+    "overwrite": False,
+    "forever": datetime(9999, 1, 1, tzinfo=UTC),
+    "lease": MOMENT,
+    "before": MOMENT,
+    "deadline": MOMENT,
+    "started": MOMENT,
+    "ended": MOMENT,
+    "now": MOMENT,
+    "run_date": MOMENT.date(),
+    "create_date": MOMENT,
+    "end_date": MOMENT,
+    "updated_date": MOMENT,
+    "arguments": "{}",
+    "evidence": "{}",
+    "observations": "{}",
+    "task_run_ids": "[1,2]",
+    "attempt_ids": "[1,2]",
+    "sso_group_ids": "[]",
+    "code": "PLAN_1",
+    "pipeline_code": "PLAN_1",
+    "task_code": "task_1",
+    "catalog": "",
+    "catalog_name": "",
+    "target_catalog_name": "",
+    "schema": "plan",
+    "schema_name": "plan",
+    "target_schema_name": "plan",
+    "table": "table_1",
+    "table_name": "table_1",
+    "target_table_name": "table_1",
+}
+
+
+def bindings(sql, name=""):
+    overrides = {
+        "latest_finished_pipeline_run": {"ended_by": MOMENT},
+        "pipeline_run_history": {"before": 1000000000},
+        "task_run_history": {"before": 1000000000},
+        "target_contract_update_rule": {"table": 1},
+        "lineage_cache_edges": {"confirmed_keys": [(1, "plan")]},
+        "clear_rule_results": {"keys": ["key_1"]},
+    }.get(name, {})
+    parameters = text(sql).compile().params
+    values = {}
+    for name in parameters:
+        if name in overrides:
+            values[name] = overrides[name]
+        elif name in VALUES:
+            values[name] = VALUES[name]
+        elif (
+            name in INTEGER_NAMES
+            or name.endswith(("_id", "_count", "_number"))
+            or name == "rows_written"
+        ):
+            values[name] = 1
+        elif name.endswith("_at") or name in {"wait_until", "not_before"}:
+            values[name] = MOMENT
+        else:
+            values[name] = "plan"
+    statement = text("EXPLAIN (FORMAT JSON) " + sql)
+    for name in re.findall(r"\bIN\s+:(\w+)", sql, re.I):
+        statement = statement.bindparams(bindparam(name, expanding=True))
+        values[name] = overrides.get(name, ["aud_task_attempts"] if name == "names" else [1, 2])
+    return statement, values
+
+
+def migration_query(name):
+    return name.startswith(("config_history_", "source_contract_", "target_contract_")) or name in {
+        "account_legacy_tokens",
+        "recorded_hash_version_names",
+        "recorded_rule_result_names",
+        "recorded_view_statement_names",
+    }
+
+
+@contextmanager
+def migration_schema(conn):
+    """Shadow only shapes used before identity enforcement and column normalization."""
+    transaction = conn.begin_nested()
+    try:
+        for table in (
+            "cfg_tables",
+            "cfg_columns",
+            "cfg_api_tokens",
+            "cfg_business_rules",
+            "aud_target_hash_version",
+            "aud_target_view_statement",
+            "aud_business_rules_results",
+        ):
+            conn.exec_driver_sql(
+                f"CREATE TEMP TABLE {table} (LIKE public.{table} INCLUDING ALL EXCLUDING IDENTITY)"
+            )
+            conn.exec_driver_sql(f"INSERT INTO {table} SELECT * FROM public.{table}")
+        for table, column in (
+            ("cfg_api_tokens", "role"),
+            ("cfg_business_rules", "target_table"),
+            ("aud_target_hash_version", "target_object"),
+            ("aud_target_view_statement", "target_object"),
+            ("aud_business_rules_results", "target_table"),
+        ):
+            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR")
+        conn.exec_driver_sql(
+            "CREATE TEMP TABLE CFG_SOURCE_COLUMNS "
+            "(LIKE public.AUD_SOURCE_COLUMNS_BASELINE INCLUDING ALL)"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO CFG_SOURCE_COLUMNS SELECT * FROM public.AUD_SOURCE_COLUMNS_BASELINE"
+        )
+        conn.exec_driver_sql("ANALYZE")
+        yield
+    finally:
+        transaction.rollback()
+
+
+def catalog_plans(conn, dialect):
+    names = dialect.query_names() - UTILITIES.keys()
+    for historical in (False, True):
+        with migration_schema(conn) if historical else nullcontext():
+            for name in sorted(name for name in names if migration_query(name) == historical):
+                statement, values = bindings(dialect.query(name), name)
+                with conn.begin_nested():
+                    plan = conn.execute(statement, values).scalar_one()[0]["Plan"]
+                yield name, plan
+
+
+def full_scans(plan, partial_indexes=frozenset(), limited=False):
+    """Find heap-wide reads and unbounded walks of whole indexes."""
+    kind = plan["Node Type"]
+    if kind == "Seq Scan" or (
+        kind in {"Index Scan", "Index Only Scan"}
+        and "Index Cond" not in plan
+        and not limited
+        and plan.get("Index Name") not in partial_indexes
+    ):
+        yield plan
+    for child in plan.get("Plans", []):
+        bounded = kind == "Limit" or (limited and kind in {"Result", "Subquery Scan"})
+        yield from full_scans(child, partial_indexes, bounded)
+
+
+FULL_READS = {
+    ("active_pipeline_codes", "cfg_pipelines"): "Enumerates every active pipeline definition.",
+    (
+        "active_pipeline_parameters",
+        "cfg_pipelines",
+    ): "Enumerates parameters across active pipelines.",
+    ("active_pipelines", "cfg_pipelines"): "Loads every active pipeline definition.",
+    (
+        "active_schedule_definitions",
+        "cfg_pipelines",
+    ): "Lists schedules across all active pipelines.",
+    ("active_tasks", "cfg_pipelines"): "Lists tasks across all active pipelines.",
+    (
+        "active_task_dependency_edges",
+        "cfg_pipelines",
+    ): "Builds the complete active dependency graph.",
+    (
+        "active_pipeline_dependency_edges",
+        "cfg_pipelines",
+    ): "Builds the complete active dependency graph.",
+    (
+        "all_pipeline_dependency_edges",
+        "cfg_pipelines",
+    ): "Validates the complete pipeline dependency graph.",
+    ("catalog_interventions", "cfg_pipelines"): "Builds bounded history for every active pipeline.",
+    ("catalog_tasks", "cfg_pipelines"): "Builds the catalog for every active pipeline.",
+    (
+        "catalog_task_runs",
+        "cfg_pipelines",
+    ): "Builds bounded task history for every active pipeline.",
+    ("catalog_pipeline_runs", "cfg_pipelines"): "Builds bounded history for every active pipeline.",
+    ("catalog_pipelines", "cfg_pipelines"): "Lists every active pipeline in the catalog.",
+    (
+        "catalog_consumption",
+        "cfg_pipelines",
+    ): "Explains bounded history across all active pipelines.",
+    ("catalog_rules", "cfg_pipelines"): "Lists rules across all active pipelines.",
+    ("catalog_lineage_cache", "cfg_pipelines"): "Builds complete active-pipeline lineage.",
+    ("controller_active_runs", "cfg_pipelines"): "Finds active definitions for the working set.",
+    ("controller_schedules", "cfg_pipelines"): "Checks the schedule of every active pipeline.",
+    ("metadata_codes", "cfg_pipelines"): "Loads the complete identifier-to-code map.",
+    ("permission_pipelines", "cfg_pipelines"): "Lists all pipelines for permission evaluation.",
+    ("sql_tasks", "cfg_pipelines"): "Validates SQL tasks across all active pipelines.",
+    ("rehash_tasks", "cfg_pipelines"): "Finds all merge targets across active pipelines.",
+    ("catalog_lineage_cache", "aud_column_lineage"): "Loads the complete current lineage cache.",
+    (
+        "recorded_hash_version_names",
+        "aud_target_hash_version",
+    ): "Normalizes every legacy target name once during migration.",
+    (
+        "recorded_rule_result_names",
+        "aud_business_rules_results",
+    ): "Normalizes every legacy target name once during migration.",
+    (
+        "recorded_view_statement_names",
+        "aud_target_view_statement",
+    ): "Normalizes every legacy target name once during migration.",
+}
