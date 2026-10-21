@@ -49,7 +49,7 @@ def scene(tmp_path):
             {
                 "SQL_ACTION": "CREATE_TABLE",
                 "TARGET_OBJECT": target,
-                "SOURCE_SQL_FILE": f"sql_scripts/{code}.sql",
+                "SCRIPT_FILE": f"sql_scripts/{code}.sql",
             },
             None,
             None,
@@ -258,7 +258,7 @@ def test_comparison_age_change_rebuilds_coverage_without_changing_the_observatio
 
 def test_empty_sql_scriptname_keeps_its_read_error_visible_and_does_not_break_regeneration(scene):
     catalog, config, folder = scene
-    catalog.tasks["BETA.load"].params["SOURCE_SQL_FILE"] = ""
+    catalog.tasks["BETA.load"].params["SCRIPT_FILE"] = ""
     write_site(catalog, config, folder)
     page = (folder / "tasks/BETA.load.html").read_text()
     assert "The file cannot be read" in page

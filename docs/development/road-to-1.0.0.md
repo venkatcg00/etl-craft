@@ -599,9 +599,12 @@ The separate frozen 0.4 soak deployment is unchanged.
   `sql_scripts/`, with the latter holding managed SELECTs and unmanaged scripts. Python tasks
   use `SCRIPT_FILE`; `Local_python_slots` replaces `Local_ingestion_slots`. Existing Engine DB
   task-parameter rows migrate; projects move their folders and update config, with no aliases.
-  Current plan references use the same names. `SCRIPT_FILE` and `SOURCE_SQL_FILE` are full paths
-  from the project directory (`python_scripts/load.py`, `sql_scripts/orders.sql`), like
-  `EVENT_FILE` and the paths in `craft-connector.yml`; 0047 adds the folder to existing values.
+  Current plan references use the same names. One parameter names every file a task runs:
+  `SCRIPT_FILE` for `PYTHON`, `SQL_SCRIPT` and the SQL actions (replacing `SOURCE_SQL_FILE`),
+  and a managed action's inline SELECT is `SELECT_QUERY` (replacing `SOURCE_SQL`). File paths
+  are full paths from the project directory (`python_scripts/load.py`,
+  `sql_scripts/orders.sql`), like `EVENT_FILE` and the paths in `craft-connector.yml`; 0047
+  adds the folder to existing values and renames the rows.
 
 - S5.X uses native autocommit by default, with file-controlled transactions where supported
   (owner, 21 October 2026). Earlier commits survive a later failure; retries restart at statement

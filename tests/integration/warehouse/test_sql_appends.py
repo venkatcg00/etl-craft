@@ -31,7 +31,7 @@ def test_killed_append_converges_when_retried(sql_world):
     params = {
         "SQL_ACTION": "APPEND_TABLE",
         "TARGET_OBJECT": "killed_events",
-        "SOURCE_SQL": "SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2",
+        "SELECT_QUERY": "SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2",
     }
     context = w.task("killed_load", **params)
     process = multiprocessing.get_context("spawn").Process(
@@ -61,14 +61,14 @@ def test_invalid_task_run_id_is_refused_before_replacing_a_batch(sql_world):
         "bad_load",
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT="invalid_load",
-        SOURCE_SQL="SELECT 1 AS id",
+        SELECT_QUERY="SELECT 1 AS id",
     )
     for call in (
         lambda: w.run(
             "bad_load",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="invalid_load",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         ),
         lambda: upgrade_targets(w.engine_db, w.config, action="APPEND_TABLE"),
     ):
@@ -88,8 +88,8 @@ def test_empty_retry_removes_its_old_batch(sql_world):
     w = sql_world
     w.setup("empty_retry", "SELECT CAST(1 AS BIGINT) AS id", "APPEND_TABLE")
     params = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": "empty_retry"}
-    w.run("load", SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id", **params)
-    result = w.run("load", SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id WHERE 1 = 0", **params)
+    w.run("load", SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id", **params)
+    result = w.run("load", SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id WHERE 1 = 0", **params)
     assert (result.insert_count, result.target_count, result.rows_written) == (0, 0, 0)
 
 
@@ -97,7 +97,7 @@ def test_upgrade_deduplicates_qualified_targets_and_refuses_format_conflicts(sql
     w = sql_world
     create_legacy_append_target(w, "shared_load")
     for code, target in (("a", "shared_load"), ("b", w.name("shared_load"))):
-        w.task(code, SQL_ACTION="APPEND_TABLE", TARGET_OBJECT=target, SOURCE_SQL="SELECT 1 AS id")
+        w.task(code, SQL_ACTION="APPEND_TABLE", TARGET_OBJECT=target, SELECT_QUERY="SELECT 1 AS id")
     result = upgrade_targets(w.engine_db, w.config, action="APPEND_TABLE", dry_run=True)
     assert len(result) == 1 and result[0].changed
     # Conflicting contracts are rejected before the warehouse's ALTER statement.
@@ -113,7 +113,7 @@ def test_upgrade_deduplicates_qualified_targets_and_refuses_format_conflicts(sql
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT=w.name("shared_load"),
         TABLE_FORMAT=opposite,
-        SOURCE_SQL="SELECT 1 AS id",
+        SELECT_QUERY="SELECT 1 AS id",
     )
     with pytest.raises(
         (HandlerError, ConfigurationError),
@@ -131,7 +131,9 @@ def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, cap
 
     w = sql_world
     create_legacy_append_target(w, "cli_load")
-    w.task("load", SQL_ACTION="APPEND_TABLE", TARGET_OBJECT="cli_load", SOURCE_SQL="SELECT 1 AS id")
+    w.task(
+        "load", SQL_ACTION="APPEND_TABLE", TARGET_OBJECT="cli_load", SELECT_QUERY="SELECT 1 AS id"
+    )
     profile = w.config.warehouse
     fields = profile_block(profile, profile.schema)
     raw = {
@@ -192,7 +194,7 @@ def test_every_sql_writer_records_pipeline_and_task_run_identities(sql_world, ac
 
     w = sql_world
     source = "SELECT CAST(1 AS BIGINT) AS id, CAST('a' AS VARCHAR(20)) AS name"
-    params = {"SQL_ACTION": action, "TARGET_OBJECT": "identities", "SOURCE_SQL": source}
+    params = {"SQL_ACTION": action, "TARGET_OBJECT": "identities", "SELECT_QUERY": source}
     if action.startswith("SCD"):
         params.update(MERGE_KEY="id", MERGE_COMPARE_COLUMNS="name")
     if action != "CREATE_TABLE":
@@ -204,7 +206,7 @@ def test_every_sql_writer_records_pipeline_and_task_run_identities(sql_world, ac
         f"SELECT pipeline_id, pipeline_run_id, task_run_id FROM {w.name('identities')}"
     ) == [first_ids]
     w.new_run()
-    params["SOURCE_SQL"] = source.replace("'a'", "'b'")
+    params["SELECT_QUERY"] = source.replace("'a'", "'b'")
     second = w.task("second_writer", **params)
     sql.run(second, w.engine_db)
     second_ids = (second.pipeline_id, second.pipeline_run_id, second.task_run_id)
@@ -220,7 +222,7 @@ def test_every_sql_writer_records_pipeline_and_task_run_identities(sql_world, ac
             "soft_delete",
             SQL_ACTION="DELETE_ROWS",
             TARGET_OBJECT="identities",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
             MERGE_KEY="id",
         )
         sql.run(deleted, w.engine_db)
@@ -252,7 +254,7 @@ def test_a_dropped_warehouse_connection_fails_retryable_and_the_retry_loads_once
     params = {
         "SQL_ACTION": "APPEND_TABLE",
         "TARGET_OBJECT": "dropped_events",
-        "SOURCE_SQL": (
+        "SELECT_QUERY": (
             "SELECT CAST(1 AS BIGINT) AS id WHERE CASE "
             f"WHEN nextval('{w.schema}.first_attempt') = 1 "
             "THEN pg_terminate_backend(pg_backend_pid()) ELSE TRUE END"

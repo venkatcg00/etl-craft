@@ -24,7 +24,7 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
             "only",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="main.selected",
-            SOURCE_SQL_FILE="sql_scripts/one.sql",
+            SCRIPT_FILE="sql_scripts/one.sql",
         )
         downstream = add_task(
             conn,
@@ -32,7 +32,7 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
             "after",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="main.after",
-            SOURCE_SQL_FILE="sql_scripts/one.sql",
+            SCRIPT_FILE="sql_scripts/one.sql",
         )
         add_dependency(conn, project.pipeline_id, downstream, selected_id)
     args = (

@@ -98,7 +98,7 @@ def test_cloud_typed_target_rehash_and_unchanged_merge(tmp_path, vendor):
     params = {
         "SQL_ACTION": "SCD1_MERGE",
         "TARGET_OBJECT": target,
-        "SOURCE_SQL": source,
+        "SELECT_QUERY": source,
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "amount|stamp",
     }

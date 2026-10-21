@@ -54,7 +54,7 @@ def check_syntax_error(world):
         "bad_syntax",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="never_created",
-        SOURCE_SQL="SELECT 1 +",
+        SELECT_QUERY="SELECT 1 +",
         RETRIES="3",
         RETRY_DELAY_SECONDS="0",
     )
@@ -87,7 +87,7 @@ def check_connection_retry(world, monkeypatch, policy=RetryOn.TRANSIENT):
         "disconnect",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="after_disconnect",
-        SOURCE_SQL="SELECT 1 AS id",
+        SELECT_QUERY="SELECT 1 AS id",
         RETRIES="1",
         RETRY_ON=policy,
         RETRY_DELAY_SECONDS="0",

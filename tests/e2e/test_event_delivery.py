@@ -47,7 +47,7 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
         "UPDATE CFG_TASKS SET TARGET_TABLE_ID=(SELECT TABLE_ID FROM CFG_TABLES "
         "WHERE SCHEMA_NAME='main' AND TABLE_NAME='records') WHERE TASK_CODE='files';\n"
         "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
-        "SELECT TASK_ID,'SOURCE_SQL','SELECT * FROM read_csv([$$event_files], header=true)' "
+        "SELECT TASK_ID,'SELECT_QUERY','SELECT * FROM read_csv([$$event_files], header=true)' "
         "FROM CFG_TASKS WHERE TASK_CODE='files';\n"
         "INSERT INTO CFG_TASK_DEPENDENCY (PIPELINE_ID,TASK_ID,DEPENDS_ON_TASK_ID,DEPENDENCY_TYPE) "
         "SELECT downstream.PIPELINE_ID,downstream.TASK_ID,upstream.TASK_ID,'SUCCESS' "

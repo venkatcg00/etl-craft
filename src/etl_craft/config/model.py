@@ -267,7 +267,7 @@ class ConnectorConfig:
 
     @property
     def sql_scripts_dir(self) -> Path:
-        """Where ``SOURCE_SQL_FILE`` names are found: ``sql_scripts/`` in the project."""
+        """Where ``SCRIPT_FILE`` names are found: ``sql_scripts/`` in the project."""
         return self.project_dir / SQL_SCRIPTS_DIRNAME
 
     @property

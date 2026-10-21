@@ -60,7 +60,7 @@ def check_rejects(w, target, merge="SCD1_MERGE"):
         HandlerError,
         match=r"4 of 6 row\(s\) do not fit, more than REJECT_LIMIT=3 allows \(3\), so the target",
     ):
-        w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="3")
+        w.run("load", **params, SELECT_QUERY=MESSY, REJECT_LIMIT="3")
     assert loaded(w, target) == []
     run = w.task("load").task_run_id
     messy = [
@@ -72,7 +72,7 @@ def check_rejects(w, target, merge="SCD1_MERGE"):
     assert set_aside(w, target) == messy
     assert w.columns(target + "__rejects") == REJECTS_COLUMNS
 
-    result = w.run("load", **params, SOURCE_SQL=MESSY, REJECT_LIMIT="67%")
+    result = w.run("load", **params, SELECT_QUERY=MESSY, REJECT_LIMIT="67%")
     assert (result.source_count, result.insert_count, result.reject_count) == (6, 2, 4)
     assert loaded(w, target) == [(1, date(2026, 1, 31), "Pune"), (4, date(2026, 1, 4), "Leh")]
     assert set_aside(w, target) == messy
@@ -83,5 +83,5 @@ def check_rejects(w, target, merge="SCD1_MERGE"):
     assert stamped == [(w.pipeline_run_id, w.pipeline_id, True)]
 
     retry = "SELECT CAST(2 AS BIGINT) AS id, '2026-02-30' AS order_date, 'Delhi' AS city"
-    assert w.run("load", **params, SOURCE_SQL=retry, REJECT_LIMIT="1").reject_count == 1
+    assert w.run("load", **params, SELECT_QUERY=retry, REJECT_LIMIT="1").reject_count == 1
     assert set_aside(w, target) == [("2", "2026-02-30", "order_date", "does not cast to date", run)]

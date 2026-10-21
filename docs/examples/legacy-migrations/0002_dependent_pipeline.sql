@@ -32,21 +32,21 @@ FROM (VALUES
 ) v
 LEFT JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1 AND p.ACTIVE_FLAG = 'Y';
 
--- An inline SELECT goes in SOURCE_SQL, its quotes doubled like any other text.
+-- An inline SELECT goes in SELECT_QUERY, its quotes doubled like any other text.
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
     ('SALES_MART', 'daily_totals', 'SQL_ACTION', 'CREATE_TABLE'),
     ('SALES_MART', 'daily_totals', 'TARGET_OBJECT', 'mart.daily_totals'),
-    ('SALES_MART', 'daily_totals', 'SOURCE_SQL',
+    ('SALES_MART', 'daily_totals', 'SELECT_QUERY',
      'SELECT CAST(ordered_at AS DATE) AS order_date, SUM(amount) AS total_amount FROM sales.orders_uk GROUP BY CAST(ordered_at AS DATE)'),
     ('SALES_MART', 'region_totals', 'SQL_ACTION', 'CREATE_TABLE'),
     ('SALES_MART', 'region_totals', 'TARGET_OBJECT', 'mart.region_totals'),
-    ('SALES_MART', 'region_totals', 'SOURCE_SQL',
+    ('SALES_MART', 'region_totals', 'SELECT_QUERY',
      'SELECT ''uk'' AS region, SUM(amount) AS total_amount FROM sales.orders_uk'),
     ('SALES_MART', 'customer_totals', 'SQL_ACTION', 'CREATE_TABLE'),
     ('SALES_MART', 'customer_totals', 'TARGET_OBJECT', 'mart.customer_totals'),
-    ('SALES_MART', 'customer_totals', 'SOURCE_SQL',
+    ('SALES_MART', 'customer_totals', 'SELECT_QUERY',
      'SELECT customer_id, SUM(amount) AS total_amount FROM sales.orders_uk GROUP BY customer_id'),
     ('SALES_MART', 'publish', 'SCRIPT_FILE', 'python_scripts/sales/publish.py'),
     ('SALES_MART', 'alert', 'EMAIL_TO', 'sales-data@example.com'),

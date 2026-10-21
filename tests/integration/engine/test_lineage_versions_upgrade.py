@@ -42,7 +42,7 @@ def test_pre_slice_cache_is_discarded_without_conversion(before_lineage_upgrade)
             "load",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="stage.output",
-            SOURCE_SQL="SELECT id FROM raw.input",
+            SELECT_QUERY="SELECT id FROM raw.input",
         )
         conn.execute(
             text(
@@ -84,7 +84,7 @@ def test_table_versions_and_edges_cannot_be_rewritten(engine_db):
             "load",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="stage.output",
-            SOURCE_SQL="SELECT id FROM raw.input",
+            SELECT_QUERY="SELECT id FROM raw.input",
         )
     collect(db.engine, db.config)
     for sql in (

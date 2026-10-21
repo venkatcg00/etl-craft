@@ -37,10 +37,9 @@ def read_sql_scripts(catalog: Catalog, config: ConnectorConfig) -> SqlFiles:
     """Read each displayed SQL file once for both its fingerprint and its HTML."""
     files: SqlFiles = {}
     names = {
-        task.params[key]
+        task.params["SCRIPT_FILE"]
         for task in catalog.tasks.values()
-        for key in ("SOURCE_SQL_FILE", "SCRIPT_FILE")
-        if key in task.params and not (key == "SCRIPT_FILE" and task.script)
+        if "SCRIPT_FILE" in task.params and not task.script
     }
     for name in sorted(names):
         try:
@@ -52,10 +51,9 @@ def read_sql_scripts(catalog: Catalog, config: ConnectorConfig) -> SqlFiles:
 
 def _task_inputs(task: TaskAsset, config: ConnectorConfig, sql_scripts: SqlFiles) -> object:
     files = []
-    for key in ("SOURCE_SQL_FILE", "SCRIPT_FILE"):
-        if key in task.params and not (key == "SCRIPT_FILE" and task.script):
-            value = sql_scripts[task.params[key]]
-            files.append(fingerprint((type(value).__name__, str(value))))
+    if "SCRIPT_FILE" in task.params and not task.script:
+        value = sql_scripts[task.params["SCRIPT_FILE"]]
+        files.append(fingerprint((type(value).__name__, str(value))))
     if task.script:
         try:
             files.append(sha256_hex(python_script(config, task.script).read_bytes()))

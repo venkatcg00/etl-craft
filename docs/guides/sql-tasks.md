@@ -14,8 +14,8 @@ Write the SELECT inline, or keep it in a file under the project's `sql_scripts/`
 
 | Parameter | Value |
 |---|---|
-| `SOURCE_SQL` | the SELECT itself |
-| `SOURCE_SQL_FILE` | the file's path from the project directory, inside `sql_scripts/`, such as `sql_scripts/sales/orders.sql` |
+| `SELECT_QUERY` | the SELECT itself |
+| `SCRIPT_FILE` | the file's path from the project directory, inside `sql_scripts/`, such as `sql_scripts/sales/orders.sql` |
 
 Name every table in the SELECT at least as `schema.table`; a bare table name has no schema. The
 connection is already in the database of the active `Warehouse` profile, which changes per
@@ -461,7 +461,7 @@ Every statement is logged with what it does, the rows the database reports and h
 `--log-level DEBUG` adds the SQL itself:
 
 ```
-INFO etl_craft.handlers.sql [task_run_id=412 pipeline=SALES task=load_customers ...]: SCD1_MERGE analytics.sales.customers from SOURCE_SQL_FILE='sql_scripts/customers.sql' on PostgreSQL
+INFO etl_craft.handlers.sql [task_run_id=412 pipeline=SALES task=load_customers ...]: SCD1_MERGE analytics.sales.customers from SCRIPT_FILE='sql_scripts/customers.sql' on PostgreSQL
 INFO etl_craft.handlers.sql.session [...]: stage the SELECT (0.84s)
 INFO etl_craft.handlers.sql.session [...]: changed rows = 12
 INFO etl_craft.handlers.sql.session [...]: update changed rows: 12 row(s) (0.21s)

@@ -135,7 +135,7 @@ WHERE TASK_CODE='load_orders' AND PIPELINE_ID=(SELECT PIPELINE_ID FROM CFG_PIPEL
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column1, v.column2
 FROM (VALUES ('SQL_ACTION', 'OVERWRITE_TABLE'),
-             ('SOURCE_SQL_FILE', 'sql_scripts/orders.sql')) v
+             ('SCRIPT_FILE', 'sql_scripts/orders.sql')) v
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = 'SALES_DAILY' AND p.ACTIVE_FLAG = 'Y'
 JOIN CFG_TASKS t ON t.PIPELINE_ID = p.PIPELINE_ID AND t.TASK_CODE = 'load_orders'
                 AND t.ACTIVE_FLAG = 'Y';
@@ -154,7 +154,7 @@ WHERE p.PIPELINE_CODE = 'SALES_DAILY'
 
 ```text
 [FAIL] SALES_DAILY.check_orders: task check_orders has HANDLER=BUSINESS_RULES but no active row in CFG_BUSINESS_RULES
-[FAIL] SALES_DAILY.load_orders: SOURCE_SQL_FILE='sql_scripts/orders.sql': no such file .../sql_scripts/orders.sql
+[FAIL] SALES_DAILY.load_orders: SCRIPT_FILE='sql_scripts/orders.sql': no such file .../sql_scripts/orders.sql
 checked 1 pipeline(s) and 2 task(s): 2 failed, 0 warning(s)
 ```
 

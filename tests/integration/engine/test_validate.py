@@ -94,7 +94,7 @@ def good_pipeline(conn, code="SALES"):
         "setup",
         SQL_ACTION="SETUP_TABLE",
         TARGET_OBJECT="sales.orders",
-        SOURCE_SQL_FILE="sql_scripts/orders.sql",
+        SCRIPT_FILE="sql_scripts/orders.sql",
     )
     load = add_task(
         conn,
@@ -102,7 +102,7 @@ def good_pipeline(conn, code="SALES"):
         "load",
         SQL_ACTION="SCD1_MERGE",
         TARGET_OBJECT="sales.orders",
-        SOURCE_SQL="SELECT id, amount FROM staging.orders",
+        SELECT_QUERY="SELECT id, amount FROM staging.orders",
         MERGE_KEY="id",
         MERGE_COMPARE_COLUMNS="amount",
         DOCUMENTATION="Merges orders.",
@@ -145,14 +145,14 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
     (root / "python_scripts" / "none.py").write_text("x = 1\n", "utf-8")
     with engine.begin() as conn:
         p = add_pipeline(conn, "BAD")
-        add_task(conn, p, "no_action", TARGET_OBJECT="s.t", SOURCE_SQL="SELECT 1 AS a")
+        add_task(conn, p, "no_action", TARGET_OBJECT="s.t", SELECT_QUERY="SELECT 1 AS a")
         add_task(
             conn,
             p,
             "writes",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="s.t",
-            SOURCE_SQL="DELETE FROM s.t",
+            SELECT_QUERY="DELETE FROM s.t",
         )
         add_task(
             conn,
@@ -160,7 +160,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "no_file",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="s.u",
-            SOURCE_SQL_FILE="sql_scripts/missing.sql",
+            SCRIPT_FILE="sql_scripts/missing.sql",
         )
         add_task(
             conn,
@@ -168,9 +168,10 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "typo",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="s.v",
-            SOURCE_SQL="SELECT 1 AS a",
+            SELECT_QUERY="SELECT 1 AS a",
             MERGE_KEYS="a",
             TASK_TIMEOUT_SECONDS="soon",
+            SOURCE_SQL_FILE="sql_scripts/old.sql",
         )
         add_task(
             conn,
@@ -178,7 +179,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "orphan_setup",
             SQL_ACTION="SETUP_TABLE",
             TARGET_OBJECT="s.w",
-            SOURCE_SQL="SELECT 1 AS a",
+            SELECT_QUERY="SELECT 1 AS a",
         )
         add_task(
             conn,
@@ -186,7 +187,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "iceberg_path",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="s.x",
-            SOURCE_SQL="SELECT 1 AS a",
+            SELECT_QUERY="SELECT 1 AS a",
             EXTERNAL_LOCATION="s3://b/x",
         )
         add_task(
@@ -195,7 +196,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "engine_columns",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="s.z",
-            SOURCE_SQL="SELECT id, PIPELINE_RUN_ID, row_id AS ROW_ID FROM s.y",
+            SELECT_QUERY="SELECT id, PIPELINE_RUN_ID, row_id AS ROW_ID FROM s.y",
         )
         add_task(conn, p, "two_args", "PYTHON", SCRIPT_FILE="python_scripts/two.py")
         add_task(conn, p, "syntax", "PYTHON", SCRIPT_FILE="python_scripts/broken.py")
@@ -210,7 +211,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "rebuild",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="s.y",
-            SOURCE_SQL="SELECT 1 AS a",
+            SELECT_QUERY="SELECT 1 AS a",
         )
         rules = add_task(conn, p, "rules", "BUSINESS_RULES")
         add_rule(conn, p, rules, "on row id", key="ROW_ID", target="s.y")
@@ -269,6 +270,11 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "SQL task parameter MERGE_KEYS is not read by etl-craft, so it has no "
             "effect; did you mean MERGE_KEY, MERGE_COMPARE_COLUMNS, "
             "MERGE_DEDUPE_ORDER",
+        ),
+        (
+            Status.WARN,
+            "SQL task parameter SOURCE_SQL_FILE is not read by etl-craft, so it has no "
+            "effect; did you mean SCRIPT_FILE",
         ),
     ]
     assert "set SETUP_FOR" in only("orphan_setup")
@@ -469,7 +475,7 @@ def test_target_formats_are_compared_across_pipelines_and_qualified_names(
             SQL_ACTION="SETUP_TABLE",
             SETUP_FOR="APPEND_TABLE",
             TARGET_OBJECT="sales.orders",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
         other = add_task(
             conn,
@@ -480,7 +486,7 @@ def test_target_formats_are_compared_across_pipelines_and_qualified_names(
             TABLE_FORMAT=("ICEBERG" if default == "NATIVE" else "NATIVE")
             if conflicting
             else default,
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
         add_task(
             conn,
@@ -488,7 +494,7 @@ def test_target_formats_are_compared_across_pipelines_and_qualified_names(
             "separate",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="elsewhere.sales.orders",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
         if not active:
             conn.execute(
@@ -542,7 +548,7 @@ def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project
     assert not report.failed
     warnings = {where: message for where, status, message in found(report) if status is Status.WARN}
     assert warnings["SALES.setup"].startswith(
-        "SOURCE_SQL_FILE='sql_scripts/orders.sql': sqlglot cannot read it as duckdb SQL "
+        "SCRIPT_FILE='sql_scripts/orders.sql': sqlglot cannot read it as duckdb SQL "
         "(line 2, column "
     )
     assert warnings["SALES.setup"].endswith(
@@ -559,7 +565,7 @@ def test_validate_refuses_repeated_merge_columns_with_the_handler_message(projec
     params = {
         "SQL_ACTION": "SCD1_MERGE",
         "TARGET_OBJECT": "sales.orders",
-        "SOURCE_SQL": "SELECT id, amount FROM staging.orders",
+        "SELECT_QUERY": "SELECT id, amount FROM staging.orders",
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "amount",
     }

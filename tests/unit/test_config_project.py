@@ -56,7 +56,7 @@ def test_files_are_found_in_their_folders(project):
 @pytest.mark.parametrize(
     ("name", "message"),
     [
-        ("", "SOURCE_SQL_FILE='' is empty"),
+        ("", "SCRIPT_FILE='' is empty"),
         ("/etc/passwd.sql", "must be a path relative to"),
         ("../secrets.sql", "without '..'"),
         (

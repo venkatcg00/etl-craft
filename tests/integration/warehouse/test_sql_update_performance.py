@@ -19,12 +19,12 @@ def test_scd1_updates_100000_changed_rows_in_under_30_seconds(sql_world):
         "TARGET_OBJECT": "people",
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
-        "SOURCE_SQL": source,
+        "SELECT_QUERY": source,
     }
     inserted = w.run("merge", **params)
     assert inserted.insert_count == 100000
     started = time.monotonic()
-    updated = w.run("merge", **{**params, "SOURCE_SQL": source.replace("'old'", "'new'")})
+    updated = w.run("merge", **{**params, "SELECT_QUERY": source.replace("'old'", "'new'")})
     elapsed = time.monotonic() - started
     assert elapsed < 30, f"100,000-row SCD1 took {elapsed:.2f}s"
     assert updated.update_count == 100000 and updated.insert_count == 0

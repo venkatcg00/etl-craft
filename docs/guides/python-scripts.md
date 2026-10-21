@@ -10,7 +10,7 @@ directory (`python_scripts/load.py` instead of `load.py`). `etl-craft migrate` u
 Engine DB parameter rows the same way. Rename `Orchestration.Local_ingestion_slots` to `Local_python_slots`
 in `craft-connector.yml`; the old setting and folder are not aliases. SQL files move from
 `sql_files/` to `sql_scripts/`, shared by managed SELECTs and unmanaged SQL scripts, and
-`SOURCE_SQL_FILE` values gain the `sql_scripts/` prefix.
+`SCRIPT_FILE` values gain the `sql_scripts/` prefix.
 
 ## The task
 

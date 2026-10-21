@@ -86,7 +86,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "stage",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="staging.orders",
-            SOURCE_SQL="SELECT id, amt AS amount, currency FROM raw.orders WHERE amt > 0",
+            SELECT_QUERY="SELECT id, amt AS amount, currency FROM raw.orders WHERE amt > 0",
             DOCUMENTATION="Stages positive orders.",
         )
         sales = add_pipeline(conn, "SALES")
@@ -96,7 +96,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "convert",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="analytics.sales.orders",
-            SOURCE_SQL_FILE="sql_scripts/convert.sql",
+            SCRIPT_FILE="sql_scripts/convert.sql",
         )
         rules = add_task(conn, sales, "rules", "BUSINESS_RULES")
         insert_row(
@@ -117,7 +117,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "daily",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="mart.daily",
-            SOURCE_SQL="SELECT COUNT(*) AS n, SUM(amount_usd) AS total FROM sales.orders",
+            SELECT_QUERY="SELECT COUNT(*) AS n, SUM(amount_usd) AS total FROM sales.orders",
         )
         add_task(
             conn,
@@ -125,7 +125,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "copy_all",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.everything",
-            SOURCE_SQL="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
+            SELECT_QUERY="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
         )
         add_pipeline_dependency(conn, mart, sales)
         add_dependency(conn, ingest, stage, pull)
@@ -460,7 +460,7 @@ def test_constant_lineage_has_no_gap_and_failed_reasons_are_escaped(project, tmp
             "make",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.constant",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
     catalog = build_catalog(engine, config)
     catalog.tasks["MART.copy_all"].lineage_error = '<script>alert("bad")</script>'

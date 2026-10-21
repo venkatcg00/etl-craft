@@ -79,7 +79,7 @@ def run(task):
             Handler.SQL,
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="main.target",
-            SOURCE_SQL="SELECT id FROM main.source",
+            SELECT_QUERY="SELECT id FROM main.source",
         )
         post = add_task(
             conn,
@@ -185,7 +185,7 @@ def test_validate_overlap_and_unmanaged_catalog_and_lineage(project):
             Handler.SQL,
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="main.target",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
         add_task(conn, pipeline, "custom", Handler.SQL_SCRIPT, SCRIPT_FILE="sql_scripts/custom.sql")
     report = validate(engine, config)

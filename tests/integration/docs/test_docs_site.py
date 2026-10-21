@@ -56,7 +56,7 @@ def test_before_the_first_release_the_site_is_the_dev_version(clone, tmp_path, r
     schema = (reference / "engine-db-schema" / "index.html").read_text(encoding="utf-8")
     assert "AUD_RUN_INTERVENTIONS" in schema
     parameters = (reference / "task-parameters" / "index.html").read_text(encoding="utf-8")
-    assert "SOURCE_SQL_FILE" in parameters
+    assert "SCRIPT_FILE" in parameters
     settings = (reference / "configuration" / "index.html").read_text(encoding="utf-8")
     assert "Dependency_gates" in settings
     assert _git(clone, "branch", "--list", "docs-site-build") == ""

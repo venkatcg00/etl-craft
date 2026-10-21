@@ -56,11 +56,11 @@ def test_rehash_upgrades_every_row_then_unchanged_merge_does_nothing(sql_world, 
         "TARGET_OBJECT": "people",
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
-        "SOURCE_SQL": source,
+        "SELECT_QUERY": source,
     }
     w.run("merge", **params)
     if kind == "SCD2_MERGE":
-        w.run("merge", **{**params, "SOURCE_SQL": source.replace("'old'", "'new'")})
+        w.run("merge", **{**params, "SELECT_QUERY": source.replace("'old'", "'new'")})
     w.execute(f"UPDATE {w.name('people')} SET HASH_KEY = 'legacy'")
     with w.engine_db.begin() as conn:
         clear_hash_version(conn, w.name("people"))
@@ -86,7 +86,7 @@ def test_rehash_upgrades_every_row_then_unchanged_merge_does_nothing(sql_world, 
         "merge",
         **{
             **params,
-            "SOURCE_SQL": source.replace("'old'", "'new'") if kind == "SCD2_MERGE" else source,
+            "SELECT_QUERY": source.replace("'old'", "'new'") if kind == "SCD2_MERGE" else source,
         },
     )
     assert unchanged.insert_count == 0 and unchanged.update_count == 0
@@ -101,7 +101,7 @@ def test_floating_compare_columns_are_refused_before_target_writes(sql_world):
             "merge_float",
             SQL_ACTION="SCD1_MERGE",
             TARGET_OBJECT="floating",
-            SOURCE_SQL=source,
+            SELECT_QUERY=source,
             MERGE_KEY="id",
             MERGE_COMPARE_COLUMNS="amount",
         )
@@ -118,7 +118,7 @@ def test_missing_or_ambiguous_rehash_contract_is_refused(sql_world):
             code,
             SQL_ACTION="SCD1_MERGE",
             TARGET_OBJECT="ambiguous",
-            SOURCE_SQL="SELECT 1 AS id, 'x' AS name, 'y' AS city",
+            SELECT_QUERY="SELECT 1 AS id, 'x' AS name, 'y' AS city",
             MERGE_KEY="id",
             MERGE_COMPARE_COLUMNS=compare,
         )
@@ -139,7 +139,7 @@ def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys, monke
         "merge_cli",
         SQL_ACTION="SCD1_MERGE",
         TARGET_OBJECT="cli_hash",
-        SOURCE_SQL=source,
+        SELECT_QUERY=source,
         MERGE_KEY="id",
         MERGE_COMPARE_COLUMNS="name",
     )
@@ -183,7 +183,7 @@ def test_correcting_repeated_compare_columns_rehashes_without_changing_business_
     params = {
         "SQL_ACTION": kind,
         "TARGET_OBJECT": "people",
-        "SOURCE_SQL": source,
+        "SELECT_QUERY": source,
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "city|name",
     }

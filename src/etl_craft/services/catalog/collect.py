@@ -635,10 +635,10 @@ def _comparison_identity(catalog: Catalog, config: ConnectorConfig, requested: b
         _engine_columns(catalog, table, config)
     for task in catalog.tasks.values():
         params = task.params
-        content = params.get("SOURCE_SQL", "")
-        if params.get("SOURCE_SQL_FILE"):
+        content = params.get("SELECT_QUERY", "")
+        if params.get("SCRIPT_FILE") and not task.script:
             try:
-                content = sql_script(config, params["SOURCE_SQL_FILE"]).read_text(encoding="utf-8")
+                content = sql_script(config, params["SCRIPT_FILE"]).read_text(encoding="utf-8")
             except (EtlCraftError, OSError) as error:
                 content = f"unavailable: {type(error).__name__}"
         inputs.append((task.label, task.target, params.get("SQL_ACTION"), content))

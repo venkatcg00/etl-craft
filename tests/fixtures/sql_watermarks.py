@@ -23,7 +23,7 @@ def check_watermarks(w, target):
     params = {
         "SQL_ACTION": "APPEND_TABLE",
         "TARGET_OBJECT": target,
-        "SOURCE_SQL": (
+        "SELECT_QUERY": (
             "SELECT id FROM (SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2) s "
             "WHERE id > $$watermark"
         ),
@@ -41,7 +41,7 @@ def check_watermarks(w, target):
         )
     assert result.offset.offset_value == "2"
     w.new_run()
-    params["SOURCE_SQL"] = (
+    params["SELECT_QUERY"] = (
         "SELECT id FROM (SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2 "
         "UNION ALL SELECT 3) s WHERE id > $$watermark"
     )
@@ -97,7 +97,7 @@ def check_watermark_literals(w, target):
             "text_watermark",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT=target,
-            SOURCE_SQL="SELECT $$watermark AS position_value",
+            SELECT_QUERY="SELECT $$watermark AS position_value",
             WATERMARK_COLUMN="position_value",
             WATERMARK_TYPE="TEXT",
             WATERMARK_START=start,
@@ -114,7 +114,7 @@ def check_watermark_literals(w, target):
         "timestamp_watermark",
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT=target,
-        SOURCE_SQL=f"SELECT position_value FROM ({select}) s WHERE position_value > $$watermark",
+        SELECT_QUERY=f"SELECT position_value FROM ({select}) s WHERE position_value > $$watermark",
         WATERMARK_COLUMN="position_value",
         WATERMARK_TYPE="TIMESTAMP",
         WATERMARK_START="2026-01-01T00:00:00",

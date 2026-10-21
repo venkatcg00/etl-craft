@@ -117,7 +117,12 @@ ROWS = {
             "TASK_PARAMETER_ID": 302,
             "TASK_ID": 202,
             "PARAMETER_NAME": "SOURCE_SQL_FILE",
-            "PARAMETER_VALUE": "legacy.sql",
+            "PARAMETER_VALUE": "sql_scripts/legacy.sql",
+        },
+        {
+            "TASK_PARAMETER_ID": 303,
+            "PARAMETER_NAME": "SOURCE_SQL",
+            "PARAMETER_VALUE": "SELECT 17 AS kept",
         },
     ],
     "CFG_PIPELINE_DEPENDENCY": [{"PIPELINE_DEPENDENCY_ID": 401}],
@@ -368,19 +373,19 @@ def assert_retained(engine, kept, upgrade_window):
             destination = "AUD_CONTROLLERS" if table == "AUD_OVERSEERS" else table
             for row in rows:
                 original = {name.upper(): value for name, value in row.items()}
-                # 0047 renames SCRIPT_NAME and makes script paths relative to the project.
+                # 0047 renames script parameters and makes script paths relative to the project.
                 renamed = table == "CFG_TASK_PARAMETERS" and original.get("PARAMETER_NAME") in {
                     "SCRIPT_NAME",
                     "SOURCE_SQL_FILE",
+                    "SOURCE_SQL",
                 }
                 if renamed:
-                    if original["PARAMETER_NAME"] == "SCRIPT_NAME":
-                        original["PARAMETER_NAME"] = "SCRIPT_FILE"
-                        original["PARAMETER_VALUE"] = (
-                            f"python_scripts/{original['PARAMETER_VALUE']}"
-                        )
-                    elif original.get("PARAMETER_NAME") == "SOURCE_SQL_FILE":
-                        original["PARAMETER_VALUE"] = f"sql_scripts/{original['PARAMETER_VALUE']}"
+                    name, value = original["PARAMETER_NAME"], original["PARAMETER_VALUE"]
+                    original["PARAMETER_NAME"], original["PARAMETER_VALUE"] = {
+                        "SCRIPT_NAME": ("SCRIPT_FILE", _in_folder("python_scripts/", value)),
+                        "SOURCE_SQL_FILE": ("SCRIPT_FILE", _in_folder("sql_scripts/", value)),
+                        "SOURCE_SQL": ("SELECT_QUERY", value),
+                    }[name]
                 columns = ", ".join(
                     f"{_expression(table, name)} AS {name.lower()}" for name in original
                 )
@@ -411,6 +416,11 @@ def assert_retained(engine, kept, upgrade_window):
                     {name.lower(): value for name, value in original.items()},
                     (table, parameters),
                 )
+
+
+def _in_folder(folder, value):
+    """0047 adds the folder to a script path that lacks it, and never doubles it."""
+    return value if value.startswith(folder) else folder + value
 
 
 def _tracker(conn, table, rows):

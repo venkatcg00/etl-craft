@@ -13,7 +13,7 @@ def orders(sql_world):
         "create",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="orders",
-        SOURCE_SQL="SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'",
+        SELECT_QUERY="SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'",
     )
     return sql_world
 
@@ -23,12 +23,12 @@ def test_create_view_builds_a_view_and_replaces_it_on_the_next_run(orders):
     view = {"SQL_ACTION": "CREATE_VIEW", "TARGET_OBJECT": "named_orders"}
     if not warehouse_dialect(w.config).views:
         with pytest.raises(HandlerError, match="cannot create views"):
-            w.run("view", SOURCE_SQL=f"SELECT id FROM {w.name('orders')}", **view)
+            w.run("view", SELECT_QUERY=f"SELECT id FROM {w.name('orders')}", **view)
         return
-    result = w.run("view", SOURCE_SQL=f"SELECT id FROM {w.name('orders')} WHERE id > 1", **view)
+    result = w.run("view", SELECT_QUERY=f"SELECT id FROM {w.name('orders')} WHERE id > 1", **view)
     assert (result.source_count, result.target_count, result.rows_written) == (None, None, None)
     assert w.rows(f"SELECT id FROM {w.name('named_orders')}") == [(2,)]
-    w.run("view", SOURCE_SQL=f"SELECT id, name FROM {w.name('orders')}", **view)
+    w.run("view", SELECT_QUERY=f"SELECT id, name FROM {w.name('orders')}", **view)
     assert sorted(w.rows(f"SELECT id, name FROM {w.name('named_orders')}")) == [
         (1, "a"),
         (2, "b"),
@@ -38,7 +38,9 @@ def test_create_view_builds_a_view_and_replaces_it_on_the_next_run(orders):
 def test_create_view_never_replaces_a_table(orders):
     w = orders
     with pytest.raises(HandlerError, match="CREATE_VIEW replaces only views"):
-        w.run("view", SQL_ACTION="CREATE_VIEW", TARGET_OBJECT="orders", SOURCE_SQL="SELECT 1 AS id")
+        w.run(
+            "view", SQL_ACTION="CREATE_VIEW", TARGET_OBJECT="orders", SELECT_QUERY="SELECT 1 AS id"
+        )
     assert len(w.rows(f"SELECT id FROM {w.name('orders')}")) == 2
 
 
@@ -47,7 +49,7 @@ def test_a_secure_view_where_the_warehouse_has_them_and_a_refusal_where_it_does_
     params = {
         "SQL_ACTION": "CREATE_VIEW",
         "TARGET_OBJECT": "secure_orders",
-        "SOURCE_SQL": f"SELECT id FROM {w.name('orders')}",
+        "SELECT_QUERY": f"SELECT id FROM {w.name('orders')}",
         "SECURE_VIEW": "true",
     }
     dialect = warehouse_dialect(w.config)
@@ -81,7 +83,7 @@ def test_a_view_is_replaced_only_when_its_statement_changes(orders, monkeypatch)
 
     def run(select):
         steps.clear()
-        w.run("view", SOURCE_SQL=select, **view)
+        w.run("view", SELECT_QUERY=select, **view)
         return replaced in steps
 
     assert run(first)

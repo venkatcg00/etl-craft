@@ -9,6 +9,12 @@ import mkdocs_gen_files
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+# Older release tags name the guide ingestion-scripts.md, and this renderer builds them too.
+SCRIPT_GUIDE = next(
+    name
+    for name in ("python-scripts.md", "ingestion-scripts.md")
+    if (ROOT / "docs" / "guides" / name).is_file()
+)
 
 nav = mkdocs_gen_files.Nav()
 for source in sorted((SRC / "etl_craft").rglob("*.py")):
@@ -33,7 +39,7 @@ for source in sorted((SRC / "etl_craft").rglob("*.py")):
                 "## Start here\n\n"
                 "- [Python script types](scripting.md): `ScriptTask`, `ScriptResult` and "
                 "`Offset`, with the data a task receives and returns.\n"
-                "- [Writing Python scripts](../../guides/python-scripts.md): examples, "
+                f"- [Writing Python scripts](../../guides/{SCRIPT_GUIDE}): examples, "
                 "offsets, warehouse access and logging.\n"
                 "- [Configuration](config/index.md): loading the project configuration "
                 "and resolving its settings.\n"

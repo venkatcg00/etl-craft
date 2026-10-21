@@ -11,18 +11,20 @@ def check_append_retries(w, target):
     """Keep another load, replace a retried batch and retain both task runs across runs."""
     params = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": target}
     w.setup(target, "SELECT CAST(1 AS BIGINT) AS id", "APPEND_TABLE")
-    w.run("seed_append", SOURCE_SQL="SELECT CAST(10 AS BIGINT) AS id", **params)
+    w.run("seed_append", SELECT_QUERY="SELECT CAST(10 AS BIGINT) AS id", **params)
     for point in ("after_insert", "after_delete"):
         with pytest.MonkeyPatch.context() as patch:
             patch.setenv("ETL_CRAFT_FAULT", f"sql.append.{point}")
             with pytest.raises(InjectedFaultError):
                 w.run(
                     "retry_append",
-                    SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2",
+                    SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2",
                     **params,
                 )
         result = w.run(
-            "retry_append", SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2", **params
+            "retry_append",
+            SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2",
+            **params,
         )
         assert (result.source_count, result.insert_count, result.target_count) == (2, 2, 3)
         assert sorted(w.rows(f"SELECT id FROM {w.name(target)}")) == [(1,), (2,), (10,)]
@@ -32,7 +34,7 @@ def check_append_retries(w, target):
     keys = w.rows(f"SELECT row_id FROM {w.name(target)}")
     assert len(set(keys)) == 3
     w.new_run()
-    w.run("retry_append", SOURCE_SQL="SELECT CAST(3 AS BIGINT) AS id", **params)
+    w.run("retry_append", SELECT_QUERY="SELECT CAST(3 AS BIGINT) AS id", **params)
     assert sorted(w.rows(f"SELECT id FROM {w.name(target)}")) == [(1,), (2,), (3,), (10,)]
 
 
@@ -79,7 +81,7 @@ def check_legacy_upgrade(w, target):
     params = {
         "SQL_ACTION": "APPEND_TABLE",
         "TARGET_OBJECT": target,
-        "SOURCE_SQL": "SELECT CAST(1 AS BIGINT) AS id",
+        "SELECT_QUERY": "SELECT CAST(1 AS BIGINT) AS id",
     }
     with pytest.raises(
         SqlGuardError, match=r"no TASK_RUN_ID column.*upgrade-targets --action APPEND_TABLE"
@@ -117,13 +119,13 @@ def check_identity_inputs(w, target):
     from etl_craft.handlers import sql
 
     for code in ("first_dummy", "second_dummy"):
-        w.task(code, SQL_ACTION="CREATE_TABLE", TARGET_OBJECT=target, SOURCE_SQL="SELECT 1 AS id")
+        w.task(code, SQL_ACTION="CREATE_TABLE", TARGET_OBJECT=target, SELECT_QUERY="SELECT 1 AS id")
     w.new_run()
     context = w.task(
         "identity_inputs",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT=target,
-        SOURCE_SQL="SELECT CAST($$pipeline_id AS BIGINT) AS source_pipeline_id, "
+        SELECT_QUERY="SELECT CAST($$pipeline_id AS BIGINT) AS source_pipeline_id, "
         "CAST($$pipeline_run_id AS BIGINT) AS source_pipeline_run_id, "
         "CAST($$task_run_id AS BIGINT) AS source_task_run_id",
         PIPELINE_ID_SUBSTITUTION="true",

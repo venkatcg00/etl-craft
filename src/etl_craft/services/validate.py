@@ -601,8 +601,17 @@ def _code_problem(column: str, code: str) -> str:
     )
 
 
+RENAMED_PARAMETERS = {
+    "SCRIPT_NAME": "SCRIPT_FILE",
+    "SOURCE_SQL": "SELECT_QUERY",
+    "SOURCE_SQL_FILE": "SCRIPT_FILE",
+}
+"""Task parameters renamed without aliases, and the names that replace them."""
+
+
 def _unknown(what: str, name: str, known: Sequence[str]) -> str:
-    hints = suggest(name, list(known))
+    renamed = RENAMED_PARAMETERS.get(name, "")
+    hints = [renamed] if renamed in known else suggest(name, list(known))
     hint = f"; did you mean {', '.join(hints)}" if hints else ""
     return f"{what} {name} is not read by etl-craft, so it has no effect{hint}"
 

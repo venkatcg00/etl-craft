@@ -30,12 +30,14 @@ All notable changes are recorded here. The format follows
 - Script naming is consistent: `python_scripts/` replaces `ingestion_scripts/`,
   `sql_scripts/` replaces `sql_files/`, Python tasks use `SCRIPT_FILE` in place of `SCRIPT_NAME`,
   and `Orchestration.Local_python_slots` replaces `Local_ingestion_slots`.
-  `SCRIPT_FILE` and `SOURCE_SQL_FILE` are paths from the project directory, like every other
-  path: `python_scripts/load.py` and `sql_scripts/orders.sql`. A value without its folder is
+  One parameter names every file a task runs: `SCRIPT_FILE` replaces `SOURCE_SQL_FILE` for SQL
+  actions, as for `PYTHON` and `SQL_SCRIPT` tasks, and an inline SELECT is `SELECT_QUERY` in
+  place of `SOURCE_SQL`. `SCRIPT_FILE` is a path from the project directory, like every other
+  path: `python_scripts/load.py` or `sql_scripts/orders.sql`. A value without its folder is
   refused, naming the path to write.
-  Migration `0047_sql_script.sql` renames existing Python task parameter rows and adds the
-  folder to existing `SCRIPT_FILE` and `SOURCE_SQL_FILE` values. Move project
-  folders and update configuration files before running; old names have no aliases.
+  Migration `0047_sql_script.sql` renames existing parameter rows and adds the folder to
+  existing file values. Move project folders and update configuration files before running;
+  old names have no aliases.
 
 - Engine DB scheduling, run inspection and catalog reads use selective history indexes and
   bounded PostgreSQL lookups. Migration `0046_query_indexes.sql` adds the indexes on both

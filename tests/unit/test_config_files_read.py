@@ -23,7 +23,7 @@ GOOD = {
     "SALES,check,ETL,BUSINESS_RULES,N,1,Y\n"
     "MART,build,ETL,SQL,,,N\n",
     "task_parameters.csv": "PIPELINE_CODE,TASK_CODE,PARAMETER_NAME,PARAMETER_VALUE\n"
-    'SALES,load,SOURCE_SQL,"SELECT id,\n       name FROM raw.orders"\n',
+    'SALES,load,SELECT_QUERY,"SELECT id,\n       name FROM raw.orders"\n',
     "task_dependencies.csv": "PIPELINE_CODE,TASK_CODE,DEPENDS_ON_PIPELINE_CODE,"
     "DEPENDS_ON_TASK_CODE,DEPENDENCY_TYPE\n"
     "SALES,check,SALES,load,SUCCESS\n",
@@ -61,7 +61,7 @@ def test_good_files_read_with_types_defaults_and_quoted_cells(tmp_path):
     assert sales["ACTIVE_FLAG"] == "Y"
     assert read.rows["tasks.csv"][("SALES", "check")].values["RUN_CONDITION_COUNT"] == 1
     assert not read.rows["tasks.csv"][("MART", "build")].active
-    query = read.rows["task_parameters.csv"][("SALES", "load", "SOURCE_SQL")]
+    query = read.rows["task_parameters.csv"][("SALES", "load", "SELECT_QUERY")]
     assert (query.line, query.values["PARAMETER_VALUE"]) == (
         3,
         "SELECT id,\n       name FROM raw.orders",
@@ -165,7 +165,7 @@ def test_duplicate_keys_self_dependencies_and_missing_references_are_named(tmp_p
         "DEPENDENCY_TYPE\nSALES,check,SALES,lod,SUCCESS\n",
         tasks=GOOD["tasks.csv"] + "SALSE,extra,ETL,SQL,,,Y\n",
         task_parameters="PIPELINE_CODE,TASK_CODE,PARAMETER_NAME,PARAMETER_VALUE\n"
-        "SALES,load,SOURCE_SQL,SELECT 1\n",
+        "SALES,load,SELECT_QUERY,SELECT 1\n",
         pipeline_dependencies="PIPELINE_CODE,DEPENDS_ON_PIPELINE_CODE,DEPENDENCY_TYPE\n"
         "MART,SALES,SUCCESS\n",
     )

@@ -16,7 +16,7 @@ def check_composite_merge(w, target, kind):
     }
     if kind == "SCD1_MERGE":
         params["PRESERVE_TARGET"] = "true"
-    w.run(target, SOURCE_SQL=source, **params)
+    w.run(target, SELECT_QUERY=source, **params)
     before = w.rows(f"SELECT * FROM {w.name(target)} WHERE region = 'us'")
     changed_source = source.replace(
         "CAST('Rome' AS VARCHAR(20)) AS city", "CAST('Paris' AS VARCHAR(20)) AS city"
@@ -25,7 +25,7 @@ def check_composite_merge(w, target, kind):
         changed_source = changed_source.replace(
             "CAST('old' AS VARCHAR(20)) AS name", "CAST(NULL AS VARCHAR(20)) AS name"
         )
-    changed = w.run(target, SOURCE_SQL=changed_source, **params)
+    changed = w.run(target, SELECT_QUERY=changed_source, **params)
     assert (changed.update_count, changed.insert_count) == (1, 0 if kind == "SCD1_MERGE" else 1)
     assert w.rows(f"SELECT * FROM {w.name(target)} WHERE region = 'us'") == before
     if kind == "SCD1_MERGE":
@@ -38,7 +38,7 @@ def check_composite_merge(w, target, kind):
             f"SELECT region, name, city, active_flag FROM {w.name(target)} "
             "ORDER BY region, active_flag"
         ) == [("eu", "old", "Rome", "N"), ("eu", "old", "Paris", "Y"), ("us", "old", "Rome", "Y")]
-    again = w.run(target, SOURCE_SQL=changed_source, **params)
+    again = w.run(target, SELECT_QUERY=changed_source, **params)
     assert (again.update_count, again.insert_count) == (0, 0)
 
 
@@ -82,10 +82,10 @@ def check_killed_merge(world, kind, point):
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }
-    w.run("seed", SOURCE_SQL=source, **params)
+    w.run("seed", SELECT_QUERY=source, **params)
     before = merge_rows(w, target)
     w.new_run()
-    params["SOURCE_SQL"] = (
+    params["SELECT_QUERY"] = (
         "SELECT 1 AS id, CAST('new' AS VARCHAR(20)) AS name "
         "UNION ALL SELECT 2, 'same' UNION ALL SELECT 3, 'add'"
     )

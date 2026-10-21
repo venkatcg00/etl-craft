@@ -31,7 +31,7 @@ def check_event_queries(world, target):
         "insert",
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT=target,
-        SOURCE_SQL="SELECT CAST(1 AS INTEGER) AS ready",
+        SELECT_QUERY="SELECT CAST(1 AS INTEGER) AS ready",
     )
     result = check_event(
         world.engine_db, world.config, world.pipeline_run_id, event, waiting.next_check_at
@@ -52,7 +52,7 @@ def check_event_queries(world, target):
         "files",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT=target,
-        SOURCE_SQL="SELECT $$event_files AS path",
+        SELECT_QUERY="SELECT $$event_files AS path",
     )
     downstream = replace(downstream, event_files=("/tmp/a\\b:batch'01.csv",))
     assert world.rows(read_sql_task(downstream).select_sql) == [("/tmp/a\\b:batch'01.csv",)]

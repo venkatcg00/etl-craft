@@ -147,7 +147,7 @@ class SqlWorld:
             f"setup_{table}",
             SQL_ACTION="SETUP_TABLE",
             TARGET_OBJECT=table,
-            SOURCE_SQL=select,
+            SELECT_QUERY=select,
             SETUP_FOR=writer,
         )
 

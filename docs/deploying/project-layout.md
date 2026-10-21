@@ -40,13 +40,13 @@ directory.
 
 A task names its SQL file or script by its path from the project directory, like every other
 path: `sql_scripts/sales/orders.sql` or `python_scripts/load_orders.py`. The path must start with
-the handler's folder (`sql_scripts/` for `SOURCE_SQL_FILE` and `SQL_SCRIPT`, `python_scripts/`
+the handler's folder (`sql_scripts/` for `SCRIPT_FILE` and `SQL_SCRIPT`, `python_scripts/`
 for `PYTHON`) and stay inside it, with no `..`, and the file must exist and end in `.sql` or
 `.py`. Otherwise the task fails before anything runs, with a
 message that names the parameter, the value and the folder, and suggests close matches:
 
 ```
-SOURCE_SQL_FILE='sql_scripts/sales/order.sql': no such file /srv/etl/etl-craft/sql_scripts/sales/order.sql — did you mean: sql_scripts/sales/orders.sql
+SCRIPT_FILE='sql_scripts/sales/order.sql': no such file /srv/etl/etl-craft/sql_scripts/sales/order.sql — did you mean: sql_scripts/sales/orders.sql
 ```
 
 ## Configuration files

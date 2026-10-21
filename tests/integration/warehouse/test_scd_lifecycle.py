@@ -34,7 +34,7 @@ def test_setup_and_upgrade_refuse_mixed_scd_lifecycles(sql_world):
             kind,
             SQL_ACTION=kind,
             TARGET_OBJECT="mixed",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
             MERGE_KEY="id",
             MERGE_COMPARE_COLUMNS="id",
         )
@@ -58,14 +58,14 @@ def test_merge_refuses_opposite_writer_in_another_pipeline_with_a_qualified_alia
             "SQL",
             SQL_ACTION="SCD2_MERGE",
             TARGET_OBJECT=w.name("shared"),
-            SOURCE_SQL=source,
+            SELECT_QUERY=source,
             MERGE_KEY="id",
             MERGE_COMPARE_COLUMNS="name",
         )
     params = {
         "SQL_ACTION": "SCD1_MERGE",
         "TARGET_OBJECT": "shared",
-        "SOURCE_SQL": source,
+        "SELECT_QUERY": source,
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }

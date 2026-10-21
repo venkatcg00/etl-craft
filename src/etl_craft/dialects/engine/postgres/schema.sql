@@ -184,7 +184,7 @@ CREATE UNIQUE INDEX ux_taskparameters_name_identity
 CREATE TRIGGER trg_audit_cfg_task_parameters
     BEFORE INSERT OR UPDATE ON CFG_TASK_PARAMETERS
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
-COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, SOURCE_SQL, ...); TARGET_OBJECT is derived from the task table reference. Which names each handler reads is documented in the task parameter reference.';
+COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, SELECT_QUERY, ...); TARGET_OBJECT is derived from the task table reference. Which names each handler reads is documented in the task parameter reference.';
 
 -- A BUSINESS_RULES task's rules: a correlated SELECT that finds rows of the referenced target that
 -- break it, and what a failing row gets flagged as.

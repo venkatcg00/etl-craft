@@ -45,7 +45,7 @@ from etl_craft.services.catalog.storage import MARKER as MARKER
 from etl_craft.services.catalog.trigger_html import trigger_edges
 from etl_craft.services.lineage import COPY
 
-SQL_PARAMETERS = frozenset({"SOURCE_SQL"})
+SQL_PARAMETERS = frozenset({"SELECT_QUERY"})
 ZOOM_BUTTONS = (
     '<span class="zoom">'
     '<button type="button" class="zoom-out" title="Zoom out">&minus;</button>'
@@ -558,7 +558,7 @@ class Pages:
             shown = (
                 f"<pre>{_e(value)}</pre>" if name in SQL_PARAMETERS else f"<code>{_e(value)}</code>"
             )
-            if name == "SOURCE_SQL_FILE":
+            if name == "SCRIPT_FILE" and not task.script:
                 shown += self._sql_script(value)
             rows.append([f"<code>{_e(name)}</code>", shown])
         return "<h2>Parameters</h2>" + _table(["Parameter", "Value"], rows, "No parameters.")

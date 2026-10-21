@@ -362,7 +362,7 @@ def substitute_task_tokens(
     refresh_type: str,
     pipeline_run_id_substitution: bool,
     filter_enabled: bool,
-    source: str = "SOURCE_SQL",
+    source: str = "SELECT_QUERY",
     force_all: bool = False,
     run_date: date = LINEAGE_RUN_DATE,
     run_date_substitution: bool = False,

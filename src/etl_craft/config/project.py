@@ -16,7 +16,7 @@ from etl_craft.core.errors import MetadataError
 from etl_craft.core.text import suggest
 
 
-def sql_script(config: ConnectorConfig, name: str, *, setting: str = "SOURCE_SQL_FILE") -> Path:
+def sql_script(config: ConnectorConfig, name: str, *, setting: str = "SCRIPT_FILE") -> Path:
     """Return the ``.sql`` file ``name``, a project path inside ``sql_scripts/``."""
     return project_file(config.sql_scripts_dir, name, setting=setting, suffix=".sql")
 
