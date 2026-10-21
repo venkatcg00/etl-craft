@@ -13,6 +13,7 @@ from etl_craft.api.routes import add_action_routes
 from etl_craft.core.errors import (
     EtlCraftError,
     MetadataError,
+    MigrationError,
     PermissionDeniedError,
     ResourceNotFoundError,
     UsageError,
@@ -44,7 +45,15 @@ def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> Fast
         try:
             return to_json(await asyncio.to_thread(readiness, ctx))
         except (EtlCraftError, SQLAlchemyError) as error:
-            return JSONResponse({"message": f"Engine DB is not ready: {error}"}, 503)
+            logger.error("UI readiness check failed: %s", type(error).__name__)
+            cause = (
+                "package version does not match applied migrations; "
+                "install the matching package and run `etl-craft migrate`"
+                if isinstance(error, MigrationError)
+                else "database or configuration check failed; "
+                "check Engine DB connectivity, database logs and server configuration"
+            )
+            return JSONResponse({"message": f"Engine DB is not ready: {cause}"}, 503)
 
     _add_error_handlers(app)
     add_login_routes(app, ctx)

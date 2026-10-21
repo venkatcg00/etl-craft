@@ -16,6 +16,7 @@ All notable changes are recorded here. The format follows
   UI readiness recovers from Engine DB outages, SIGTERM rejects new requests and drains
   existing ones within `Shutdown_grace_seconds`, and explicit `Docs_site.Trusted_proxies`
   controls forwarded addresses/schemes recorded under audit arguments' `_http` metadata.
+  Unsigned readiness responses report safe causes without exposing database exception details.
 - `etl-craft[ui]` replaces `[server]`, and `[all]` includes UI and every warehouse extra.
   The remote CLI uses `--api` / `ETL_CRAFT_API`; `ApiClient` replaces `ControllerClient`.
   Old names have no compatibility aliases. Apply Engine DB migrations before starting roles.

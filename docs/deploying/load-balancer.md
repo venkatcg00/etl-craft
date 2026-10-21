@@ -9,7 +9,9 @@ S7.F supplies the complete Compose and Kubernetes layouts.
 
 Probe **`GET /health` on each UI copy**, accepting only 200. It returns 503 with the cause
 when the Engine DB cannot be reached, its applied migrations differ from the package, or
-shutdown has begun. A recovered Engine DB becomes ready without restarting the copy.
+shutdown has begun. Public responses name a safe failure category; SQL, parameters and
+internal exception details are never included. Server logs record the exception class.
+A recovered Engine DB becomes ready without restarting the copy.
 The controller's probe remains a process-liveness check; do not use it for API readiness.
 
 Use no sticky sessions. Sign-in, refresh, revocation and run state live in the Engine DB.
