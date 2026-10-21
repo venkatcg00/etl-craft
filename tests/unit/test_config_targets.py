@@ -11,10 +11,10 @@ from etl_craft.config.targets import (
     active_warehouse,
     parse_warehouse_url,
     preferred_connection_url,
-    strip_databricks_credentials,
 )
 from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.text import strip_databricks_credentials
 
 pytestmark = pytest.mark.unit
 

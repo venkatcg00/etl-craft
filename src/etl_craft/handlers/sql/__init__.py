@@ -19,6 +19,7 @@ from etl_craft.config.targets import active_catalog
 from etl_craft.core.actor import Actor
 from etl_craft.core.enums import ActorKind, SqlAction
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
+from etl_craft.core.faults import fault_point
 from etl_craft.core.text import qualify as qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
@@ -97,6 +98,10 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
                 now=datetime.now(UTC),
             )
             outcome = _apply(session, action)
+        if task.action == SqlAction.SCD1_MERGE:
+            fault_point("sql.scd1.after_commit")
+        elif task.action == SqlAction.SCD2_MERGE:
+            fault_point("sql.scd2.after_commit")
         if isinstance(outcome, SqlGuardError):
             raise outcome
         with engine_db.begin() as conn:

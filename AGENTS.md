@@ -166,8 +166,11 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 - An Engine DB change ships as a migration in both `dialects/engine/postgres/migrations/` and
   `dialects/engine/sqlite/migrations/`, with both `schema.sql` files updated to match. The
   upgrade test must pass from every released schema in `tests/fixtures/schemas/`.
-- Released migration files are immutable. Behaviour that Python must run around a migration is
-  attached with markers (`dialects/engine/migration-markers.toml` and SQL headers, read by
+- Released migration files are immutable: a file is released once a version tag (`v*`)
+  contains it. Correct an unreleased migration in place before its first release, and
+  recreate any development Engine DB that already applied it. Behaviour that Python must run
+  around a released migration is attached with markers
+  (`dialects/engine/migration-markers.toml` and SQL headers, read by
   `engine/migrations.py`).
 - A migration that needs a new marker, or a Python branch for one file, is a design change:
   stop and ask.

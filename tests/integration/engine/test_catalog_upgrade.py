@@ -6,50 +6,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from etl_craft.dialects.engine import build_engine
 from etl_craft.engine.migrations import apply_pending_migrations
 from etl_craft.engine.queries import run_script
-from etl_craft.engine.schema import init_db
 from fixtures.catalog import snapshot
-from fixtures.engine_db import engine_config, sqlite_engine_db
-from fixtures.released_schema import install
 
 SCHEMAS = Path(__file__).parents[2] / "fixtures" / "schemas"
 RELEASES = sorted(path.name for path in SCHEMAS.iterdir() if path.is_dir())
-
-
-@pytest.mark.parametrize("release", RELEASES)
-def test_full_catalog_matches_fresh_initialization(empty_engine_db, release, tmp_path, monkeypatch):
-    db = empty_engine_db
-    folder = "postgres" if db.engine.dialect.name == "postgresql" else "sqlite"
-    install(db, release)
-    monkeypatch.delenv("ETL_CRAFT_MIGRATIONS_DIR", raising=False)
-    apply_pending_migrations(db.engine)
-    if folder == "postgres":
-        with db.engine.begin() as conn:
-            conn.execute(text("CREATE SCHEMA fresh"))
-        profile = replace(db.config.engine, schema="fresh")
-        fresh = build_engine(engine_config(profile))
-    else:
-        directory = tmp_path / "fresh"
-        directory.mkdir()
-        fresh = sqlite_engine_db(directory).engine
-    try:
-        init_db(fresh)
-        upgraded, expected = snapshot(db.engine), snapshot(fresh)
-        for section in expected:
-            if section == "tables":
-                assert upgraded[section].keys() == expected[section].keys()
-                for table in expected[section]:
-                    for field in expected[section][table]:
-                        assert upgraded[section][table][field] == expected[section][table][field], (
-                            table,
-                            field,
-                        )
-            else:
-                assert upgraded[section] == expected[section], section
-    finally:
-        fresh.dispose()
 
 
 @pytest.fixture

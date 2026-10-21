@@ -303,3 +303,15 @@ def _drop_schema(world: SqlWorld) -> None:
         world.execute(f"DROP SCHEMA IF EXISTS {world.catalog}.{world.schema} CASCADE")
     else:
         world.execute(f"DROP SCHEMA IF EXISTS {world.catalog}.{world.schema}")
+
+
+def run_killed_sql(context, point):
+    """Exit at a warehouse boundary using a fresh child connection and explicit actor."""
+    import os
+
+    from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+    from etl_craft.dialects.engine import build_engine
+
+    os.environ["ETL_CRAFT_FAULT"] = point + ":kill"
+    with acting_as(SYSTEM_ACTOR):
+        sql.run(context, build_engine(context.config))

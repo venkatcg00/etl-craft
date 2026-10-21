@@ -173,3 +173,27 @@ def test_http_library_capture_uses_warning_unless_debug(name, level):
         assert logger.level == logging.DEBUG
     finally:
         logger.setLevel(previous)
+
+
+@pytest.mark.parametrize("fmt", ["text", "json"])
+def test_logging_masks_structured_secrets_without_losing_formatting_fields(fmt):
+    stream = io.StringIO()
+    log.configure("INFO", fmt, stream)
+    logger = logging.getLogger("etl_craft.masking")
+    url = "postgresql://user:private-password@db/project?sslmode=require&pwd=private-query"
+    payload = {"nested": ({"password": "private-list", 1: "public-value"},)}
+    with log.log_context(password="private-context", handler=url):
+        logger.info("connect %(handler)s", {"handler": url}, extra={"api_key": "private-key"})
+        logger.info("payload %s", payload, stack_info=True)
+    rendered = stream.getvalue()
+    for secret in [
+        "private-password",
+        "private-query",
+        "private-context",
+        "private-key",
+        "private-list",
+    ]:
+        assert secret not in rendered
+    assert "sslmode=require" in rendered
+    assert "[REDACTED]" in rendered
+    assert "connect postgresql://user:***@db/project?sslmode=require" in rendered

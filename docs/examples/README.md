@@ -32,6 +32,9 @@ with a `# variable` or `# value` comment:
   profile only, and stops with a "not set" or "empty" error naming the variable. Missing
   variables include suggestions for similarly named keys; values are never shown.
 
+Audit arguments and logs redact secret-named fields even inside lists, and credentials in
+connection URLs. This does not replace keeping credentials in the secrets source.
+
 `etl-craft doctor` lists every value that was used as written but looks like a variable name,
 which is how a missing variable shows up.
 

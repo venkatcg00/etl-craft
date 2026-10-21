@@ -17,24 +17,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import Actor, current_actor
 from etl_craft.core.enums import ActionOutcome
-from etl_craft.core.text import is_secret_name
+from etl_craft.core.text import mask_arguments
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
 
 logger = logging.getLogger(__name__)
-
-
-def mask_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
-    """Mask values of sensitive names, including nested arguments, before serialization."""
-    return {
-        key: "[REDACTED]"
-        if is_secret_name(key)
-        else mask_arguments(value)
-        if isinstance(value, dict)
-        else value
-        for key, value in arguments.items()
-        if key not in {"handler"}
-    }
 
 
 @dataclass
@@ -103,7 +90,8 @@ def register_engine(engine: Engine) -> None:
 @contextmanager
 def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[ActionRequest]:
     """Record one audited request once its Engine DB is bound, whatever its outcome."""
-    request = ActionRequest(command, mask_arguments(arguments), datetime.now(UTC))
+    payload = {key: value for key, value in arguments.items() if key != "handler"}
+    request = ActionRequest(command, mask_arguments(payload), datetime.now(UTC))
     token = _request.set(request)
     try:
         yield request

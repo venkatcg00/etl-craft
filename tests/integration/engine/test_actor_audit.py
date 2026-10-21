@@ -624,3 +624,71 @@ def test_doctor_warns_about_writable_sqlite_file(empty_engine_db):
     path.chmod(0o666)
     checks = _engine_state(empty_engine_db.config, empty_engine_db.engine)
     assert any(check.status == Status.WARN and "chmod go-w" in check.detail for check in checks)
+
+
+@pytest.mark.parametrize("log_format", ["text", "json"])
+def test_nested_action_secrets_never_reach_audit_logs_cli_or_api(engine_db, log_format):
+    import io
+
+    from fastapi.testclient import TestClient
+
+    from etl_craft.api.app import create_app
+    from etl_craft.cli.output import Output
+    from etl_craft.core import log
+    from etl_craft.core.enums import ActionName, ApiRole
+    from etl_craft.core.errors import ConfigurationError
+    from etl_craft.services.operations import OperationContext, tokens
+    from etl_craft.services.operations.actions import invoke
+    from etl_craft.services.operations.recording import recorded
+    from etl_craft.services.operations.requests import AuditInput
+
+    db = engine_db
+    ctx = OperationContext(db.engine, db.config, ALICE, role=ApiRole.ADMIN)
+    secret = "nested-password-never-public"
+    url_secret = "url-password-never-public"
+    arguments = {
+        "connections": [
+            {
+                "password": secret,
+                "url": f"postgresql://team:{url_secret}@db/project?sslmode=require",
+            },
+            {
+                "nested": [{"API_TOKEN": secret}],
+                "url": f"jdbc:postgresql://db/project?pwd={secret}",
+                "warehouse": f"jdbc:databricks://db/default;httpPath=/sql/x;PWD={secret}",
+            },
+        ],
+    }
+    logs, output = io.StringIO(), io.StringIO()
+    log.configure("INFO", log_format, logs)
+    with recorded(ctx, ActionName.RUN, arguments):
+        logging.getLogger("etl_craft.audit_test").info("request: %s", arguments)
+        try:
+            raise ConfigurationError(
+                f"connection rejected postgresql://team:{url_secret}@db/project"
+            )
+        except ConfigurationError:
+            logging.getLogger("etl_craft.audit_test").exception("connection failure")
+    credential = invoke(
+        ctx, ActionName.TOKEN_CREATE, tokens.TokenCreate(name="reader", role=ApiRole.ADMIN)
+    )
+    code = invoke(ctx, ActionName.AUDIT, AuditInput())
+    Output(stdout=output).result(code, "json")
+    with TestClient(create_app(ctx)) as client:
+        response = client.get(
+            "/api/v1/audit", headers={"Authorization": "Bearer " + credential.token}
+        )
+    assert response.status_code == 200, response.text
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT ARGUMENTS AS arguments FROM AUD_ACTIONS WHERE COMMAND='run'")
+        ).scalar_one()
+        for table in inspect(conn).get_table_names():
+            if table.lower().startswith("aud_"):
+                rows = conn.exec_driver_sql('SELECT * FROM "' + table + '"').all()
+                assert secret not in str(rows) and url_secret not in str(rows), table
+    for visible in (str(row), logs.getvalue(), output.getvalue(), response.text):
+        assert secret not in visible and url_secret not in visible
+        assert "[REDACTED]" in visible
+        assert "sslmode=require" in visible
+    assert arguments["connections"][0]["password"] == secret

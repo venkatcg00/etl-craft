@@ -14,6 +14,11 @@ ingestion script receives its own settings through `CFG_TASK_PARAMETERS`, which 
 a script that needs a credential reads it from its environment. Values in
 `CFG_TASK_PARAMETERS` and anything a script prints or logs are the team's responsibility.
 
+Audit arguments and structured log fields mask secret-named keys recursively, including mappings
+inside lists. Connection URL passwords and secret query parameters are redacted in audit
+arguments and log messages, including exception text. Safe connection settings remain visible.
+The audit API and `etl-craft audit --format json` return the same redacted arguments.
+
 Credential query keys (`password`, `pwd`, `passwd`, `token`, `access_token`, `secret` and
 `private_key_file_pwd`, in any case) are refused in JDBC URLs; name the secret variable in
 `Secret` instead. DuckDB's `S3_secret` is also stored as a variable name and resolved for each

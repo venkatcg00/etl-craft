@@ -13,9 +13,8 @@ from fixtures.sql_appends import (
     check_append_retries,
     check_legacy_upgrade,
     create_legacy_append_target,
-    run_killed_append,
 )
-from fixtures.sql_warehouse import warehouses
+from fixtures.sql_warehouse import run_killed_sql, warehouses
 
 
 def test_append_retries_replace_only_their_task_run(sql_world):
@@ -36,7 +35,7 @@ def test_killed_append_converges_when_retried(sql_world):
     }
     context = w.task("killed_load", **params)
     process = multiprocessing.get_context("spawn").Process(
-        target=run_killed_append, args=(context,)
+        target=run_killed_sql, args=(context, "sql.append.after_insert")
     )
     try:
         process.start()

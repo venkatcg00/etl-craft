@@ -9,10 +9,10 @@ from __future__ import annotations
 import difflib
 import hashlib
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from etl_craft.core.enums import RefreshType
 from etl_craft.core.errors import ConfigurationError, HandlerError
@@ -43,6 +43,73 @@ def is_secret_name(name: str) -> bool:
 def public_url_query(query: dict[str, str]) -> dict[str, str]:
     """Keep driver settings while omitting credential-like keys from logged URLs."""
     return {key: value for key, value in query.items() if not is_secret_name(key)}
+
+
+# The Databricks parameters that name what to connect to; every other one (AuthMech, UID, PWD)
+# is a credential or a JDBC-driver setting, and is dropped.
+_DATABRICKS_PUBLIC_PARAMS = frozenset(
+    {"httppath", "transportmode", "ssl", "conncatalog", "connschema", "catalog", "schema"}
+)
+
+
+def strip_databricks_credentials(jdbc_url: str) -> str:
+    """Drop credential and driver parameters from a Databricks JDBC URL.
+
+    The URL Databricks' "Connection Details" page offers includes ``AuthMech``, ``UID`` and a
+    real token in ``PWD``; what is left is safe to keep.
+    """
+    prefix, sep, params_blob = jdbc_url.partition(";")
+    if not sep:
+        return jdbc_url
+    kept = [
+        chunk
+        for chunk in params_blob.split(";")
+        if chunk.partition("=")[0].strip().lower() in _DATABRICKS_PUBLIC_PARAMS
+    ]
+    return prefix + (";" + ";".join(kept) if kept else "")
+
+
+_URL = re.compile(r"(?:jdbc:)?[A-Za-z][A-Za-z0-9+.-]*://[^\s<>]+")
+
+
+def mask_arguments(arguments: Mapping[str, object]) -> dict[str, object]:
+    """Redact secret-named fields and URL credentials throughout structured arguments."""
+    return {
+        key: "[REDACTED]" if isinstance(key, str) and is_secret_name(key) else _mask_value(value)
+        for key, value in arguments.items()
+    }
+
+
+def _mask_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return mask_arguments(value)
+    if isinstance(value, list):
+        return [_mask_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_mask_value(item) for item in value)
+    if isinstance(value, str):
+        return _URL.sub(lambda match: _public_url(match.group()), value)
+    return value
+
+
+def _public_url(value: str) -> str:
+    if value.startswith("jdbc:databricks://"):
+        value = strip_databricks_credentials(value)
+    prefix = "jdbc:" if value.startswith("jdbc:") else ""
+    try:
+        url = urlsplit(value.removeprefix(prefix))
+        query = dict(parse_qsl(url.query, keep_blank_values=True))
+        safe_query = public_url_query(query)
+        if url.password is None and query == safe_query:
+            return value
+        authority = url.netloc
+        if url.password is not None:
+            user, _, host = authority.rpartition("@")
+            authority = user.split(":", 1)[0] + ":***@" + host
+        return prefix + urlunsplit(url._replace(netloc=authority, query=urlencode(safe_query)))
+    except ValueError:
+        # Malformed URL-shaped text must not expose credentials while reporting another error.
+        return "[REDACTED URL]"
 
 
 _JDBC_SCHEME = re.compile(r"^jdbc:(?P<scheme>[a-zA-Z0-9_+-]+):")
