@@ -9,72 +9,18 @@ from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from http.client import HTTPResponse
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import quote, urlencode
+from urllib.request import Request
 
+from etl_craft.config.remote import server_url as server_url
+from etl_craft.core.api_errors import response_error
 from etl_craft.core.enums import ActionName, HttpMethod
-from etl_craft.core.errors import EtlCraftError, ServerError, UsageError
+from etl_craft.core.errors import ServerError, UsageError
+from etl_craft.core.http_client import open_request
 from etl_craft.services import credentials
 from etl_craft.services.operations.actions import ACTIONS
 from etl_craft.services.operations.serialization import decode, encode
 from etl_craft.services.operations.sessions import Session, TokenInput
-
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-"""Hosts a server may be reached at over plain HTTP: this machine only."""
-
-
-class _NoRedirects(HTTPRedirectHandler):
-    def redirect_request(
-        self, req: Request, fp: object, code: int, msg: str, headers: object, newurl: str
-    ) -> None:
-        return None
-
-
-def server_url(value: str) -> str:
-    """Return ``scheme://host[:port]``; refuse anything but HTTPS except to this machine."""
-    try:
-        url = urlsplit(value)
-        port = url.port
-    except ValueError as error:
-        raise UsageError(f"--api {value!r} is malformed; expected https://<host>[:port]") from error
-    if (
-        url.scheme not in {"https", "http"}
-        or not url.hostname
-        or url.username
-        or url.password
-        or url.path not in {"", "/"}
-        or url.query
-        or url.fragment
-    ):
-        raise UsageError(f"--api {value!r}; expected https://<host>[:port] with nothing after it")
-    if url.scheme == "http" and url.hostname not in LOCAL_HOSTS:
-        raise UsageError(
-            f"--api {value!r}: plain HTTP is refused except to localhost; use https://"
-        )
-    host = f"[{url.hostname}]" if ":" in url.hostname else url.hostname
-    return f"{url.scheme}://{host}" + (f":{port}" if port else "")
-
-
-def _error(status: int, body: bytes, url: str) -> EtlCraftError:
-    """Rebuild the API's error class from its exit code, so local and remote exits match."""
-    try:
-        document = json.loads(body)
-    except ValueError:
-        document = None
-    if isinstance(document, dict) and isinstance(document.get("message"), str):
-        code = document.get("exit_code")
-        classes = {int(cls.exit_code): cls for cls in _subclasses(EtlCraftError)}
-        cls = classes.get(code, ServerError) if isinstance(code, int) else ServerError
-        return cls(document["message"])
-    if isinstance(document, dict) and "detail" in document:
-        return UsageError(f"{url} refused the request (HTTP {status}): {document['detail']}")
-    return ServerError(f"{url} answered HTTP {status} without an etl-craft error; check the URL")
-
-
-def _subclasses(cls: type[EtlCraftError]) -> Iterator[type[EtlCraftError]]:
-    for sub in cls.__subclasses__():
-        yield sub
-        yield from _subclasses(sub)
 
 
 class ApiClient:
@@ -132,7 +78,7 @@ class ApiClient:
         except HTTPError as error:
             if error.code == 401 and signed_in and self._service_token is None:
                 return self._send(method, path, query, body, self._token(renew=True))
-            raise _error(error.code, error.read(65536), self.url) from error
+            raise response_error(error.code, error.read(65536), self.url) from error
 
     def _send(
         self,
@@ -153,7 +99,7 @@ class ApiClient:
             data = json.dumps({k: v for k, v in body.items() if v is not None}).encode()
         request = Request(url, data=data, headers=headers, method=method)
         try:
-            response: HTTPResponse = build_opener(_NoRedirects()).open(request, timeout=60)
+            response: HTTPResponse = open_request(request, timeout=60)
         except HTTPError:
             raise  # an answer from the server; _open turns it into the server's own error
         except (URLError, OSError) as error:

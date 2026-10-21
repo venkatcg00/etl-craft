@@ -8,6 +8,10 @@ import pytest
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2] / "src" / "etl_craft"
+# Runs and attempts, business-rule runs and agents each have one module owning their lifecycle.
+TRANSITION_MODULES = {
+    ROOT / "engine" / name for name in ("transitions.py", "rule_runs.py", "agent_transitions.py")
+}
 STATUS_WRITE = re.compile(
     r"\bSET\s+(?:STATUS\s*=|(?:(?!\bWHERE\b)[^;])*?,\s*STATUS\s*=)", re.IGNORECASE | re.DOTALL
 )
@@ -21,7 +25,7 @@ def test_no_direct_status_writes():
             writing.add(path.stem)
     assert writing
     for path in ROOT.rglob("*.py"):
-        if path == ROOT / "engine" / "transitions.py":
+        if path in TRANSITION_MODULES:
             continue
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):

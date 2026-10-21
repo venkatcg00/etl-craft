@@ -224,6 +224,31 @@ class WarehouseDialect:
     session_sql: str | None = None
     """Setup SQL for each new warehouse connection."""
 
+    session_fencing = False
+    """Whether a new lock holder can stop an expired holder's warehouse statements.
+
+    Cluster execution needs it: a statement keeps running on the server after its client
+    dies, so a lock passes on only once the old holder's tagged statements are confirmed gone.
+    """
+
+    def session_tag_args(self, tag: str) -> Mapping[str, Any]:
+        """Driver connect arguments that label every statement of a session with ``tag``."""
+        return {}
+
+    def stop_tagged(self, conn: Connection, tag: str) -> None:
+        """Ask the server to stop every statement labelled ``tag``."""
+        raise ConfigurationError(
+            f"a {self.spec.display_name} warehouse cannot stop another session's statements; "
+            "use local execution (Deployment.Profile LAPTOP or CONTROLLER)"
+        )
+
+    def running_tagged(self, conn: Connection, tag: str) -> int:
+        """Count the statements labelled ``tag`` that the server has not finished."""
+        raise ConfigurationError(
+            f"a {self.spec.display_name} warehouse cannot list another session's statements; "
+            "use local execution (Deployment.Profile LAPTOP or CONTROLLER)"
+        )
+
     def on_connect(self, dbapi_connection: Any, profile: ConnectionProfile, secret: str) -> None:
         """Apply this dialect's session settings, closing its setup cursor on failure too."""
         if self.session_sql is None:

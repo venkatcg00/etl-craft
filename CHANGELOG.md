@@ -8,6 +8,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- PostgreSQL queue execution for `Deployment.Profile: CONTROLLER_AGENTS`, with API-only
+  agents, 30-second claims, measured capacity, leases, fenced reports and shared log chunks.
+  `etl-craft agent` runs from its own `--project` copy; `agents` lists capacity and
+  `agent drain|resume|stop --agent-id` records durable controls. Agent tokens cannot invoke
+  people's actions. Apply `0048_agent_queue.sql` before starting the roles.
+- Optional PostgreSQL `Engine.<profile>.Listen_jdbc_url` reuses profile authentication for
+  direct or session-pooled notifications. UI/controller startup and doctor verify delivery.
+
 - `HANDLER=SQL_SCRIPT` executes `SCRIPT_FILE` under `sql_scripts/` in order, with bound run
   context and `INPUT_PARAMS`. Each statement is audited in the attempt log. Native autocommit
   preserves earlier statements on failure; files may use explicit transactions where supported.
@@ -16,6 +24,14 @@ All notable changes are recorded here. The format follows
   `0047_sql_script.sql` before using the handler. Prefer `RETRY_ON=NONE` for scripts.
 
 ### Fixed
+
+- Waiting agent claims recheck token revocation, expiry and account activity before admitting
+  queued work, including credentials changed while the long poll waits.
+- Warehouse session labels distinguish deployments that reuse attempt numbers. Where warehouse
+  fencing is supported, failed work confirms its statements stopped before unlocking, retaining
+  the lock when confirmation fails.
+  Agents check their own warehouse's fencing capability before registration, and claims clear
+  obsolete queue-wait reasons.
 
 - Upgrading a SQLite Engine DB from 0.3.0 keeps each attempt's RETRYABLE value.
 - SQLite upgrades retain each pipeline run's configuration fingerprint. Development Engine DBs
@@ -26,6 +42,14 @@ All notable changes are recorded here. The format follows
   context, extra fields and exceptions; audit CLI JSON and API responses retain that redaction.
 
 ### Changed
+
+- Target, event and single-writer warehouse ownership use shared durable resource locks.
+  Agents stop their children before lease expiry when renewal fails. A lock left by an ended
+  or expired holder passes only after the next holder stops that holder's tagged warehouse
+  statements and confirms none still run; otherwise the lock stays with it and the new writer
+  fails, naming the target and holder. `CONTROLLER_AGENTS` refuses Databricks warehouses, which
+  cannot yet stop another session's statements; use local execution there.
+- Removed `ScriptTask.engine_db`; scripts use `task.warehouse()` locally and on agents.
 
 - Script naming is consistent: `python_scripts/` replaces `ingestion_scripts/`,
   `sql_scripts/` replaces `sql_files/`, Python tasks use `SCRIPT_FILE` in place of `SCRIPT_NAME`,

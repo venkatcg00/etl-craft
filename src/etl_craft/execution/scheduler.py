@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import SETTLED_STATUSES, Handler, RunStatus
+from etl_craft.core.enums import SETTLED_STATUSES, DeploymentProfile, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.outage import OutageBudget
@@ -31,6 +31,8 @@ from etl_craft.execution.gates import Clock, CrossPipelineCheck, TrackedGate, ch
 from etl_craft.execution.interventions import record_gate_bypass
 from etl_craft.execution.pools import ExecutionHandle, HandleState, Pool, slot_kind
 from etl_craft.execution.pools.local import LocalPool
+from etl_craft.execution.pools.provider import create_pool
+from etl_craft.execution.pools.queue import QueuePool, restore
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.retries import refresh_retries
 from etl_craft.execution.runner import admit_attempt, preflight
@@ -69,13 +71,17 @@ class Scheduler:
         self.gate = TrackedGate(
             clock, config.dependency_gates, config.limits.gate_wait_minutes * 60
         )
-        self.own_pool: LocalPool | None = None
+        self.own_pool: LocalPool | QueuePool | None = None
         if pool is None:
-            self.own_pool = LocalPool(engine, config, child=child)
+            self.own_pool = create_pool(engine, config, child)
             pool = self.own_pool
         self.pool: Pool = pool
         self.handlers: dict[int, str] = {}
-        self.jobs: dict[int, ExecutionHandle] = {}
+        self.jobs: dict[int, ExecutionHandle] = (
+            restore(engine, pipeline_run_id)
+            if config.deployment == DeploymentProfile.CONTROLLER_AGENTS
+            else {}
+        )
         self.event_stop = threading.Event()
         self.sql_events: dict[int, bool] = {}
         self.event_due: dict[int, EventCheck] = {}
@@ -385,6 +391,9 @@ class Scheduler:
 
     def close(self, *, interrupted: bool = False) -> None:
         """Stop the run's task processes on interruption, then wait for every attempt to end."""
+        if interrupted and self.config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
+            self.jobs.clear()
+            interrupted = False
         if interrupted:
             self.cancel.set()
             self._stop_running()

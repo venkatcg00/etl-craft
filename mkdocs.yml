@@ -126,6 +126,7 @@ nav:
       - The project directory: deploying/project-layout.md
       - Scheduling runs: deploying/scheduling.md
       - Controller: deploying/controller.md
+      - Agents and the queue: deploying/agents.md
       - Deployment profiles and sizing: deploying/sizing.md
       - HTTP API: deploying/http-api.md
       - Behind a load balancer: deploying/load-balancer.md

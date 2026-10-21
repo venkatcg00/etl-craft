@@ -8,6 +8,7 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import psycopg
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Connection, Engine
 from sqlalchemy.exc import OperationalError
@@ -35,6 +36,19 @@ class PostgresEngineDialect(EngineDialect):
     supports_api_replicas = True
     spec = engine_for_jdbc_url("jdbc:postgresql:")
     directory = Path(__file__).parent
+
+    def listen(self, conn: Connection, channels: tuple[str, ...]) -> None:
+        """Quote each notification channel as an identifier, never as SQL input."""
+        for channel in channels:
+            quoted = conn.dialect.identifier_preparer.quote_identifier(channel)
+            conn.exec_driver_sql(f"LISTEN {quoted}")
+
+    def notifications(self, conn: Connection, timeout: float) -> Iterator[tuple[str, str]]:
+        """Read committed notifications from this dedicated session connection."""
+        driver = conn.connection.driver_connection
+        assert isinstance(driver, psycopg.Connection)
+        for notification in driver.notifies(timeout=timeout):
+            yield notification.channel, notification.payload
 
     def stored_name(self, table: str) -> str:
         """Return ``table`` in lower case, as PostgreSQL folds unquoted names."""

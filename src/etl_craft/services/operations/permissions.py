@@ -20,7 +20,12 @@ class PipelineAccess:
     def permits(self, code: str, required: ApiRole = ApiRole.VIEWER) -> bool:
         """Whether the account has the required role on this pipeline."""
         role = self.roles.get(code)
-        return role is not None and tuple(ApiRole).index(role) >= tuple(ApiRole).index(required)
+        return (
+            role is not None
+            and role != ApiRole.AGENT
+            and required != ApiRole.AGENT
+            and tuple(ApiRole).index(role) >= tuple(ApiRole).index(required)
+        )
 
     def require(self, ctx: OperationContext, code: str, required: ApiRole) -> None:
         """Refuse without revealing the pipeline's tasks, runs or logs."""

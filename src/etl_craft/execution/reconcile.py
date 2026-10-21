@@ -16,7 +16,8 @@ from sqlalchemy.engine import Engine
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.time import as_utc
-from etl_craft.engine import transitions
+from etl_craft.dialects.engine import for_engine
+from etl_craft.engine import agent_transitions, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.execution.leases import LEASE_SECONDS, process_start
 
@@ -78,6 +79,9 @@ def reconcile(
     engine: Engine, *, pipeline_id: int | None = None, task_id: int | None = None
 ) -> Reconciliation:
     """Fence expired attempts, stop verified local children, then release expired idle runs."""
+    if for_engine(engine).supports_api_replicas:
+        with engine.begin() as conn:
+            agent_transitions.expire_agents(conn)
     now = datetime.now(UTC)
     report = Reconciliation()
     with engine.connect() as conn:
@@ -88,8 +92,12 @@ def reconcile(
         expires = as_utc(row.lease_expires_at or row.queued_at)
         if expires > now:
             continue
-        local = row.host == socket.gethostname()
-        if not local and expires + timedelta(seconds=2 * LEASE_SECONDS) > now:
+        local = not row.agent_owned and row.host == socket.gethostname()
+        if (
+            not local
+            and not row.agent_owned
+            and expires + timedelta(seconds=2 * LEASE_SECONDS) > now
+        ):
             continue
         message = (
             f"attempt {row.attempt_number} was lost: owner {row.owner_id} stopped renewing "

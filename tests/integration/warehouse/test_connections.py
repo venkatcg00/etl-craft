@@ -8,8 +8,10 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.config import ConnectionProfile, ConnectorConfig, SourceConfig
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import SecretsSource, TableFormat
 from etl_craft.core.errors import LockTimeoutError
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.warehouse.connection import (
     build_warehouse_engine,
     open_warehouse,
@@ -77,16 +79,18 @@ def queue_engine_db(request, tmp_path):
     else:
         db = request.getfixturevalue("postgres_database")
     apply_schema(db.engine)
-    return db.engine
+    return LocalLocker(db.engine, db.config)
 
 
 @pytest.mark.warehouse_duckdb
+@pytest.mark.usefixtures("engine_actor")
 def test_writers_of_a_duckdb_file_queue_and_a_bounded_wait_says_why(queue_engine_db, tmp_path):
     config = warehouse_config(f"jdbc:duckdb:{tmp_path / 'warehouse.duckdb'}")
     holding, release = threading.Event(), threading.Event()
+    locker = queue_engine_db
 
     def hold_the_warehouse():
-        with open_warehouse(config, queue_engine_db):
+        with acting_as(SYSTEM_ACTOR), open_warehouse(config, locker):
             holding.set()
             release.wait(30)
 
@@ -96,19 +100,19 @@ def test_writers_of_a_duckdb_file_queue_and_a_bounded_wait_says_why(queue_engine
         assert holding.wait(10)
         with (
             pytest.raises(LockTimeoutError, match="only one writing process at a time"),
-            open_warehouse(config, queue_engine_db, wait_seconds=0.5),
+            open_warehouse(config, locker, wait_seconds=0.5),
         ):
             pass  # pragma: no cover - the lock is never granted
         # A task that writes through its own script queues the same way.
         with (
             pytest.raises(LockTimeoutError),
-            single_writer_lock(config, queue_engine_db, wait_seconds=0.5),
+            single_writer_lock(config, locker, wait_seconds=0.5),
         ):
             pass  # pragma: no cover - the lock is never granted
     finally:
         release.set()
         holder.join(10)
-    with open_warehouse(config, queue_engine_db, wait_seconds=5) as engine:
+    with open_warehouse(config, locker, wait_seconds=5) as engine:
         assert scalar(engine, "SELECT 1") == 1
 
 

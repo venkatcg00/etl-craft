@@ -20,7 +20,7 @@ from fixtures.scoped_controls import ctx as ctx
 MACHINE = Host({"/proc/self/cgroup": "0::/\n"}.get, lambda: 8, 8, 16 * GIB)
 
 
-def test_server_workers_refuses_execution_and_starts_nothing(ctx, capsys, monkeypatch):
+def test_the_cluster_profile_refuses_sqlite_and_init_only_starts_nothing(ctx, capsys, monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(ctx.engine, "ops"))
     with ctx.engine.begin() as conn:
         add_task(conn, add_pipeline(conn, "P"), "T")
@@ -39,11 +39,17 @@ def test_server_workers_refuses_execution_and_starts_nothing(ctx, capsys, monkey
     )
     code = main(["--config", str(path), "run", "--pipeline-code", "P", "--init-only"])
     error = capsys.readouterr().err
-    assert code == ConfigurationError.exit_code
     shared = ctx.engine.dialect.name == "postgresql"
-    assert ("no agent queue provider" if shared else "share one PostgreSQL") in error
+    if shared:
+        # --init-only initializes the run for later and starts no task, here or on an agent.
+        assert code == 0, error
+    else:
+        assert code == ConfigurationError.exit_code
+        assert "share one PostgreSQL" in error
     with ctx.engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar() == 0
+        runs = conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar()
+        attempts = conn.execute(text("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS")).scalar()
+    assert (runs, attempts) == ((1, 0) if shared else (0, 0))
 
 
 def test_a_sized_role_builds_its_pool_and_a_server_without_slots_admits_nothing(ctx):

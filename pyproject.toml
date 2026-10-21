@@ -199,7 +199,7 @@ type = "layers"
 layers = [
     "etl_craft.cli",
     "etl_craft.api",
-    "etl_craft.controller",
+    "etl_craft.controller | etl_craft.agent",
     "etl_craft.services",
     "etl_craft.execution",
     "etl_craft.handlers",

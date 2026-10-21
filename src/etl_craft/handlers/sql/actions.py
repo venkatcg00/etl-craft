@@ -36,15 +36,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy.engine import Engine
-
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import sha256_hex
-from etl_craft.engine.repository.hash_versions import fetch_hash_version, fetch_view_statement
-from etl_craft.engine.repository.tasks import TargetTask, fetch_target_tasks
-from etl_craft.engine.runlog import fetch_task_run_status
+from etl_craft.engine.repository.tasks import TargetTask
+from etl_craft.engine.task_store import TaskStore
 from etl_craft.handlers.registry import HandlerResult, TaskContext
 from etl_craft.handlers.sql.rejects import screen
 from etl_craft.handlers.sql.replacement import cleanup, promote, recover_overwrite
@@ -75,7 +72,7 @@ class ActionContext:
 
     task: SqlTask
     context: TaskContext
-    engine_db: Engine
+    store: TaskStore
     user: str
     now: datetime
     staged: str | None = None
@@ -93,7 +90,7 @@ class ActionContext:
             return self.staged
         stage = build_stage(session, self.select_sql, empty=empty)
         if self.task.watermark is not None:
-            record_range(session, stage, self.task.watermark, self.context, self.engine_db)
+            record_range(session, stage, self.task.watermark, self.context, self.store)
         return stage
 
     @property
@@ -205,8 +202,7 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
     if session.target_columns():
         logger.info("%s exists; SETUP_TABLE leaves it as it is", session.target)
         return HandlerResult(source_count=0, target_count=0, insert_count=0)
-    with action.engine_db.connect() as conn:
-        others = fetch_target_tasks(conn, action.context.pipeline_id, action.context.task_id)
+    others = list(action.store.state(SqlAction.SETUP_TABLE).peers)
     writer = writer_action(action.task.setup_for, others, action.task.target_object)
     stage = action.build_stage(session, empty=True)
     create_target_shape(session, stage, AUDIT_COLUMNS[writer])
@@ -379,8 +375,7 @@ def _merge_stage(
     """
     task = action.task
     check_target_audit(session, kind)
-    with action.engine_db.connect() as conn:
-        version = fetch_hash_version(conn, session.target)
+    version = action.store.target(session.target).hash_version
     if version != 2:
         raise SqlGuardError(
             f"{session.target} has hash version {version or 'unknown'}; "
@@ -577,14 +572,11 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
     """
     context = action.context
     target_object = action.task.target_object
-    with action.engine_db.connect() as conn:
-        others = fetch_target_tasks(conn, context.pipeline_id, context.task_id)
-        creator = next((task for task in others if task.sql_action == SqlAction.CREATE_TABLE), None)
-        status = (
-            fetch_task_run_status(conn, creator.task_id, context.pipeline_run_id)
-            if creator is not None
-            else None
-        )
+    state = action.store.state(SqlAction.DROP_TABLE)
+    creator = next(
+        (task for task in state.peers if task.sql_action == SqlAction.CREATE_TABLE), None
+    )
+    status = state.peer_statuses.get(str(creator.task_id)) if creator is not None else None
     if creator is None:
         raise SqlGuardError(
             f"DROP_TABLE refused for {target_object}: no other active task in this pipeline "
@@ -684,11 +676,9 @@ def create_view(session: Session, action: ActionContext) -> HandlerResult:
             session.target, action.select_sql, secure=secure, exists=True
         ).encode()
     )
-    if kind == "VIEW":
-        with action.engine_db.connect() as conn:
-            if fetch_view_statement(conn, session.target) == wanted:
-                logger.info("%s already holds this statement; view kept", session.target)
-                return HandlerResult()
+    if kind == "VIEW" and action.store.target(session.target).view_statement == wanted:
+        logger.info("%s already holds this statement; view kept", session.target)
+        return HandlerResult()
     ddl = session.dialect.view_ddl(
         session.target, action.select_sql, secure=secure, exists=kind == "VIEW"
     )

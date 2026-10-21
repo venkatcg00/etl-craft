@@ -2,6 +2,7 @@
 
 from etl_craft.cli.commands import (
     account,
+    agent,
     audit,
     capabilities,
     clone,
@@ -48,6 +49,8 @@ COMMANDS: tuple[Command, ...] = (
     run.COMMAND,
     controller.COMMAND,
     ui.COMMAND,
+    agent.COMMAND,
+    agent.LIST,
     token.COMMAND,
     mark.COMMAND,
     *(controls.command(a) for a in CONTROL_VERBS),

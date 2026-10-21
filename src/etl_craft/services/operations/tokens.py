@@ -76,6 +76,8 @@ def _view(row: RowMapping) -> TokenView:
     values = dict(row)
     values["account_kind"] = AccountKind(values["account_kind"])
     values["token_kind"] = TokenKind(values["token_kind"])
+    if values["token_kind"] == TokenKind.AGENT:
+        values["role"] = ApiRole.AGENT
     for key in ("created_at", "expires_at", "revoked_at"):
         values[key] = timestamp(values[key])
     return TokenView(**values)
@@ -108,7 +110,8 @@ class TokenRevoke(Request):
 
 def create_token(ctx: OperationContext, request: TokenCreate) -> CreatedToken:
     """Print-once credentials contain 256 random bits; only their SHA-256 is stored."""
-    name, role = request.name, request.role
+    name = request.name
+    role = ApiRole.VIEWER if request.role == ApiRole.AGENT else request.role
     now = datetime.now(UTC)
     expires_at = (
         None if request.expires is None else now + timedelta(days=int(request.expires[:-1]))
@@ -133,7 +136,12 @@ def create_token(ctx: OperationContext, request: TokenCreate) -> CreatedToken:
         return issue_token(
             conn,
             ctx.actor.name,
-            TokenGrant(account.account_id, name, TokenKind.SERVICE, expires_at),
+            TokenGrant(
+                account.account_id,
+                name,
+                TokenKind.AGENT if request.role == ApiRole.AGENT else TokenKind.SERVICE,
+                expires_at,
+            ),
         )
 
 

@@ -351,3 +351,53 @@ def describe(measurement: Measurement, unit: str) -> str:
     value = measurement.value if unit == "CPUs" else measurement.value / MIB
     shown = f"{value:g} CPUs" if unit == "CPUs" else f"{value:.0f} MB"
     return f"{shown} from {measurement.source} ({measurement.detail})"
+
+
+def size_agent(allocation: Allocation, ceilings: Ceilings) -> Sizing:
+    """Size the task host with the same per-kind estimates and explicit ceilings."""
+    cpus, memory = allocation.cpus.value, allocation.memory.value
+    reserve_cpus = None if cpus is None else max(0.05, cpus * 0.1)
+    reserve_memory = None if memory is None else max(32 * MIB, memory * 0.1)
+    fallbacks = []
+    if cpus is None or memory is None:
+        total = python = warehouse = Size(
+            0, "allocation unavailable; cannot reserve task resources"
+        )
+        fallbacks.append("CPU and memory measurements are required before accepting claims")
+    else:
+        total, python, warehouse = _slots(
+            cpus - (reserve_cpus or 0), memory - (reserve_memory or 0), ceilings
+        )
+    return Sizing(
+        DeploymentProfile.CONTROLLER_AGENTS,
+        reserve_cpus,
+        reserve_memory,
+        total,
+        python,
+        warehouse,
+        Size(0, "agent opens no HTTP port"),
+        Size(0, "agent opens no Engine DB connection"),
+        tuple(fallbacks),
+    )
+
+
+def resource_pressure(allocation: Allocation, host: Host | None = None) -> dict[str, Measurement]:
+    """Read pressure with the same discovery provider used by startup and heartbeats."""
+    host = host or system_host()
+    load = host.read("/proc/loadavg")
+    cpu = (
+        Measurement(float(load.split()[0]), "/proc/loadavg", "one-minute CPU load")
+        if load
+        else Measurement(None, "unavailable", "CPU load cannot be read")
+    )
+    source = allocation.memory.source
+    usage_path = source.replace("memory.max", "memory.current").replace(
+        "memory.limit_in_bytes", "memory.usage_in_bytes"
+    )
+    written = host.read(usage_path) if usage_path != source else None
+    memory = (
+        Measurement(float(written.strip()), usage_path, "current allocation memory use")
+        if written
+        else Measurement(None, "unavailable", "allocation memory use cannot be read")
+    )
+    return {"cpu_load_1m": cpu, "memory_used": memory}

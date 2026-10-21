@@ -42,6 +42,7 @@ from etl_craft.core.text import quote_identifier
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.migrations import pending_migrations
+from etl_craft.engine.notifications import check_notifications
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
 from etl_craft.handlers.mail import email_tls_problem
@@ -54,6 +55,7 @@ from etl_craft.warehouse.connection import (
     verify_iceberg_catalog,
     warehouse_dialect,
 )
+from etl_craft.warehouse.fencing import cluster_problem
 
 
 class Status(StrEnum):
@@ -147,11 +149,14 @@ def resource_checks(config: ConnectorConfig, host: Host | None = None) -> list[C
             )
         )
     elif config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
+        problem = cluster_problem(config)
         checks.append(
-            warn(
+            fail("Deployment profile", problem)
+            if problem
+            else ok(
                 "Deployment profile",
-                "controller-agents: the controller runs no tasks, and this version has no agent "
-                "queue provider, so run and controller refuse to start",
+                "CONTROLLER_AGENTS: PostgreSQL queue; the controller schedules and agents "
+                "execute tasks. With no eligible agent, attempts stay QUEUED",
             )
         )
     else:
@@ -319,6 +324,13 @@ def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
                 "PostgreSQL in production"
             )
             checks.append(ok("Engine DB kind", detail))
+        try:
+            check_notifications(config, engine)
+        except EtlCraftError as error:
+            checks.append(fail("Engine DB notifications", str(error)))
+        else:
+            if for_engine(engine).supports_api_replicas:
+                checks.append(ok("Engine DB notifications", "LISTEN/NOTIFY round trip delivered"))
         checks += _connection_budget(config, engine)
         if engine_state:
             checks += _engine_state(config, engine)
@@ -381,6 +393,19 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
     return checks
 
 
+QUEUE_TABLE = "AUD_RESOURCE_LOCKS"
+"""The Engine DB table holding the single-writer warehouse queue."""
+
+
+def _queue_engine(config: ConnectorConfig) -> Engine | None:
+    """Return the Engine DB holding the writers' queue, or ``None`` before setup creates it."""
+    engine = engine_db(config)
+    if for_engine(engine).existing_tables(engine, (QUEUE_TABLE,)):
+        return engine
+    engine.dispose()
+    return None
+
+
 def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Check]:
     """Check the warehouse; a single-writer one is opened in the writers' queue when it can be.
 
@@ -422,7 +447,7 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
                 "each other",
             )
         )
-    engine = engine_db(config) if queue_on_engine_db else None
+    engine = _queue_engine(config) if queue_on_engine_db else None
     try:
         problem = probe_warehouse(config, engine, schema=True)
     finally:

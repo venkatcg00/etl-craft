@@ -15,6 +15,8 @@ from sqlalchemy.exc import DBAPIError
 from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.enums import (
     AccountKind,
+    AgentCommand,
+    AgentStatus,
     AttemptStatus,
     ControlAcknowledgement,
     ControlAction,
@@ -262,6 +264,10 @@ def seeded_tables(db):
                     )
                 if table.upper() == "AUD_BUSINESS_RULES_RESULTS" and lower == "status":
                     value = "REPORT"
+                if table.upper() == "AUD_AGENTS" and lower == "status":
+                    value = AgentStatus.ACTIVE
+                if table.upper() == "AUD_AGENT_COMMANDS" and lower == "command":
+                    value = AgentCommand.DRAIN
                 payload[name] = value
             if table.upper() != "CFG_BUSINESS_RULES" and "business_rule_id" in [
                 c["name"].lower() for c in columns
@@ -279,6 +285,20 @@ def seeded_tables(db):
                 payload[key] = conn.execute(
                     text("SELECT BUSINESS_RULE_RUN_ID FROM AUD_BUSINESS_RULES_RUN_LOG")
                 ).scalar_one()
+            if table.upper() == "AUD_ATTEMPT_LOG_CHUNKS":
+                # Part of the composite key, which the loop above can leave out.
+                name = next(c["name"] for c in columns if c["name"].lower() == "sequence_number")
+                payload.setdefault(name, 0)
+            # An agent is a token, and an agent's rows name a registered agent.
+            for column in columns:
+                lower = column["name"].lower()
+                if lower == "agent_id" and table.upper() == "AUD_AGENTS":
+                    source = "SELECT TOKEN_ID FROM CFG_API_TOKENS"
+                elif lower == "agent_id":
+                    source = "SELECT AGENT_ID FROM AUD_AGENTS"
+                else:
+                    continue
+                payload[column["name"]] = conn.execute(text(source)).scalars().first()
             quoted = ", ".join('"' + name + '"' for name in payload)
             binds = ", ".join(":" + name for name in payload)
             conn.execute(text(f'INSERT INTO "{table}" ({quoted}) VALUES ({binds})'), payload)

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -30,6 +31,43 @@ if TYPE_CHECKING:
 
 class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
+
+    session_fencing = True
+
+    def session_tag_args(self, tag: str) -> Mapping[str, Any]:
+        """Label every query of the session through the client's source."""
+        return {"source": tag}
+
+    def stop_tagged(self, conn: Connection, tag: str) -> None:
+        """Kill each unfinished query whose source is ``tag``."""
+        rows = conn.execute(
+            text(
+                "SELECT query_id AS query_id FROM system.runtime.queries "
+                "WHERE source = :tag AND state NOT IN ('FINISHED', 'FAILED')"
+            ),
+            {"tag": tag},
+        ).all()
+        for row in rows:
+            if not re.fullmatch(r"[0-9a-z_]+", row.query_id):
+                raise SqlGuardError(f"Trino returned an unexpected query id {row.query_id!r}")
+            conn.execute(
+                text(
+                    f"CALL system.runtime.kill_query(query_id => '{row.query_id}', "
+                    "message => 'etl-craft: the lock passed to a new holder')"
+                )
+            )
+
+    def running_tagged(self, conn: Connection, tag: str) -> int:
+        """Count unfinished queries; a state this code does not know counts as running."""
+        return int(
+            conn.execute(
+                text(
+                    "SELECT count(*) AS running FROM system.runtime.queries "
+                    "WHERE source = :tag AND state NOT IN ('FINISHED', 'FAILED')"
+                ),
+                {"tag": tag},
+            ).scalar_one()
+        )
 
     def classify_failure(self, error: BaseException) -> Failure:
         """Keep Trino's user errors distinct from resource, external and internal errors."""

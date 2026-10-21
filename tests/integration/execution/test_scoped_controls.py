@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.config import ConnectionProfile
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     ActionName,
     ApiRole,
@@ -25,6 +25,7 @@ from etl_craft.execution import control_flow
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.pipeline import run_pipeline
 from etl_craft.execution.runner import admit_attempt, execute_attempt
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.services.operations import from_json, to_json
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.controls import ControlRequest
@@ -379,11 +380,24 @@ def test_event_probe_control_is_fenced_without_claiming_an_unobserved_query_ende
             EVENT_SETTLE_SECONDS="0",
             EVENT_TIMEOUT_MINUTES="NONE",
         )
-    with (
-        locks.event(task).hold(ctx.engine),
-        pytest.raises(RunRefusedError, match="event probe is active; no control was accepted"),
-    ):
-        ask(ctx, run, ControlAction.STOP, "wait")
+    # A running probe holds the lock in its own process: hold it on another thread here, so
+    # the control is a separate holder rather than a nested one.
+    taken, done = threading.Event(), threading.Event()
+
+    def probe():
+        with acting_as(SYSTEM_ACTOR), locks.event(task).hold(LocalLocker(ctx.engine, ctx.config)):
+            taken.set()
+            done.wait(30)
+
+    holder = threading.Thread(target=probe, daemon=True)
+    holder.start()
+    assert taken.wait(10)
+    try:
+        with pytest.raises(RunRefusedError, match="event probe is active; no control was accepted"):
+            ask(ctx, run, ControlAction.STOP, "wait")
+    finally:
+        done.set()
+        holder.join(10)
     held = ask(ctx, run, ControlAction.HOLD, "wait")
     waiting = check_event(ctx.engine, ctx.config, run, task, datetime.now(UTC))
     assert waiting.status is None and waiting.next_check_at

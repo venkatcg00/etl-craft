@@ -236,12 +236,14 @@ class Demo:
         vendor = "DATABRICKS" if self.warehouse_kind.startswith("databricks") else "SNOWFLAKE"
         names = DATABRICKS_VARS if vendor == "DATABRICKS" else SNOWFLAKE_VARS
         require_variables(vendor, names)
-        fields: dict[str, Any] = {name.lower(): f"ETL_CRAFT_TEST_{vendor}_{name}" for name in names}
+        fields: dict[str, Any] = {
+            name.capitalize(): f"ETL_CRAFT_TEST_{vendor}_{name}" for name in names
+        }
         self.catalog = os.environ[
             f"ETL_CRAFT_TEST_{vendor}_{'CATALOG' if vendor == 'DATABRICKS' else 'DATABASE'}"
         ]
         if schema is not None:
-            fields["schema"] = schema
+            fields["Schema"] = schema
         table_format = "ICEBERG" if self.warehouse_kind.endswith("iceberg") else "NATIVE"
         return {"Name": vendor.title(), "Table_format": table_format, "dev": fields}
 

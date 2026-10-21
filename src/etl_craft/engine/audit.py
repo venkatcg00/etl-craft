@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.core.actor import Actor, current_actor
@@ -45,33 +45,39 @@ class ActionRequest:
         if not for_engine(engine).existing_tables(engine, ("aud_actions",)):
             return
         with engine.begin() as conn:
-            pipeline = conn.execute(
-                statement(conn, "action_pipeline"), {"code": self.arguments.get("pipeline_code")}
+            self.write(conn)
+
+    def write(self, conn: Connection) -> None:
+        """Record in the caller's outcome transaction when the action must commit atomically."""
+        if self.recorded:
+            return
+        pipeline = conn.execute(
+            statement(conn, "action_pipeline"), {"code": self.arguments.get("pipeline_code")}
+        ).scalar_one_or_none()
+        task = None
+        if pipeline is not None and self.arguments.get("task_code"):
+            task = conn.execute(
+                statement(conn, "action_task"),
+                {"pipeline": pipeline, "code": self.arguments["task_code"]},
             ).scalar_one_or_none()
-            task = None
-            if pipeline is not None and self.arguments.get("task_code"):
-                task = conn.execute(
-                    statement(conn, "action_task"),
-                    {"pipeline": pipeline, "code": self.arguments["task_code"]},
-                ).scalar_one_or_none()
-            actor = self.actor
-            payload = json.dumps(self.arguments, default=str)
-            conn.execute(
-                statement(conn, "action_insert"),
-                {
-                    "started": self.requested_at,
-                    "ended": datetime.now(UTC),
-                    "actor": actor.name,
-                    "kind": actor.kind.value,
-                    "host": socket.gethostname(),
-                    "command": self.command,
-                    "arguments": payload,
-                    "pipeline": pipeline,
-                    "task": task,
-                    "outcome": self.outcome,
-                    "exit_code": self.exit_code,
-                },
-            )
+        actor = self.actor
+        payload = json.dumps(self.arguments, default=str)
+        conn.execute(
+            statement(conn, "action_insert"),
+            {
+                "started": self.requested_at,
+                "ended": datetime.now(UTC),
+                "actor": actor.name,
+                "kind": actor.kind.value,
+                "host": socket.gethostname(),
+                "command": self.command,
+                "arguments": payload,
+                "pipeline": pipeline,
+                "task": task,
+                "outcome": self.outcome,
+                "exit_code": self.exit_code,
+            },
+        )
         self.recorded = True
 
 

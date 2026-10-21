@@ -19,6 +19,7 @@ from etl_craft.core.enums import RunStatus, YesNo
 from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.time import as_utc
+from etl_craft.engine.notifications import listener_engine
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import controllers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
@@ -26,6 +27,8 @@ from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline, run_types
 from etl_craft.execution.pools.local import LocalPool
+from etl_craft.execution.pools.provider import create_pool
+from etl_craft.execution.pools.queue import QueuePool
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.trigger_waits import settle_ended_parent_waits
 from etl_craft.services.cloning import run_hooks
@@ -92,7 +95,7 @@ class _Supervisor:
 
     ctx: OperationContext
     stop: threading.Event
-    pool: LocalPool
+    pool: LocalPool | QueuePool
     working: WorkingSet = field(default_factory=WorkingSet)
     schedules: Schedules = field(default_factory=Schedules)
     jobs: Jobs = field(default_factory=dict)
@@ -179,10 +182,11 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             f"controller account={ctx.actor.name!r}, kind={ctx.actor.kind}; expected SERVICE; "
             "set ETL_CRAFT_TOKEN to an administrator service account token"
         )
-    supervisor = _Supervisor(ctx, stop, LocalPool(ctx.engine, ctx.config, child=ctx.child))
+    supervisor = _Supervisor(ctx, stop, create_pool(ctx.engine, ctx.config, ctx.child))
     outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
+    notifications = listener_engine(ctx.config)
     try:
-        with acting_as(ctx.actor), leadership(ctx.engine) as leader:
+        with acting_as(ctx.actor), leadership(notifications) as leader:
             controller_id = controllers.start(ctx.engine)
             logger.info("controller_id=%s: controller active", controller_id)
             if not ctx.config.allow_schedule:
@@ -207,5 +211,6 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             f"controller lost its Engine DB connection: {error}; restore it and restart controller"
         ) from error
     finally:
+        notifications.dispose()
         supervisor.schedules.catalog.close()
         supervisor.pool.close()

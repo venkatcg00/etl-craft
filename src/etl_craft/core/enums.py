@@ -152,6 +152,7 @@ class ActorKind(StrEnum):
 class TokenKind(StrEnum):
     """What a stored credential is for: automation, a request, or renewing a user's access."""
 
+    AGENT = "AGENT"
     SERVICE = "SERVICE"
     ACCESS = "ACCESS"
     REFRESH = "REFRESH"
@@ -167,6 +168,7 @@ class AccountKind(StrEnum):
 class ApiRole(StrEnum):
     """A deployment account role, each including the ones before it."""
 
+    AGENT = "agent"
     VIEWER = "viewer"
     OPERATOR = "operator"
     DEVELOPER = "developer"
@@ -189,6 +191,15 @@ class ActionScope(StrEnum):
 
 class ActionName(StrEnum):
     """Every action an interface can request; the value is its audit and role-policy name."""
+
+    AGENT_REGISTER = "agent register"
+    AGENT_DEREGISTER = "agent deregister"
+    AGENT_CLAIM = "agent claim"
+    AGENT_RENEW = "agent renew"
+    AGENT_REPORT = "agent report"
+    AGENT_LOG = "agent log"
+    AGENT_CONTROL = "agent control"
+    AGENTS = "agents"
 
     LOGIN = "login"
     LOGIN_METHODS = "login methods"
@@ -548,3 +559,43 @@ class TaskType(StrEnum):
 
     INGESTION = "INGESTION"
     ETL = "ETL"
+
+
+class AgentStatus(StrEnum):
+    """Whether an agent accepts claims, is draining, or has departed."""
+
+    ACTIVE = "ACTIVE"
+    DRAINING = "DRAINING"
+    GONE = "GONE"
+
+
+class AgentCommand(StrEnum):
+    """Durable operator requests acknowledged by their agent."""
+
+    DRAIN = "DRAIN"
+    RESUME = "RESUME"
+    STOP = "STOP"
+
+
+class SlotKind(StrEnum):
+    """The process capacity an entire attempt consumes."""
+
+    PYTHON = "python"
+    WAREHOUSE = "warehouse"
+
+
+class AgentReport(StrEnum):
+    """Fenced task progress sent through the agent report action."""
+
+    START = "START"
+    END = "END"
+    STATE = "STATE"
+    TARGET = "TARGET"
+    PUBLISH = "PUBLISH"
+    WATERMARK = "WATERMARK"
+    RULE_BEGIN = "RULE_BEGIN"
+    RULE_KEYS = "RULE_KEYS"
+    RULE_END = "RULE_END"
+    ALERT = "ALERT"
+    LOCK = "LOCK"
+    UNLOCK = "UNLOCK"

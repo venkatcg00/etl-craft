@@ -69,8 +69,17 @@ def test_every_change_is_audited():
         if action.method == HttpMethod.POST and action.audit == Audit.NONE
     }
     # The bulk request invokes the audited control once per object; a token refresh issues
-    # no new authority; provenance only reads, with a structured key in its body.
-    assert unaudited == {ActionName.CONTROL_BULK, ActionName.REFRESH, ActionName.DATA_PROVENANCE}
+    # no new authority; provenance only reads, with a structured key in its body. An agent's
+    # claim, renewal and log upload repeat every few seconds, and each is recorded where it
+    # takes effect: the attempt row, the agent registry and the log chunks.
+    assert unaudited == {
+        ActionName.CONTROL_BULK,
+        ActionName.REFRESH,
+        ActionName.DATA_PROVENANCE,
+        ActionName.AGENT_CLAIM,
+        ActionName.AGENT_RENEW,
+        ActionName.AGENT_LOG,
+    }
 
 
 def test_host_actions_have_no_route_and_say_where_they_run():
@@ -97,6 +106,9 @@ def test_routed_actions_answer_with_documents_and_take_keyword_requests():
 def test_pipeline_selections_use_pipeline_scope_and_identity_administration_stays_deployment():
     for action in ACTIONS.values():
         names = {field.name for field in fields(action.request)}
+        # An agent reaches only the attempt its own token claimed, fenced by owner and status.
+        if action.role == ApiRole.AGENT:
+            continue
         if names & {"pipeline_code", "run_id", "attempt_id", "control_id", "task_run_id"}:
             assert action.scope == ActionScope.PIPELINE, action.name
     for name in (ActionName.PIPELINES, ActionName.LINEAGE, ActionName.DOCS_VERSION_CHECK):

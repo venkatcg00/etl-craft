@@ -7,7 +7,6 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
 
 import psycopg
 from sqlalchemy.engine import Connection, Engine
@@ -46,9 +45,8 @@ class Leadership:
         if self.connection is None:
             stop.wait(1)
             return
-        driver: Any = self.connection.connection.driver_connection
         try:
-            for _ in driver.notifies(timeout=1, stop_after=1):
+            for _ in for_engine(self.connection).notifications(self.connection, 1):
                 break
         except psycopg.OperationalError as error:
             logger.warning("the leadership connection dropped (%s); taking leadership again", error)

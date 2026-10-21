@@ -1,0 +1,2 @@
+SELECT LOCK_KEY AS lock_key FROM AUD_RESOURCE_LOCKS
+WHERE LOCK_KEY=:key AND HOLDER_ID=:holder AND OWNER_ID=:owner AND LEASE_EXPIRES_AT>(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')

@@ -52,6 +52,7 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.handlers.registry import TaskContext
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.spec import read_sql_task
 from etl_craft.handlers.sql.watermarks import read_watermark
 from etl_craft.scripting import Offset
@@ -585,7 +586,7 @@ def reset_watermark(
         )
     wanted = Offset(value, task.watermark.start.datatype)
     with (
-        locks.target(task.target_object, active_catalog(config)).hold(engine),
+        locks.target(task.target_object, active_catalog(config)).hold(LocalLocker(engine, config)),
         engine.begin() as conn,
     ):
         selected = runlog.select_run(conn, pipeline_id, selector)

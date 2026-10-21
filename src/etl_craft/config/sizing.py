@@ -47,14 +47,9 @@ def start_role(
     )
     if config.deployment is None:
         return config
-    if config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
-        raise ConfigurationError(
-            "Deployment.Profile is CONTROLLER_AGENTS: tasks run on registered agents, and this "
-            "version has no agent queue provider, so nothing runs here instead. Choose LAPTOP "
-            "or CONTROLLER until agents are available"
-        )
     sizing = size(allocation, config.deployment, ceilings(config))
-    _refuse_unaffordable(allocation, sizing, server=server)
+    if server or config.deployment != DeploymentProfile.CONTROLLER_AGENTS:
+        _refuse_unaffordable(allocation, sizing, server=server)
     logger.info(
         "%s sizing: %d task slots (%s), %d python, %d warehouse, %d server threads, "
         "Engine DB pool %d%s",

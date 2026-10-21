@@ -16,6 +16,7 @@ from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.hash_versions import save_hash_version
 from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.protection import refuse_replacement
 from etl_craft.handlers.sql.session import Session
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
@@ -39,7 +40,7 @@ def rehash(
     split_object_ref(target)
     catalog = active_catalog(config)
     qualified = qualify(target, catalog)
-    with locks.target(target, catalog).hold(engine):
+    with locks.target(target, catalog).hold(LocalLocker(engine, config)):
         with engine.connect() as conn:
             task_ids = conn.execute(statement(conn, "rehash_tasks")).scalars().all()
             tasks = {task_id: fetch_task_parameters(conn, task_id) for task_id in task_ids}
@@ -68,7 +69,10 @@ def rehash(
                 "Configure matching compare columns before rehashing"
             )
         columns = next(iter(contracts))
-        with open_warehouse(config, engine) as warehouse, warehouse.begin() as conn:
+        with (
+            open_warehouse(config, LocalLocker(engine, config)) as warehouse,
+            warehouse.begin() as conn,
+        ):
             session = Session(
                 conn,
                 warehouse_dialect(config),

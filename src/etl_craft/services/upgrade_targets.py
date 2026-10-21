@@ -16,6 +16,7 @@ from etl_craft.engine import locks
 from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.engine.repository.validation import fetch_active_tasks
 from etl_craft.handlers.registry import TaskContext
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.protection import refuse_replacement
 from etl_craft.handlers.sql.session import Session
@@ -178,8 +179,8 @@ def _upgrade_target(
     writers = [writer for writer in plan.contracts[key] if writer[3]]
     qualified, _, dialect, declared = (writers or plan.contracts[key])[0]
     with (
-        locks.target(qualified, "").hold(engine),
-        open_warehouse(config, engine) as warehouse,
+        locks.target(qualified, "").hold(LocalLocker(engine, config)),
+        open_warehouse(config, LocalLocker(engine, config)) as warehouse,
         warehouse.begin() as conn,
     ):
         if not declared:

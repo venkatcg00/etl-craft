@@ -52,6 +52,7 @@ from etl_craft.core.errors import (
 from etl_craft.core.errors import (
     TransientError as TransientError,
 )
+from etl_craft.core.ownership import ResourceLocker
 from etl_craft.core.text import qualify
 from etl_craft.warehouse.connection import open_warehouse
 
@@ -185,11 +186,11 @@ class ScriptTask:
     task_params: Mapping[str, str]
     force: bool
     config: ConnectorConfig
-    engine_db: Engine
     logger: logging.Logger
     run_date: date = field(default_factory=lambda: datetime.now(UTC).date())
     backfill: bool = False
     event_files: tuple[str, ...] = ()
+    _locks: ResourceLocker | None = field(default=None, repr=False)
 
     def table(self, name: str) -> str:
         """Return ``schema.table`` as its full name in the active warehouse database.
@@ -202,5 +203,5 @@ class ScriptTask:
     @contextmanager
     def warehouse(self) -> Iterator[Engine]:
         """Open the warehouse, queued behind other writers where it allows only one."""
-        with open_warehouse(self.config, self.engine_db) as engine:
+        with open_warehouse(self.config, self._locks) as engine:
             yield engine

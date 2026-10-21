@@ -144,12 +144,18 @@ item's text, or work done early under another item.
 | S5.AE One gateway | In progress | #227 | Slice 1: stateless PostgreSQL `ui`, headless health-only controller, package schema checks, `ui`/`all` extras and `--api`; agent API and deployment layouts remain with S5.C/S7.F |
 | S5.AF Indexes for every query | Done | #229 | Selective history indexes, bounded catalog reads and a PostgreSQL full-scan guard |
 | S5.X Unmanaged SQL tasks | Done | #230 | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
-| S5.C and later | Not started | | |
+| S5.C The PostgreSQL queue and the agent | Done | #231 | API-only agents with claims, renewals, fenced reports, shared log chunks and durable drain/resume/stop; durable resource locks that pass only after the expired holder's warehouse statements are confirmed stopped |
+| S5.AI Event waits on signal rows | Planned | | Keyed SQL waits consume each signal once with the wait's success, like files; always-true queries are refused |
+| S5.AH Partitioned offsets for streams | Planned | | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
+| S5.D and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
+| S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
+| S7.U Personal-data erasure | Planned | | A standing erasure register and ERASURE tasks remove subjects after loads, outside managed writes |
+| S7.V Empty replacements | Planned | | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
 | S7.O Package and demo repositories | Planned | | A very small demo stays in package CI; Support Insights holds its project and supplies release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
 | S7.Q A generic ANSI SQL warehouse | Planned | | A `generic` dialect over SQLAlchemy for rare databases: ANSI SQL only, NULL-safe column comparison for merges, refusals for anything without an ANSI form |
@@ -593,7 +599,38 @@ rotation/provenance, migration rollback, identity counters and full fresh/upgrad
 checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite was needed.
 The separate frozen 0.4 soak deployment is unchanged.
 
+S5.C (#231) ran the agent API, queue, lock, fencing and agent-process tests on PostgreSQL (the
+SQLite cases are refused, as cluster execution requires PostgreSQL), lock and transition tests on
+both Engine DBs, and released-schema upgrades on both. Lock races ran 20 times. Takeover fencing
+ran against PostgreSQL and Trino over Iceberg locally. Full cloud acceptance passed on
+Snowflake (39 tests, including takeover fencing) and Databricks (38 tests).
+
 **Choices that differ from the item text.**
+
+- S5.C includes the query fencing S5.D's cancellation would otherwise supply (owner, 21 October
+  2026); S5.D keeps operator cancellation acknowledged within seconds. A lock whose holder ended or
+  expired passes only after the next holder stops that holder's tagged warehouse statements and
+  confirms none still run; it then takes the row in one statement, only while the row still names
+  the confirmed holder. The holder taking over confirms, because a cut-off agent may reach
+  nothing: locally the task process, on the cluster the agent, which holds the warehouse
+  credentials the API tier does not need. Sessions carry the holder through connect arguments
+  (`application_name`, Trino `source`, Snowflake `QUERY_TAG`). Embedded DuckDB needs no server
+  stop. Databricks cannot yet list and stop another session's statements here, so
+  `CONTROLLER_AGENTS` refuses it at controller and agent startup and in doctor, naming local execution as
+  the remedy; local execution keeps its earlier behaviour there.
+- Attempt endings no longer delete their lock rows. Successful work releases its locks; failed
+  work confirms its statements stopped before unlocking. An unconfirmed error, killed, timed-out
+  or lost attempt leaves its row until a successor confirms the stop. This replaces "reconciling an attempt as LOST releases its locks".
+- Until S5.F, an agent runs from its own copy of the project (`--project`), with project-relative
+  paths, instead of a materialized bundle.
+- Agent lifecycle writes, including queued-attempt claims, live in `engine/agent_transitions.py`;
+  attempt transitions remain in `engine/transitions.py`, so lifecycle SQL keeps owning modules. PostgreSQL-only agent queries
+  sit in the shared query catalog, as the controller's leadership query does; cluster execution
+  refuses SQLite before any of them runs.
+- Agent registration and deregistration are audited. Claims, renewals and log uploads repeat
+  every few seconds and are recorded where they take effect (the attempt row, the agent registry
+  and the log chunks), not in `AUD_ACTIONS`. Agent routes are authorized by attempt ownership,
+  not pipeline grants.
 
 - S5.X names both handlers' files scripts (owner, 21 October 2026): `python_scripts/` and
   `sql_scripts/`, with the latter holding managed SELECTs and unmanaged scripts. Python tasks
@@ -1784,7 +1821,8 @@ gates, which run on `main` without a tag; cloud acceptance runs at a milestone o
 the owner approves. The version stays 0.3.0 and `CHANGELOG.md` collects every change under
 `[Unreleased]` until the 1.0.0 release pull request. 1.0.0 upgrades from 0.3.0, the soaked release
 the owner's deployment runs, with nothing lost, and its gate is the full release gate (cloud
-evidence, chaos, the Support Insights run and a soak) on exactly the code it tags.
+evidence, chaos, the Support Insights run and the 72-hour endurance run) on exactly the code
+it tags.
 
 ## Shared foundations
 
@@ -4772,8 +4810,9 @@ Branch: `feat/api-gateway-roles`, one per slice. After S5.AD and before S5.C and
 - *Controller load.* The supervision loop runs in one thread, so a bigger controller means a
   faster core, more memory for the active runs' graphs and low latency to the Engine DB
   primary, not more cores. Keep the controller in the same zone as the primary. The controller
-  records each tick's duration; S7.I's soak reports it at 200 active runs, and the release
-  fails when the 95th percentile exceeds one second. The fix then is cheaper work per tick,
+  records each tick's duration; S6.G's load benchmark reports it at 200 active runs, S7.I's
+  endurance run at the example's own load, and the release fails when the 95th percentile
+  exceeds one second in either. The fix then is cheaper work per tick,
   not a second controller.
 - *The Engine DB in production.*
   - PostgreSQL with synchronous replication, or a managed service with zero-data-loss
@@ -4805,7 +4844,7 @@ Branch: `feat/api-gateway-roles`, one per slice. After S5.AD and before S5.C and
     `/health`.
   - Agents run, report and are fenced through the API alone, with no Engine DB credentials.
   - The `ui` and `all` extras replace `server`, and `--api` replaces `--controller`.
-  - The controller's tick duration is recorded and S7.I's soak checks it.
+  - The controller's tick duration is recorded and S7.I's endurance run checks it.
 
 ### S5.AF Indexes for every query
 
@@ -4935,6 +4974,103 @@ RETURNING a.ATTEMPT_ID
   - Drain, resume and stop are applied and acknowledged, and refused for a `GONE` agent.
   - The agent list matches the registry across joins, drains and departures.
 
+### S5.AI Event waits on signal rows
+
+Branch: `feat/events-signal-rows`. After S5.C, before S5.AH (owner, 21 October 2026).
+
+- *Problem.* Files landing in cloud storage, finished jobs and webhooks reach a pipeline as rows
+  a small function inserts into a team-owned signal table. An `EVENT_SQL` wait is satisfied by
+  any row, so it cannot tell a new signal from one an earlier run handled; teams would have to
+  write their own claim, delete and release SQL, each step a place to lose or repeat an event.
+  File waits already avoid this: etl-craft records each consumed file with the wait's success.
+  And `SELECT count(*) ...` always returns a row, so such a wait is satisfied at once.
+- *Change.*
+  1. **Keyed SQL waits.** A new `EVENT_KEY_COLUMN` names a column of the `EVENT_SQL` result
+     holding each event's own id (the sender's message id, an object key with its version).
+     etl-craft removes the keys this event task has already consumed; any key left satisfies
+     the wait. Without `EVENT_KEY_COLUMN`, a SQL wait behaves as today.
+  2. **Consumption with the wait's success.** The satisfying keys are recorded in a new
+     `AUD_EVENT_KEYS (TASK_ID, EVENT_KEY, TASK_RUN_ID, ...)`, unique on task and key, in the same
+     transaction as the wait's successful ending, exactly as `AUD_EVENT_FILES` records files. A
+     key is consumed once; a failed completion consumes nothing. Migrations in both dialects;
+     S6.A retention covers the table.
+  3. **Downstream access.** `$$event_keys` (escaped SQL literals) and `task.event_keys`, with the
+     selected rows' other columns as `task.event_rows`, follow `$$event_files` and
+     `task.event_files`.
+  4. **Bounded probes.** The query bounds its own window (for example the last seven days); a
+     result above `EVENT_MAX_ROWS` (default 10000) fails the probe, naming the task and the
+     count, rather than reading an unbounded table.
+  5. **No always-true queries.** `validate` and the task refuse an `EVENT_SQL` whose result
+     always has a row: a top-level aggregate with no `GROUP BY` and no `HAVING` (read with
+     sqlglot), naming the task and the remedy.
+  6. **The guide "Signalling a pipeline from other systems".** The function only inserts
+     `(event_name, event_id, payload, received_at)` with `event_id` as the primary key, so a
+     repeated delivery is a no-op; it holds an INSERT grant on that table and nothing else.
+     Recipes for S3 notifications to Lambda, Event Grid to Azure Functions and Pub/Sub to Cloud
+     Functions. The team purges old rows by age; etl-craft never writes the table.
+- *Tests.* On every local warehouse and both Engine DBs:
+  - a new key satisfies the wait and is consumed once; consumed keys never satisfy it again;
+  - a key arriving while a run is active starts the next run;
+  - two runs probing at once consume each key in one run only (20 rounds);
+  - a run that fails after the wait keeps its keys, and its retry or recovery still has them;
+  - a repeated delivery of the same `event_id` triggers nothing;
+  - `EVENT_MAX_ROWS` and the `count(*)` refusal fail with their message parts.
+- *Done when.* An external system signals a pipeline by inserting one row, and each signal is
+  processed by exactly one run, with no SQL of the team's beyond the insert and a purge.
+
+### S5.AH Partitioned offsets for streams
+
+Branch: `feat/scripting-partitioned-offsets`. After S5.AI, before S5.D (owner, 21 October 2026).
+
+- *Problem.* A stream (Kafka, Kinesis, Azure Event Hubs) is a source with a position per
+  partition, not a series of events to signal one by one. A Python task can already read it and
+  return an offset that etl-craft commits with the attempt's success, but an offset is a single
+  `NUMBER`, `TEXT` or `TIMESTAMP`. Per-partition positions end up as JSON in `TEXT`, which nothing
+  checks: a partition can move backwards or vanish silently. Nothing resets a script's offset
+  either; `mark --watermark` covers SQL watermarks only.
+- *Change.*
+  1. **A `PARTITIONS` offset type** (`core.enums.OffsetType`). Its value is a map of partition
+     key (text) to the next position to read (a `NUMBER`; Kinesis sequence numbers fit as
+     decimals). `Offset(PartitionOffsets({...}), "PARTITIONS")` in `etl_craft.scripting`; stored
+     in `AUD_TASK_OFFSET_TRACKER` as canonical JSON with sorted keys, with a migration in both
+     dialects if the type check needs one.
+  2. **Checks when an attempt returns it**, failing the attempt before anything commits, naming
+     the task, the partition, the stored and returned positions and the remedy:
+     - a partition's position moved backwards;
+     - a partition stored before is missing from the returned map. A partition that really
+       went away is removed by the reset below, never by omission.
+     A new partition is accepted and recorded in the task log.
+  3. **An audited reset.** `etl-craft mark --task-code T --offset '{"3": 120}' --reason ...`, the
+     API route and one service in `services/operations`, like `--watermark`: it sets, adds or
+     (with `null`) removes named partitions of a `PARTITIONS` offset, and sets a scalar offset for
+     the other types. It is refused while the task has a live attempt, and recorded with its
+     reason and actor.
+  4. **The guide "Reading from streams"**, with a Kafka example and the rules it shows:
+     - schedule the pipeline frequently with `OVERLAP_POLICY='SKIP'`, so one run reads at a time;
+       the script assigns partitions itself rather than joining a consumer group that rebalances;
+     - each run reads from the stored positions to the end of each partition as found at the
+       start of the run, capped by a row limit in `INPUT_PARAMS`, and never chases the tail;
+     - landed rows carry topic, partition and offset, and the landing write is safe to repeat
+       (replace the task run's batch, or merge on topic, partition and offset), because a crash
+       between the warehouse commit and the attempt's ending makes the retry read the range again;
+     - store the next position to read, never last-plus-one: compacted and transactional topics
+       leave gaps;
+     - a stored position older than the earliest record still in the topic fails, naming the
+       topic, partition and both positions; the reset is the remedy, never skipping ahead;
+     - an empty batch returns `row_count = 0`, and downstream tasks depending with `HAS_DATA`
+       skip;
+     - etl-craft's offset is the source of truth; committing the consumer group's offset
+       afterwards is only for lag monitoring.
+     The signal-table guide stays for discrete events (a file landed, a job finished).
+- *Tests.*
+  - On both Engine DBs: a backwards partition and a missing partition fail with their message
+    parts and commit nothing; a new partition is accepted; the reset sets, adds and removes
+    partitions, is refused with a live attempt and is audited; offsets survive a killed attempt
+    unchanged.
+  - The guide's Kafka example runs against a local broker in the demo's checks (S8.H).
+- *Done when.* A stream is read in bounded, repeatable micro-batches with per-partition positions
+  etl-craft checks, and an operator can move a position deliberately, with a reason.
+
 ### S5.D Cancellation across the cluster
 
 Cancelling a run sets `CANCEL_REQUESTED_AT` on its non-terminal attempts. `QUEUED` attempts end
@@ -4994,7 +5130,7 @@ Branch: `feat/pools-bundles`.
   1. `etl-craft bundle publish [--project P]` builds a manifest (relative path to SHA-256) of
      `sql_scripts/`, `python_scripts/`, `seeds/` and the project's `craft-connector.yml`
      (secrets stay variable names), uploads the files to the artifact store (`Artifacts.Store: file:///shared/etl-craft` or
-     `s3://bucket/prefix`), and records `AUD_PROJECT_BUNDLES (BUNDLE_ID, PROJECT_ID, MANIFEST, CREATED_BY, CREATED_AT)`.
+     `s3://bucket/prefix` through an `Object_stores` profile, item 6), and records `AUD_PROJECT_BUNDLES (BUNDLE_ID, PROJECT_ID, MANIFEST, CREATED_BY, CREATED_AT)`.
      `etl-craft bundle publish` also works through `--api`: the API stores the files in the
      artifact store. A CI runner needs only an API token, with no Engine DB or artifact-store
      credentials.
@@ -5010,6 +5146,18 @@ Branch: `feat/pools-bundles`.
      run ends. Retries and recovery of the same run use the pinned graph; edits apply from
      the next run. `status`, `explain` and the UI show the pinned version and say when a
      newer version exists.
+  6. **Object store profiles** (owner, 21 October 2026). `craft-connector.yml` gains
+     `Object_stores`: named profiles of `Endpoint` (empty is AWS), `Region`, `Url_style`
+     (`PATH` or `VIRTUAL`), `Auth_mode` (`KEYS`, or `DEFAULT` for the host's credential chain:
+     an instance role, environment or SSO profile) and, for `KEYS`, `Access_key_id` and
+     `Secret_access_key` as variable names. The S3 API covers AWS S3, MinIO, Cloudflare R2 and
+     Google Cloud Storage's interoperability mode. The `aws` extra supplies `boto3`; without it, a
+     profile fails with the remedy `pip install etl-craft[aws]`. `Artifacts.Store` here, S6.B's
+     `Logs.Store` and S7.M's `Uploads.Archive_to` name a profile for every `s3://` location, so
+     one connection serves them all. `doctor` checks each profile it uses can list and write its
+     prefix, naming the profile and the prefix, never a secret. File arrivals in any cloud reach
+     pipelines through that cloud's own event and a small function writing a signal row (the
+     "Signalling a pipeline from other systems" guide), not through etl-craft listing buckets.
 - *Tests.* Editing a SQL file mid-run doesn't change the run; a corrupted cached file is detected.
   A config apply that adds, removes and rewires tasks during an active run leaves its graph
   unchanged; the next run uses the new graph. Restarting the controller mid-run keeps the
@@ -5101,8 +5249,8 @@ Branch: `feat/engine-retention`.
   retained run's consumption or gate decisions reference. `--archive-to <warehouse schema>` copies the
   rows to the warehouse before deleting.
 - **Files follow retention.** The same periods delete attempt log files in `Logs.Store` and
-  `Log_dir`, and S7.M's stored uploads, not only Engine DB rows. Delete a file only after its
-  rows are purged or archived; no retained row points to a missing file without saying so.
+  `Log_dir`, not only Engine DB rows. S7.M archives stored uploads under its own file policy.
+  Delete a file only after its rows are purged or archived; no retained row points to a missing file without saying so.
   The log view shows `removed by retention on <date>` rather than a read error.
 - **Archiving that survives a crash.** `--archive-to <warehouse schema>` works batch by batch:
   merge the batch into the archive table keyed by the source primary key, confirm its row
@@ -5120,6 +5268,13 @@ Branch: `feat/engine-retention`.
   `doctor` reports a PostgreSQL Engine DB with no retention period set. Archives go to the
   warehouse only; Parquet or Iceberg exports to object storage wait until a team needs
   archives outside the warehouse.
+- **Warehouse retention.** Retain `<target>__rejects`, business-rule result mirrors and cloned
+  mirrors for periods in the config files. Apply retention to Iceberg snapshots of managed
+  targets through `expire_snapshots` and `remove_orphan_files` where the warehouse supports
+  them. Each has a recommended default written by `setup`, and `doctor` reports an unset
+  period. Purges hold the target lock, audit their row counts, and never touch a target's own
+  rows. On every local warehouse, test that older rows are removed and newer ones kept, and
+  that a concurrent merge waits for the lock.
 - *Tests.* Purge keeps referenced rows; a dry run deletes nothing and reports counts; purge of
   1 million synthetic attempt rows on PostgreSQL finishes within 5 minutes and doesn't block a
   concurrent run.
@@ -5127,7 +5282,7 @@ Branch: `feat/engine-retention`.
 ### S6.B Logs outside the Engine DB
 
 - Attempt logs are files: on the local provider under `Log_dir`, on agents uploaded at the end of the
-  attempt to `Logs.Store` (`file://` or `s3://`). `AUD_TASK_ATTEMPTS.LOG_PATH` holds the location.
+  attempt to `Logs.Store` (`file://`, or `s3://` through an S5.F `Object_stores` profile). `AUD_TASK_ATTEMPTS.LOG_PATH` holds the location.
 - `TASK_LOG` keeps a tail of `Logs.Tail_bytes` (default 8 KiB, down from 64 KiB) plus the reported
   values.
 - The API's log endpoint streams stored logs and the live log chunks that agents upload
@@ -5273,7 +5428,8 @@ Keep S6.D as one implementation PR.
    - the reference cluster: controller 4 vCPU / 12 GiB, 10 agents 2 vCPU / 8 GiB, PostgreSQL
      4 vCPU / 16 GiB.
    Budgets to meet: admission latency p99 under 2 s; queue age p99 under 5 s while slots are free;
-   Engine DB CPU under 60%; connections within the budget; the controller's memory under 4 GiB. Record
+   Engine DB CPU under 60%; connections within the budget; the controller's memory under 4 GiB;
+   the controller's tick duration p95 under one second at 200 active runs. Record
    the results in `release/benchmarks/<version>.md`.
 
 **Gate.** The benchmark meets its budgets for 24 hours, and the restore test passes.
@@ -5520,7 +5676,14 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
        - the status: `REFUSED` (before a run, or by the `FILE_VALIDATION` task, with the
          reason), `LOADED`, or `FAILED` with the run's outcome;
        - the times.
-     - Stored files follow S6.A retention.
+     - After the retention period, move the file to `Uploads.Archive_to` (`file://`, or
+       `s3://` through an S5.F `Object_stores` profile), recording its archive location and SHA-256, then remove it from live storage.
+       The audit row stays forever: uploader, time, file name, size, SHA-256 and the run started.
+     - Rerunning an archived upload restores its file and checks the SHA-256. An unreachable
+       or missing archive, or a different hash, fails with the upload, archive location and
+       remedy. A crash between the archive write and live delete leaves both copies, never
+       neither; the next run resumes. Test archive then rerun, a missing archive, a changed
+       hash, and a kill at each step.
   5. **Feedback.** The uploader sees the outcome, the validation message and the run's status,
      in the CLI output, the API response and the UI page. `etl-craft uploads --pipeline_code P`
      lists the history.
@@ -5619,6 +5782,61 @@ Branch: `feat/seed-tables`. After S7.M (stewardship uploads) and S5.F (bundles).
   - After the first upload, the stewarded ones report `LOCKED` in the deploy workflow's
     `seed apply`.
 
+### S7.T Business calendars
+
+- Calendars are config files holding a calendar code, holidays as dates, and weekend days.
+- A pipeline may name a `CALENDAR` and a `NON_BUSINESS_DAY` policy: `SKIP` records the tick as
+  `SKIPPED`, with the calendar and date as its reason; `NEXT_BUSINESS_DAY` moves it forward.
+- Schedules support the Nth business day and the last business day of the month.
+- `validate` refuses an unknown calendar or a schedule rule with no matching date in the next
+  year. A holiday list ending within 30 days fails `validate`; `doctor` reports one ending
+  within 60 days.
+- Run-date, backfill and catch-up use the same calendar. Catch-up and backfill otherwise stay
+  as built, with their safe defaults.
+- *Tests.* Holidays and weekends skipped or moved; month ends; a schedule timezone at a DST
+  change; a backfill across a holiday.
+
+### S7.U Personal-data erasure
+
+After S6.A and S7.C.
+
+- *Problem.* Sources outside etl-craft's control resend erased people. Erasure is a standing
+  register that later runs apply, not a single delete, and never changes the managed write path.
+- `columns.csv` gains `SUBJECT_TYPE` (for example `CUSTOMER`): the column holds a data subject's
+  key in that table.
+- `AUD_ERASURE_SUBJECTS` holds `SUBJECT_TYPE`, `SUBJECT_KEY`, `KEY_HMAC`, `REASON`, `CREATED_BY`,
+  `CREATED_AT`, `LIFTED_BY`, `LIFTED_AT` and `LIFT_REASON`. Keep the key so later runs can find
+  the subject; it is admin-only, masked in every output and never logged. `KEY_HMAC` is a keyed
+  hash using a secret from the Secrets provider, used in audit records instead of the raw key.
+- Admin commands and API routes call one service in `services/operations`:
+  - `etl-craft erase --subject TYPE --value KEY --reason TEXT [--dry-run]` registers the subject
+    and erases it at once. A dry run lists tables and row counts without changing anything.
+  - `etl-craft erase --lift --subject TYPE --value KEY --reason TEXT` ends a mistaken entry.
+- `ERASURE` is an ordinary task handler in `core.enums`. It deletes registered subjects from
+  the managed tables its pipeline writes that have a column of that type, including SCD2
+  history, `<target>__rejects`, landing tables and mirrors, each under its target lock. Record
+  each table's count on the attempt, keyed by `KEY_HMAC`.
+- Teams place the task after loads or in a nightly pipeline. `doctor` reports managed tables
+  with subject columns that no active `ERASURE` task covers.
+- Team-written tables (team `CFG_` tables and unmanaged `SQL_SCRIPT` targets) are listed in
+  the result for the team to handle; never touch them.
+- Attempt logs are not rewritten. The guide explains how S7.C redaction and S6.A log retention
+  bound them. Recommend keeping personal data in a few dimension tables referenced by
+  surrogate keys, so erasure touches few tables and history stays useful.
+- *Tests.* Erase every managed table type on every local warehouse; a source's resent subject
+  is erased by the next `ERASURE` run; a crash between tables resumes without a half-erased
+  table; dry runs change nothing; lifted entries are no longer applied; no raw key appears in
+  audit, logs, errors or API output.
+
+### S7.V Empty replacements
+
+- `OVERWRITE_TABLE` and `CREATE_TABLE` take `ALLOW_EMPTY` (`Y`/`N`, parsed by
+  `handlers.sql.spec.parse_flag`), default `Y`, preserving today's behaviour.
+- With `N`, an empty SELECT fails before changing the target, naming the task, target and
+  remedy: fix the source or set `ALLOW_EMPTY=Y`. Record the failure in audit and the attempt log.
+- *Tests.* On every local warehouse, `N` with no rows fails and leaves the target unchanged;
+  `Y` replaces it with no rows; `N` with rows replaces it as usual.
+
 ### S7.B Users, roles and identities (W10)
 
 S5.S delivers the accounts, the login, the roles and the role check on every action. S7.B adds:
@@ -5651,6 +5869,20 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
   providers plus `aws-secrets-manager` and `vault` (HashiCorp Vault KV v2) as optional extras.
 - Secrets stay variable names in `craft-connector.yml`; the provider resolves them when a connection
   opens, and caches them for at most `Secrets.Cache_seconds`.
+- **Python script secrets.** Scripts receive secrets only through the configured Secrets
+  provider (`ENVIRONMENT`, `FILE`, or the secret managers above). There is no connections
+  table and no secret value in the Engine DB; secrets stay variable names everywhere.
+- A task declares the names it may read in pipe-separated `SECRETS`; `task.secret(name)`
+  resolves one. Non-secret settings such as host, port and database go in `INPUT_PARAMS`, or
+  inside the secret.
+- `validate` refuses an undeclared name or a declared name missing from the provider, naming
+  the task, secret name and provider, never a value.
+- On the cluster, the API resolves declared secrets at claim and sends them over TLS. Refuse
+  plain HTTP except to localhost. The agent passes them to its task through a pipe, never
+  environment variables or arguments; agents never hold provider credentials.
+- Register every resolved value for masking in logs, audit, errors and API output (S7.C).
+- *Tests.* Refuse undeclared names; no value in a log, error or API response; an expired agent
+  cannot receive secrets; refuse plain HTTP to a non-local API.
 
 ### S7.F Packaging and deployment
 
@@ -5709,17 +5941,40 @@ schema evolution types (`S3.G.4`), identity columns (`S3.G.5`), hash golden valu
 `CREATE_TABLE` re-runs into external locations, Snowflake Iceberg mirrors with a cloning external
 volume, and the managed PostgreSQL Engine DBs (`S5.I`).
 
-### S7.I The soak
+### S7.I The endurance run
+
+A 72-hour accelerated run replaces a 30-day soak (owner, 21 October 2026). A long-lived process's
+leaks and slowdowns come from the number of runs, not the number of days, and rare events are
+tested directly with explicit times, so a month of calendar time adds nothing a high run rate and
+those tests do not already show.
 
 Run the Support Insights example ([the release-candidate stage](#release-candidate-the-support-insights-example))
-for 30 days on the reference cluster:
+for 72 hours on the reference cluster (S8's laptop k3d deployment):
 
-- daily `kill -9` of a random agent, a weekly `kill -9` of the controller, one Engine DB failover or
-  restart, one warehouse outage of at least 15 minutes, one upgrade between two 0.9 patch releases;
-- operated only through the UI and CLI;
-- success: no run with a wrong final status, no duplicated or missing rows in the warehouse (checked
-  by reconciliation queries written for the project), no manual database edits, and every incident
-  explained by `explain` and the intervention log.
+- **Accelerated schedules.** Every client pipeline runs every minute and `SI_REFERENCE` hourly,
+  with the generators' caps raised to match, so the 72 hours carry roughly a month of the
+  15-minute production schedule's runs and history.
+- **Faults.** A `kill -9` of a random agent every 6 hours, of the controller every 24 hours, one
+  Engine DB failover, one warehouse outage of at least 15 minutes, and one upgrade from the
+  previous release candidate to this one mid-run. S8.H's failure scenarios run once in the window.
+- **Measured every 10 minutes** and written to the results manifest: resident memory and open
+  Engine DB and warehouse connections for the controller and each `ui` copy and agent, Engine DB
+  size per table, and the controller's tick duration.
+- **Operated only through the UI and CLI.** No manual database edits.
+- **Success:**
+  - no run with a wrong final status, and no duplicated or missing rows in the warehouse
+    (checked by reconciliation queries written for the project);
+  - every incident explained by `explain` and the intervention log;
+  - the controller's tick duration at the 95th percentile under one second throughout;
+  - memory and connection counts level off: over the last 24 hours, no process's memory grows by
+    more than 10% and no connection count rises at all; a steady rise fails the run, naming the
+    process and the measure;
+  - Engine DB and log growth stay within the retention budget S6.A sets.
+- **Rare events are tests, not waiting.** Daylight-saving changes, month ends, calendar holiday
+  lists running out (S7.T), token and certificate expiry and retention boundaries are covered by
+  explicit-time tests in the suite. A rare event found missing from the suite is added there.
+- **A fix restarts the run** only when it changes code the run exercises; a documentation-only
+  change does not. Release evidence certifies the code the run ran.
 
 ### S7.J Documentation to finish
 
@@ -5861,7 +6116,7 @@ target cannot be reached under those constraints, report the measured bottleneck
 decision; do not declare the item complete or silently relax the target.
 These timing-acceptance runs are deliberate manual validation, not a new repeated PR job.
 
-**Gate.** The soak passes, and S7.N meets the complete-CI target without weakening checks.
+**Gate.** The endurance run (S7.I) passes, and S7.N meets the complete-CI target without weakening checks.
 
 ### S7.O Package and demo repositories
 
@@ -5905,7 +6160,7 @@ S8.G.
        the Support Insights repository's `etl-craft` branch as its starting point (S8).
      - The Quick Start runs the small demo, as written, in package CI. The README links to the
        demo repository for the full walkthrough.
-     - The soak (S7.I) runs on the Support Insights deployment. `scripts/soak.py` takes a
+     - The endurance run (S7.I) runs on the Support Insights deployment. `scripts/soak.py` takes a
        project directory.
   3. **Release evidence from the demo** (replaces running the demo in S8.G).
      - The demo's acceptance workflow (S8.E) runs against a candidate wheel attached to the
@@ -5975,7 +6230,7 @@ release candidate.
      - check free space and writability of the logs and uploads directories before an attempt
        starts;
      - refuse a server start on a port in use or alongside a running server, naming it.
-  4. Add a row whenever a review, the soak or Support Insights (S8.H) finds another obvious
+  4. Add a row whenever a review, the endurance run or Support Insights (S8.H) finds another obvious
      failure.
 - *Tests.* One named regression test per row, on both Engine DBs where the row involves one.
   The Support Insights acceptance (S8.F, S8.H) exercises the outage and kill rows on the full
@@ -6454,14 +6709,14 @@ package bug or missing feature demonstration remains hidden behind a project wor
    manifest. The release pull request copies it to
    `release/evidence/<version>/example-support-insights.json`. The package's CI and release
    suites never check out or run the demo.
-2. The soak (`S7.I`) runs on this example.
+2. The endurance run (`S7.I`) runs on this example.
 3. `release_gate.py` refuses 1.0.0 unless the manifest matches the release wheel's SHA-256 and
    the one demo commit pinned in `release/example.toml`, and lists every
    expected check and scenario as passed (S7.O item 3).
 
 **Gate.** The example's three workflows pass against the final release candidate, S8.F
 reference queries and UI checks pass, every S8.H feature/scenario and README walkthrough is verified,
-and the soak on the example passed. A partial coverage matrix cannot pass the release gate.
+and the endurance run on the example passed. A partial coverage matrix cannot pass the release gate.
 
 ## 1.0.0 release checklist
 
@@ -6502,7 +6757,7 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
       cold- and warm-cache evidence, without omitted tests, weaker coverage or removed matrix
       contracts.
 - [ ] Every row of S7.P's obvious-failure catalog names a passing regression test.
-- [ ] The soak passed.
+- [ ] The 72-hour endurance run passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
 
@@ -6617,6 +6872,13 @@ change it only by updating this table and the documentation together.
 | Views | `CREATE_VIEW` replaces only views, never a table; a secure view is created only where the warehouse has one (Snowflake, PostgreSQL), and refused elsewhere rather than created as an ordinary view | SQL views |
 | Authoring pipelines | SQL files plus explicit `CFG_` rows, kept as one CSV file per `CFG_` table in `config/` and merged by key with `etl-craft config apply`; `ACTIVE_FLAG` switches rows off and on, and rows keep their ids. Project migrations write the same rows with SQL. No dbt models or Jinja, and no template language beyond `$$` | Non-goals; Configuration files guide |
 | DuckDB's SQLAlchemy dialect | A core dependency, the one exception to optional warehouse extras: DuckDB is the default local warehouse of the quick start, the demo and the tests, so `pip install etl-craft` runs a whole local deployment. Engine code never imports it; SQLAlchemy loads it from the `duckdb:` URL | S4.I.6 |
+| Pipeline tests on sample data | Not added: fixtures are written to pass; business rules on real data and the dev environment profile test the real pipeline | Business rules; environment profiles |
+| Approval gates | Not added: operator overrides already audit actor and reason; config changes are reviewed in pull requests | Operator controls; config apply |
+| Built-in row-count drop checks | Not added: volumes vary; business rules express the checks a team needs | Business rules |
+| Support bundle | Not added: gathering confidential business data into one file for external sharing is unsafe; reporters share `--version`, `doctor` and chosen excerpts | Support guidance |
+| Encrypted secret store in the Engine DB | Not added: secret managers already do this | S7.E |
+| Suppression list on managed writes | Not added: sources resend data outside etl-craft's control; the standing erasure register and ERASURE task delete it again outside the write path | S7.U |
+| Catch-up and backfill | Stay as built, with their safe defaults | S4.C; backfill |
 
 ## Appendix C: Glossary
 

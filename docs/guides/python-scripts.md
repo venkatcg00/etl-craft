@@ -65,6 +65,10 @@ def run(task: ScriptTask) -> ScriptResult:
 | `logger` | a logger named after the task |
 | `task_params`, `config` | the task's parameters and the loaded `craft-connector.yml` |
 
+`ScriptTask.engine_db` has been removed: scripts never access the Engine DB directly.
+`task.warehouse()` remains available locally and on agents, including its shared single-writer
+queue. On agents, `task.config` contains no Engine DB connection or credentials.
+
 `ScriptResult` holds `row_count`, the rows the script wrote, a required whole number that the
 engine records as the task's source, target and insert counts; `offset`, the new offset, or `None`
 to keep the stored one; and `variables`, a mapping of names to any values of your own, listed

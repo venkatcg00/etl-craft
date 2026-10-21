@@ -7,6 +7,7 @@ A route only reads the request (query and path for a GET, JSON body for a POST),
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace
 from functools import cache
+from inspect import isawaitable
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -17,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from etl_craft.core.enums import ActionName, HttpMethod, HttpScheme, Transport
 from etl_craft.core.errors import UsageError
+from etl_craft.core.text import sha256_hex
 from etl_craft.services.operations import OperationContext, to_json
 from etl_craft.services.operations.actions import ACTIONS, Action, invoke
 from etl_craft.services.operations.identity import authenticated_context
@@ -82,7 +84,12 @@ def _caller(
         raise HTTPException(
             401, "a valid bearer token is required", headers={"WWW-Authenticate": "Bearer"}
         )
-    return replace(authenticated_context(ctx, identity), transport=Transport.HTTP)
+    assert credentials is not None
+    return replace(
+        authenticated_context(ctx, identity),
+        transport=Transport.HTTP,
+        credential_digest=sha256_hex(credentials.credentials.encode()),
+    )
 
 
 async def _answer(caller: OperationContext, action: Action, request: Request) -> Response:
@@ -109,6 +116,8 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
         given.update(body)
     parsed = _parse(action, given)
     result = await run_in_threadpool(invoke, caller, action.name, parsed)
+    if isawaitable(result):
+        result = await result
     if action.streams:
         assert isinstance(result, Iterator)
         return StreamingResponse(result, media_type="text/plain")

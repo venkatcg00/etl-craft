@@ -183,7 +183,9 @@ kill-task-or-overseer = [
     "tests/integration/controller/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run",
     "tests/integration/execution/test_retries.py::test_lost_attempt_retries_with_a_new_owner",
 ]
-kill-worker = "open: S5.C"
+kill-worker = [
+    "tests/integration/api/test_agent_process.py::test_a_lost_agent_stops_its_writer_before_a_second_holder",
+]
 two-overseers = [
     "tests/integration/controller/test_server.py::test_only_one_leader_and_session_release_not_history_controls_restart",
     "tests/integration/controller/test_server.py::test_server_picks_up_cli_run_and_second_server_is_refused",
@@ -232,7 +234,10 @@ sla-breach-write-fails = [
     "tests/integration/execution/test_sla_watch.py::test_a_refused_breach_write_is_retried_and_the_lapse_reported_once",
 ]
 engine-db-growth = "open: S6.A"
-worker-cut-off-or-clock-skew = "open: S5.C"
+worker-cut-off-or-clock-skew = [
+    "tests/integration/api/test_agent_process.py::test_a_lost_agent_stops_its_writer_before_a_second_holder",
+    "tests/integration/api/test_agent_api.py::test_expired_lease_cannot_be_renewed_or_report_success",
+]
 retry-that-cannot-succeed = [
     "tests/integration/warehouse/test_retry_classification.py::test_sql_syntax_fails_once_with_driver_evidence",
     "tests/integration/execution/test_failure_classes.py::test_script_failure_policy_and_historical_explanation",

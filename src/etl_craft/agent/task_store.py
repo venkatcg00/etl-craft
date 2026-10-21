@@ -1,0 +1,128 @@
+"""Handler metadata and ownership through the agent API; never through an Engine DB engine."""
+
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
+
+from etl_craft import __version__
+from etl_craft.agent.client import AgentClient
+from etl_craft.core.enums import ActionName, AgentReport
+from etl_craft.core.errors import ServerError
+from etl_craft.core.ownership import attempt_holder
+from etl_craft.core.text import sha256_hex
+from etl_craft.engine.alerts import AlertState
+from etl_craft.engine.repository.business_rules import RuleRunBinding
+from etl_craft.engine.resource_locks import confirm_stale, holder_tag
+from etl_craft.engine.task_store import RuleEnding, TargetPublication, TargetState, TaskState
+from etl_craft.services.operations.agent_models import AgentTask
+from etl_craft.services.operations.serialization import from_json
+
+
+@dataclass
+class RemoteTaskStore:
+    """The HTTP implementation of the same task store the local provider supplies.
+
+    ``confirm`` stops a stale holder's tagged warehouse statements from this agent, which
+    holds the warehouse credentials the API tier does not need.
+    """
+
+    client: AgentClient
+    attempt_id: int
+    confirm: Callable[[str], None]
+    held: set[int] = field(default_factory=set)
+
+    @property
+    def holder_id(self) -> str:
+        """Identify the attempt within its credential namespace."""
+        assert self.client.token is not None
+        return attempt_holder(self.attempt_id, sha256_hex(self.client.token.encode()))
+
+    @property
+    def session_tag(self) -> str:
+        """Tag every connection with its admitted attempt identity."""
+        return holder_tag(self.holder_id)
+
+    def request(self, operation: AgentReport) -> AgentTask:
+        """Bind every sub-operation to the exact attempt and package version."""
+        return AgentTask(version=__version__, attempt_id=self.attempt_id, operation=operation)
+
+    def call(self, request: AgentTask) -> object:
+        """Leave all ownership and lifecycle decisions at the API tier."""
+        return self.client.call(ActionName.AGENT_REPORT, request).data
+
+    def state(self, sql_action: str | None = None) -> TaskState:
+        """Read the admitted task's metadata, checkpoints and related writers."""
+        return from_json(TaskState, self.call(self.request(AgentReport.STATE)))
+
+    def target(self, target: str) -> TargetState:
+        """Read only the locked target's published contract."""
+        return from_json(
+            TargetState, self.call(replace(self.request(AgentReport.TARGET), target=target))
+        )
+
+    def publish(self, publication: TargetPublication) -> None:
+        """Publish the contract after the warehouse commit, under owned target fencing."""
+        self.call(replace(self.request(AgentReport.PUBLISH), publication=publication))
+
+    def watermark(self, start: str, end: str) -> None:
+        """Report a staged range; only the successful ending advances the checkpoint."""
+        self.call(
+            replace(self.request(AgentReport.WATERMARK), watermark_from=start, watermark_to=end)
+        )
+
+    def begin_rule(self, rule_id: int) -> RuleRunBinding:
+        """Bind one of this task's rules to its recorded run."""
+        return from_json(
+            RuleRunBinding,
+            self.call(replace(self.request(AgentReport.RULE_BEGIN), rule_id=rule_id)),
+        )
+
+    def rule_keys(self, rule_id: int) -> set[str]:
+        """Read only flags for the admitted task's rule."""
+        result = self.call(replace(self.request(AgentReport.RULE_KEYS), rule_id=rule_id))
+        if not isinstance(result, list) or any(not isinstance(key, str) for key in result):
+            raise ServerError(
+                "agent rule keys: expected a list of strings; upgrade the API and agent together"
+            )
+        return set(result)
+
+    def end_rule(self, ending: RuleEnding) -> None:
+        """Commit the rule's keys and ending through its fenced task service."""
+        self.call(replace(self.request(AgentReport.RULE_END), rule_ending=ending))
+
+    def alert(self, pipelines: str | None) -> AlertState:
+        """Derive the report scope from admitted metadata through the API."""
+        return from_json(AlertState, self.call(self.request(AgentReport.ALERT)))
+
+    @contextmanager
+    def hold(self, key: int, name: str, wait_seconds: float) -> Iterator[None]:
+        """Hold a shared resource without retaining a server connection between calls."""
+        if key in self.held:
+            yield
+            return
+        request = replace(
+            self.request(AgentReport.LOCK),
+            lock_key=key,
+            lock_wait_seconds=min(wait_seconds if wait_seconds > 0 else 30, 30),
+        )
+        while True:
+            result = self.client.call(ActionName.AGENT_REPORT, request, timeout=35).data
+            if not isinstance(result, dict):
+                raise ServerError(f"{name}: expected a lock answer; check the API version")
+            stale = result.get("stale_holder")
+            if result.get("acquired") is True:
+                break
+            if not isinstance(stale, str) or stale == request.confirmed_holder:
+                raise ServerError(f"{name}: expected acquired ownership; check the API version")
+            confirm_stale(self.confirm, name, stale)
+            request = replace(request, confirmed_holder=stale)
+        self.held.add(key)
+        completed = False
+        try:
+            yield
+            completed = True
+        finally:
+            self.held.remove(key)
+            if not completed:
+                confirm_stale(self.confirm, name, self.holder_id)
+            self.call(replace(self.request(AgentReport.UNLOCK), lock_key=key))

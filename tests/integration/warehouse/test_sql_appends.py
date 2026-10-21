@@ -9,6 +9,7 @@ from etl_craft.services.upgrade_targets import upgrade_targets
 from etl_craft.warehouse.connection import warehouse_dialect
 from fixtures.auth import service_token
 from fixtures.engine_db import profile_block
+from fixtures.lock_fencing import expire_leases
 from fixtures.sql_appends import (
     check_append_retries,
     check_legacy_upgrade,
@@ -41,6 +42,7 @@ def test_killed_append_converges_when_retried(sql_world):
         process.start()
         process.join(60)
         assert process.exitcode == 137
+        expire_leases(w.engine_db)
         result = w.run("killed_load", **params)
         assert (result.insert_count, result.target_count) == (2, 2)
         assert sorted(w.rows(f"SELECT id FROM {w.name('killed_events')}")) == [(1,), (2,)]

@@ -15,6 +15,9 @@ UTILITIES = {
 INTEGER_NAMES = frozenset(
     {
         "id",
+        "sequence",
+        "offset",
+        "length",
         "key",
         "pipeline",
         "target",
@@ -32,6 +35,13 @@ INTEGER_NAMES = frozenset(
 )
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
+    "seconds": 60,
+    "python_free": True,
+    "warehouse_free": True,
+    "report": "{}",
+    "node_id": "node_1",
+    "force": "N",
+    "rerun": "N",
     "active": "Y",
     "active_flag": "Y",
     "backfill": "N",
@@ -95,7 +105,7 @@ def bindings(sql, name=""):
             values[name] = VALUES[name]
         elif (
             name in INTEGER_NAMES
-            or name.endswith(("_id", "_count", "_number"))
+            or name.endswith(("_id", "_count", "_number", "_slots"))
             or name == "rows_written"
         ):
             values[name] = 1
@@ -184,7 +194,13 @@ def full_scans(plan, partial_indexes=frozenset(), limited=False):
         yield from full_scans(child, partial_indexes, bounded)
 
 
+REGISTRY = "Reads the agent registry: one row per agent token, bounded by the tokens issued."
 FULL_READS = {
+    ("agent_host_lock", "aud_agents"): REGISTRY,
+    ("agent_list", "aud_agents"): REGISTRY,
+    ("agent_usage", "aud_agents"): REGISTRY,
+    ("reconcile_attempts", "aud_agents"): REGISTRY,
+    ("transition_expire_agents", "aud_agents"): REGISTRY,
     ("active_pipeline_codes", "cfg_pipelines"): "Enumerates every active pipeline definition.",
     (
         "active_pipeline_parameters",

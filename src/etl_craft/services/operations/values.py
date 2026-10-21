@@ -20,7 +20,8 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
-from etl_craft.handlers.registry import TaskContext
+from etl_craft.handlers.registry import TaskContext, task_store
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.protection import MERGES, Protection, ProtectionRequest, exists
 from etl_craft.handlers.sql.session import Session
@@ -117,8 +118,8 @@ def _selected(
         )
     catalog = active_catalog(ctx.config)
     with (
-        locks.target(spec.target_object, catalog).hold(ctx.engine),
-        open_warehouse(ctx.config, ctx.engine) as warehouse,
+        locks.target(spec.target_object, catalog).hold(LocalLocker(ctx.engine, ctx.config)),
+        open_warehouse(ctx.config, LocalLocker(ctx.engine, ctx.config)) as warehouse,
         warehouse.begin() as conn,
     ):
         session = Session(
@@ -285,7 +286,7 @@ def write_values(ctx: OperationContext, edit: ValueEdit) -> ValueResult:
                 ActionContext(
                     spec,
                     context,
-                    ctx.engine,
+                    task_store(context, ctx.engine),
                     ctx.actor.name,
                     request.now,
                     stage,

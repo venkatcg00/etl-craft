@@ -127,6 +127,10 @@ Engine:
   sit:
     Name: Postgres                     # value
     Jdbc_url: ENGINE_JDBC_URL          # variable — jdbc:postgresql://host:5432/etl_craft
+    # Listen_jdbc_url: ENGINE_LISTEN_URL # variable — optional, PostgreSQL only: a direct or
+    #                                    # session-pooled address for LISTEN, with this profile's
+    #                                    # login; unset, Jdbc_url. Startup and doctor prove a
+    #                                    # NOTIFY arrives (transaction pooling drops them)
     Schema: etl_craft                  # value — must already exist; the engine never creates it
     User: ENGINE_USER                  # variable
     Auth_mode: ENGINE_AUTH_MODE        # variable — PASSWORD | KEY_FILE | TOKEN | OAUTH | SSO | STS

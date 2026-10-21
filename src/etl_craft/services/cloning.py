@@ -48,6 +48,7 @@ from etl_craft.dialects.engine.tables import CONFIG_TABLES
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
 from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,7 @@ def clone(engine: Engine, config: ConnectorConfig) -> list[ClonedTable]:
     catalog = active_catalog(config)
     schema = config.warehouse.schema
     cloned: list[ClonedTable] = []
-    with locks.CLONE.hold(engine), open_warehouse(config, engine) as warehouse:
+    with locks.CLONE.hold(engine), open_warehouse(config, LocalLocker(engine, config)) as warehouse:
         for table, columns in _engine_tables(engine, config, PREFIXES[cloning.scope]):
             mirror = qualify(f"{schema}.{table}", catalog)
             cloned.append(_clone_table(engine, warehouse, dialect, config, table, mirror, columns))

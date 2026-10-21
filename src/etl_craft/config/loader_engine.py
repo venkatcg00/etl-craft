@@ -19,6 +19,7 @@ from etl_craft.config.model import ConnectionProfile
 from etl_craft.config.resolve import Resolver
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.text import mask_arguments
 
 
 def parse_engine(
@@ -37,7 +38,7 @@ def parse_engine(
         path,
     )
     block = field_keys(block, where, path)
-    reject_unknown(block, CONNECTION_FIELDS, where, path, fields=True)
+    reject_unknown(block, CONNECTION_FIELDS | {"listen_jdbc_url"}, where, path, fields=True)
     fields = Fields(block, where, profiled.profile, resolver, path)
     jdbc_url = fields.value("jdbc_url", required=True) or ""
     try:
@@ -47,6 +48,20 @@ def parse_engine(
             f"{path}: {where}.jdbc_url: {error}{fields.hint('jdbc_url')}"
         ) from error
 
+    listen_url = fields.value("listen_jdbc_url")
+    if listen_url is not None:
+        try:
+            supported = (
+                spec.name == "postgresql" and engine_for_jdbc_url(listen_url).name == "postgresql"
+            )
+        except ConfigurationError:
+            supported = False
+        if not supported:
+            address = mask_arguments({"url": listen_url})["url"]
+            raise ConfigurationError(
+                f"{path}: {where}.Listen_jdbc_url={address!r}; expected PostgreSQL; "
+                "remove Listen_jdbc_url for SQLite or point it at the PostgreSQL Engine DB"
+            )
     declared = profiled.text("Name")
     if declared and ENGINE_NAMES.get(declared.lower()) != spec.name:
         raise ConfigurationError(
@@ -70,4 +85,5 @@ def parse_engine(
         auth_mode=auth_mode,
         extra=extra,
         schema=profile_schema(fields),
+        listen_jdbc_url=listen_url,
     )

@@ -1,26 +1,49 @@
 # Waiting for files or warehouse rows
 
-A local pipeline can start on its schedule and wait for a source to arrive. Add a task with
+A pipeline can start on its schedule and wait for a source to arrive. Add a task with
 `HANDLER='EVENT_WAIT'` before the tasks that read the source. The controller checks the event
-without submitting an agent; a whole-pipeline `run` does the same. A frequent schedule with
-`OVERLAP_POLICY='SKIP'` leaves one run waiting instead of building a queue of empty runs.
+itself, locally or on a cluster, without using an agent slot; a whole-pipeline `run` does the
+same. A frequent schedule with `OVERLAP_POLICY='SKIP'` leaves one run waiting instead of building
+a queue of empty runs.
+
+## What to wait for
+
+- **A file on a local or mounted filesystem:** `EVENT_FILE`, a glob. This is what event waits are
+  best at: they react to filesystem notifications within a second and wait for the file to stop
+  changing.
+- **A file in cloud storage** (S3, Azure Blob, Google Cloud Storage): use the cloud's own event
+  for a new object, and a small function that writes a row to a table, then wait for that row
+  with `EVENT_SQL`. etl-craft does not list buckets.
+- **Something another system finished** (a job, a webhook, a message): the same kind of row.
+- **Another pipeline's success:** not an event wait. Use `CFG_PIPELINE_DEPENDENCY` with
+  `DEPENDENCY_TYPE='SUCCESS'`, which has its own `Orchestration.Gate_wait_minutes` budget.
+- **A stream** (Kafka, Kinesis, Event Hubs): not an event wait either. Read it in batches: a
+  frequently scheduled Python task reads from its stored offset and returns the new one, and
+  downstream tasks that depend on it with `HAS_DATA` skip an empty batch.
+
+## Settings
 
 | Parameter | Value |
 |---|---|
 | `EVENT_FILE` | a filesystem glob, absolute or relative to the directory holding `craft-connector.yml` |
-| `EVENT_SQL` | one read-only SELECT on the configured warehouse; any returned row satisfies it |
+| `EVENT_SQL` | one read-only SELECT on the configured warehouse; any returned row satisfies it, so select rows such as `SELECT 1 ... WHERE ...`, never `count(*)`, which returns a row even when the count is 0 |
 | `EVENT_SETTLE_SECONDS` | seconds a file's size and modification time must stay unchanged; default `30` |
 | `EVENT_TIMEOUT_MINUTES` | total wait budget in minutes; default `60`; `NONE` waits indefinitely; `0` checks files once and allows no SQL connection wait |
 | `EVENT_POLL_SECONDS` | seconds between SQL probes or fallback file scans; default `60`, minimum `1` |
 | `EVENT_ON_TIMEOUT` | `FAIL` (default) or `SKIP` |
 
-Set exactly one of `EVENT_FILE` and `EVENT_SQL`. Numeric budgets must be finite and nonnegative. Set `EVENT_TIMEOUT_MINUTES=NONE` to wait until the event arrives or the run is cancelled.
+Set exactly one of `EVENT_FILE` and `EVENT_SQL`. Numeric budgets must be finite and
+nonnegative. Set `EVENT_TIMEOUT_MINUTES=NONE` to wait until the event arrives or the run is
+cancelled.
+
+## File waits
+
 The file matcher ignores directories and canonicalizes paths, including symbolic links. It
 records every settled, unconsumed match. An already old file still gets a full observed settling
 interval. A change to either size or modification time restarts that interval.
 
 `AUD_GATE_WAITS` stores `WAIT_KIND='EVENT'`, the original deadline, the next check and file
-observations. An indefinite wait has a NULL deadline; restarting an controller preserves it.
+observations. An indefinite wait has a NULL deadline; restarting a controller preserves it.
 File waits use native filesystem notifications through watchdog (inotify on Linux and FSEvents
 on macOS) to bring a check forward. The scheduler checks notification hints within one second,
 without admitting a task agent. Notifications watch the fixed directory prefix of the glob,
@@ -30,14 +53,20 @@ A timer checks a matching file when its settling interval ends. Periodic scans a
 watch handles. Globs without a fixed directory prefix use the fallback scan. Each resumed file
 wait checks once immediately for deliveries received during downtime.
 
+## SQL waits
+
 SQL waits probe at `EVENT_POLL_SECONDS`, close their connections between probes and use the
 normal warehouse connection and single-writer lock. A busy single-writer
 warehouse leaves the event waiting. A query or filesystem error fails the task with its cause.
 SQL probes run in fresh interpreters outside the scheduler loop, without agent slots.
 Each probe gets at most 30 seconds or the remaining event budget, whichever is shorter;
 a slow probe is stopped and checked again while budget remains. Interruption stops the local
-probe, which also exits if its supervisor dies. The original deadline is committed before querying. Keep queries short: stopping
-the local client does not guarantee that a remote warehouse immediately cancels its query.
+probe, which also exits if its supervisor dies. The original deadline is committed before
+querying. Keep queries short and read-only: an event probe holds no target lock, so stopping it
+does not guarantee that a remote warehouse cancels its query at once.
+
+## Resources and outcomes
+
 
 Idle waits retain only durable metadata, cached deadlines and file watch handles; they do not
 hold a warehouse connection or agent slot. The existing supervisor still performs cancellation,
@@ -46,15 +75,10 @@ usage is low rather than zero. Choose a longer polling interval for expensive qu
 filesystems; this increases fallback detection latency. Use a dedicated inbox to keep recursive
 watch counts small.
 
-Upstream pipeline success already uses `CFG_PIPELINE_DEPENDENCY` with `DEPENDENCY_TYPE='SUCCESS'`;
-that existing gate has its own finite `Orchestration.Gate_wait_minutes` budget. A webhook or
-message broker can signal a file or insert a warehouse row for an event task to watch. There is
-no generic notification receiver in this handler.
-
 At timeout, the task ends `FAILED` or `SKIPPED`; ordinary `SUCCESS`, `FAILURE`, `ALWAYS` and
 `HAS_DATA` dependency rules decide which tasks follow it. Use `SUCCESS` to follow a satisfied event;
-an event task reports no target rows, so `validate` refuses `HAS_DATA` on it. Timeouts and probe errors do not
-automatically retry or receive a fresh budget. To wait for a new delivery, start a new run.
+an event task reports no target rows, so `validate` refuses `HAS_DATA` on it. Timeouts and probe
+errors do not automatically retry or receive a fresh budget. To wait for a new delivery, start a new run.
 
 ## Evidence and downstream files
 
