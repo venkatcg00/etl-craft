@@ -200,7 +200,7 @@ a hold.
 HTTP clients use `POST /api/v1/controls` with `pipeline_code`, `action` (`HOLD`, `RELEASE`,
 `STOP`, `ABORT`), `reason`, optional `run_id`/`run_key`, `task_code` and `request_key`.
 `GET /api/v1/control-requests/{control_id}` returns the same document as `control-request`.
-Controls require operator; inspection requires viewer. Local and `--controller` commands call the
+Controls require operator; inspection requires viewer. Local and `--api` commands call the
 same services and preserve the authenticated actor.
 
 ## Pause and resume a pipeline
@@ -406,7 +406,7 @@ Only selected objects are affected. Results include each accepted control or its
 refusal; this is not an all-or-nothing transaction. A nonzero CLI exit means at least one object
 refused, while earlier accepted actions remain committed. Retry the same selection with the
 same keys to inspect accepted requests safely. Bulk preparation does not wait for task execution
-or agent/query endings. The same flags support `--controller`.
+or agent/query endings. The same flags support `--api`.
 
 The shared HTTP routes are `GET /api/v1/capabilities`,
 `POST /api/v1/controls` (including `RECOVER`, `RESTART`, `RUN_PAUSED`) and

@@ -123,7 +123,7 @@ ETL_CRAFT_REQUIRE_SERVICES=1 \
 ```
 
 This covers all four local warehouses on both Engine DBs, pip and uv, the sdist and the
-`server` extra. Expect no skips. The demos copy `examples/demo/` from the source tree: a change
+`ui` extra. Expect no skips. The demos copy `examples/demo/` from the source tree: a change
 there needs only a rerun; a change under `src/` needs a rebuild. Run demo sessions one at a
 time, because the local Iceberg demos share fixed namespaces.
 

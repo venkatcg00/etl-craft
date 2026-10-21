@@ -57,6 +57,7 @@ EXPECTED = {
     enums.ActionScope: {"deployment", "pipeline"},
     enums.Transport: {"LOCAL", "HTTP"},
     enums.HttpMethod: {"GET", "POST"},
+    enums.HttpScheme: {"http", "https"},
     enums.LineageDirection: {"BOTH", "UPSTREAM", "DOWNSTREAM"},
     enums.ControlStatus: {"REQUESTED", "ACKNOWLEDGED", "COMPLETED"},
     enums.ControlAcknowledgement: {"PROCESS", "QUERIES"},

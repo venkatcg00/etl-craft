@@ -278,7 +278,7 @@ class AuditView:
 
 @dataclass(frozen=True)
 class Health:
-    """The API answers and its Engine DB request path works."""
+    """The process answers its health probe."""
 
     SCHEMA: ClassVar[str] = "etl-craft/health/1"
     status: str = "ok"

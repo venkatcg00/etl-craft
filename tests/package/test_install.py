@@ -33,8 +33,11 @@ SHIPPED = (
 CHECK = """
 import sys
 import etl_craft
+from importlib.metadata import metadata
 from etl_craft.dialects.engine import all_dialects
 assert etl_craft.__version__ == sys.argv[1], etl_craft.__version__
+extras = set(metadata("etl-craft").get_all("Provides-Extra") or ())
+assert {"ui", "all"} <= extras and "server" not in extras
 for dialect in all_dialects():
     assert "CREATE TABLE CFG_PIPELINES" in dialect.schema_path().read_text(encoding="utf-8")
     assert dialect.query("existing_tables")
@@ -74,7 +77,7 @@ def test_the_wheel_holds_the_package_files_and_the_licence():
         ("wheel", "uv", None),
         ("sdist", "pip", None),
         ("sdist", "uv", None),
-        ("wheel", "uv", "server"),
+        ("wheel", "uv", "ui"),
     ],
 )
 def test_it_installs_and_runs(tmp_path, installer, kind, extra):
@@ -107,9 +110,9 @@ def test_it_installs_and_runs(tmp_path, installer, kind, extra):
     )
     run(str(_bin(venv, "python")), "-c", CHECK, version)
 
-    if extra == "server":
+    if extra == "ui":
         run(
             str(_bin(venv, "python")),
             "-c",
-            "import fastapi, uvicorn; from etl_craft.api.app import create_app",
+            "import fastapi, uvicorn, jinja2; from etl_craft.api.app import create_app",
         )

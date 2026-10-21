@@ -173,6 +173,13 @@ class ApiRole(StrEnum):
     ADMIN = "admin"
 
 
+class HttpScheme(StrEnum):
+    """HTTP schemes accepted from explicitly trusted proxies."""
+
+    HTTP = "http"
+    HTTPS = "https"
+
+
 class ActionScope(StrEnum):
     """Whether authorization uses deployment or pipeline roles."""
 
@@ -246,6 +253,7 @@ class ActionName(StrEnum):
     INIT_DB = "init-db"
     MIGRATE = "migrate"
     CONTROLLER = "controller"
+    UI = "ui"
     PUBLISH_DOCS = "publish-docs"
 
 

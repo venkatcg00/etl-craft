@@ -747,6 +747,17 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "boto3" },
+    { name = "databricks-sqlalchemy" },
+    { name = "fastapi" },
+    { name = "jinja2" },
+    { name = "pydantic" },
+    { name = "snowflake-sqlalchemy" },
+    { name = "sqlalchemy" },
+    { name = "trino", extra = ["sqlalchemy"] },
+    { name = "uvicorn" },
+]
 aws = [
     { name = "boto3" },
 ]
@@ -758,21 +769,22 @@ publish = [
     { name = "ngrok", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "ngrok", version = "1.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-server = [
-    { name = "fastapi" },
-    { name = "pydantic" },
-    { name = "uvicorn" },
-]
 snowflake = [
     { name = "snowflake-sqlalchemy" },
 ]
 trino = [
     { name = "trino", extra = ["sqlalchemy"] },
 ]
+ui = [
+    { name = "fastapi" },
+    { name = "jinja2" },
+    { name = "pydantic" },
+    { name = "uvicorn" },
+]
 
 [package.dev-dependencies]
 dev = [
-    { name = "etl-craft", extra = ["aws", "databricks", "server", "snowflake", "trino"] },
+    { name = "etl-craft", extra = ["aws", "databricks", "snowflake", "trino", "ui"] },
     { name = "httpx" },
     { name = "import-linter" },
     { name = "mypy" },
@@ -786,7 +798,7 @@ dev = [
     { name = "types-pyyaml" },
 ]
 docs = [
-    { name = "etl-craft", extra = ["server"] },
+    { name = "etl-craft", extra = ["ui"] },
     { name = "mike" },
     { name = "mkdocs" },
     { name = "mkdocs-gen-files" },
@@ -801,25 +813,27 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.28" },
     { name = "databricks-sqlalchemy", marker = "extra == 'databricks'", specifier = ">=2" },
     { name = "duckdb-engine", specifier = ">=0.13" },
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
+    { name = "etl-craft", extras = ["ui", "aws", "databricks", "snowflake", "trino"], marker = "extra == 'all'", editable = "." },
+    { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115" },
+    { name = "jinja2", marker = "extra == 'ui'", specifier = ">=3.1" },
     { name = "ngrok", marker = "extra == 'publish'", specifier = ">=1.4" },
     { name = "psutil", specifier = ">=6.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
-    { name = "pydantic", marker = "extra == 'server'", specifier = ">=2" },
+    { name = "pydantic", marker = "extra == 'ui'", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "snowflake-sqlalchemy", marker = "extra == 'snowflake'", specifier = ">=1.7" },
     { name = "sqlalchemy", specifier = ">=2.0.54" },
     { name = "sqlalchemy", marker = "extra == 'databricks'", specifier = ">=2.0.54,<2.1" },
     { name = "sqlglot", specifier = ">=26" },
     { name = "trino", extras = ["sqlalchemy"], marker = "extra == 'trino'", specifier = ">=0.330" },
-    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.35" },
+    { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.35" },
     { name = "watchdog", specifier = ">=6" },
 ]
-provides-extras = ["server", "aws", "databricks", "publish", "snowflake", "trino"]
+provides-extras = ["ui", "all", "aws", "databricks", "publish", "snowflake", "trino"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "etl-craft", extras = ["aws", "databricks", "server", "snowflake", "trino"], editable = "." },
+    { name = "etl-craft", extras = ["aws", "databricks", "ui", "snowflake", "trino"], editable = "." },
     { name = "httpx", specifier = ">=0.28" },
     { name = "import-linter", specifier = ">=2.1" },
     { name = "mypy", specifier = ">=1.11" },
@@ -833,7 +847,7 @@ dev = [
     { name = "types-pyyaml", specifier = ">=6.0.12" },
 ]
 docs = [
-    { name = "etl-craft", extras = ["server"], editable = "." },
+    { name = "etl-craft", extras = ["ui"], editable = "." },
     { name = "mike", specifier = ">=2.2" },
     { name = "mkdocs", specifier = ">=1.6.1,<2" },
     { name = "mkdocs-gen-files", specifier = ">=0.6" },

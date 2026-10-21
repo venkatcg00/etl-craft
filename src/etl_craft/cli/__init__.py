@@ -41,10 +41,10 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
         default=default(None),
     )
     group.add_argument(
-        "--controller",
+        "--api",
         metavar="URL",
-        help="Operate this etl-craft controller instead of the local project (default: "
-        "$ETL_CRAFT_CONTROLLER); https:// except to localhost.",
+        help="Operate this etl-craft API instead of the local project (default: "
+        "$ETL_CRAFT_API); https:// except to localhost.",
         default=default(None),
     )
     group.add_argument(
@@ -104,9 +104,9 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         parser.print_usage(out.stdout)
         return ExitCode.USAGE
     log.configure(args.log_level, args.log_format)
-    args.controller = args.controller or os.environ.get("ETL_CRAFT_CONTROLLER")
+    args.api = args.api or os.environ.get("ETL_CRAFT_API")
     try:
-        if args.controller:
+        if args.api:
             return int(args.handler(args, out))
         with access_context(args):
             return int(args.handler(args, out))

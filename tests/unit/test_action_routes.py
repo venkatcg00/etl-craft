@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from etl_craft.api import routes
 from etl_craft.api.app import create_app
-from etl_craft.cli.client import ControllerClient
+from etl_craft.cli.client import ApiClient
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import ApiRole, Audit, HttpMethod, RunStatus
 from etl_craft.core.errors import PermissionDeniedError, UsageError
@@ -66,7 +66,10 @@ def build(cls):
 
 def context(role=ApiRole.ADMIN):
     return OperationContext(
-        types.SimpleNamespace(connect=lambda: nullcontext(None)), None, ADMIN, role=role
+        types.SimpleNamespace(connect=lambda: nullcontext(None)),
+        types.SimpleNamespace(docs_site=None),
+        ADMIN,
+        role=role,
     )
 
 
@@ -135,7 +138,7 @@ def test_the_client_and_the_route_hand_the_operation_the_same_request(server, mo
     monkeypatch.setattr("etl_craft.cli.client.build_opener", lambda *handlers: Opener())
     request = build(ACTIONS[name].request)
     with pytest.raises(CapturedError):
-        result = ControllerClient("http://127.0.0.1:8000").invoke(name, request)
+        result = ApiClient("http://127.0.0.1:8000").invoke(name, request)
         list(result)  # a streamed action sends its request when read
     assert calls == [(name, request)]
 

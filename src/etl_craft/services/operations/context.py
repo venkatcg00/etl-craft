@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import Actor
-from etl_craft.core.enums import ApiRole, Transport
+from etl_craft.core.enums import ApiRole, HttpScheme, Transport
 from etl_craft.execution.attempt_types import ChildOptions
 
 
@@ -31,3 +31,5 @@ class OperationContext:
     provisioning: bool = False
     sso_group_ids: tuple[int, ...] = ()
     credential_token_id: int | None = None
+    client_address: str | None = None
+    client_scheme: HttpScheme | None = None

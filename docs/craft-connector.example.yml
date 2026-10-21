@@ -43,7 +43,7 @@ Orchestration:
   # Profile: prod                 # overrides Secrets.Profile for this section only
   # Log_dir: logs                 # where each task attempt's log file goes; relative to this file
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
-  # Api_address: 127.0.0.1:8730    # HTTP listener with etl-craft[server]
+  # Api_address: 127.0.0.1:8730    # API/UI listener; controller --no-ui serves /health here
   Timezone: UTC                  # default logical date for manual runs and schedules
   Shutdown_grace_seconds: 60           # value — controller waits before stopping local work
   Engine_db_outage_seconds: 120       # value — how long a process that reached a PostgreSQL

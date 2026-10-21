@@ -1,27 +1,31 @@
 """The version-one HTTP API: one generated route per action, sharing the CLI's documents."""
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from etl_craft.api.gateway import Gateway, GatewayMiddleware
 from etl_craft.api.login import SIGN_IN, add_login_routes
 from etl_craft.api.routes import add_action_routes
 from etl_craft.core.errors import (
     EtlCraftError,
     MetadataError,
+    MigrationError,
     PermissionDeniedError,
     ResourceNotFoundError,
     UsageError,
 )
-from etl_craft.services.operations import OperationContext
+from etl_craft.services.operations import OperationContext, to_json
 from etl_craft.services.operations.actions import ACTIONS
+from etl_craft.services.operations.processes import probe, readiness
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(ctx: OperationContext) -> FastAPI:
+def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> FastAPI:
     """Build routes without opening connections or starting the controller."""
     app = FastAPI(
         title="etl-craft",
@@ -30,6 +34,27 @@ def create_app(ctx: OperationContext) -> FastAPI:
         redoc_url=None,
         openapi_url="/api/v1/openapi.json",
     )
+
+    app.state.gateway = gateway
+    app.add_middleware(GatewayMiddleware, ctx=ctx, gateway=gateway)
+
+    @app.get("/health")
+    async def health() -> object:
+        if gateway is None:
+            return to_json(probe(ctx))
+        try:
+            return to_json(await asyncio.to_thread(readiness, ctx))
+        except (EtlCraftError, SQLAlchemyError) as error:
+            logger.error("UI readiness check failed: %s", type(error).__name__)
+            cause = (
+                "package version does not match applied migrations; "
+                "install the matching package and run `etl-craft migrate`"
+                if isinstance(error, MigrationError)
+                else "database or configuration check failed; "
+                "check Engine DB connectivity, database logs and server configuration"
+            )
+            return JSONResponse({"message": f"Engine DB is not ready: {cause}"}, 503)
+
     _add_error_handlers(app)
     add_login_routes(app, ctx)
     routed = frozenset(name for name, action in ACTIONS.items() if action.path is not None)

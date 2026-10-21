@@ -246,3 +246,20 @@ def engine_db(empty_engine_db: EngineDb, request: pytest.FixtureRequest) -> Engi
                 )
             )
     return db
+
+
+@contextmanager
+def engine_db_cut_off(engine):
+    """Refuse new connections to this test's database and end its sessions, as a restart does."""
+    name = psycopg.sql.Identifier(engine.url.database)
+    with postgres_admin() as admin:
+        admin.execute(psycopg.sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(name))
+        admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = %s AND pid <> pg_backend_pid()",
+            (engine.url.database,),
+        )
+        try:
+            yield
+        finally:
+            admin.execute(psycopg.sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS true").format(name))

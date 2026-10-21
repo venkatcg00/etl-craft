@@ -103,7 +103,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         done = call(args, ActionName.RUN, request, role="run")
     assert isinstance(done, (OperationResult, BackfillView))
     out.result(done, args.output_format)
-    started_only = args.init_only or (args.controller and not (args.task_code or args.backfill))
+    started_only = args.init_only or (args.api and not (args.task_code or args.backfill))
     return _exit_code(done, started_only=bool(started_only))
 
 

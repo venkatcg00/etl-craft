@@ -127,6 +127,7 @@ nav:
       - Controller: deploying/controller.md
       - Deployment profiles and sizing: deploying/sizing.md
       - HTTP API: deploying/http-api.md
+      - Behind a load balancer: deploying/load-balancer.md
       - Checking a deployment, doctor and setup: deploying/doctor-and-setup.md
       - Engine DB setup and upgrades: deploying/engine-db.md
       - Cloning into the warehouse: deploying/cloning.md

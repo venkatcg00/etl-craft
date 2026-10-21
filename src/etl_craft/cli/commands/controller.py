@@ -3,48 +3,32 @@
 from __future__ import annotations
 
 import argparse
-import signal
-import threading
 from importlib.util import find_spec
-from types import FrameType
 
 from etl_craft.cli.commands.common import Command, command_context, on_host
+from etl_craft.cli.lifecycle import shutdown_event
 from etl_craft.cli.output import Output
-from etl_craft.controller.supervisor import serve
+from etl_craft.controller.health import serve_health
 from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode
-from etl_craft.services.operations.actions import admitted
+from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.requests import NoInput
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
-    pass
+    parser.add_argument("--no-ui", action="store_true", help="Serve only /health, without the API.")
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
     on_host(args, ActionName.CONTROLLER)
-    stop = threading.Event()
+    with shutdown_event() as stop, command_context(args, role="controller") as ctx:
+        invoke(ctx, ActionName.CONTROLLER, NoInput())
+        if args.no_ui or find_spec("fastapi") is None or find_spec("uvicorn") is None:
+            serve_health(ctx, stop)
+        else:
+            from etl_craft.api.serve import serve_http
 
-    def stopping(signum: int, frame: FrameType | None) -> None:
-        stop.set()
-
-    previous = {
-        number: signal.signal(number, stopping) for number in (signal.SIGTERM, signal.SIGINT)
-    }
-    try:
-        with (
-            command_context(args, role="controller") as ctx,
-            admitted(ctx, ActionName.CONTROLLER, NoInput()),
-        ):
-            if find_spec("fastapi") is None or find_spec("uvicorn") is None:
-                serve(ctx, stop)
-            else:
-                from etl_craft.api.serve import serve_http
-
-                serve_http(ctx, stop)
-    finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+            serve_http(ctx, stop)
     return ExitCode.SUCCESS
 
 

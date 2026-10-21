@@ -39,7 +39,7 @@ def server(empty_engine_db, tmp_path, monkeypatch, cli_logging):
     monkeypatch.setenv("ETL_CRAFT_CONFIG", str(_write_project(tmp_path, db)))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "person"))
     monkeypatch.delenv("ETL_CRAFT_TOKEN", raising=False)
-    monkeypatch.delenv("ETL_CRAFT_CONTROLLER", raising=False)
+    monkeypatch.delenv("ETL_CRAFT_API", raising=False)
     system = OperationContext(db.engine, config, SYSTEM_ACTOR)
     admin = _admin(system)
     for name, role in (("alice", ApiRole.OPERATOR), ("vera", ApiRole.VIEWER)):
@@ -121,7 +121,7 @@ def sign_in(monkeypatch, capsys, url, name="alice", *answers):
     monkeypatch.setattr("builtins.input", lambda prompt="": next(replies))
     monkeypatch.setattr(login, "password", lambda confirm=False: PASSWORD)
     monkeypatch.setattr(login, "interactive", lambda: None)
-    return run(capsys, "login", "--controller", url)
+    return run(capsys, "login", "--api", url)
 
 
 def tokens_of(ctx, name):
@@ -148,7 +148,7 @@ def test_password_sign_in_keeps_only_tokens_locally_and_whoami_reads_the_server(
     assert set(stored[url]) == {"access", "refresh", "access_expires_at"}
     assert "jdbc" not in json.dumps(stored) and PASSWORD not in json.dumps(stored)
     assert [row.kind for row in tokens_of(server["ctx"], "alice")] == ["REFRESH", "ACCESS"]
-    code, out, _ = run(capsys, "whoami", "--controller", url, "--format", "json")
+    code, out, _ = run(capsys, "whoami", "--api", url, "--format", "json")
     assert code == 0
     assert json.loads(out) == {
         "schema": "etl-craft/identity/1",
@@ -165,7 +165,7 @@ def test_an_expired_access_token_is_renewed_and_an_expired_refresh_needs_sign_in
     stored = credentials.read_server(url)
     past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
     credentials.store_session(url, {**stored, "access_expires_at": past})
-    assert run(capsys, "whoami", "--controller", url)[0] == 0
+    assert run(capsys, "whoami", "--api", url)[0] == 0
     renewed = credentials.read_server(url)
     assert renewed["access"] != stored["access"] and renewed["refresh"] == stored["refresh"]
     rows = tokens_of(server["ctx"], "alice")
@@ -177,7 +177,7 @@ def test_an_expired_access_token_is_renewed_and_an_expired_refresh_needs_sign_in
             {"past": datetime.now(UTC) - timedelta(days=1), "id": refresh_id},
         )
     credentials.store_session(url, {**renewed, "access_expires_at": past})
-    code, _, err = run(capsys, "whoami", "--controller", url)
+    code, _, err = run(capsys, "whoami", "--api", url)
     assert code == ExitCode.USAGE and "refresh token is unknown, expired or revoked" in err
 
 
@@ -186,14 +186,14 @@ def test_disabling_the_account_and_logging_out_revoke_its_server_session(
 ):
     url, ctx = server["url"], server["ctx"]
     sign_in(monkeypatch, capsys, url)
-    assert run(capsys, "logout", "--controller", url)[0] == 0
+    assert run(capsys, "logout", "--api", url)[0] == 0
     assert credentials.read_server(url) is None
     assert all(row.revoked_at is not None for row in tokens_of(ctx, "alice"))
-    code, _, err = run(capsys, "whoami", "--controller", url)
-    assert code == ExitCode.USAGE and f"etl-craft login --controller {url}" in err
+    code, _, err = run(capsys, "whoami", "--api", url)
+    assert code == ExitCode.USAGE and f"etl-craft login --api {url}" in err
     sign_in(monkeypatch, capsys, url)
     invoke(ctx, ActionName.ACCOUNT_DISABLE, accounts.AccountName(name="alice"))
-    code, _, err = run(capsys, "whoami", "--controller", url)
+    code, _, err = run(capsys, "whoami", "--api", url)
     assert code == ExitCode.USAGE and "refresh token is unknown, expired or revoked" in err
 
 
@@ -232,21 +232,19 @@ def test_remote_reads_print_exactly_what_the_local_project_prints(server, monkey
     for argv in reads:
         for output in ("text", "json"):
             local = run(capsys, *argv, "--format", output)
-            remote = run(capsys, *argv, "--format", output, "--controller", url)
+            remote = run(capsys, *argv, "--format", output, "--api", url)
             assert remote == local and local[0] in (0, 1), argv
     monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["admin"])
     for argv in (("token", "list"), ("account", "list")):
         local = run(capsys, *argv, "--format", "json")
-        remote = run(capsys, "--controller", url, *argv, "--format", "json")
+        remote = run(capsys, "--api", url, *argv, "--format", "json")
         assert remote == local and local[0] == 0, argv
 
 
 def test_remote_controls_follow_the_role_and_record_refusals(server, monkeypatch, capsys):
     url, ctx = server["url"], server["ctx"]
     monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["viewer"])
-    code, _, err = run(
-        capsys, "pause", "--pipeline-code", "P", "--reason", "x", "--controller", url
-    )
+    code, _, err = run(capsys, "pause", "--pipeline-code", "P", "--reason", "x", "--api", url)
     assert code == ExitCode.PERMISSION_DENIED
     assert "pipeline 'P' needs operator role" in err
     assert "group grant" in err
@@ -257,9 +255,7 @@ def test_remote_controls_follow_the_role_and_record_refusals(server, monkeypatch
         assert "ci-viewer" in list(refused)
     monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["operator"])
     for verb in ("pause", "resume"):
-        code, out, err = run(
-            capsys, verb, "--pipeline-code", "P", "--reason", "r", "--controller", url
-        )
+        code, out, err = run(capsys, verb, "--pipeline-code", "P", "--reason", "r", "--api", url)
         assert code == 0 and out.startswith("P: "), err
     with ctx.engine.connect() as conn:
         paused_by = conn.execute(text("SELECT PAUSED_BY AS actor FROM AUD_PIPELINE_PAUSES"))
@@ -296,7 +292,7 @@ def test_remote_controls_reach_the_same_actions_with_the_selected_run(server, mo
         ("run", "--pipeline-code", "P", "--task-code", "T", "--rerun", "--with-downstream"),
         ("run", "--pipeline-code", "P", "--backfill", "2026-01-01:2026-01-02"),
     ):
-        code, out, err = run(capsys, *argv, "--reason", "why", "--controller", url)
+        code, out, err = run(capsys, *argv, "--reason", "why", "--api", url)
         assert code == 0, (argv, err)
         if argv[0] == "abort":
             assert "control_id=" in out and out.endswith("P: done\n"), out
@@ -333,19 +329,19 @@ def test_host_only_actions_and_options_are_refused_against_a_server(server, monk
             "`--force` works only on the controller's host",
         ),
     ):
-        code, _, err = run(capsys, "--controller", url, *argv)
+        code, _, err = run(capsys, "--api", url, *argv)
         assert code == ExitCode.USAGE and expected in err, (argv, err)
 
 
 def test_only_https_is_accepted_except_on_this_machine(server, monkeypatch, capsys):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["viewer"])
-    code, _, err = run(capsys, "whoami", "--controller", "http://example.com")
+    code, _, err = run(capsys, "whoami", "--api", "http://example.com")
     assert code == ExitCode.USAGE and "plain HTTP is refused except to localhost" in err
-    code, _, err = run(capsys, "whoami", "--controller", "https://user:secret@example.com")
+    code, _, err = run(capsys, "whoami", "--api", "https://user:secret@example.com")
     assert code == ExitCode.USAGE and "nothing after it" in err
-    monkeypatch.setenv("ETL_CRAFT_CONTROLLER", "https://127.0.0.1:1")
+    monkeypatch.setenv("ETL_CRAFT_API", "https://127.0.0.1:1")
     code, _, err = run(capsys, "whoami")
-    assert code == ExitCode.SERVER and "cannot reach the controller" in err
+    assert code == ExitCode.SERVER and "cannot reach the API" in err
 
 
 def test_attempt_logs_stream_from_the_server_within_the_role(server, monkeypatch, capsys):
@@ -360,14 +356,14 @@ def test_attempt_logs_stream_from_the_server_within_the_role(server, monkeypatch
         )
     monkeypatch.setenv("ETL_CRAFT_TOKEN", server["service"]["viewer"])
     attempt = str(server["attempt"])
-    assert run(capsys, "logs", "--attempt-id", attempt, "--controller", url) == (
+    assert run(capsys, "logs", "--attempt-id", attempt, "--api", url) == (
         0,
         "first\nsecond é\n",
         "",
     )
-    assert run(capsys, "logs", "--attempt-id", attempt, "--offset", "6", "--controller", url)[
-        1
-    ] == ("second é\n")
+    assert run(capsys, "logs", "--attempt-id", attempt, "--offset", "6", "--api", url)[1] == (
+        "second é\n"
+    )
 
 
 def test_sso_sign_in_runs_the_device_flow_on_the_server(
@@ -386,7 +382,7 @@ def test_sso_sign_in_runs_the_device_flow_on_the_server(
         code, out, err = sign_in(monkeypatch, capsys, url, "unused", "y")
         assert code == 0, err
         assert "enter ABCD-EFGH" in out and f"Signed in to {url} as sam (viewer)" in out
-        assert run(capsys, "whoami", "--controller", url)[1] == "sam viewer\n"
+        assert run(capsys, "whoami", "--api", url)[1] == "sam viewer\n"
 
 
 @pytest.mark.parametrize("standalone", [False, True])
@@ -411,7 +407,7 @@ def test_remote_task_run_forwards_the_exact_selection(
             "--reason",
             "checked",
         ]
-    code, out, err = run(capsys, *args, "--controller", server["url"])
+    code, out, err = run(capsys, *args, "--api", server["url"])
     expected = ExitCode.SUCCESS if status == RunStatus.SUCCESS else ExitCode.INCOMPLETE
     assert code == expected and out == "P: task done\n", err
     actor, request = calls[0]
@@ -438,7 +434,7 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
         "maintenance",
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -451,7 +447,7 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
         str(held["control_id"]),
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -469,7 +465,7 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
         "drain",
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -489,7 +485,7 @@ def test_remote_scoped_cli_uses_same_request_and_status_document(server, monkeyp
         "ready",
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -512,7 +508,7 @@ def test_remote_cli_prepares_recovery_restart_and_selected_bulk(
         "maintenance",
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -531,7 +527,7 @@ def test_remote_cli_prepares_recovery_restart_and_selected_bulk(
         "fresh context",
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -547,7 +543,7 @@ def test_remote_cli_prepares_recovery_restart_and_selected_bulk(
         str(source),
         "--format",
         "json",
-        "--controller",
+        "--api",
         url,
     )
     assert code == 0, err
@@ -567,7 +563,7 @@ def test_remote_cli_prepares_recovery_restart_and_selected_bulk(
         )
     )
     code, out, err = run(
-        capsys, "run", "--controls-file", str(selection), "--format", "json", "--controller", url
+        capsys, "run", "--controls-file", str(selection), "--format", "json", "--api", url
     )
     assert code == 0, err
     assert json.loads(out)["outcomes"][0]["control"]["action"] == "HOLD"

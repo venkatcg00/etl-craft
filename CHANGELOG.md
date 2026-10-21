@@ -8,9 +8,22 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Split HTTP from supervision with `etl-craft ui` on PostgreSQL and
+  `etl-craft controller --no-ui` serving only unsigned `GET /health` with the standard library.
+  All-in-one remains the default with HTTP dependencies installed; SQLite supports that layout.
+  API copies share durable sessions, refresh tokens and run state without sticky sessions.
+  Both roles refuse missing, unknown or changed Engine DB migrations for their package.
+  UI readiness recovers from Engine DB outages, SIGTERM rejects new requests and drains
+  existing ones within `Shutdown_grace_seconds`, and explicit `Docs_site.Trusted_proxies`
+  controls forwarded addresses/schemes recorded under audit arguments' `_http` metadata.
+  Unsigned readiness responses report safe causes without exposing database exception details.
+- `etl-craft[ui]` replaces `[server]`, and `[all]` includes UI and every warehouse extra.
+  The remote CLI uses `--api` / `ETL_CRAFT_API`; `ApiClient` replaces `ControllerClient`.
+  Old names have no compatibility aliases. Apply Engine DB migrations before starting roles.
+
 - Consistent names, with no aliases: the old spellings are refused by name.
   - Flags are kebab-case: `--pipeline-code` and `--task-code`. `list` is `pipelines`.
-  - `--server` is `--controller`, and `ETL_CRAFT_SERVER` is `ETL_CRAFT_CONTROLLER`.
+  - The remote address is `--api` / `ETL_CRAFT_API`.
   - Every `craft-connector.yml` key is `Capitalized_snake`: `Jdbc_url`, `User`, `Secret`,
     `Schema`, `Auth_mode`, `Key_file`, `Host`, `Port`, `From_address`, `Tls_mode`,
     `Transport`, `Catalog`, `Token`, `Account` and the rest of each connection and email

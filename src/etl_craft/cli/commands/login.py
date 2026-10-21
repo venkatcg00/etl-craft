@@ -4,7 +4,7 @@ import argparse
 import time
 from collections.abc import Callable
 
-from etl_craft.cli.client import ControllerClient
+from etl_craft.cli.client import ApiClient
 from etl_craft.cli.commands.common import Command, call, command_context, configure_output
 from etl_craft.cli.output import Output
 from etl_craft.cli.prompts import interactive, password
@@ -50,8 +50,8 @@ def _login(args: argparse.Namespace, out: Output) -> int:
 
 def _store(args: argparse.Namespace, session: sessions.Session) -> str:
     """Keep the session where later commands find it; return where, for the message."""
-    if args.controller:
-        client = ControllerClient(args.controller)
+    if args.api:
+        client = ApiClient(args.api)
         client.store(session)
         return f" to {client.url}"
     with command_context(args) as ctx:
@@ -82,8 +82,8 @@ def sso_session(
 
 
 def _logout(args: argparse.Namespace, out: Output) -> int:
-    if args.controller:
-        client = ControllerClient(args.controller)
+    if args.api:
+        client = ApiClient(args.api)
         token = client.forget()
         where = f" of {client.url}"
     else:
@@ -110,7 +110,7 @@ def _whoami(args: argparse.Namespace, out: Output) -> int:
 COMMANDS = (
     Command(
         "login",
-        "Sign in on this project's Engine DB, or on a controller with --controller.",
+        "Sign in on this project's Engine DB, or through the API with --api.",
         _login,
         actions=(
             ActionName.LOGIN_METHODS,

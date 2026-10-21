@@ -19,7 +19,7 @@ def recorded(
     ctx: OperationContext, name: ActionName, arguments: Mapping[str, Any]
 ) -> Iterator[ActionRequest]:
     """Record the request once, before the action changes anything, whatever its outcome."""
-    with acting_as(ctx.actor), command_request(name, arguments) as request:
+    with acting_as(ctx.actor), command_request(name, _http_arguments(ctx, arguments)) as request:
         register_engine(ctx.engine)
         yield request
 
@@ -31,10 +31,19 @@ def record_refusal(
     with acting_as(ctx.actor):
         ActionRequest(
             name,
-            mask_arguments(arguments),
+            mask_arguments(_http_arguments(ctx, arguments)),
             datetime.now(UTC),
             actor=ctx.actor,
             engine=ctx.engine,
             outcome=ActionOutcome.REFUSED,
             exit_code=error.exit_code,
         ).record()
+
+
+def _http_arguments(ctx: OperationContext, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+    if ctx.client_address is None:
+        return arguments
+    return {
+        **arguments,
+        "_http": {"client_address": ctx.client_address, "scheme": ctx.client_scheme},
+    }

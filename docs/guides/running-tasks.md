@@ -57,7 +57,7 @@ manual dispatch; resume the definition before starting a selection.
 The API exposes the same request as `POST /api/v1/runs`, requiring the operator role. Its body
 names `pipeline_code` and `task_code`, and accepts `standalone`, `run_id` or `run_key`,
 `with_downstream`, `ignore_dependencies` (with `standalone`), `run_date` and `reason`. With `standalone: false`, it runs the task in the selected pipeline
-run. The CLI uses this same operation against `--controller`. Execution waits for its actual
+run. The CLI uses this same operation against `--api`. Execution waits for its actual
 outcome.
 
 Run JSON includes `selected_task_ids` (null for a whole pipeline), `ignore_dependencies` and
