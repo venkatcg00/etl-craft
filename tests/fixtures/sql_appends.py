@@ -112,18 +112,6 @@ def check_legacy_upgrade(w, target):
     assert w.rows(f"SELECT COUNT(*) FROM {w.name(target)} WHERE task_run_id IS NULL") == [(2,)]
 
 
-def run_killed_append(context):
-    """Exit without cleanup after a warehouse insert, using a fresh child connection."""
-    import os
-
-    from etl_craft.dialects.engine import build_engine
-    from etl_craft.handlers import sql
-
-    os.environ["ETL_CRAFT_FAULT"] = "sql.append.after_insert:kill"
-    engine = build_engine(context.config)
-    sql.run(context, engine)
-
-
 def check_identity_inputs(w, target):
     """Resolve named SQL inputs and persist the same identities in the target's audit columns."""
     from etl_craft.handlers import sql

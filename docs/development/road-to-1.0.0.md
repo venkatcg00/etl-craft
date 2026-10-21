@@ -152,7 +152,7 @@ item's text, or work done early under another item.
 | S7.O Package, demo and configuration repositories | Planned | | A very small demo stays in package CI; the Support Insights demo and its configuration repository supply release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
 | S7.Q A generic ANSI SQL warehouse | Planned | | A `generic` dialect over SQLAlchemy for rare databases: ANSI SQL only, NULL-safe column comparison for merges, refusals for anything without an ANSI form |
-| S7.R Complete the test suite | Planned | | Two slices: known gaps after S5.AE/before S5.AF; six-skill coverage audit after S7.A/before the first 1.0.0 release candidate |
+| S7.R Complete the test suite | In progress | #228 | Slice 1: recursive secret masking, merge crash windows and full-column/catalog upgrade guards; six-skill coverage audit remains after S7.A |
 | S7.N Faster complete pull-request CI | Done | #170 | Fail-closed collection/shard accounting, isolated schema templates and shared demo workers; complete checks in 6m33s-8m15s (owner-approved ten-minute target) |
 | S8.H Support Insights scenario coverage | Planned | | Deterministic mixed-quality generators, every-feature demonstrations, business-rule and stewardship cases, and runnable README coverage |
 
@@ -300,6 +300,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.R.1 (#228) covers nested secret and URL masking through audits, logs, CLI JSON and HTTP
+on both Engine DBs; real process loss at seven merge boundaries on all four local warehouses
+and both Engine DBs; and full-column retention plus catalog equivalence from every released
+schema. The warehouse SQL is unchanged; cloud acceptance does not apply to the shared
+insert refactor exercised by the four local warehouses.
 
 S5.AE slice 1 (#227) covers two PostgreSQL UI processes sharing sign-in, refresh, run reads
 and revocation, including the loss of one copy. Database/schema readiness recovers without
@@ -578,6 +584,20 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S7.R.1 found that unreleased SQLite migration 0035 reset AUD_TASK_ATTEMPTS.RETRYABLE to TRUE.
+  It was corrected in place, with no marker, because no tag contains it. Development Engine DBs
+  that applied the old file must be recreated (`migrate` refuses an edited applied file).
+  No released installation is affected. The same sweep corrected SQLite migration 0044,
+  whose run-log rebuild omitted CONFIG_SHA256; development databases that applied it also
+  need recreation. Both dialects' unreleased migrations 0019–0045 were checked; no other
+  unintended omissions were found.
+- S7.R.1 reuses the existing full-catalog snapshot guard inside the strengthened released-schema
+  upgrade test, rather than adding a second comparison. Every released table's columns get
+  historical sentinels, with explicit projections for renamed/normalized fields and the deliberate
+  lineage-cache invalidation in 0031. The shared masker and existing Databricks URL sanitizer move to `core.text` for audit,
+  logging and configuration callers. Merge statement boundaries and the outer committed boundary are faulted;
+  a shared insert step keeps the existing SQL unchanged. Refresh-token behaviour is unchanged.
 
 - S5.AE slice 1: acceptance is the standalone PostgreSQL UI, standard-library health-only
   controller, durable cross-copy session sequence, renamed extras/address and package-schema

@@ -87,7 +87,7 @@ Code: `services/operations/inspect.py` (log streaming), `services/docs_publish.p
 
 ### Secrets
 
-Code: `engine/audit.py` (`mask_arguments`), `core/text.py` (`is_secret_name`).
+Code: `engine/audit.py`, `core/log.py`, `core/text.py` (`mask_arguments`, `is_secret_name`).
 
 1. Masking is by argument name: test secrets nested inside lists, inside free-text values
    (connection URLs with passwords, error messages from drivers) and in log lines; each must be

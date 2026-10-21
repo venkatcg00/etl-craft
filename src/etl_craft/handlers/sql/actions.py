@@ -466,23 +466,16 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         action.stamp,
         step="update changed rows",
     )
+    fault_point("sql.scd1.after_update")
 
     new_keys = f"NOT EXISTS (SELECT 1 FROM {target} t WHERE {key_match})"
     insert_count = session.count(
         f"SELECT COUNT(*) FROM {stage} s WHERE {new_keys}", step="new rows"
     )
-    columns = ", ".join(stage_columns)
-    row_id_columns, row_id_values = session.row_id_insert_parts()
-    session.run(
-        f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
-        f"CREATE_DATE, CREATED_BY, "
-        f"UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, "
-        f":now, :updated_by, :now, :updated_by, "
-        f"'N', 'Y'{row_id_values} FROM {stage} s WHERE {new_keys}",
-        action.stamp,
-        step="insert new rows",
+    _insert_merge_rows(
+        session, action, stage_columns, f"FROM {stage} s WHERE {new_keys}", step="insert new rows"
     )
+    fault_point("sql.scd1.after_insert")
     session.drop(changed)
     session.drop(stage)
     target_count = session.count(f"SELECT COUNT(*) FROM {target}", step="target rows")
@@ -532,34 +525,23 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
         action.stamp,
         step="close the active version of changed keys",
     )
+    fault_point("sql.scd2.after_close")
 
-    columns = ", ".join(stage_columns)
-    insert_head = (
-        f"INSERT INTO {target} ({columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
-        f"CREATE_DATE, CREATED_BY, "
-        "UPDATE_DATE, UPDATED_BY, DELETE_FLAG, ACTIVE_FLAG{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, "
-        f":now, :updated_by, :now, :updated_by, 'N', "
-        "'Y'{row_id_values} "
-    )
-    row_id_columns, row_id_values = session.row_id_insert_parts()
     stage_changed = _key_match(task.merge_key, "s", "ck")
-    session.run(
-        insert_head.format(row_id_columns=row_id_columns, row_id_values=row_id_values)
-        + f"FROM {stage} s WHERE EXISTS (SELECT 1 FROM {changed} ck WHERE {stage_changed})",
-        action.stamp,
+    _insert_merge_rows(
+        session,
+        action,
+        stage_columns,
+        f"FROM {stage} s WHERE EXISTS (SELECT 1 FROM {changed} ck WHERE {stage_changed})",
         step="insert new versions of changed keys",
     )
-
+    fault_point("sql.scd2.after_versions")
     no_active = f"NOT EXISTS (SELECT 1 FROM {target} t WHERE {key_match} AND t.ACTIVE_FLAG = 'Y')"
     new = session.count(f"SELECT COUNT(*) FROM {stage} s WHERE {no_active}", step="new keys")
-    row_id_columns, row_id_values = session.row_id_insert_parts()
-    session.run(
-        insert_head.format(row_id_columns=row_id_columns, row_id_values=row_id_values)
-        + f"FROM {stage} s WHERE {no_active}",
-        action.stamp,
-        step="insert new keys",
+    _insert_merge_rows(
+        session, action, stage_columns, f"FROM {stage} s WHERE {no_active}", step="insert new keys"
     )
+    fault_point("sql.scd2.after_insert")
     session.drop(changed)
     session.drop(stage)
     target_count = session.count(f"SELECT COUNT(*) FROM {target}", step="target rows")
@@ -569,6 +551,22 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
         insert_count=closed + new,
         update_count=closed,
         reject_count=rejected,
+    )
+
+
+def _insert_merge_rows(
+    session: Session, action: ActionContext, columns: list[str], body: str, *, step: str
+) -> None:
+    names = ", ".join(columns)
+    row_id_columns, row_id_values = session.row_id_insert_parts()
+    session.run(
+        f"INSERT INTO {session.target} ({names}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
+        "CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, "
+        f"ACTIVE_FLAG{row_id_columns}) "
+        f"SELECT {names}, :pipeline_run_id, :pipeline_id, :task_run_id, "
+        f":now, :updated_by, :now, :updated_by, 'N', 'Y'{row_id_values} {body}",
+        action.stamp,
+        step=step,
     )
 
 

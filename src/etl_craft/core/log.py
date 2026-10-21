@@ -20,6 +20,7 @@ from enum import StrEnum
 from typing import IO, Any
 
 from etl_craft.core.errors import UsageError
+from etl_craft.core.text import mask_arguments
 
 ROOT_LOGGER = "etl_craft"
 LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -56,7 +57,20 @@ class ContextFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         """Add the context to ``record``; never drop it."""
-        fields = dict(_CONTEXT.get())
+        fields = mask_arguments(dict(_CONTEXT.get()))
+        masked = mask_arguments({"message": record.msg})
+        record.msg = masked["message"]
+        if isinstance(record.args, tuple):
+            record.args = tuple(mask_arguments({"value": item})["value"] for item in record.args)
+        elif record.args is not None:
+            record.args = mask_arguments(record.args)
+        if record.exc_info:
+            detail = logging.Formatter().formatException(record.exc_info)
+            record.exc_text = str(mask_arguments({"exception": detail})["exception"])
+        if record.stack_info:
+            record.stack_info = str(mask_arguments({"stack": record.stack_info})["stack"])
+        for name in vars(record).keys() - _RECORD_ATTRIBUTES:
+            setattr(record, name, mask_arguments({name: getattr(record, name)})[name])
         for name, value in fields.items():
             if not hasattr(record, name):
                 setattr(record, name, value)
@@ -91,7 +105,7 @@ class JsonFormatter(logging.Formatter):
             if key not in _RECORD_ATTRIBUTES and key not in entry:
                 entry[key] = value
         if record.exc_info:
-            entry["exception"] = self.formatException(record.exc_info)
+            entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         if record.stack_info:
             entry["stack"] = self.formatStack(record.stack_info)
         return json.dumps(entry, default=str)

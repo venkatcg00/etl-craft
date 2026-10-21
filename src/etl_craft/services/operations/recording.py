@@ -10,7 +10,8 @@ from typing import Any
 from etl_craft.core.actor import acting_as
 from etl_craft.core.enums import ActionName, ActionOutcome
 from etl_craft.core.errors import EtlCraftError
-from etl_craft.engine.audit import ActionRequest, command_request, mask_arguments, register_engine
+from etl_craft.core.text import mask_arguments
+from etl_craft.engine.audit import ActionRequest, command_request, register_engine
 from etl_craft.services.operations.context import OperationContext
 
 

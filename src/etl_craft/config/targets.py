@@ -16,7 +16,12 @@ from urllib.parse import parse_qsl, urlencode
 from etl_craft.config.auth import WAREHOUSE_NAMES, WarehouseSpec, warehouse_spec
 from etl_craft.config.model import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.core.text import is_safe_identifier, jdbc_scheme, parse_jdbc_url
+from etl_craft.core.text import (
+    is_safe_identifier,
+    jdbc_scheme,
+    parse_jdbc_url,
+    strip_databricks_credentials,
+)
 
 # SQLAlchemy dialect names, with their driver, for schemes that differ from the scheme itself.
 _SQLALCHEMY_DIALECTS = {"postgresql": "postgresql+psycopg"}
@@ -30,11 +35,6 @@ _SNOWFLAKE_URL = re.compile(
     r"^jdbc:snowflake://(?P<host>[^:/?]+)(:(?P<port>\d+))?/?(\?(?P<query>.*))?$"
 )
 _SNOWFLAKE_ACCOUNT = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*")
-# The Databricks parameters that name what to connect to; every other one (AuthMech, UID, PWD)
-# is a credential or a JDBC-driver setting, and is dropped.
-_DATABRICKS_PUBLIC_PARAMS = frozenset(
-    {"httppath", "transportmode", "ssl", "conncatalog", "connschema", "catalog", "schema"}
-)
 
 
 @dataclass(frozen=True)
@@ -187,23 +187,6 @@ def _parse_snowflake(jdbc_url: str) -> WarehouseUrl:
         catalog=database,
         query=query,
     )
-
-
-def strip_databricks_credentials(jdbc_url: str) -> str:
-    """Drop credential and driver parameters from a Databricks JDBC URL.
-
-    The URL Databricks' "Connection Details" page offers includes ``AuthMech``, ``UID`` and a
-    real token in ``PWD``; what is left is safe to keep.
-    """
-    prefix, sep, params_blob = jdbc_url.partition(";")
-    if not sep:
-        return jdbc_url
-    kept = [
-        chunk
-        for chunk in params_blob.split(";")
-        if chunk.partition("=")[0].strip().lower() in _DATABRICKS_PUBLIC_PARAMS
-    ]
-    return prefix + (";" + ";".join(kept) if kept else "")
 
 
 def preferred_connection_url(name: str, fields: Mapping[str, str]) -> str:

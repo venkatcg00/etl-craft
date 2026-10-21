@@ -41,6 +41,9 @@ etl-craft run --pipeline-code SUPPORT_DM      # succeeds on the same client runs
 etl-craft generate-docs --with-warehouse      # then open catalog/gaps.html
 ```
 
+Audit JSON and logs redact nested secret fields and connection URL credentials; the demo
+configuration still names secret variables rather than storing their values.
+
 `prepare.py metadata` creates numbered seed migrations under `migrations/` and runs
 `etl-craft migrate`. Repeating it leaves applied files unchanged. To edit loaded metadata,
 add a new project migration instead of editing an applied seed. The optional remote-mode

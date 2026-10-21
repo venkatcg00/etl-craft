@@ -480,3 +480,25 @@ def test_untagged_dollar_literal_with_reserved_token_and_expression():
         )
         == "SELECT $$pipeline_run_id + 1$$, 42 AS run"
     )
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("postgresql://db/project?sslmode=require", "postgresql://db/project?sslmode=require"),
+        (
+            "jdbc:postgresql://user:p%40ss@db/project?pwd=secret&sslmode=require",
+            "jdbc:postgresql://user:***@db/project?sslmode=require",
+        ),
+        ("postgresql://user:secret@[broken/project", "[REDACTED URL]"),
+        (
+            "jdbc:databricks://db/default;httpPath=/sql/x;UID=token;PWD=secret;ssl=1",
+            "jdbc:databricks://db/default;httpPath=/sql/x;ssl=1",
+        ),
+        ("postgresql://user:pa'ss@db/project?pwd=qu'ery", "postgresql://user:***@db/project"),
+    ],
+)
+def test_nested_argument_urls_keep_only_safe_connection_details(url, expected):
+    from etl_craft.core.text import mask_arguments
+
+    assert mask_arguments({"items": [{"url": url}]}) == {"items": [{"url": expected}]}

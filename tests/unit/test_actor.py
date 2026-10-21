@@ -10,8 +10,7 @@ from etl_craft.core.actor import (
     current_actor,
 )
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.core.text import public_url_query
-from etl_craft.engine.audit import mask_arguments
+from etl_craft.core.text import mask_arguments, public_url_query
 
 pytestmark = pytest.mark.unit
 
@@ -39,7 +38,11 @@ def test_sensitive_argument_values_are_masked_recursively():
             "handler": "callable",
         }
     )
-    assert result == {"token": "[REDACTED]", "nested": {"password": "[REDACTED]", "other": "keep"}}
+    assert result == {
+        "token": "[REDACTED]",
+        "nested": {"password": "[REDACTED]", "other": "keep"},
+        "handler": "callable",
+    }
 
 
 @pytest.mark.parametrize("key", ["api_key", "pwd", "passwd", "private_key", "credential", "TOKEN"])

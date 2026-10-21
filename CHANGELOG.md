@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Upgrading a SQLite Engine DB from 0.3.0 keeps each attempt's RETRYABLE value.
+- SQLite upgrades retain each pipeline run's configuration fingerprint. Development Engine DBs
+  that applied the earlier unreleased 0035 or 0044 migration must be recreated; `migrate`
+  refuses changed applied files. No released installation has applied those migrations.
+- Audit arguments mask secret-named keys inside nested lists and mappings, and credentials in
+  connection URLs. Text and JSON logging use the same masking for messages, arguments,
+  context, extra fields and exceptions; audit CLI JSON and API responses retain that redaction.
+
 ### Changed
 
 - Split HTTP from supervision with `etl-craft ui` on PostgreSQL and
