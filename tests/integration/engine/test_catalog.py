@@ -59,14 +59,14 @@ def project(engine_db, tmp_path, monkeypatch):
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
-    (root / "sql_files").mkdir(exist_ok=True)
-    (root / "sql_files" / "convert.sql").write_text(
+    (root / "sql_scripts").mkdir(exist_ok=True)
+    (root / "sql_scripts" / "convert.sql").write_text(
         "SELECT o.id, o.amount * r.rate AS amount_usd\n"
         "FROM staging.orders o JOIN ref.rates r ON r.currency = o.currency\n",
         encoding="utf-8",
     )
-    (root / "ingestion_scripts" / "crm").mkdir(parents=True, exist_ok=True)
-    (root / "ingestion_scripts" / "crm" / "orders.py").write_text("def run():\n    pass\n", "utf-8")
+    (root / "python_scripts" / "crm").mkdir(parents=True, exist_ok=True)
+    (root / "python_scripts" / "crm" / "orders.py").write_text("def run():\n    pass\n", "utf-8")
     monkeypatch.chdir(root)
     engine = engine_db.engine
     with engine.begin() as conn:
@@ -76,7 +76,7 @@ def project(engine_db, tmp_path, monkeypatch):
             ingest,
             "pull",
             "PYTHON",
-            SCRIPT_NAME="crm/orders.py",
+            SCRIPT_FILE="python_scripts/crm/orders.py",
             TARGET_OBJECT="raw.orders",
             SOURCE_OBJECT="CRM API",
         )
@@ -86,7 +86,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "stage",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="staging.orders",
-            SOURCE_SQL="SELECT id, amt AS amount, currency FROM raw.orders WHERE amt > 0",
+            SELECT_QUERY="SELECT id, amt AS amount, currency FROM raw.orders WHERE amt > 0",
             DOCUMENTATION="Stages positive orders.",
         )
         sales = add_pipeline(conn, "SALES")
@@ -96,7 +96,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "convert",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="analytics.sales.orders",
-            SOURCE_SQL_FILE="convert.sql",
+            SCRIPT_FILE="sql_scripts/convert.sql",
         )
         rules = add_task(conn, sales, "rules", "BUSINESS_RULES")
         insert_row(
@@ -117,7 +117,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "daily",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="mart.daily",
-            SOURCE_SQL="SELECT COUNT(*) AS n, SUM(amount_usd) AS total FROM sales.orders",
+            SELECT_QUERY="SELECT COUNT(*) AS n, SUM(amount_usd) AS total FROM sales.orders",
         )
         add_task(
             conn,
@@ -125,7 +125,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "copy_all",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.everything",
-            SOURCE_SQL="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
+            SELECT_QUERY="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
         )
         add_pipeline_dependency(conn, mart, sales)
         add_dependency(conn, ingest, stage, pull)
@@ -187,7 +187,7 @@ def test_the_catalog_joins_tasks_tables_and_rules(project):
     edges = {(e.source, e.target, e.task) for e in catalog.table_edges}
     assert ("sales.orders", "mart.everything", "MART.copy_all") in edges
     assert ("external:crm api", "raw.orders", "INGEST.pull") in edges
-    assert catalog.scripts["crm/orders.py"].exists
+    assert catalog.scripts["python_scripts/crm/orders.py"].exists
 
 
 def test_a_tables_graph_runs_to_the_first_source_and_the_last_consumer(project):
@@ -253,7 +253,9 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
             "tasks/SALES.rules.html",
         ]
     )
-    assert any(re.fullmatch(r"scripts/crm_orders\.py-[0-9a-f]{8}\.html", p) for p in pages)
+    assert any(
+        re.fullmatch(r"scripts/python_scripts_crm_orders\.py-[0-9a-f]{8}\.html", p) for p in pages
+    )
     assert site.pages == len(pages)
     table = (folder / table_url("sales.orders")).read_text("utf-8")
     assert '<svg class="lineage"' in table and 'data-col="sales.orders|amount_usd"' in table
@@ -458,7 +460,7 @@ def test_constant_lineage_has_no_gap_and_failed_reasons_are_escaped(project, tmp
             "make",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.constant",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
     catalog = build_catalog(engine, config)
     catalog.tasks["MART.copy_all"].lineage_error = '<script>alert("bad")</script>'
@@ -542,7 +544,7 @@ def test_failed_sql_output_does_not_guess_deployed_only_columns(project, tmp_pat
     with duckdb.connect(str(root / "analytics.duckdb")) as conn:
         conn.execute("CREATE SCHEMA sales")
         conn.execute("CREATE TABLE sales.orders (id BIGINT, unresolved_output DECIMAL(18,2))")
-    (config.sql_files_dir / "convert.sql").write_text("SELECT * FROM missing.source")
+    (config.sql_scripts_dir / "convert.sql").write_text("SELECT * FROM missing.source")
     folder = write_site(
         build_catalog(engine, config, with_warehouse=True), config, tmp_path / "site"
     ).folder

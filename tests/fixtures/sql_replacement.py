@@ -11,7 +11,7 @@ def check_replacement_failure(w, target, action):
     params = {"SQL_ACTION": action, "TARGET_OBJECT": target}
     if action == "OVERWRITE_TABLE":
         w.setup(target, "SELECT 1 AS id", action)
-    w.run(target, SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params)
+    w.run(target, SELECT_QUERY="SELECT 1 AS id UNION ALL SELECT 2", **params)
     before_definition = definition(w, target, comment=True)
     before = sorted(w.rows(f"SELECT * FROM {w.name(target)}"))
     columns = w.columns(target)
@@ -23,7 +23,7 @@ def check_replacement_failure(w, target, action):
         with pytest.MonkeyPatch.context() as patch:
             patch.setenv("ETL_CRAFT_FAULT", f"sql.replace.{point}")
             with pytest.raises(InjectedFaultError):
-                w.run(target, SOURCE_SQL="SELECT 3 AS id", **params)
+                w.run(target, SELECT_QUERY="SELECT 3 AS id", **params)
         assert sorted(w.rows(f"SELECT * FROM {w.name(target)}")) == before
         assert w.columns(target) == columns
         assert definition(w, target) == before_definition
@@ -39,17 +39,17 @@ def check_replacement_failure(w, target, action):
         if dialect.replace_strategy == "create_or_replace":
             patch.setattr(Session, "run", invalid_publish)
             with pytest.raises(HandlerError):
-                w.run(target, SOURCE_SQL="SELECT 3 AS id", **params)
+                w.run(target, SELECT_QUERY="SELECT 3 AS id", **params)
             assert sorted(w.rows(f"SELECT * FROM {w.name(target)}")) == before
             assert definition(w, target) == before_definition
     if action == "OVERWRITE_TABLE":
         with pytest.raises(HandlerError):
             w.run(
-                target, SOURCE_SQL="SELECT CAST('invalid_integer' AS VARCHAR(40)) AS id", **params
+                target, SELECT_QUERY="SELECT CAST('invalid_integer' AS VARCHAR(40)) AS id", **params
             )
         assert sorted(w.rows(f"SELECT * FROM {w.name(target)}")) == before
     assert definition(w, target) == before_definition
-    result = w.run(target, SOURCE_SQL="SELECT 3 AS id", **params)
+    result = w.run(target, SELECT_QUERY="SELECT 3 AS id", **params)
     assert result.insert_count == 1 and w.rows(f"SELECT id FROM {w.name(target)}") == [(3,)]
     assert "replacement metadata must survive" in str(definition(w, target))
     assert not any(table.startswith(f"{target.lower()}__etl_keep_") for table in w.tables())

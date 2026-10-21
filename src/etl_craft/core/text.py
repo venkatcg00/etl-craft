@@ -215,7 +215,7 @@ def unquote(value: str) -> str:
 # SQL statements
 
 
-def _sql_parts(sql_text: str, *, placeholders: bool = False) -> Iterator[tuple[str, bool]]:
+def sql_parts(sql_text: str, *, placeholders: bool = False) -> Iterator[tuple[str, bool]]:
     """Yield code and protected quotes/comments using one scanner."""
     i = start = 0
     length = len(sql_text)
@@ -264,7 +264,7 @@ def _sql_parts(sql_text: str, *, placeholders: bool = False) -> Iterator[tuple[s
 def _delimiter_in_quote_or_comment(sql: str, start: int, delimiter: int) -> bool:
     """Whether a prospective dollar delimiter lies inside quoted text or a comment."""
     offset = start
-    for part, protected in _sql_parts(sql[start:]):
+    for part, protected in sql_parts(sql[start:]):
         end = offset + len(part)
         if offset <= delimiter < end:
             return protected and part.startswith(("'", '"', "`", "--", "/*"))
@@ -276,7 +276,7 @@ def split_statements(sql_text: str) -> list[str]:
     """Split SQL on semicolons outside quoted strings, identifiers, bodies and comments."""
     statements: list[str] = []
     current = ""
-    for part, protected in _sql_parts(sql_text):
+    for part, protected in sql_parts(sql_text):
         if protected:
             current += part
             continue
@@ -338,7 +338,7 @@ def is_only_comments(statement: str) -> bool:
     """Whether ``statement`` holds nothing but comments and whitespace."""
     return all(
         (protected and part.startswith(("--", "/*"))) or not part.strip()
-        for part, protected in _sql_parts(statement)
+        for part, protected in sql_parts(statement)
     )
 
 
@@ -362,7 +362,7 @@ def substitute_task_tokens(
     refresh_type: str,
     pipeline_run_id_substitution: bool,
     filter_enabled: bool,
-    source: str = "SOURCE_SQL",
+    source: str = "SELECT_QUERY",
     force_all: bool = False,
     run_date: date = LINEAGE_RUN_DATE,
     run_date_substitution: bool = False,
@@ -392,7 +392,7 @@ def substitute_task_tokens(
     task's definition, and running the SQL anyway would read the wrong rows. The id is an
     integer the engine resolved, so it is written into the text directly.
     """
-    parts = list(_sql_parts(sql, placeholders=True))
+    parts = list(sql_parts(sql, placeholders=True))
     found = {
         match.group(1)
         for part, protected in parts

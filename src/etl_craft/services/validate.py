@@ -4,7 +4,7 @@ A run finds a mistake in a task's definition only when it reaches that task, and
 not even then: an alert that runs before the tasks it reports on, or a ``HAS_DATA`` dependency
 on a task that never reports rows. ``validate`` reads the Engine DB and the project's files, and
 checks each active pipeline and task with the same code a run uses. It runs no tasks: SQL is
-read and checked, ingestion scripts are parsed, not imported. Active source definitions are
+read and checked, Python scripts are parsed, not imported. Active source definitions are
 compared with existing warehouse tables by the standalone validate command.
 
 Each finding is a ``FAIL`` (a run would fail, hang or silently do something else) or a ``WARN``
@@ -23,7 +23,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import ingestion_script
+from etl_craft.config.project import python_script
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.cron import parse, timezone
 from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlAction
@@ -53,7 +53,7 @@ from etl_craft.engine.repository.validation import (
 )
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
-from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline
+from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline, sql_script
 from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.sql import task_dialect
@@ -63,7 +63,12 @@ from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.doctor import Status
-from etl_craft.services.lineage import dialect_and_catalog, output_columns, table_name
+from etl_craft.services.lineage import (
+    dialect_and_catalog,
+    output_columns,
+    script_lineage,
+    table_name,
+)
 from etl_craft.services.source_columns import definition_problem, drift, warehouse_columns
 from etl_craft.services.trigger_validation import trigger_definition, trigger_graph_problems
 from etl_craft.warehouse.connection import open_warehouse
@@ -78,6 +83,7 @@ KNOWN_PARAMETERS: dict[str, frozenset[str]] = {
     Handler.EVENT_WAIT: event_wait.PARAMETERS,
     Handler.RUN_PIPELINE: run_pipeline.PARAMETERS,
     Handler.SQL: SQL_PARAMETERS,
+    Handler.SQL_SCRIPT: sql_script.PARAMETERS,
     Handler.BUSINESS_RULES: frozenset(),
     Handler.EMAIL_ALERT: email_alert.PARAMETERS,
 }
@@ -389,6 +395,8 @@ def _task(
             report.fail(where, problem)
     except EtlCraftError as error:
         report.fail(where, str(error))
+    if task.handler == Handler.SQL_SCRIPT:
+        _script_overlap(context, data, report)
     for warning in _unread_sql(conn, context):
         report.warn(where, warning)
 
@@ -543,10 +551,10 @@ def _business_rules(conn: Connection, context: TaskContext, data: _Metadata) -> 
 
 def _python(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     params = context.task_params
-    name = (params.get("SCRIPT_NAME") or "").strip()
+    name = (params.get("SCRIPT_FILE") or "").strip()
     if not name:
-        return ["SCRIPT_NAME is required for HANDLER=PYTHON: a .py file under ingestion_scripts/"]
-    path = ingestion_script(context.config, name)
+        return ["SCRIPT_FILE is required for HANDLER=PYTHON, such as python_scripts/load.py"]
+    path = python_script(context.config, name)
     python_scripts.parse_input_params(params.get("INPUT_PARAMS"))
     problem = python_scripts.script_definition_problem(path, name)
     return [problem] if problem else []
@@ -569,10 +577,16 @@ def _run_pipeline(conn: Connection, context: TaskContext, data: _Metadata) -> li
     return []
 
 
+def _sql_script(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
+    sql_script.read_script(context)
+    return []
+
+
 CHECKS: dict[str, Callable[[Connection, TaskContext, _Metadata], list[str]]] = {
     Handler.EVENT_WAIT: _event_wait,
     Handler.RUN_PIPELINE: _run_pipeline,
     Handler.SQL: _sql,
+    Handler.SQL_SCRIPT: _sql_script,
     Handler.BUSINESS_RULES: _business_rules,
     Handler.PYTHON: _python,
     Handler.EMAIL_ALERT: _email_alert,
@@ -587,7 +601,35 @@ def _code_problem(column: str, code: str) -> str:
     )
 
 
+RENAMED_PARAMETERS = {
+    "SCRIPT_NAME": "SCRIPT_FILE",
+    "SOURCE_SQL": "SELECT_QUERY",
+    "SOURCE_SQL_FILE": "SCRIPT_FILE",
+}
+"""Task parameters renamed without aliases, and the names that replace them."""
+
+
 def _unknown(what: str, name: str, known: Sequence[str]) -> str:
-    hints = suggest(name, list(known))
+    renamed = RENAMED_PARAMETERS.get(name, "")
+    hints = [renamed] if renamed in known else suggest(name, list(known))
     hint = f"; did you mean {', '.join(hints)}" if hints else ""
     return f"{what} {name} is not read by etl-craft, so it has no effect{hint}"
+
+
+def _script_overlap(context: TaskContext, data: _Metadata, report: Report) -> None:
+    try:
+        script = sql_script.read_script(context)
+    except EtlCraftError:
+        return
+    lineage = script_lineage(";\n".join(script.statements), context.task_code, context.config)
+    _, catalog = dialect_and_catalog(context.config)
+    for task in data.tasks:
+        if task.handler != Handler.SQL:
+            continue
+        target = table_name(data.params[task.task_id].get("TARGET_OBJECT", "").split("."), catalog)
+        if target in lineage.targets:
+            report.warn(
+                f"{context.pipeline_code}.{context.task_code}",
+                f"unmanaged SQL_SCRIPT writes {target}, also targeted by managed task "
+                f"{task.label}; it bypasses managed hashes, ROW_ID and target locks",
+            )

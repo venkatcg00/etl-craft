@@ -41,7 +41,7 @@ def check_evolution(w, target):
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }
-    w.run(target, SOURCE_SQL=shape, **params)
+    w.run(target, SELECT_QUERY=shape, **params)
     before = types(w, target)
     key = w.rows(f"SELECT id, row_id FROM {w.name(target)}")
     has_arrays = dialect.spec.key != "duckdb_iceberg"
@@ -55,7 +55,7 @@ def check_evolution(w, target):
         f"CAST('2026-10-06 12:34:56.123456' AS {timestamp}) AS happened_at"
     )
     source = f"SELECT id, name, {extra} FROM {w.name(target)} WHERE 1 = 0"
-    w.run(target, SOURCE_SQL=source, SCHEMA_EVOLUTION="true", **params)
+    w.run(target, SELECT_QUERY=source, SCHEMA_EVOLUTION="true", **params)
     after = types(w, target)
     assert {name: after[name] for name in before} == before
     assert w.rows(f"SELECT id, row_id FROM {w.name(target)}") == key
@@ -75,13 +75,13 @@ def check_evolution(w, target):
         assert after["happened_at"] == "TIMESTAMP_NTZ(6)"
     # Read existing columns from the target, preserving its warehouse-reported types on retry.
     retry = f"SELECT id, name, {', '.join(new_columns)} FROM {w.name(target)} WHERE 1 = 0"
-    w.run(target, SOURCE_SQL=retry, SCHEMA_EVOLUTION="true", **params)
+    w.run(target, SELECT_QUERY=retry, SCHEMA_EVOLUTION="true", **params)
     assert types(w, target) == after
     bad = retry.replace("amount,", "CAST(amount AS DECIMAL(12,3)) AS amount,").replace(
         "happened_at ", "happened_at, CAST(1 AS INTEGER) AS refused "
     )
     with pytest.raises(HandlerError, match="cannot change the existing type") as error:
-        w.run(target, SOURCE_SQL=bad, SCHEMA_EVOLUTION="true", **params)
+        w.run(target, SELECT_QUERY=bad, SCHEMA_EVOLUTION="true", **params)
     assert "12,2" in str(error.value).replace(" ", "")
     assert "12,3" in str(error.value).replace(" ", "")
     assert types(w, target) == after
@@ -90,7 +90,7 @@ def check_evolution(w, target):
     write = f"SELECT id, name, {listed} FROM {w.name(target)}"
     w.run(
         target,
-        SOURCE_SQL=write,
+        SELECT_QUERY=write,
         MERGE_COMPARE_COLUMNS="name|amount",
         **{name: value for name, value in params.items() if name != "MERGE_COMPARE_COLUMNS"},
     )
@@ -107,7 +107,7 @@ def check_interrupted_evolution(w, target):
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }
-    w.run(target, SOURCE_SQL=shape, **params)
+    w.run(target, SELECT_QUERY=shape, **params)
     before = w.rows(f"SELECT * FROM {w.name(target)}")
     source = (
         f"SELECT id, name, CAST(1 AS DECIMAL(12,2)) AS first_added, "
@@ -123,12 +123,12 @@ def check_interrupted_evolution(w, target):
 
         patch.setattr(Session, "run", fail_second)
         with pytest.raises(HandlerError, match="column addition unavailable"):
-            w.run(target, SOURCE_SQL=source, SCHEMA_EVOLUTION="true", **params)
+            w.run(target, SELECT_QUERY=source, SCHEMA_EVOLUTION="true", **params)
     columns = w.columns(target)
     assert "second_added" not in columns
     original_columns = [name for name in columns if name != "first_added"]
     assert w.rows(f"SELECT {', '.join(original_columns)} FROM {w.name(target)}") == before
     transactional = warehouse_dialect(w.config).replace_strategy == "transactional"
     assert ("first_added" in columns) != transactional
-    w.run(target, SOURCE_SQL=source, SCHEMA_EVOLUTION="true", **params)
+    w.run(target, SELECT_QUERY=source, SCHEMA_EVOLUTION="true", **params)
     assert {"first_added", "second_added"} <= set(w.columns(target))

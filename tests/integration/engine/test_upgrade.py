@@ -7,6 +7,7 @@ representative rows by named column.
 """
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,9 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
     monkeypatch.chdir(tmp_path)
     retained = seed(engine, tmp_path)
 
+    upgrade_started = datetime.now(UTC)
     apply_pending_migrations(engine, project_default=tmp_path / "migrations")
+    upgrade_ended = datetime.now(UTC)
 
     if folder == "postgres":
         with engine.begin() as conn:
@@ -53,7 +56,7 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
             assert upgraded[section] == expected, section
     finally:
         fresh.dispose()
-    assert_retained(engine, retained)
+    assert_retained(engine, retained, (upgrade_started, upgrade_ended))
     # The partial unique indexes came along too: one open pause per pipeline.
     with engine.begin() as conn:
         conn.execute(

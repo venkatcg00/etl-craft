@@ -9,6 +9,12 @@ import mkdocs_gen_files
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+# Older release tags name the guide ingestion-scripts.md, and this renderer builds them too.
+SCRIPT_GUIDE = next(
+    name
+    for name in ("python-scripts.md", "ingestion-scripts.md")
+    if (ROOT / "docs" / "guides" / name).is_file()
+)
 
 nav = mkdocs_gen_files.Nav()
 for source in sorted((SRC / "etl_craft").rglob("*.py")):
@@ -27,13 +33,13 @@ for source in sorted((SRC / "etl_craft").rglob("*.py")):
             handle.write(
                 "# Python API\n\n"
                 "Use these references alongside the guides: signatures, types and docstrings "
-                "come from the installed source. The ingestion-script contract is the entry "
+                "come from the installed source. The Python-script contract is the entry "
                 "point for writing Python tasks. Other modules describe the engine's current "
                 "implementation; their interfaces may change before 1.0.0.\n\n"
                 "## Start here\n\n"
-                "- [Ingestion script types](scripting.md): `ScriptTask`, `ScriptResult` and "
+                "- [Python script types](scripting.md): `ScriptTask`, `ScriptResult` and "
                 "`Offset`, with the data a task receives and returns.\n"
-                "- [Writing ingestion scripts](../../guides/ingestion-scripts.md): examples, "
+                f"- [Writing Python scripts](../../guides/{SCRIPT_GUIDE}): examples, "
                 "offsets, warehouse access and logging.\n"
                 "- [Configuration](config/index.md): loading the project configuration "
                 "and resolving its settings.\n"

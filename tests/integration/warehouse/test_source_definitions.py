@@ -20,7 +20,7 @@ def test_scd_engine_columns_match_the_action_contract(sql_world, action, tmp_pat
         "writer",
         SQL_ACTION=f" {action.lower()} ",
         TARGET_OBJECT="managed",
-        SOURCE_SQL=select,
+        SELECT_QUERY=select,
         MERGE_KEY="id",
         MERGE_COMPARE_COLUMNS="amount",
     )
@@ -53,7 +53,7 @@ def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
             "source_reader",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=f"{world.schema}.output",
-            SOURCE_SQL=f"SELECT id FROM {source}",
+            SELECT_QUERY=f"SELECT id FROM {source}",
         )
     folder = tmp_path / "seed"
     result = export_config(world.engine_db, folder, config=world.config)
@@ -107,7 +107,7 @@ def test_catalog_finds_sql_target_gaps_without_flagging_audit_columns(sql_world)
         "documented_target",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="documented",
-        SOURCE_SQL="SELECT 1 AS id, 2 AS removed",
+        SELECT_QUERY="SELECT 1 AS id, 2 AS removed",
     )
     world.execute(f"DROP TABLE {world.name('documented')}")
     world.execute(
@@ -136,7 +136,7 @@ def test_declared_nullability_and_kind_are_compared_with_deployed_structure(sql_
             "reader",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=f"{world.schema}.output",
-            SOURCE_SQL=f"SELECT id FROM {source}",
+            SELECT_QUERY=f"SELECT id FROM {source}",
         )
     folder = tmp_path / "contracts"
     export_config(world.engine_db, folder, config=world.config)

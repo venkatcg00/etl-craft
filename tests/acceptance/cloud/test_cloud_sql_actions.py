@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")
 
 def cloud_world(tmp_path, name, fields, table_format, schema):
     project = tmp_path / "etl-craft"
-    (project / "sql_files").mkdir(parents=True)
+    (project / "sql_scripts").mkdir(parents=True)
     config = write_config(project, name, fields, table_format)
     engine_db = sqlite_engine_db(project).engine
     apply_schema(engine_db)
@@ -81,7 +81,7 @@ def walk_every_action(w):
             "create",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=names["orders"],
-            SOURCE_SQL="SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'",
+            SELECT_QUERY="SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'",
         )
         assert created.insert_count == 2
         assert sorted(w.rows(f"SELECT row_id FROM {w.name(names['orders'])}")) == [(1,), (2,)]
@@ -92,7 +92,7 @@ def walk_every_action(w):
             "overwrite",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT=names["orders"] + "_copy",
-            SOURCE_SQL=f"SELECT id, name FROM {w.name(names['orders'])}",
+            SELECT_QUERY=f"SELECT id, name FROM {w.name(names['orders'])}",
         )
         assert overwrite.insert_count == 2
 
@@ -103,7 +103,7 @@ def walk_every_action(w):
             "scd1",
             SQL_ACTION="SCD1_MERGE",
             TARGET_OBJECT=names["customers"],
-            SOURCE_SQL=f"SELECT 1 AS id, {ann} AS name UNION ALL SELECT 2, 'Bo'",
+            SELECT_QUERY=f"SELECT 1 AS id, {ann} AS name UNION ALL SELECT 2, 'Bo'",
             **scd,
         )
         assert (first.insert_count, first.update_count) == (2, 0)
@@ -111,7 +111,7 @@ def walk_every_action(w):
             "scd1",
             SQL_ACTION="SCD1_MERGE",
             TARGET_OBJECT=names["customers"],
-            SOURCE_SQL=f"SELECT 1 AS id, {ann} AS name UNION ALL SELECT 2, 'Bob'",
+            SELECT_QUERY=f"SELECT 1 AS id, {ann} AS name UNION ALL SELECT 2, 'Bob'",
             **scd,
         )
         assert (second.insert_count, second.update_count) == (0, 1)
@@ -120,14 +120,14 @@ def walk_every_action(w):
             "scd2",
             SQL_ACTION="SCD2_MERGE",
             TARGET_OBJECT=names["history"],
-            SOURCE_SQL=f"SELECT 1 AS id, {ann} AS name",
+            SELECT_QUERY=f"SELECT 1 AS id, {ann} AS name",
             **scd,
         )
         changed = w.run(
             "scd2",
             SQL_ACTION="SCD2_MERGE",
             TARGET_OBJECT=names["history"],
-            SOURCE_SQL="SELECT 1 AS id, 'Anna' AS name",
+            SELECT_QUERY="SELECT 1 AS id, 'Anna' AS name",
             **scd,
         )
         assert (changed.update_count, changed.insert_count, changed.target_count) == (1, 1, 2)
@@ -149,7 +149,7 @@ def walk_every_action(w):
             "append",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT=names["events"],
-            SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2",
+            SELECT_QUERY="SELECT 1 AS id UNION ALL SELECT 2",
         )
         assert appended.insert_count == 2
 
@@ -181,7 +181,7 @@ def walk_every_action(w):
             SQL_ACTION="DELETE_ROWS",
             TARGET_OBJECT=names["customers"],
             MERGE_KEY="id",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
         hard = w.run(
             "hard",
@@ -189,7 +189,7 @@ def walk_every_action(w):
             TARGET_OBJECT=names["customers"],
             MERGE_KEY="id",
             HARD_DELETE="true",
-            SOURCE_SQL="SELECT 2 AS id",
+            SELECT_QUERY="SELECT 2 AS id",
         )
         assert (soft.delete_count, hard.delete_count) == (1, 1)
         assert w.rows(f"SELECT id, delete_flag FROM {w.name(names['customers'])}") == [(1, "Y")]
@@ -270,14 +270,14 @@ def walk_views(w):
             "orders",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=orders,
-            SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2 AS id",
+            SELECT_QUERY="SELECT 1 AS id UNION ALL SELECT 2 AS id",
         )
         params = {"SQL_ACTION": "CREATE_VIEW", "TARGET_OBJECT": view}
-        w.run("view", SOURCE_SQL=f"SELECT id FROM {w.name(orders)} WHERE id > 1", **params)
+        w.run("view", SELECT_QUERY=f"SELECT id FROM {w.name(orders)} WHERE id > 1", **params)
         assert w.rows(f"SELECT id FROM {w.name(view)}") == [(2,)]
         w.execute(f"GRANT SELECT ON VIEW {w.name(view)} TO {grantee}")
 
-        w.run("view", SOURCE_SQL=f"SELECT id, id * 10 AS tens FROM {w.name(orders)}", **params)
+        w.run("view", SELECT_QUERY=f"SELECT id, id * 10 AS tens FROM {w.name(orders)}", **params)
         assert sorted(w.rows(f"SELECT id, tens FROM {w.name(view)}")) == [(1, 10), (2, 20)]
         with w.warehouse.connect() as conn:
             grants = [
@@ -292,13 +292,15 @@ def walk_views(w):
             ), grants
 
         with pytest.raises(HandlerError, match="CREATE_VIEW replaces only views"):
-            w.run("on_table", SQL_ACTION="CREATE_VIEW", TARGET_OBJECT=orders, SOURCE_SQL="SELECT 1")
+            w.run(
+                "on_table", SQL_ACTION="CREATE_VIEW", TARGET_OBJECT=orders, SELECT_QUERY="SELECT 1"
+            )
         assert len(w.rows(f"SELECT id FROM {w.name(orders)}")) == 2
 
         secured = {
             "SQL_ACTION": "CREATE_VIEW",
             "TARGET_OBJECT": secure,
-            "SOURCE_SQL": f"SELECT id FROM {w.name(orders)}",
+            "SELECT_QUERY": f"SELECT id FROM {w.name(orders)}",
             "SECURE_VIEW": "true",
         }
         if snowflake:
@@ -386,7 +388,7 @@ def walk_row_id_generation(w):
                 legacy,
                 SQL_ACTION="APPEND_TABLE",
                 TARGET_OBJECT=legacy,
-                SOURCE_SQL="SELECT CAST(2 AS BIGINT) AS id",
+                SELECT_QUERY="SELECT CAST(2 AS BIGINT) AS id",
             )
             assert sorted(w.rows(f"SELECT row_id FROM {w.name(legacy)}")) == [(7,), (8,)]
     finally:
@@ -434,7 +436,7 @@ def walk_table_format_checks(w):
             "seed",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT=target,
-            SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id",
+            SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id",
         )
         before = w.rows(f"SELECT * FROM {w.name(target)}")
         for requested in (actual, opposite):
@@ -461,7 +463,7 @@ def walk_table_format_checks(w):
                     SQL_ACTION=action,
                     TARGET_OBJECT=target,
                     TABLE_FORMAT=opposite,
-                    SOURCE_SQL="SELECT id FROM nonexistent_source",
+                    SELECT_QUERY="SELECT id FROM nonexistent_source",
                     **params,
                 )
         assert w.rows(f"SELECT * FROM {w.name(target)}") == before
@@ -471,7 +473,7 @@ def walk_table_format_checks(w):
             TARGET_OBJECT=target,
             TABLE_FORMAT=actual,
             SCHEMA_EVOLUTION="true",
-            SOURCE_SQL="SELECT CAST(2 AS BIGINT) AS id, CAST('ok' AS VARCHAR(20)) AS added",
+            SELECT_QUERY="SELECT CAST(2 AS BIGINT) AS id, CAST('ok' AS VARCHAR(20)) AS added",
         )
         assert w.rows(f"SELECT id, added FROM {w.name(target)}") == [(2, "ok")]
         w.run(
@@ -479,14 +481,14 @@ def walk_table_format_checks(w):
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=replacement,
             TABLE_FORMAT=actual,
-            SOURCE_SQL="SELECT CAST(3 AS BIGINT) AS id",
+            SELECT_QUERY="SELECT CAST(3 AS BIGINT) AS id",
         )
         w.run(
             "replace",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=replacement,
             TABLE_FORMAT=actual,
-            SOURCE_SQL="SELECT CAST(4 AS BIGINT) AS id",
+            SELECT_QUERY="SELECT CAST(4 AS BIGINT) AS id",
         )
         assert w.rows(f"SELECT id FROM {w.name(replacement)}") == [(4,)]
         with w.warehouse.connect() as conn:
@@ -838,7 +840,7 @@ def walk_source_definitions(w, folder):
             "land_source",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=target,
-            SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id, CAST(2 AS BIGINT) AS removed",
+            SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id, CAST(2 AS BIGINT) AS removed",
         )
         with w.engine_db.begin() as conn:
             conn.execute(
@@ -849,7 +851,7 @@ def walk_source_definitions(w, folder):
             "source_reader",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=target + "_consumer",
-            SOURCE_SQL=f"SELECT id FROM {source}",
+            SELECT_QUERY=f"SELECT id FROM {source}",
         )
         exported = export_config(w.engine_db, folder, config=w.config)
         assert exported.rows["columns.csv"] >= 2

@@ -9,7 +9,7 @@ with `TARGET_SCHEMA_NAME=mart` and `TARGET_TABLE_NAME=events`, referencing the m
 | PARAMETER_NAME | PARAMETER_VALUE |
 | --- | --- |
 | SQL_ACTION | SCD1_MERGE |
-| SOURCE_SQL | SELECT event_id, payload FROM source.events WHERE event_id > $$watermark |
+| SELECT_QUERY | SELECT event_id, payload FROM source.events WHERE event_id > $$watermark |
 | MERGE_KEY | event_id |
 | MERGE_COMPARE_COLUMNS | payload |
 | WATERMARK_COLUMN | event_id |

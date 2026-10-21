@@ -1,17 +1,21 @@
 # SQL tasks
 
+For procedures, grants and maintenance, use an ordinary [SQL_SCRIPT task](sql-scripts.md).
+The managed actions below keep their read-only SELECT contract.
+
+
 A task with `HANDLER = 'SQL'` supplies a read-only SELECT and names what to do with its rows. The
 engine wraps the SELECT in one of nine actions and performs every write itself. The task's
 settings are rows in `CFG_TASK_PARAMETERS`.
 
 ## The SELECT
 
-Write the SELECT inline, or keep it in a file under the project's `sql_files/` folder:
+Write the SELECT inline, or keep it in a file under the project's `sql_scripts/` folder:
 
 | Parameter | Value |
 |---|---|
-| `SOURCE_SQL` | the SELECT itself |
-| `SOURCE_SQL_FILE` | a path inside `sql_files/`, such as `sales/orders.sql` |
+| `SELECT_QUERY` | the SELECT itself |
+| `SCRIPT_FILE` | the file's path from the project directory, inside `sql_scripts/`, such as `sql_scripts/sales/orders.sql` |
 
 Name every table in the SELECT at least as `schema.table`; a bare table name has no schema. The
 connection is already in the database of the active `Warehouse` profile, which changes per
@@ -457,7 +461,7 @@ Every statement is logged with what it does, the rows the database reports and h
 `--log-level DEBUG` adds the SQL itself:
 
 ```
-INFO etl_craft.handlers.sql [task_run_id=412 pipeline=SALES task=load_customers ...]: SCD1_MERGE analytics.sales.customers from SOURCE_SQL_FILE='customers.sql' on PostgreSQL
+INFO etl_craft.handlers.sql [task_run_id=412 pipeline=SALES task=load_customers ...]: SCD1_MERGE analytics.sales.customers from SCRIPT_FILE='sql_scripts/customers.sql' on PostgreSQL
 INFO etl_craft.handlers.sql.session [...]: stage the SELECT (0.84s)
 INFO etl_craft.handlers.sql.session [...]: changed rows = 12
 INFO etl_craft.handlers.sql.session [...]: update changed rows: 12 row(s) (0.21s)
@@ -500,7 +504,7 @@ each statement, a failure between them can leave the batch absent until its retr
 identities. Writers outside etl-craft do not participate in the target lock.
 
 An append refuses a target without `TASK_RUN_ID`, because a retry could duplicate rows; the
-error names the command that adds the column. Upgrade existing configured SQL and ingestion
+error names the command that adds the column. Upgrade existing configured SQL and Python script
 targets:
 
 ```bash
@@ -513,7 +517,7 @@ etl-craft upgrade-targets --action APPEND_TABLE --target sales.events
 
 The command adds missing `PIPELINE_ID`, `PIPELINE_RUN_ID` and `TASK_RUN_ID` columns as nullable
 BIGINT under the same target lock. It validates the stored table format and refuses conflicting
-writer formats or incompatible identity types. It scans active SQL tasks and Python ingestion
+writer formats or incompatible identity types. It scans active SQL tasks and Python script
 tasks with `TARGET_OBJECT` configured. For targets owned only by Python scripts without an explicit `TABLE_FORMAT`, it uses the stored format because the scripts own their table definitions. It preserves existing rows, leaving new identity fields NULL; it cannot identify
 or remove duplicates from past retries. Already upgraded targets are left intact. Existing overwrite
 and merge targets need these columns before their next write; `SCHEMA_EVOLUTION` does not add audit

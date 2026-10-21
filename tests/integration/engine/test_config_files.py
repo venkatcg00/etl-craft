@@ -143,7 +143,10 @@ def test_apply_inserts_updates_and_retires_by_key(exported):
                     "PARAMETER_NAME": name,
                     "PARAMETER_VALUE": value,
                 }
-                for name, value in (("SCRIPT_NAME", "sales/publish.py"), ("RETRIES", "2"))
+                for name, value in (
+                    ("SCRIPT_FILE", "python_scripts/sales/publish.py"),
+                    ("RETRIES", "2"),
+                )
             ]
         ),
     )
@@ -201,7 +204,7 @@ def test_apply_inserts_updates_and_retires_by_key(exported):
         by_operation.setdefault(change.operation, set()).add((change.file, change.row))
     assert by_operation["insert"] == {
         ("tasks.csv", "SALES_MART.archive"),
-        ("task_parameters.csv", "SALES_MART.archive SCRIPT_NAME"),
+        ("task_parameters.csv", "SALES_MART.archive SCRIPT_FILE"),
         ("task_parameters.csv", "SALES_MART.archive RETRIES"),
         ("task_dependencies.csv", "SALES_MART.archive on SALES_MART.publish SUCCESS"),
         ("task_dependencies.csv", "SALES_MART.alert on SALES_MART.archive ALWAYS"),

@@ -4,16 +4,16 @@
 ``services.lineage``), then joins them into assets:
 
 - a **table** for each SQL task's ``TARGET_OBJECT``, each table a SELECT reads, each business
-  rule's referenced target, and each ingestion script's ``TARGET_OBJECT``; with its columns, the
+  rule's referenced target, and each Python script's ``TARGET_OBJECT``; with its columns, the
   tasks that write and read it, the rules on it, and its writers' latest run;
 - a **task** for each active task, with its parameters, documentation, lineage and latest run;
-- a **pipeline**, a **business rule** and an **ingestion script** page each.
+- a **pipeline**, a **business rule** and an **Python script** page each.
 
 Tables are joined by name as lineage names them: lower case, without the active warehouse
 database. Two kinds of edge connect them: column edges, one per target column and source
 column, and table edges, one per source table and target table of a task. A SQL task whose
 columns cannot be traced keeps its table edges, from the tables its SELECT reads, and its reason
-is listed. An ingestion script appears at table level: a ``PYTHON`` task may name the table it
+is listed. A Python script appears at table level: a ``PYTHON`` task may name the table it
 writes in ``TARGET_OBJECT`` and where it reads from in ``SOURCE_OBJECT``, shown as an external
 source.
 
@@ -35,7 +35,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import ingestion_script, sql_file
+from etl_craft.config.project import python_script, sql_script
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
 from etl_craft.core.enums import GapState, Handler, RunStatus, SlaStatus, SqlAction
 from etl_craft.core.errors import EtlCraftError, MetadataError
@@ -125,7 +125,7 @@ class TableAsset:
 
     @property
     def external(self) -> bool:
-        """Whether this is an ingestion script's source rather than a warehouse table."""
+        """Whether this is a Python script's source rather than a warehouse table."""
         return self.name.startswith(EXTERNAL_PREFIX)
 
     @property
@@ -175,10 +175,10 @@ class TaskAsset:
 
     @property
     def script(self) -> str | None:
-        """The ingestion script a ``PYTHON`` task runs."""
+        """The Python script a ``PYTHON`` task runs."""
         if self.row.handler != Handler.PYTHON:
             return None
-        return (self.params.get("SCRIPT_NAME") or "").strip() or None
+        return (self.params.get("SCRIPT_FILE") or "").strip() or None
 
 
 @dataclass
@@ -220,7 +220,7 @@ class RuleAsset:
 
 @dataclass
 class ScriptAsset:
-    """An ingestion script, the tasks that run it, and whether the file is there."""
+    """A Python script, the tasks that run it, and whether the file is there."""
 
     name: str
     tasks: list[str] = field(default_factory=list)
@@ -447,9 +447,11 @@ def _connect_task(
     """Record what a task reads and writes, at table level and, for SQL, at column level."""
     params = task.params
     handler = task.row.handler
-    if handler == Handler.SQL:
+    if handler in (Handler.SQL, Handler.SQL_SCRIPT):
         written = (params.get("TARGET_OBJECT") or "").strip()
-        task.target = name_of(written) if written else None
+        task.target = (name_of(written) if written else None) or (
+            lineage.target_object if lineage is not None else None
+        )
         action = (params.get("SQL_ACTION") or "").strip().upper()
         if lineage is not None:
             task.sources = lineage.sources
@@ -465,15 +467,23 @@ def _connect_task(
             script = catalog.scripts.setdefault(task.script, ScriptAsset(task.script))
             script.tasks.append(task.label)
             try:
-                script.exists = ingestion_script(config, task.script).is_file()
+                script.exists = python_script(config, task.script).is_file()
             except EtlCraftError:
                 script.exists = False
-    if task.target is not None:
-        _table(catalog, task.target).writers.append(task.label)
+    _connect_tables(catalog, task, lineage)
+
+
+def _connect_tables(catalog: Catalog, task: TaskAsset, lineage: TaskLineage | None) -> None:
+    """Join every read and written table, including multi-target unmanaged scripts."""
+    targets = lineage.targets if lineage is not None and lineage.targets else (task.target,)
+    for target in targets:
+        if target is not None:
+            _table(catalog, target).writers.append(task.label)
     for source in task.sources:
         _table(catalog, source).readers.append(task.label)
-        if task.target is not None and source != task.target:
-            catalog.table_edges.append(TableEdge(source, task.target, task.label))
+        for target in targets:
+            if target is not None and source != target:
+                catalog.table_edges.append(TableEdge(source, target, task.label))
     for edge in task.column_edges:
         _table(catalog, edge.target_object).add_column(edge.target_column)
         if edge.source_object is not None and edge.source_column is not None:
@@ -625,10 +635,10 @@ def _comparison_identity(catalog: Catalog, config: ConnectorConfig, requested: b
         _engine_columns(catalog, table, config)
     for task in catalog.tasks.values():
         params = task.params
-        content = params.get("SOURCE_SQL", "")
-        if params.get("SOURCE_SQL_FILE"):
+        content = params.get("SELECT_QUERY", "")
+        if params.get("SCRIPT_FILE") and not task.script:
             try:
-                content = sql_file(config, params["SOURCE_SQL_FILE"]).read_text(encoding="utf-8")
+                content = sql_script(config, params["SCRIPT_FILE"]).read_text(encoding="utf-8")
             except (EtlCraftError, OSError) as error:
                 content = f"unavailable: {type(error).__name__}"
         inputs.append((task.label, task.target, params.get("SQL_ACTION"), content))

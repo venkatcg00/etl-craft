@@ -47,7 +47,7 @@ class LocalPool:
         self.child = child or ChildOptions()
         self.total = limits.max_parallel_tasks
         self.slots = {
-            "ingestion": limits.local_ingestion_slots or self.total,
+            "python": limits.local_python_slots or self.total,
             "warehouse": limits.local_warehouse_slots or self.total,
         }
         # A sized server may have no task slots: capacity stays zero and runs stay queued.

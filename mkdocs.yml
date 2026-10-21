@@ -106,9 +106,10 @@ nav:
       - Configuration migrations: guides/configuration-migrations.md
       - Dependencies and run conditions: guides/dependencies.md
       - SQL tasks: guides/sql-tasks.md
+      - SQL scripts: guides/sql-scripts.md
       - Protecting human SCD edits: guides/human-overrides.md
       - Business rules: guides/business-rules.md
-      - Ingestion scripts: guides/ingestion-scripts.md
+      - Python scripts: guides/python-scripts.md
       - Email alerts: guides/email-alerts.md
       - Validating pipelines: guides/validating.md
       - Inspecting pipelines: guides/inspecting.md
@@ -142,6 +143,7 @@ nav:
       - Accounts and login: examples/accounts/README.md
       - File delivery event: examples/event-wait.md
       - SQL source watermark: examples/sql-watermark.md
+      - Unmanaged SQL task: examples/sql-script.md
       - Scoped operator controls: examples/operator-controls.md
   - Reference:
       - reference/index.md

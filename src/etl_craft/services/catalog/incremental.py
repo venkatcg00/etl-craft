@@ -10,7 +10,7 @@ from importlib import resources
 from pathlib import Path
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import ingestion_script, sql_file
+from etl_craft.config.project import python_script, sql_script
 from etl_craft.core.errors import ConfigurationError, EtlCraftError
 from etl_craft.core.text import sha256_hex
 from etl_craft.services.catalog.collect import Catalog, TaskAsset
@@ -33,30 +33,30 @@ def fingerprint(value: object) -> str:
     return sha256_hex(repr(value).encode())
 
 
-def read_sql_files(catalog: Catalog, config: ConnectorConfig) -> SqlFiles:
+def read_sql_scripts(catalog: Catalog, config: ConnectorConfig) -> SqlFiles:
     """Read each displayed SQL file once for both its fingerprint and its HTML."""
     files: SqlFiles = {}
     names = {
-        task.params["SOURCE_SQL_FILE"]
+        task.params["SCRIPT_FILE"]
         for task in catalog.tasks.values()
-        if "SOURCE_SQL_FILE" in task.params
+        if "SCRIPT_FILE" in task.params and not task.script
     }
     for name in sorted(names):
         try:
-            files[name] = sql_file(config, name).read_text(encoding="utf-8")
+            files[name] = sql_script(config, name).read_text(encoding="utf-8")
         except (OSError, EtlCraftError) as error:
             files[name] = error
     return files
 
 
-def _task_inputs(task: TaskAsset, config: ConnectorConfig, sql_files: SqlFiles) -> object:
+def _task_inputs(task: TaskAsset, config: ConnectorConfig, sql_scripts: SqlFiles) -> object:
     files = []
-    if "SOURCE_SQL_FILE" in task.params:
-        value = sql_files[task.params["SOURCE_SQL_FILE"]]
+    if "SCRIPT_FILE" in task.params and not task.script:
+        value = sql_scripts[task.params["SCRIPT_FILE"]]
         files.append(fingerprint((type(value).__name__, str(value))))
     if task.script:
         try:
-            files.append(sha256_hex(ingestion_script(config, task.script).read_bytes()))
+            files.append(sha256_hex(python_script(config, task.script).read_bytes()))
         except (OSError, EtlCraftError) as error:
             files.append(f"{type(error).__name__}: {error}")
     return replace(task, row=replace(task.row, last_run=None), runs=[]), files
@@ -83,7 +83,9 @@ def _components(catalog: Catalog) -> list[set[str]]:
     return components
 
 
-def page_versions(catalog: Catalog, config: ConnectorConfig, sql_files: SqlFiles) -> dict[str, str]:
+def page_versions(
+    catalog: Catalog, config: ConnectorConfig, sql_scripts: SqlFiles
+) -> dict[str, str]:
     """Version pages by metadata, history, referenced files and rendering code."""
     package = resources.files("etl_craft.services")
     renderer = fingerprint(
@@ -104,7 +106,9 @@ def page_versions(catalog: Catalog, config: ConnectorConfig, sql_files: SqlFiles
         catalog.sql_dialect,
         catalog.compared_at,
     )
-    tasks = {label: _task_inputs(task, config, sql_files) for label, task in catalog.tasks.items()}
+    tasks = {
+        label: _task_inputs(task, config, sql_scripts) for label, task in catalog.tasks.items()
+    }
     versions: dict[str, str] = {}
     _pipeline_versions(catalog, context, tasks, versions)
     for rule_id, rule in catalog.rules.items():

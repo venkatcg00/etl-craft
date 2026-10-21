@@ -29,7 +29,7 @@ def ceilings(config: ConnectorConfig) -> Ceilings:
     limits = config.limits
     return Ceilings(
         limits.max_parallel_tasks if limits.max_parallel_tasks_written else None,
-        limits.local_ingestion_slots,
+        limits.local_python_slots,
         limits.local_warehouse_slots,
     )
 
@@ -56,12 +56,12 @@ def start_role(
     sizing = size(allocation, config.deployment, ceilings(config))
     _refuse_unaffordable(allocation, sizing, server=server)
     logger.info(
-        "%s sizing: %d task slots (%s), %d ingestion, %d warehouse, %d server threads, "
+        "%s sizing: %d task slots (%s), %d python, %d warehouse, %d server threads, "
         "Engine DB pool %d%s",
         sizing.profile,
         sizing.task_slots.value,
         sizing.task_slots.reason,
-        sizing.ingestion_slots.value,
+        sizing.python_slots.value,
         sizing.warehouse_slots.value,
         sizing.server_threads.value,
         sizing.engine_pool.value,
@@ -70,7 +70,7 @@ def start_role(
     limits = replace(
         config.limits,
         max_parallel_tasks=sizing.task_slots.value,
-        local_ingestion_slots=sizing.ingestion_slots.value,
+        local_python_slots=sizing.python_slots.value,
         local_warehouse_slots=sizing.warehouse_slots.value,
     )
     return replace(config, limits=limits, sizing=sizing)

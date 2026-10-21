@@ -153,7 +153,7 @@ def test_catalog_gaps_require_viewer_and_do_not_publish_lineage(api, role):
             "lineage",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="api.output",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
     with ctx.engine.connect() as conn:
         before = conn.execute(
@@ -536,7 +536,7 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
         set_task_target(conn, task, "s.events")
         for name, value in {
             "SQL_ACTION": "APPEND_TABLE",
-            "SOURCE_SQL": "SELECT id FROM raw.events WHERE id > $$watermark",
+            "SELECT_QUERY": "SELECT id FROM raw.events WHERE id > $$watermark",
             "WATERMARK_COLUMN": "id",
             "WATERMARK_TYPE": "NUMBER",
             "WATERMARK_START": "0",

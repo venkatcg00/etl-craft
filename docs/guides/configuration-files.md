@@ -17,8 +17,8 @@ etl-craft/
 │   ├── business_rules.csv         CFG_BUSINESS_RULES
 │   ├── tables.csv                 CFG_TABLES
 │   └── columns.csv                CFG_COLUMNS
-├── sql_files/
-└── ingestion_scripts/
+├── sql_scripts/
+└── python_scripts/
 ```
 
 The files are the whole configuration: every row of every table, active or not, each with an
@@ -47,7 +47,7 @@ config 6da809c4700d from /srv/sales/etl-craft/config: 6 change(s)
   insert     tasks.csv                  SALES_MART.archive
   retire     task_parameters.csv        SALES_DAILY.load_orders DOCUMENTATION  (not in the file)
   update     task_parameters.csv        SALES_DAILY.fetch_orders RETRIES  (PARAMETER_VALUE: '2' -> '3')
-  insert     task_parameters.csv        SALES_MART.archive SCRIPT_NAME
+  insert     task_parameters.csv        SALES_MART.archive SCRIPT_FILE
   insert     task_dependencies.csv      SALES_MART.archive on SALES_MART.publish SUCCESS
 [FAIL] SALES_MART: depends on pipeline SALES_DAILY_EU, which is inactive and no longer runs, so once its last run is consumed the dependency is never satisfied again; deactivate the dependency too, or reactivate the pipeline
 [FAIL] SALES_MART.alert: reports on the whole run but does not depend on archive, so it can run before they finish and report on a run still in progress; add an ALWAYS dependency on each

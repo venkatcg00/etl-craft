@@ -203,14 +203,14 @@ def cli_project(empty_engine_db, tmp_path, monkeypatch):
     code, output = project.run("init-db")
     assert code == 0, output
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(db.engine))
-    config.ingestion_scripts_dir.mkdir()
-    (config.ingestion_scripts_dir / "load.py").write_text(
+    config.python_scripts_dir.mkdir()
+    (config.python_scripts_dir / "load.py").write_text(
         "from etl_craft.scripting import ScriptResult\ndef run(task):\n    return ScriptResult(1)\n"
     )
     with db.engine.begin() as conn:
         project.pipeline_id = add_pipeline(conn, "P")
         project.task_id = add_task(
-            conn, project.pipeline_id, "load", "PYTHON", SCRIPT_NAME="load.py"
+            conn, project.pipeline_id, "load", "PYTHON", SCRIPT_FILE="python_scripts/load.py"
         )
     try:
         yield project

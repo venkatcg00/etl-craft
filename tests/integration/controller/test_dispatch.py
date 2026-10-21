@@ -29,7 +29,7 @@ def test_fast_branch_starts_its_downstream_before_the_slow_branch_finishes(
     cli_project, server_mode
 ):
     p = cli_project
-    scripts = p.config.ingestion_scripts_dir
+    scripts = p.config.python_scripts_dir
     (scripts / "slow.py").write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    Path('slow-start').touch()\n"
@@ -50,8 +50,10 @@ def test_fast_branch_starts_its_downstream_before_the_slow_branch_finishes(
         "def run(task):\n    Path('fast-downstream').touch()\n    return ScriptResult(1)\n"
     )
     with p.engine.begin() as conn:
-        add_task(conn, p.pipeline_id, "slow", "PYTHON", SCRIPT_NAME="slow.py")
-        following = add_task(conn, p.pipeline_id, "after_fast", "PYTHON", SCRIPT_NAME="after.py")
+        add_task(conn, p.pipeline_id, "slow", "PYTHON", SCRIPT_FILE="python_scripts/slow.py")
+        following = add_task(
+            conn, p.pipeline_id, "after_fast", "PYTHON", SCRIPT_FILE="python_scripts/after.py"
+        )
         add_dependency(conn, p.pipeline_id, following, p.task_id)
     if server_mode:
         assert p.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
@@ -288,15 +290,17 @@ def test_shutdown_cancels_all_runs_before_joining_the_shared_pool(cli_project):
     raw = yaml.safe_load(p.config.config_path.read_text())
     raw["Orchestration"].update(Max_parallel_tasks=1, Shutdown_grace_seconds=0)
     p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    (p.config.ingestion_scripts_dir / "block.py").write_text(
+    (p.config.python_scripts_dir / "block.py").write_text(
         "from pathlib import Path\nimport time\n"
         "def run(task):\n    Path('other-run-started').touch()\n    time.sleep(120)\n"
     )
     with p.engine.begin() as conn:
-        later = add_task(conn, p.pipeline_id, "after_load", "PYTHON", SCRIPT_NAME="load.py")
+        later = add_task(
+            conn, p.pipeline_id, "after_load", "PYTHON", SCRIPT_FILE="python_scripts/load.py"
+        )
         add_dependency(conn, p.pipeline_id, later, p.task_id)
         other = add_pipeline(conn, "OTHER")
-        add_task(conn, other, "block", "PYTHON", SCRIPT_NAME="block.py")
+        add_task(conn, other, "block", "PYTHON", SCRIPT_FILE="python_scripts/block.py")
     assert p.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
     assert p.run("run", "--pipeline-code", "OTHER", "--init-only")[0] == 0
     server = p.start("controller")

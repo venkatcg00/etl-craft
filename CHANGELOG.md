@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `HANDLER=SQL_SCRIPT` executes `SCRIPT_FILE` under `sql_scripts/` in order, with bound run
+  context and `INPUT_PARAMS`. Each statement is audited in the attempt log. Native autocommit
+  preserves earlier statements on failure; files may use explicit transactions where supported.
+  These tasks bypass managed hashes, target locks and ROW_ID; `validate` warns about managed
+  target overlap, and lineage/catalog label their inferred effects unmanaged. Apply migration
+  `0047_sql_script.sql` before using the handler. Prefer `RETRY_ON=NONE` for scripts.
+
 ### Fixed
 
 - Upgrading a SQLite Engine DB from 0.3.0 keeps each attempt's RETRYABLE value.
@@ -17,6 +26,18 @@ All notable changes are recorded here. The format follows
   context, extra fields and exceptions; audit CLI JSON and API responses retain that redaction.
 
 ### Changed
+
+- Script naming is consistent: `python_scripts/` replaces `ingestion_scripts/`,
+  `sql_scripts/` replaces `sql_files/`, Python tasks use `SCRIPT_FILE` in place of `SCRIPT_NAME`,
+  and `Orchestration.Local_python_slots` replaces `Local_ingestion_slots`.
+  One parameter names every file a task runs: `SCRIPT_FILE` replaces `SOURCE_SQL_FILE` for SQL
+  actions, as for `PYTHON` and `SQL_SCRIPT` tasks, and an inline SELECT is `SELECT_QUERY` in
+  place of `SOURCE_SQL`. `SCRIPT_FILE` is a path from the project directory, like every other
+  path: `python_scripts/load.py` or `sql_scripts/orders.sql`. A value without its folder is
+  refused, naming the path to write.
+  Migration `0047_sql_script.sql` renames existing parameter rows and adds the folder to
+  existing file values. Move project folders and update configuration files before running;
+  old names have no aliases.
 
 - Engine DB scheduling, run inspection and catalog reads use selective history indexes and
   bounded PostgreSQL lookups. Migration `0046_query_indexes.sql` adds the indexes on both

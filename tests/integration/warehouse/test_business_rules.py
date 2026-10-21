@@ -22,7 +22,7 @@ def world(sql_world):
         "orders",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="orders",
-        SOURCE_SQL="SELECT 10 AS order_id, 1 AS customer_id, 5 AS amount "
+        SELECT_QUERY="SELECT 10 AS order_id, 1 AS customer_id, 5 AS amount "
         "UNION ALL SELECT 11, 2, -3 UNION ALL SELECT 12, 3, 7",
     )
     w.task("rules")
@@ -203,8 +203,8 @@ def test_only_the_active_version_of_a_versioned_table_is_judged(sql_world):
         "MERGE_KEY": "order_id",
         "MERGE_COMPARE_COLUMNS": "customer_id",
     }
-    w.run("orders", SOURCE_SQL="SELECT 10 AS order_id, 2 AS customer_id", **params)
-    w.run("orders", SOURCE_SQL="SELECT 10 AS order_id, 1 AS customer_id", **params)
+    w.run("orders", SELECT_QUERY="SELECT 10 AS order_id, 2 AS customer_id", **params)
+    w.run("orders", SELECT_QUERY="SELECT 10 AS order_id, 1 AS customer_id", **params)
     w.task("rules")
     add_rule(
         w,

@@ -151,7 +151,8 @@ def run_handler(
         result = resolve_handler(context.handler)(context, engine)
     except EtlCraftError as error:
         logger.error("task failed: %s", error)
-        logger.debug("traceback", exc_info=True)
+        if context.handler != Handler.SQL_SCRIPT:
+            logger.debug("traceback", exc_info=True)
         _record_failure(
             engine,
             context.task_run_id,

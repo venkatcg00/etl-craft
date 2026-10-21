@@ -20,7 +20,7 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
             "a_consumer",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.output",
-            SOURCE_SQL="SELECT * FROM stage.orders",
+            SELECT_QUERY="SELECT * FROM stage.orders",
         )
         add_task(
             conn,
@@ -28,7 +28,7 @@ def test_upstream_stars_join_resolution_and_schema_cache(engine_db, tmp_path, mo
             "z_producer",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="stage.orders",
-            SOURCE_SQL="SELECT * FROM raw.orders",
+            SELECT_QUERY="SELECT * FROM raw.orders",
         )
         add_source_column(conn, "raw.orders", "z", "INT", 1)
         add_source_column(conn, "raw.orders", "a", "INT", 2)
@@ -161,7 +161,7 @@ def test_sequential_self_reads_do_not_create_lineage_cycles(engine_db):
             "create",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="stage.orders",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
         first = add_task(
             conn,
@@ -169,7 +169,7 @@ def test_sequential_self_reads_do_not_create_lineage_cycles(engine_db):
             "append_a",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="stage.orders",
-            SOURCE_SQL="SELECT id FROM stage.orders",
+            SELECT_QUERY="SELECT id FROM stage.orders",
         )
         second = add_task(
             conn,
@@ -177,7 +177,7 @@ def test_sequential_self_reads_do_not_create_lineage_cycles(engine_db):
             "append_b",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="stage.orders",
-            SOURCE_SQL="SELECT id FROM stage.orders",
+            SELECT_QUERY="SELECT id FROM stage.orders",
         )
         add_dependency(conn, pipeline, first, create)
         add_dependency(conn, pipeline, second, first)

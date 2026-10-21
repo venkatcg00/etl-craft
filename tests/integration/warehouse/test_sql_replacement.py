@@ -21,7 +21,7 @@ def test_failed_restore_leaves_a_durable_backup(sql_world, action, monkeypatch):
     if action == "OVERWRITE_TABLE":
         w.setup("daily", "SELECT 1 AS id", action)
     params = {"SQL_ACTION": action, "TARGET_OBJECT": "daily"}
-    w.run("daily", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.run("daily", SELECT_QUERY="SELECT 1 AS id", **params)
     before = w.rows(f"SELECT * FROM {w.name('daily')}")
     original_run = Session.run
     original_rename = Session.rename
@@ -41,7 +41,7 @@ def test_failed_restore_leaves_a_durable_backup(sql_world, action, monkeypatch):
         patch.setattr(Session, "run", refuse_restore)
         patch.setattr(Session, "rename", refuse_rename)
         with pytest.raises(HandlerError, match=r"restoration failed.*retained at.*Restore"):
-            w.run("daily", SOURCE_SQL="SELECT 2 AS id", **params)
+            w.run("daily", SELECT_QUERY="SELECT 2 AS id", **params)
     keep = [table for table in w.tables() if "__etl_keep_" in table]
     assert len(keep) == 1
     assert w.rows(f"SELECT * FROM {w.name(keep[0])}") == before
@@ -56,7 +56,7 @@ def test_cleanup_failure_cannot_undo_nontransactional_publication(sql_world, mon
     w = sql_world
     assert warehouse_dialect(w.config).replace_strategy != "transactional"
     params = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "daily"}
-    w.run("daily", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.run("daily", SELECT_QUERY="SELECT 1 AS id", **params)
     original = Session.drop
 
     def unavailable_cleanup(session, name):
@@ -66,7 +66,7 @@ def test_cleanup_failure_cannot_undo_nontransactional_publication(sql_world, mon
 
     with monkeypatch.context() as patch:
         patch.setattr(Session, "drop", unavailable_cleanup)
-        result = w.run("daily", SOURCE_SQL="SELECT 2 AS id", **params)
+        result = w.run("daily", SELECT_QUERY="SELECT 2 AS id", **params)
     assert result.insert_count == 1
     assert w.rows(f"SELECT id FROM {w.name('daily')}") == [(2,)]
 
@@ -84,7 +84,7 @@ def test_partitioned_iceberg_replacement_preserves_or_refuses(sql_world, action)
     if action == "OVERWRITE_TABLE":
         w.setup("daily", "SELECT 1 AS id", action)
     params = {"SQL_ACTION": action, "TARGET_OBJECT": "daily"}
-    w.run("daily", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.run("daily", SELECT_QUERY="SELECT 1 AS id", **params)
     before_rows = w.rows(f"SELECT * FROM {w.name('daily')}")
     trino = require("trino")
     engine = create_engine(f"trino://etl@{trino.address}/iceberg/{w.schema}")
@@ -102,10 +102,10 @@ def test_partitioned_iceberg_replacement_preserves_or_refuses(sql_world, action)
         assert "partitioning" in before
         if w.kind == "duckdb_iceberg" and action == "CREATE_TABLE":
             with pytest.raises(HandlerError, match="cannot preserve partitioning"):
-                w.run("daily", SOURCE_SQL="SELECT 2 AS id", **params)
+                w.run("daily", SELECT_QUERY="SELECT 2 AS id", **params)
             assert w.rows(f"SELECT * FROM {w.name('daily')}") == before_rows
         else:
-            w.run("daily", SOURCE_SQL="SELECT 2 AS id", **params)
+            w.run("daily", SELECT_QUERY="SELECT 2 AS id", **params)
             assert w.rows(f"SELECT id FROM {w.name('daily')}") == [(2,)]
         assert definition(w, "daily") == before
     finally:
@@ -119,7 +119,7 @@ def test_transactional_cleanup_failure_rolls_back_replacement(sql_world, monkeyp
 
     w = sql_world
     params = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "daily"}
-    w.run("daily", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.run("daily", SELECT_QUERY="SELECT 1 AS id", **params)
     original = Session.drop
 
     def unavailable_cleanup(session, name):
@@ -130,7 +130,7 @@ def test_transactional_cleanup_failure_rolls_back_replacement(sql_world, monkeyp
     with monkeypatch.context() as patch:
         patch.setattr(Session, "drop", unavailable_cleanup)
         with pytest.raises(HandlerError, match="cleanup unavailable"):
-            w.run("daily", SOURCE_SQL="SELECT 2 AS id", **params)
+            w.run("daily", SELECT_QUERY="SELECT 2 AS id", **params)
     assert w.rows(f"SELECT id FROM {w.name('daily')}") == [(1,)]
 
 
@@ -145,9 +145,9 @@ def test_replacement_uses_target_schema_instead_of_connection_default(sql_world,
     w.execute(f"CREATE SCHEMA {schema}")
     params = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": f"{other}.outside"}
     try:
-        w.run("outside", SOURCE_SQL="SELECT 1 AS id", **params)
+        w.run("outside", SELECT_QUERY="SELECT 1 AS id", **params)
         assert w.rows(f"SELECT id FROM {target}") == [(1,)]
-        w.run("outside", SOURCE_SQL="SELECT 2 AS id", **params)
+        w.run("outside", SELECT_QUERY="SELECT 2 AS id", **params)
         assert w.rows(f"SELECT id FROM {target}") == [(2,)]
         assert "outside" not in w.tables()
         point = (
@@ -158,7 +158,7 @@ def test_replacement_uses_target_schema_instead_of_connection_default(sql_world,
         with monkeypatch.context() as patch:
             patch.setenv("ETL_CRAFT_FAULT", f"sql.replace.{point}")
             with pytest.raises(InjectedFaultError):
-                w.run("outside", SOURCE_SQL="SELECT 3 AS id", **params)
+                w.run("outside", SELECT_QUERY="SELECT 3 AS id", **params)
         assert w.rows(f"SELECT id FROM {target}") == [(2,)]
     finally:
         tables = w.rows(

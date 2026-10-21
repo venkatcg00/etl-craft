@@ -16,7 +16,7 @@ An upstream that has not run yet, or is still `IN-PROGRESS`, satisfies no depend
 
 "Wrote" means inserted, updated or deleted, as `AUD_TASK_RUN_LOG.ROWS_WRITTEN` records: an
 `APPEND_TABLE` of no rows, or a merge that changed nothing, does not satisfy `HAS_DATA` however
-many rows its target holds. An ingestion script's `row_count` is the rows it wrote. A row recorded
+many rows its target holds. A Python task's `row_count` is the rows it wrote. A row recorded
 before `ROWS_WRITTEN` existed is judged by its `TARGET_COUNT`.
 
 ## Run conditions

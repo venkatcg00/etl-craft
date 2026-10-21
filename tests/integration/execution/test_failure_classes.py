@@ -30,8 +30,8 @@ def test_script_failure_policy_and_historical_explanation(
     engine_db, config, exception, policy, count, status, kind
 ):
     project = config.project_dir
-    (project / "ingestion_scripts").mkdir(exist_ok=True)
-    (project / "ingestion_scripts" / "load.py").write_text(
+    (project / "python_scripts").mkdir(exist_ok=True)
+    (project / "python_scripts" / "load.py").write_text(
         "from pathlib import Path\n"
         "from etl_craft.scripting import ScriptResult, TransientError, PermanentError\n"
         "def run():\n"
@@ -49,7 +49,7 @@ def test_script_failure_policy_and_historical_explanation(
             pipeline,
             "load",
             "PYTHON",
-            SCRIPT_NAME="load.py",
+            SCRIPT_FILE="python_scripts/load.py",
             RETRIES="3",
             RETRY_DELAY_SECONDS="0",
             RETRY_ON=policy,

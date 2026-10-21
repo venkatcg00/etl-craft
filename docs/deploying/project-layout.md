@@ -8,9 +8,9 @@ etl-craft/
 ├── craft-connector.yml     # connections and settings
 ├── .env                    # secrets, when Secrets.Source_type is file (keep it out of git)
 ├── engine.db               # the Engine DB, when it is SQLite at jdbc:sqlite:engine.db
-├── sql_files/              # SQL files that SQL tasks name in SOURCE_SQL_FILE
+├── sql_scripts/             # SELECTs for SQL tasks and SQL_SCRIPT files
 │   └── sales/orders.sql
-├── ingestion_scripts/      # Python ingestion scripts that PYTHON tasks name
+├── python_scripts/          # Python scripts that PYTHON tasks name
 │   └── load_orders.py
 ├── config/                 # pipelines as CSV files, one per CFG_ table, for `etl-craft config apply`
 │   └── pipelines.csv, tasks.csv, task_parameters.csv, ...
@@ -38,13 +38,15 @@ directory.
 
 ## Files that tasks name
 
-A task names its SQL file or script by its path inside the folder, such as `sales/orders.sql`
-under `sql_files/`. The name must be relative and stay inside that folder, with no `..`, and the
-file must exist and end in `.sql` or `.py`. Otherwise the task fails before anything runs, with a
+A task names its SQL file or script by its path from the project directory, like every other
+path: `sql_scripts/sales/orders.sql` or `python_scripts/load_orders.py`. The path must start with
+the handler's folder (`sql_scripts/` for `SCRIPT_FILE` and `SQL_SCRIPT`, `python_scripts/`
+for `PYTHON`) and stay inside it, with no `..`, and the file must exist and end in `.sql` or
+`.py`. Otherwise the task fails before anything runs, with a
 message that names the parameter, the value and the folder, and suggests close matches:
 
 ```
-SOURCE_SQL_FILE='sales/order.sql': no such file /srv/etl/etl-craft/sql_files/sales/order.sql — did you mean: sales/orders.sql
+SCRIPT_FILE='sql_scripts/sales/order.sql': no such file /srv/etl/etl-craft/sql_scripts/sales/order.sql — did you mean: sql_scripts/sales/orders.sql
 ```
 
 ## Configuration files

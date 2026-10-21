@@ -35,7 +35,7 @@ def test_typed_watermarks(sql_world, kind, start, select, expected):
         "typed_load",
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT="typed",
-        SOURCE_SQL=f"SELECT cursor FROM ({select}) s WHERE cursor > $$watermark",
+        SELECT_QUERY=f"SELECT cursor FROM ({select}) s WHERE cursor > $$watermark",
         WATERMARK_COLUMN="cursor",
         WATERMARK_TYPE=kind,
         WATERMARK_START=start,
@@ -60,7 +60,7 @@ def test_bad_staged_watermarks_do_not_write(sql_world, column, select, match):
             "bad_load",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="bad_watermark",
-            SOURCE_SQL=f"SELECT * FROM ({select}) s WHERE $$watermark = 0",
+            SELECT_QUERY=f"SELECT * FROM ({select}) s WHERE $$watermark = 0",
             WATERMARK_COLUMN=column,
             WATERMARK_TYPE="NUMBER",
             WATERMARK_START="0",
@@ -78,7 +78,7 @@ def test_nonfinite_numeric_watermarks_do_not_write(sql_world, value):
             "nonfinite_load",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="nonfinite_watermark",
-            SOURCE_SQL=f"SELECT CAST('{value}' AS NUMERIC) AS id WHERE $$watermark = 0",
+            SELECT_QUERY=f"SELECT CAST('{value}' AS NUMERIC) AS id WHERE $$watermark = 0",
             WATERMARK_COLUMN="id",
             WATERMARK_TYPE="NUMBER",
             WATERMARK_START="0",
@@ -93,7 +93,7 @@ def test_backfill_does_not_advance_the_sql_watermark(sql_world):
         "backfill_load",
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT="backfill_watermark",
-        SOURCE_SQL="SELECT CAST(1 AS BIGINT) AS id WHERE 1 > $$watermark",
+        SELECT_QUERY="SELECT CAST(1 AS BIGINT) AS id WHERE 1 > $$watermark",
         WATERMARK_COLUMN="id",
         WATERMARK_TYPE="NUMBER",
         WATERMARK_START="0",
@@ -117,7 +117,7 @@ def test_a_reset_reloads_through_a_merge_without_duplicates(sql_world):
     params = {
         "SQL_ACTION": "SCD1_MERGE",
         "TARGET_OBJECT": "merge_watermark",
-        "SOURCE_SQL": (
+        "SELECT_QUERY": (
             "SELECT id FROM (SELECT CAST(1 AS BIGINT) AS id UNION ALL SELECT 2) s "
             "WHERE id > $$watermark"
         ),
@@ -151,7 +151,7 @@ def test_text_watermarks_are_literals_even_with_sql_and_bind_characters(sql_worl
             "text_load",
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="text_cursor",
-            SOURCE_SQL="SELECT 'z' AS cursor WHERE 'z' > $$watermark",
+            SELECT_QUERY="SELECT 'z' AS cursor WHERE 'z' > $$watermark",
             WATERMARK_COLUMN="cursor",
             WATERMARK_TYPE="TEXT",
             WATERMARK_START=start,

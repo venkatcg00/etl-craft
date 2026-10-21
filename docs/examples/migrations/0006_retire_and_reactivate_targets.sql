@@ -68,7 +68,7 @@ WHERE TASK_ID IN (SELECT ID FROM retired_tasks WHERE CODE='SALES_MART.publish');
 
 -- Change the existing script setting and reactivate the existing parameters.
 UPDATE CFG_TASK_PARAMETERS SET ACTIVE_FLAG='Y',
-    PARAMETER_VALUE=CASE WHEN PARAMETER_NAME='SCRIPT_NAME' THEN 'sales/publish_to_partner.py'
+    PARAMETER_VALUE=CASE WHEN PARAMETER_NAME='SCRIPT_FILE' THEN 'python_scripts/sales/publish_to_partner.py'
                         ELSE PARAMETER_VALUE END
 WHERE TASK_ID IN (SELECT ID FROM retired_tasks WHERE CODE='SALES_MART.publish');
 

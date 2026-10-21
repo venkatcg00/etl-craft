@@ -20,7 +20,7 @@ def prepare(w, kind, compare="name|amount"):
     params = {
         "SQL_ACTION": kind,
         "TARGET_OBJECT": "protected",
-        "SOURCE_SQL": source,
+        "SELECT_QUERY": source,
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": compare,
     }
@@ -67,7 +67,7 @@ def test_value_locks_effective_hashes_provenance_and_unlock(sql_world, kind):
     assert current(w) == before
     assert unchanged.variables == {"PROTECTED_ROWS": 1, "PROTECTED_VALUES": 1}
     changed = w.run(
-        "load", **{**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("10 AS", "20 AS")}
+        "load", **{**params, "SELECT_QUERY": params["SELECT_QUERY"].replace("10 AS", "20 AS")}
     )
     assert changed.update_count == 1
     assert [(r["name"], r["amount"]) for r in current(w)] == [("Manual", 20)]
@@ -132,12 +132,12 @@ def test_human_insert_row_lock_delete_revival_and_service_writer(sql_world, kind
     delete = {
         "SQL_ACTION": "DELETE_ROWS",
         "TARGET_OBJECT": "protected",
-        "SOURCE_SQL": "SELECT 2 AS id",
+        "SELECT_QUERY": "SELECT 2 AS id",
         "MERGE_KEY": "id",
     }
     assert w.run("delete", **delete).delete_count == 0
     assert w.run("delete", **{**delete, "HARD_DELETE": "true"}).delete_count == 0
-    incoming = {**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("1 AS id", "2 AS id")}
+    incoming = {**params, "SELECT_QUERY": params["SELECT_QUERY"].replace("1 AS id", "2 AS id")}
     assert w.run("load", **incoming).update_count == 0
     assert current(w)[1]["name"] == "Human"
     act(
@@ -262,7 +262,7 @@ def test_protected_replacement_and_atomic_evidence_rollback(sql_world, monkeypat
                 "replace_" + action,
                 SQL_ACTION=action,
                 TARGET_OBJECT="protected",
-                **({"SOURCE_SQL": params["SOURCE_SQL"]} if action != "DROP_TABLE" else {}),
+                **({"SELECT_QUERY": params["SELECT_QUERY"]} if action != "DROP_TABLE" else {}),
             )
 
     def fail(point):
@@ -318,7 +318,7 @@ def test_edit_and_unlock_race_with_etl(sql_world, kind, request, engine_kind):
         use_postgres_engine(w, request)
     ctx, params = prepare(w, kind)
     context = w.task(
-        "load", **{**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("10 AS", "20 AS")}
+        "load", **{**params, "SELECT_QUERY": params["SELECT_QUERY"].replace("10 AS", "20 AS")}
     )
     two_at_once(
         lambda: act(
@@ -495,7 +495,7 @@ def test_noncompare_edits_null_values_and_historical_tampering(sql_world):
         reason="remove wrong name",
     )
     assert current(w)[0]["name"] is None
-    incoming = {**params, "SOURCE_SQL": params["SOURCE_SQL"].replace("10 AS", "20 AS")}
+    incoming = {**params, "SELECT_QUERY": params["SELECT_QUERY"].replace("10 AS", "20 AS")}
     w.run("load", **incoming)
     assert current(w)[0]["name"] is None and current(w)[0]["amount"] == 20
     w.execute(f"UPDATE {w.name('protected')} SET name='tampered' WHERE active_flag='N'")
@@ -530,7 +530,7 @@ def test_evidence_cannot_be_a_task_target_and_partial_restore_fails(sql_world):
             "destroy_evidence",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT=journal,
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
     snapshot = next(t for t in w.tables() if t.startswith("etl_fingerprints_"))
     w.execute(f"DROP TABLE {w.name(snapshot)}")

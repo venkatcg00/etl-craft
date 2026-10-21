@@ -17,14 +17,14 @@ def check_scd_lifecycle(w, target, kind):
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }
-    w.run(f"load_{target}", SOURCE_SQL=shape, **params)
+    w.run(f"load_{target}", SELECT_QUERY=shape, **params)
     before = w.rows(f"SELECT * FROM {w.name(target)} ORDER BY row_id")
-    unchanged = w.run(f"load_{target}", SOURCE_SQL=shape, **params)
+    unchanged = w.run(f"load_{target}", SELECT_QUERY=shape, **params)
     assert (unchanged.insert_count, unchanged.update_count) == (0, 0)
     assert w.rows(f"SELECT * FROM {w.name(target)} ORDER BY row_id") == before
 
     changed_shape = shape.replace("'Ann'", "'Anna'")
-    w.run(f"load_{target}", SOURCE_SQL=changed_shape, **params)
+    w.run(f"load_{target}", SELECT_QUERY=changed_shape, **params)
     history = w.rows(f"SELECT * FROM {w.name(target)} WHERE active_flag = 'N' ORDER BY row_id")
     creation = w.rows(
         f"SELECT create_date, created_by FROM {w.name(target)} WHERE active_flag = 'Y'"
@@ -33,7 +33,7 @@ def check_scd_lifecycle(w, target, kind):
         "SQL_ACTION": "DELETE_ROWS",
         "TARGET_OBJECT": target,
         "MERGE_KEY": "id",
-        "SOURCE_SQL": "SELECT 1 AS id",
+        "SELECT_QUERY": "SELECT 1 AS id",
     }
     assert w.run(f"delete_{target}", **deletion).delete_count == 1
     assert w.rows(
@@ -50,7 +50,7 @@ def check_scd_lifecycle(w, target, kind):
     assert w.run(f"delete_{target}", **deletion).delete_count == 0
     assert w.rows(f"SELECT * FROM {w.name(target)} ORDER BY row_id") == deleted
 
-    revived = w.run(f"load_{target}", SOURCE_SQL=changed_shape, **params)
+    revived = w.run(f"load_{target}", SELECT_QUERY=changed_shape, **params)
     assert (revived.update_count, revived.insert_count) == (
         (1, 0) if kind == "SCD1_MERGE" else (0, 1)
     )
@@ -92,7 +92,7 @@ def create_legacy_scd1(w, target):
         "TARGET_OBJECT": target,
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
-        "SOURCE_SQL": shape,
+        "SELECT_QUERY": shape,
     }
     context = w.task(f"load_{target}", **params)
     dialect = warehouse_dialect(w.config)

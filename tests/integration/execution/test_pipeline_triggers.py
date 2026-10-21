@@ -363,7 +363,9 @@ def test_controller_runs_child_and_resumes_parent(trigger_scene, mode, resume):
     scene = trigger_scene()
     project, ctx, child, task, _ = scene
     with project.engine.begin() as conn:
-        add_task(conn, child, "work", Handler.PYTHON, SCRIPT_NAME="sales/fetch_orders.py")
+        add_task(
+            conn, child, "work", Handler.PYTHON, SCRIPT_FILE="python_scripts/sales/fetch_orders.py"
+        )
         conn.execute(
             text(
                 "INSERT INTO CFG_TASK_PARAMETERS "
@@ -372,7 +374,7 @@ def test_controller_runs_child_and_resumes_parent(trigger_scene, mode, resume):
             ),
             {"id": task, "mode": mode},
         )
-    (project.config.ingestion_scripts_dir / "sales/fetch_orders.py").write_text(
+    (project.config.python_scripts_dir / "sales/fetch_orders.py").write_text(
         "from etl_craft.scripting import ScriptResult\ndef run(task):\n    return ScriptResult(1)\n"
     )
     # One agent slot proves a parent wait cannot hold the only slot needed by its child.

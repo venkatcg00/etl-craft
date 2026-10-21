@@ -46,8 +46,8 @@ def project(engine_db, tmp_path, monkeypatch):
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
-    (root / "sql_files").mkdir(exist_ok=True)
-    (root / "sql_files" / "convert.sql").write_text(
+    (root / "sql_scripts").mkdir(exist_ok=True)
+    (root / "sql_scripts" / "convert.sql").write_text(
         "SELECT o.id, o.amount * r.rate AS amount_usd\n"
         "FROM analytics.staging.orders o JOIN ref.rates r ON r.currency = o.currency\n"
         "WHERE $$pipeline_run_id_filter\n",
@@ -63,7 +63,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "stage",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="staging.orders",
-            SOURCE_SQL="SELECT id, amt AS amount, currency FROM raw.orders",
+            SELECT_QUERY="SELECT id, amt AS amount, currency FROM raw.orders",
         )
         sales = add_pipeline(conn, "SALES")
         add_task(
@@ -72,7 +72,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "convert",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="sales.orders",
-            SOURCE_SQL_FILE="convert.sql",
+            SCRIPT_FILE="sql_scripts/convert.sql",
             PIPELINE_RUN_ID_FILTER="true",
             DOCUMENTATION="Converts orders to US dollars.",
         )
@@ -83,7 +83,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "daily",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="mart.daily",
-            SOURCE_SQL="SELECT SUM(amount_usd) AS total FROM sales.orders",
+            SELECT_QUERY="SELECT SUM(amount_usd) AS total FROM sales.orders",
         )
         add_task(
             conn,
@@ -91,7 +91,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "copy_all",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.everything",
-            SOURCE_SQL="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
+            SELECT_QUERY="SELECT * FROM sales.orders o JOIN ref.rates r ON o.id = r.id",
         )
         add_task(conn, mart, "cleanup", SQL_ACTION="DROP_TABLE", TARGET_OBJECT="mart.everything")
     with engine.begin() as conn:
@@ -160,7 +160,7 @@ def test_lineage_is_stored_and_worked_out_again_only_when_the_sql_changes(projec
         conn.execute(
             text(
                 "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'SELECT id FROM raw.orders' "
-                "WHERE PARAMETER_NAME = 'SOURCE_SQL' AND PARAMETER_VALUE LIKE '%amt AS amount%'"
+                "WHERE PARAMETER_NAME = 'SELECT_QUERY' AND PARAMETER_VALUE LIKE '%amt AS amount%'"
             )
         )
     third = {lineage.task: lineage for lineage in collect(engine, config)}
@@ -242,7 +242,7 @@ def change_stage(engine):
         conn.execute(
             text(
                 "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='SELECT id, amt AS new_amount, "
-                "currency FROM raw.orders' WHERE PARAMETER_NAME='SOURCE_SQL' AND TASK_ID IN "
+                "currency FROM raw.orders' WHERE PARAMETER_NAME='SELECT_QUERY' AND TASK_ID IN "
                 "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='stage')"
             )
         )
@@ -453,7 +453,7 @@ def test_failed_writer_closes_current_history_and_reports_the_reason(
                 "also_stage",
                 SQL_ACTION="APPEND_TABLE",
                 TARGET_OBJECT="staging.orders",
-                SOURCE_SQL="SELECT id, amt AS amount, currency FROM raw.orders",
+                SELECT_QUERY="SELECT id, amt AS amount, currency FROM raw.orders",
             )
     collect(engine, config)
     lineage_clock.instant += timedelta(hours=1)
@@ -461,7 +461,7 @@ def test_failed_writer_closes_current_history_and_reports_the_reason(
         conn.execute(
             text(
                 "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='SELECT * FROM unknown.input' "
-                "WHERE PARAMETER_NAME='SOURCE_SQL' AND TASK_ID IN "
+                "WHERE PARAMETER_NAME='SELECT_QUERY' AND TASK_ID IN "
                 "(SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='stage')"
             )
         )
@@ -571,14 +571,14 @@ def test_failed_collection_without_confirmed_keys_closes_history(engine_db):
             "load",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="stage.output",
-            SOURCE_SQL="SELECT id FROM raw.input",
+            SELECT_QUERY="SELECT id FROM raw.input",
         )
     collect(db.engine, db.config)
     with db.engine.begin() as conn:
         conn.execute(
             text(
                 "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='SELECT * FROM unknown.input' "
-                "WHERE PARAMETER_NAME='SOURCE_SQL'"
+                "WHERE PARAMETER_NAME='SELECT_QUERY'"
             )
         )
     result = collect(db.engine, db.config)

@@ -1,7 +1,7 @@
 """A new Engine DB, as ``etl-craft setup`` creates it, in a project holding every file the
 configuration examples in ``docs/examples/migrations/`` name.
 
-The project has a DuckDB warehouse, email settings, the examples' SQL files and ingestion
+The project has a DuckDB warehouse, email settings, the examples' SQL files and python
 scripts, and empty ``migrations/`` and ``config/`` folders. ``load_examples`` applies the
 example migrations in order, as a team's ``etl-craft migrate`` would.
 """
@@ -81,13 +81,13 @@ def metadata_project(empty_engine_db, tmp_path, monkeypatch) -> MetadataProject:
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
-    sql = root / "sql_files" / "sales"
+    sql = root / "sql_scripts" / "sales"
     sql.mkdir(parents=True)
     for region in REGIONS:
         (sql / f"orders_{region}.sql").write_text(
             f"SELECT order_id, customer_id, amount, ordered_at FROM lnd.orders_{region}", "utf-8"
         )
-    scripts = root / "ingestion_scripts" / "sales"
+    scripts = root / "python_scripts" / "sales"
     scripts.mkdir(parents=True)
     for name in SCRIPTS:
         (scripts / f"{name}.py").write_text(SCRIPT, "utf-8")

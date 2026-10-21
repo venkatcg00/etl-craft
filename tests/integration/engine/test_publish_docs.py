@@ -314,7 +314,7 @@ def test_organization_url_through_proxy_keeps_links_and_records_the_public_url(
             "load",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="mart.sample",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
         )
     write_site(build_catalog(engine_db.engine, engine_db.config), engine_db.config, site)
 

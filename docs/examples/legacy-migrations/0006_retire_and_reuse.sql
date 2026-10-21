@@ -74,7 +74,7 @@ LEFT JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1 AND p.ACTIVE_FLAG = 'Y'
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
-    ('SALES_MART', 'publish', 'SCRIPT_NAME', 'sales/publish_to_partner.py'),
+    ('SALES_MART', 'publish', 'SCRIPT_FILE', 'python_scripts/sales/publish_to_partner.py'),
     ('SALES_MART', 'publish', 'INPUT_PARAMS', '{"partner": "acme"}')
 ) v
 LEFT JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1 AND p.ACTIVE_FLAG = 'Y'

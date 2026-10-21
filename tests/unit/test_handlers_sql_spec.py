@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def project(tmp_path):
     root = tmp_path / "etl-craft"
-    (root / "sql_files").mkdir(parents=True)
+    (root / "sql_scripts").mkdir(parents=True)
     return root
 
 
@@ -49,7 +49,7 @@ def test_a_complete_merge_task(project):
             project,
             SQL_ACTION="scd2_merge",
             TARGET_OBJECT=" sales.orders ",
-            SOURCE_SQL="SELECT id, name FROM raw.orders WHERE $$pipeline_run_id_filter;",
+            SELECT_QUERY="SELECT id, name FROM raw.orders WHERE $$pipeline_run_id_filter;",
             PIPELINE_RUN_ID_FILTER="TRUE",
             MERGE_KEY="id | region",
             MERGE_COMPARE_COLUMNS="name",
@@ -63,11 +63,11 @@ def test_a_complete_merge_task(project):
     assert (task.merge_key, task.merge_compare_columns) == (("id", "region"), ("name",))
     assert task.dedupe_order == "updated_at DESC NULLS LAST, id"
     assert task.schema_evolution and not task.preserve_target
-    assert task.source == "SOURCE_SQL"
+    assert task.source == "SELECT_QUERY"
 
 
-def test_a_sql_file_is_read_from_sql_files(project):
-    (project / "sql_files" / "orders.sql").write_text(
+def test_a_sql_script_is_read_from_sql_scripts(project):
+    (project / "sql_scripts" / "orders.sql").write_text(
         "-- all orders on a full refresh\nSELECT $$pipeline_run_id AS run\nFROM raw.orders\n"
         "WHERE $$pipeline_run_id_filter\n",
         encoding="utf-8",
@@ -76,22 +76,22 @@ def test_a_sql_file_is_read_from_sql_files(project):
         context(
             project,
             refresh_type="FULL",
-            SOURCE_SQL_FILE="orders.sql",
+            SCRIPT_FILE="sql_scripts/orders.sql",
             PIPELINE_RUN_ID_SUBSTITUTION="true",
             PIPELINE_RUN_ID_FILTER="true",
             **BASE,
         )
     )
     assert task.select_sql.endswith("SELECT 42 AS run\nFROM raw.orders\nWHERE 1=1")
-    assert task.source == "SOURCE_SQL_FILE='orders.sql'"
+    assert task.source == "SCRIPT_FILE='sql_scripts/orders.sql'"
 
 
 def test_drop_table_takes_no_select(project):
     task = read_sql_task(context(project, SQL_ACTION="DROP_TABLE", TARGET_OBJECT="s.t"))
     assert (task.select_sql, task.source) == (None, "none")
-    with pytest.raises(HandlerError, match="DROP_TABLE takes no SELECT, but SOURCE_SQL is set"):
+    with pytest.raises(HandlerError, match="DROP_TABLE takes no SELECT, but SELECT_QUERY is set"):
         read_sql_task(
-            context(project, SQL_ACTION="DROP_TABLE", TARGET_OBJECT="s.t", SOURCE_SQL="SELECT 1")
+            context(project, SQL_ACTION="DROP_TABLE", TARGET_OBJECT="s.t", SELECT_QUERY="SELECT 1")
         )
 
 
@@ -108,41 +108,41 @@ def test_drop_table_takes_no_select(project):
             {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": "orders"},
             "TARGET_OBJECT='orders' must be 'schema.table' or 'database.schema.table'",
         ),
-        (BASE, "needs a SELECT: set SOURCE_SQL, or SOURCE_SQL_FILE"),
+        (BASE, "needs a SELECT: set SELECT_QUERY, or SCRIPT_FILE"),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1", "SOURCE_SQL_FILE": "a.sql"},
-            "set SOURCE_SQL or SOURCE_SQL_FILE, not both",
+            {**BASE, "SELECT_QUERY": "SELECT 1", "SCRIPT_FILE": "sql_scripts/a.sql"},
+            "set SELECT_QUERY or SCRIPT_FILE, not both",
         ),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1; SELECT 2"},
-            "SOURCE_SQL must hold exactly one SELECT; it holds 2 statements",
+            {**BASE, "SELECT_QUERY": "SELECT 1; SELECT 2"},
+            "SELECT_QUERY must hold exactly one SELECT; it holds 2 statements",
         ),
         (
-            {**BASE, "SOURCE_SQL": "DELETE FROM s.t"},
-            "SOURCE_SQL must be a read-only SELECT .* is not a query but DELETE",
+            {**BASE, "SELECT_QUERY": "DELETE FROM s.t"},
+            "SELECT_QUERY must be a read-only SELECT .* is not a query but DELETE",
         ),
-        ({**BASE, "SOURCE_SQL": "SELECT 1", "SCHEMA_EVOLUTION": "yes"}, "must be true or false"),
+        ({**BASE, "SELECT_QUERY": "SELECT 1", "SCHEMA_EVOLUTION": "yes"}, "must be true or false"),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1", "HARD_DELETE": "true"},
+            {**BASE, "SELECT_QUERY": "SELECT 1", "HARD_DELETE": "true"},
             "HARD_DELETE applies only to DELETE_ROWS, not SQL_ACTION=OVERWRITE_TABLE",
         ),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1", "MERGE_KEY": "id"},
+            {**BASE, "SELECT_QUERY": "SELECT 1", "MERGE_KEY": "id"},
             "MERGE_KEY does not apply to SQL_ACTION=OVERWRITE_TABLE",
         ),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1", "MERGE_DEDUPE_ORDER": "id"},
+            {**BASE, "SELECT_QUERY": "SELECT 1", "MERGE_DEDUPE_ORDER": "id"},
             "MERGE_DEDUPE_ORDER applies only to SCD1_MERGE and SCD2_MERGE",
         ),
         (
-            {"SQL_ACTION": "DELETE_ROWS", "TARGET_OBJECT": "s.t", "SOURCE_SQL": "SELECT 1"},
+            {"SQL_ACTION": "DELETE_ROWS", "TARGET_OBJECT": "s.t", "SELECT_QUERY": "SELECT 1"},
             "MERGE_KEY is required for SQL_ACTION=DELETE_ROWS",
         ),
         (
             {
                 "SQL_ACTION": "SCD1_MERGE",
                 "TARGET_OBJECT": "s.t",
-                "SOURCE_SQL": "SELECT 1",
+                "SELECT_QUERY": "SELECT 1",
                 "MERGE_KEY": "id; drop",
                 "MERGE_COMPARE_COLUMNS": "a",
             },
@@ -152,7 +152,7 @@ def test_drop_table_takes_no_select(project):
             {
                 "SQL_ACTION": "SCD1_MERGE",
                 "TARGET_OBJECT": "s.t",
-                "SOURCE_SQL": "SELECT 1",
+                "SELECT_QUERY": "SELECT 1",
                 "MERGE_KEY": "id",
                 "MERGE_COMPARE_COLUMNS": "a",
                 "MERGE_DEDUPE_ORDER": "lower(a) DESC",
@@ -160,14 +160,14 @@ def test_drop_table_takes_no_select(project):
             "MERGE_DEDUPE_ORDER='lower\\(a\\) DESC': 'lower\\(a\\) DESC' is not",
         ),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1", "SECURE_VIEW": "true"},
+            {**BASE, "SELECT_QUERY": "SELECT 1", "SECURE_VIEW": "true"},
             "SECURE_VIEW applies only to CREATE_VIEW, not SQL_ACTION=OVERWRITE_TABLE",
         ),
         (
             {
                 "SQL_ACTION": "CREATE_VIEW",
                 "TARGET_OBJECT": "s.v",
-                "SOURCE_SQL": "SELECT 1",
+                "SELECT_QUERY": "SELECT 1",
                 "TABLE_FORMAT": "iceberg",
             },
             "CREATE_VIEW takes no TABLE_FORMAT: a view stores no data",
@@ -176,7 +176,7 @@ def test_drop_table_takes_no_select(project):
             {
                 "SQL_ACTION": "CREATE_VIEW",
                 "TARGET_OBJECT": "s.v",
-                "SOURCE_SQL": "SELECT 1",
+                "SELECT_QUERY": "SELECT 1",
                 "EXTERNAL_VOLUME": "lake",
             },
             "CREATE_VIEW takes no EXTERNAL_VOLUME: a view stores no data",
@@ -189,7 +189,7 @@ def test_definition_mistakes_fail_with_the_remedy(project, params, message):
 
 
 def test_setup_for_names_the_writing_action(project):
-    setup = {"SQL_ACTION": "SETUP_TABLE", "TARGET_OBJECT": "s.t", "SOURCE_SQL": "SELECT 1"}
+    setup = {"SQL_ACTION": "SETUP_TABLE", "TARGET_OBJECT": "s.t", "SELECT_QUERY": "SELECT 1"}
     assert read_sql_task(context(project, **setup)).setup_for is None
     assert read_sql_task(context(project, SETUP_FOR="scd2_merge", **setup)).setup_for == (
         SqlAction.SCD2_MERGE
@@ -197,7 +197,7 @@ def test_setup_for_names_the_writing_action(project):
     with pytest.raises(HandlerError, match="SETUP_FOR='DROP_TABLE' must name the action that"):
         read_sql_task(context(project, SETUP_FOR="DROP_TABLE", **setup))
     with pytest.raises(HandlerError, match="SETUP_FOR applies only to SETUP_TABLE"):
-        read_sql_task(context(project, SETUP_FOR="SCD1_MERGE", SOURCE_SQL="SELECT 1", **BASE))
+        read_sql_task(context(project, SETUP_FOR="SCD1_MERGE", SELECT_QUERY="SELECT 1", **BASE))
     with pytest.raises(
         HandlerError, match=r"SCHEMA_EVOLUTION applies only to .* not SQL_ACTION=APP"
     ):
@@ -206,18 +206,18 @@ def test_setup_for_names_the_writing_action(project):
                 project,
                 SQL_ACTION="APPEND_TABLE",
                 TARGET_OBJECT="s.t",
-                SOURCE_SQL="SELECT 1",
+                SELECT_QUERY="SELECT 1",
                 SCHEMA_EVOLUTION="true",
             )
         )
 
 
-def test_a_missing_or_unreadable_sql_file_is_metadata(project):
-    with pytest.raises(MetadataError, match=r"SOURCE_SQL_FILE='nope\.sql': no such file"):
-        read_sql_task(context(project, SOURCE_SQL_FILE="nope.sql", **BASE))
-    (project / "sql_files" / "latin1.sql").write_bytes(b"SELECT '\xe9'")
-    with pytest.raises(MetadataError, match=r"SOURCE_SQL_FILE='latin1\.sql': cannot read"):
-        read_sql_task(context(project, SOURCE_SQL_FILE="latin1.sql", **BASE))
+def test_a_missing_or_unreadable_sql_script_is_metadata(project):
+    with pytest.raises(MetadataError, match=r"SCRIPT_FILE='sql_scripts/nope\.sql': no such file"):
+        read_sql_task(context(project, SCRIPT_FILE="sql_scripts/nope.sql", **BASE))
+    (project / "sql_scripts" / "latin1.sql").write_bytes(b"SELECT '\xe9'")
+    with pytest.raises(MetadataError, match=r"SCRIPT_FILE='sql_scripts/latin1\.sql': cannot read"):
+        read_sql_task(context(project, SCRIPT_FILE="sql_scripts/latin1.sql", **BASE))
 
 
 def test_flags():
@@ -232,7 +232,7 @@ def test_execution_identity_tokens_have_distinct_named_values(project):
         context(
             project,
             **BASE,
-            SOURCE_SQL="SELECT $$pipeline_id AS definition_id, "
+            SELECT_QUERY="SELECT $$pipeline_id AS definition_id, "
             "$$pipeline_run_id AS execution_id, $$task_run_id AS task_execution_id",
             PIPELINE_ID_SUBSTITUTION="true",
             PIPELINE_RUN_ID_SUBSTITUTION="true",
@@ -250,7 +250,7 @@ def test_a_view_reads_its_select_and_whether_it_is_secure(project):
             project,
             SQL_ACTION="CREATE_VIEW",
             TARGET_OBJECT="s.v",
-            SOURCE_SQL="SELECT 1 AS id",
+            SELECT_QUERY="SELECT 1 AS id",
             SECURE_VIEW="true",
         )
     )
@@ -272,16 +272,16 @@ def test_a_view_reads_its_select_and_whether_it_is_secure(project):
     ],
 )
 def test_a_reject_limit_is_rows_or_a_share_of_the_select(project, written, shown, allowed):
-    task = read_sql_task(context(project, **BASE, SOURCE_SQL="SELECT 1", REJECT_LIMIT=written))
+    task = read_sql_task(context(project, **BASE, SELECT_QUERY="SELECT 1", REJECT_LIMIT=written))
     assert task.reject_limit is not None
     assert (str(task.reject_limit), task.reject_limit.rows(99)) == (shown, allowed)
-    assert read_sql_task(context(project, **BASE, SOURCE_SQL="SELECT 1")).reject_limit is None
+    assert read_sql_task(context(project, **BASE, SELECT_QUERY="SELECT 1")).reject_limit is None
 
 
 @pytest.mark.parametrize("written", ["-1", "1.5", "ten", "101%", "nan%", "%"])
 def test_a_reject_limit_that_is_not_rows_or_a_percentage_is_refused(project, written):
     with pytest.raises(HandlerError, match=r"must be a whole number of rows, such as 100, or a"):
-        read_sql_task(context(project, **BASE, SOURCE_SQL="SELECT 1", REJECT_LIMIT=written))
+        read_sql_task(context(project, **BASE, SELECT_QUERY="SELECT 1", REJECT_LIMIT=written))
 
 
 def test_a_reject_limit_applies_only_to_writes_into_an_existing_target(project):
@@ -291,14 +291,14 @@ def test_a_reject_limit_applies_only_to_writes_into_an_existing_target(project):
                 project,
                 SQL_ACTION="CREATE_TABLE",
                 TARGET_OBJECT="s.t",
-                SOURCE_SQL="SELECT 1",
+                SELECT_QUERY="SELECT 1",
                 REJECT_LIMIT="5",
             )
         )
 
 
 def test_skip_rejects_over_limit_needs_a_reject_limit(project):
-    params = {**BASE, "SOURCE_SQL": "SELECT 1", "SKIP_REJECTS_OVER_LIMIT": "true"}
+    params = {**BASE, "SELECT_QUERY": "SELECT 1", "SKIP_REJECTS_OVER_LIMIT": "true"}
     with pytest.raises(HandlerError, match=r"SKIP_REJECTS_OVER_LIMIT applies only with REJECT_LI"):
         read_sql_task(context(project, **params))
     task = read_sql_task(context(project, **params, REJECT_LIMIT="1"))
@@ -320,7 +320,7 @@ def test_watermark_tokens_are_typed_and_protected(project, kind, start, literal)
             project,
             SQL_ACTION="APPEND_TABLE",
             TARGET_OBJECT="sales.orders",
-            SOURCE_SQL=(
+            SELECT_QUERY=(
                 "SELECT changed FROM raw.orders WHERE changed > $$watermark -- $$watermark\n"
             ),
             WATERMARK_COLUMN="changed",
@@ -352,7 +352,7 @@ def test_bad_watermark_definitions_fail_before_the_warehouse(project, params):
                 project,
                 SQL_ACTION="APPEND_TABLE",
                 TARGET_OBJECT="sales.orders",
-                SOURCE_SQL="SELECT id FROM raw.orders WHERE id > $$watermark",
+                SELECT_QUERY="SELECT id FROM raw.orders WHERE id > $$watermark",
                 **params,
             )
         )
@@ -362,7 +362,7 @@ def test_watermark_needs_an_incremental_action_and_a_token(project):
     params = {"WATERMARK_COLUMN": "id", "WATERMARK_TYPE": "NUMBER", "WATERMARK_START": "0"}
     with pytest.raises(HandlerError, match="does not apply"):
         read_sql_task(
-            context(project, SOURCE_SQL="SELECT id WHERE id > $$watermark", **BASE, **params)
+            context(project, SELECT_QUERY="SELECT id WHERE id > $$watermark", **BASE, **params)
         )
     with pytest.raises(HandlerError, match="no \\$\\$watermark"):
         read_sql_task(
@@ -370,7 +370,7 @@ def test_watermark_needs_an_incremental_action_and_a_token(project):
                 project,
                 SQL_ACTION="APPEND_TABLE",
                 TARGET_OBJECT="sales.orders",
-                SOURCE_SQL="SELECT 1 AS id",
+                SELECT_QUERY="SELECT 1 AS id",
                 **params,
             )
         )
@@ -383,7 +383,7 @@ def test_a_stored_watermark_replaces_the_start_and_keeps_its_type(project):
         project,
         SQL_ACTION="APPEND_TABLE",
         TARGET_OBJECT="sales.orders",
-        SOURCE_SQL="SELECT id FROM raw.orders WHERE id > $$watermark",
+        SELECT_QUERY="SELECT id FROM raw.orders WHERE id > $$watermark",
         WATERMARK_COLUMN="id",
         WATERMARK_TYPE="NUMBER",
         WATERMARK_START="0",
@@ -401,7 +401,7 @@ def test_repeated_merge_columns_name_the_task_parameter_column_and_remedy(
     params = {
         "SQL_ACTION": "SCD1_MERGE",
         "TARGET_OBJECT": "sales.orders",
-        "SOURCE_SQL": "SELECT id, region FROM raw.orders",
+        "SELECT_QUERY": "SELECT id, region FROM raw.orders",
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "region",
     }

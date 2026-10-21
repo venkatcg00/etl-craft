@@ -72,7 +72,7 @@ with a project migration (etl-craft migrate)`.
   rows.
 - **Write values as SQL literals.** Text goes in single quotes, with each quote inside it doubled
   (`'the day''s orders'`); `NULL`, unquoted, means no value; numbers stay as they are. JSON values
-  are text too. SQL in a value (`SOURCE_SQL`, `BUSINESS_RULE_SQL`) is text like any other, and
+  are text too. SQL in a value (`SELECT_QUERY`, `BUSINESS_RULE_SQL`) is text like any other, and
   bound names such as `:pipeline_run_id`, `%` and `$$` tokens inside it are stored as written.
 - **Keep the SQL portable** when one file goes to SQLite and PostgreSQL. Everything in the
   examples runs on both: `VALUES` lists (whose columns are `column1`, `column2` and so on),

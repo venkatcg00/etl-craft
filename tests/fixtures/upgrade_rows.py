@@ -9,6 +9,8 @@ from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, inspect, text
 
+from etl_craft.core.actor import SYSTEM_ACTOR
+
 STAMP = "2001-02-03 04:05:06+00:00"
 END = "2001-02-03 05:05:06+00:00"
 COMMON = {
@@ -109,7 +111,20 @@ COMMON = {
 ROWS = {
     "CFG_PIPELINES": [{"PIPELINE_ID": 101}, {"PIPELINE_ID": 102, "PIPELINE_CODE": "UPSTREAM"}],
     "CFG_TASKS": [{"TASK_ID": 201}, {"TASK_ID": 202, "TASK_CODE": "upstream"}],
-    "CFG_TASK_PARAMETERS": [{"TASK_PARAMETER_ID": 301}],
+    "CFG_TASK_PARAMETERS": [
+        {"TASK_PARAMETER_ID": 301},
+        {
+            "TASK_PARAMETER_ID": 302,
+            "TASK_ID": 202,
+            "PARAMETER_NAME": "SOURCE_SQL_FILE",
+            "PARAMETER_VALUE": "sql_scripts/legacy.sql",
+        },
+        {
+            "TASK_PARAMETER_ID": 303,
+            "PARAMETER_NAME": "SOURCE_SQL",
+            "PARAMETER_VALUE": "SELECT 17 AS kept",
+        },
+    ],
     "CFG_PIPELINE_DEPENDENCY": [{"PIPELINE_DEPENDENCY_ID": 401}],
     "CFG_TASK_DEPENDENCY": [{"TASK_DEPENDENCY_ID": 501, "DEPENDS_ON_PIPELINE_ID": 101}],
     "CFG_BUSINESS_RULES": [{"BUSINESS_RULE_ID": 601}],
@@ -343,7 +358,7 @@ def _assert_fields(actual, expected, location):
         assert actual == expected, (location, actual, expected)
 
 
-def assert_retained(engine, kept):
+def assert_retained(engine, kept, upgrade_window):
     with engine.connect() as conn:
         for table, keys, rows in sorted(kept, key=lambda item: item[0] != "AUD_TASK_ATTEMPTS"):
             if table == "AUD_COLUMN_LINEAGE":
@@ -358,6 +373,19 @@ def assert_retained(engine, kept):
             destination = "AUD_CONTROLLERS" if table == "AUD_OVERSEERS" else table
             for row in rows:
                 original = {name.upper(): value for name, value in row.items()}
+                # 0047 renames script parameters and makes script paths relative to the project.
+                renamed = table == "CFG_TASK_PARAMETERS" and original.get("PARAMETER_NAME") in {
+                    "SCRIPT_NAME",
+                    "SOURCE_SQL_FILE",
+                    "SOURCE_SQL",
+                }
+                if renamed:
+                    name, value = original["PARAMETER_NAME"], original["PARAMETER_VALUE"]
+                    original["PARAMETER_NAME"], original["PARAMETER_VALUE"] = {
+                        "SCRIPT_NAME": ("SCRIPT_FILE", _in_folder("python_scripts/", value)),
+                        "SOURCE_SQL_FILE": ("SCRIPT_FILE", _in_folder("sql_scripts/", value)),
+                        "SOURCE_SQL": ("SELECT_QUERY", value),
+                    }[name]
                 columns = ", ".join(
                     f"{_expression(table, name)} AS {name.lower()}" for name in original
                 )
@@ -374,11 +402,25 @@ def assert_retained(engine, kept):
                 )
                 assert len(found) == 1, (table, parameters, original, found)
                 actual = found[0]
+                if renamed:
+                    assert actual["updated_by"] == SYSTEM_ACTOR.name
+                    assert (
+                        _normal(upgrade_window[0])
+                        <= _normal(actual["updated_date"])
+                        <= _normal(upgrade_window[1])
+                    )
+                    original["UPDATED_BY"] = SYSTEM_ACTOR.name
+                    original["UPDATED_DATE"] = actual["updated_date"]
                 _assert_fields(
                     dict(actual),
                     {name.lower(): value for name, value in original.items()},
                     (table, parameters),
                 )
+
+
+def _in_folder(folder, value):
+    """0047 adds the folder to a script path that lacks it, and never doubles it."""
+    return value if value.startswith(folder) else folder + value
 
 
 def _tracker(conn, table, rows):

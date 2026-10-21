@@ -19,13 +19,13 @@ def check_row_id_generation(w, target):
             dialect.surrogate_key != "computed"
         )
     params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": target}
-    w.run(target, SOURCE_SQL=select + " UNION ALL SELECT 2", **params)
+    w.run(target, SELECT_QUERY=select + " UNION ALL SELECT 2", **params)
     initial = w.rows(f"SELECT row_id FROM {w.name(target)}")
     assert len(initial) == 2 and len(set(initial)) == 2
     assert all(row[0] is not None and row[0] > 0 for row in initial)
     # Keep the target's stored types, including cloud-specific decimal precision.
     source = f"SELECT id, CAST(4.25 AS DECIMAL(12,2)) AS amount FROM {w.name(target)}"
-    w.run(target, SOURCE_SQL=source, SCHEMA_EVOLUTION="true", **params)
+    w.run(target, SELECT_QUERY=source, SCHEMA_EVOLUTION="true", **params)
     assert types(w, target)["amount"].lower().replace(" ", "") in {
         "decimal(12,2)",
         "numeric(12,2)",
@@ -36,20 +36,20 @@ def check_row_id_generation(w, target):
 
     created = target + "_create"
     create = {"SQL_ACTION": "CREATE_TABLE", "TARGET_OBJECT": created}
-    w.run(created, SOURCE_SQL=select + " UNION ALL SELECT 2", **create)
+    w.run(created, SELECT_QUERY=select + " UNION ALL SELECT 2", **create)
     with w.warehouse.connect() as conn:
         assert dialect.row_id_generated(conn, w.name(created)) == (
             dialect.surrogate_key != "computed"
         )
-    w.run(created, SOURCE_SQL="SELECT CAST(3 AS BIGINT) AS id", **create)
+    w.run(created, SELECT_QUERY="SELECT CAST(3 AS BIGINT) AS id", **create)
     assert w.rows(f"SELECT id FROM {w.name(created)}") == [(3,)]
 
     appended = target + "_append"
     w.setup(appended, select, "APPEND_TABLE")
     append = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": appended}
-    w.run(appended, SOURCE_SQL=select + " UNION ALL SELECT 2", **append)
+    w.run(appended, SELECT_QUERY=select + " UNION ALL SELECT 2", **append)
     w.new_run()
-    w.run(appended, SOURCE_SQL="SELECT CAST(3 AS BIGINT) AS id", **append)
+    w.run(appended, SELECT_QUERY="SELECT CAST(3 AS BIGINT) AS id", **append)
     keys = w.rows(f"SELECT row_id FROM {w.name(appended)}")
     assert len(keys) == 3 and len(set(keys)) == 3 and all(row[0] is not None for row in keys)
     if dialect.identity_in_create:

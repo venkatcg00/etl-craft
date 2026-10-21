@@ -3,7 +3,7 @@
 Running etl-craft on a machine or under an orchestrator.
 
 - [The project directory](project-layout.md): `etl-craft/`, with the config, SQL files,
-  ingestion scripts, migrations and logs, and how commands find it.
+  Python scripts, migrations and logs, and how commands find it.
 - [Scheduling runs](scheduling.md): etl-craft as the orchestrator, runs started on a schedule, and
   stepping in.
 - [Checking a deployment: `doctor` and `setup`](doctor-and-setup.md): every check, and setting up

@@ -254,12 +254,12 @@ def test_sql_without_tokens_or_switches_is_untouched():
         (
             "SELECT 1",
             {"filter_enabled": True},
-            "PIPELINE_RUN_ID_FILTER is true, but SOURCE_SQL has no $$pipeline_run_id_filter",
+            "PIPELINE_RUN_ID_FILTER is true, but SELECT_QUERY has no $$pipeline_run_id_filter",
         ),
         (
             "SELECT 1",
             {"substitution": True},
-            "PIPELINE_RUN_ID_SUBSTITUTION is true, but SOURCE_SQL has no $$pipeline_run_id to",
+            "PIPELINE_RUN_ID_SUBSTITUTION is true, but SELECT_QUERY has no $$pipeline_run_id to",
         ),
         ("SELECT $$pipeline WHERE $$run_day", {}, "unknown token(s) $$pipeline, $$run_day"),
     ],

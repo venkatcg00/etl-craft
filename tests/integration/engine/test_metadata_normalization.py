@@ -102,7 +102,7 @@ def test_inactive_invalid_targets_are_reported_but_sql_and_paths_are_not_parsed(
             pipeline,
             "task",
             TARGET_OBJECT="four.part.table.name",
-            SOURCE_SQL="SELECT 1.0 AS number",
+            SELECT_QUERY="SELECT 1.0 AS number",
             SCRIPT_PATH="path.with.dots.py",
         )
         conn.execute(text("UPDATE CFG_TASK_PARAMETERS SET ACTIVE_FLAG='N'"))
@@ -120,8 +120,8 @@ def test_distinct_inactive_identity_is_not_a_duplicate(engine_db):
     with engine_db.engine.begin() as conn:
         first = add_pipeline(conn, "P")
         second = add_pipeline(conn, "Q")
-        add_task(conn, first, "same_code", SOURCE_SQL="SELECT 1")
-        add_task(conn, second, "same_code", SOURCE_SQL="SELECT 1")
+        add_task(conn, first, "same_code", SELECT_QUERY="SELECT 1")
+        add_task(conn, second, "same_code", SELECT_QUERY="SELECT 1")
         conn.execute(text("UPDATE CFG_PIPELINES SET ACTIVE_FLAG='N' WHERE PIPELINE_CODE='Q'"))
     with engine_db.engine.connect() as conn:
         assert not normalization_problems(conn, catalog=None, dialect=None)

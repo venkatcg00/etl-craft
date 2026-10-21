@@ -14,7 +14,7 @@ GUIDES = pages.REPO / "docs" / "guides"
 GUIDE_FILES = {
     "Every task": "pipelines-and-tasks.md",
     "SQL": "sql-tasks.md",
-    "PYTHON": "ingestion-scripts.md",
+    "PYTHON": "python-scripts.md",
     "EMAIL_ALERT": "email-alerts.md",
     "EVENT_WAIT": "event-waits.md",
     "RUN_PIPELINE": "pipeline-triggers.md",
@@ -49,7 +49,7 @@ def test_every_task_parameter_is_explained_in_its_handlers_guide():
 def test_the_parameter_page_lists_what_each_handler_reads():
     page = pages.task_parameters_page()
     assert "| `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE`, `SCD1_MERGE`, `SCD2_MERGE` |" in page
-    assert "| `SCRIPT_NAME` |  |" in page
+    assert "| `SCRIPT_FILE` |  |" in page
     assert "| `EMAIL_SUBJECT_FAILED` | one outcome: `EMAIL_SUBJECT_<OUTCOME>` |" in page
     assert "| `TASK_TIMEOUT_SECONDS` |  |" in page
 

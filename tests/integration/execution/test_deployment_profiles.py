@@ -59,7 +59,7 @@ def test_a_sized_role_builds_its_pool_and_a_server_without_slots_admits_nothing(
     empty = replace(
         config,
         limits=replace(
-            config.limits, max_parallel_tasks=0, local_ingestion_slots=0, local_warehouse_slots=0
+            config.limits, max_parallel_tasks=0, local_python_slots=0, local_warehouse_slots=0
         ),
     )
     pool = LocalPool(ctx.engine, empty)

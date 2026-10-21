@@ -48,7 +48,7 @@ def seed_catalog(conn, *, prefix, pipelines, tasks, runs):
         SELECT t.TASK_ID, v.name, v.value
         FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID
         CROSS JOIN (SELECT 'SQL_ACTION' AS name, 'CREATE_TABLE' AS value
-                    UNION ALL SELECT 'SOURCE_SQL', 'SELECT 1 AS id') v
+                    UNION ALL SELECT 'SELECT_QUERY', 'SELECT 1 AS id') v
         WHERE """
             + IN_PREFIX
         ),

@@ -25,7 +25,7 @@ LEFT JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1 AND p.ACTIVE_FLAG = 'Y'
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
-    ('SALES_DAILY', 'validate_feed', 'SCRIPT_NAME', 'sales/validate_feed.py'),
+    ('SALES_DAILY', 'validate_feed', 'SCRIPT_FILE', 'python_scripts/sales/validate_feed.py'),
     ('SALES_DAILY', 'validate_feed', 'INPUT_PARAMS', '{"table": "lnd.orders_uk", "min_rows": 1}'),
     ('SALES_DAILY', 'load_orders', 'RETRIES', '1')
 ) v

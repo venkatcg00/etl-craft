@@ -87,7 +87,9 @@ def seeded(engine_db):
             "PIPELINE_ID",
         )
         a = ids["alpha"]
-        ids["extract"] = add_task(conn, a, "extract", "PYTHON", SCRIPT_NAME="extract.py")
+        ids["extract"] = add_task(
+            conn, a, "extract", "PYTHON", SCRIPT_FILE="python_scripts/extract.py"
+        )
         ids["setup"] = add_task(
             conn, a, "setup_dim", SQL_ACTION="SETUP_TABLE", TARGET_OBJECT="core.dim"
         )
@@ -100,8 +102,8 @@ def seeded(engine_db):
         ids["upstream"] = add_task(conn, ids["beta"], "publish")
         conn.execute(
             text(
-                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'extract_v2.py' "
-                "WHERE TASK_ID = :t AND PARAMETER_NAME = 'SCRIPT_NAME'"
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'python_scripts/extract_v2.py' "
+                "WHERE TASK_ID = :t AND PARAMETER_NAME = 'SCRIPT_FILE'"
             ),
             {"t": ids["extract"]},
         )
@@ -188,7 +190,9 @@ def test_task_details_and_parameters(seeded):
         )
         assert (detail.pipeline_id, detail.refresh_type) == (ids["alpha"], "INCREMENTAL")
         # Only active parameters, including the value updated in place.
-        assert tasks.fetch_task_parameters(conn, ids["extract"]) == {"SCRIPT_NAME": "extract_v2.py"}
+        assert tasks.fetch_task_parameters(conn, ids["extract"]) == {
+            "SCRIPT_FILE": "python_scripts/extract_v2.py"
+        }
 
 
 def test_the_other_tasks_writing_a_target(seeded):

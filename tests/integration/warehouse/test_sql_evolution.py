@@ -35,13 +35,13 @@ def test_duckdb_iceberg_refuses_nested_additions_before_any_alter(sql_world):
     w = sql_world
     w.setup("people", "SELECT 1 AS id", "OVERWRITE_TABLE")
     params = {"SQL_ACTION": "OVERWRITE_TABLE", "TARGET_OBJECT": "people"}
-    w.run("people", SOURCE_SQL="SELECT 1 AS id", **params)
+    w.run("people", SELECT_QUERY="SELECT 1 AS id", **params)
     before = w.rows(f"SELECT * FROM {w.name('people')}")
     columns = w.columns("people")
     with pytest.raises(HandlerError, match=r"cannot add nested type.*such as Trino"):
         w.run(
             "people",
-            SOURCE_SQL="SELECT 1 AS id, CAST(1 AS DECIMAL(12,2)) AS scalar_added, "
+            SELECT_QUERY="SELECT 1 AS id, CAST(1 AS DECIMAL(12,2)) AS scalar_added, "
             "ARRAY[1,2] AS nested_added",
             SCHEMA_EVOLUTION="true",
             **params,
@@ -64,14 +64,14 @@ def test_postgres_evolution_preserves_dependent_view_index_comments_and_identity
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }
-    w.run("people", SOURCE_SQL=shape, **params)
+    w.run("people", SELECT_QUERY=shape, **params)
     w.execute(f"CREATE VIEW {w.name('people_view')} AS SELECT id, row_id FROM {target}")
     w.execute(f"CREATE INDEX people_name_idx ON {target} (name)")
     w.execute(f"COMMENT ON TABLE {target} IS 'people table'")
     w.execute(f"COMMENT ON COLUMN {target}.name IS 'person name'")
     before = w.rows(f"SELECT id, row_id FROM {w.name('people_view')}")
     source = f"SELECT id, name, CAST(123.45 AS DECIMAL(12,2)) AS amount FROM {target} WHERE 1 = 0"
-    w.run("people", SOURCE_SQL=source, SCHEMA_EVOLUTION="true", **params)
+    w.run("people", SELECT_QUERY=source, SCHEMA_EVOLUTION="true", **params)
     assert w.rows(f"SELECT id, row_id FROM {w.name('people_view')}") == before
     assert set(
         w.rows(
@@ -89,7 +89,7 @@ def test_postgres_evolution_preserves_dependent_view_index_comments_and_identity
     ) == [("person name",)]
     w.run(
         "people",
-        SOURCE_SQL="SELECT 2 AS id, CAST('Bo' AS VARCHAR(20)) AS name, "
+        SELECT_QUERY="SELECT 2 AS id, CAST('Bo' AS VARCHAR(20)) AS name, "
         "CAST(12.34 AS DECIMAL(12,2)) AS amount",
         **params,
     )
@@ -120,7 +120,7 @@ def test_trino_evolution_preserves_partitioning_comments_and_snapshot_history(sq
         "MERGE_KEY": "id",
         "MERGE_COMPARE_COLUMNS": "name",
     }
-    w.run("people", SOURCE_SQL=shape, **params)
+    w.run("people", SELECT_QUERY=shape, **params)
     snapshots = f'{w.catalog}.{w.schema}."people$snapshots"'
     before = {row[0] for row in w.rows(f"SELECT snapshot_id FROM {snapshots}")}
     assert before
@@ -128,7 +128,7 @@ def test_trino_evolution_preserves_partitioning_comments_and_snapshot_history(sq
         0
     ][0]
     source = f"SELECT id, name, CAST(123.45 AS DECIMAL(12,2)) AS amount FROM {target} WHERE 1 = 0"
-    w.run("people", SOURCE_SQL=source, SCHEMA_EVOLUTION="true", **params)
+    w.run("people", SELECT_QUERY=source, SCHEMA_EVOLUTION="true", **params)
     ddl = w.rows(f"SHOW CREATE TABLE {target}")[0][0]
     assert "partitioning = ARRAY['id']" in ddl
     assert "people table" in ddl and "person name" in ddl

@@ -9,7 +9,8 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode, FailureClass, TableFormat
@@ -32,6 +33,10 @@ if TYPE_CHECKING:
 
 class DatabricksWarehouse(WarehouseDialect):
     """Databricks, Delta tables. A session has no default schema, so scratch tables are named."""
+
+    def script_autocommit(self, engine: Engine, driver: DBAPIConnection) -> None:
+        """Keep the native driver's autocommit outside explicit file transactions."""
+        return None
 
     def classify_failure(self, error: BaseException) -> Failure:
         """Thrift server errors carry Spark SQLSTATE in their diagnostic message."""

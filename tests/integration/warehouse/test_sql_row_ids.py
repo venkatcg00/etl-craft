@@ -31,12 +31,12 @@ def test_concurrent_appends_keep_row_ids_unique_across_processes(sql_world, requ
             w.pipeline_run_id = start_run(conn, w.pipeline_id)
     w.setup("events", "SELECT 1 AS id", "APPEND_TABLE")
     params = {"SQL_ACTION": "APPEND_TABLE", "TARGET_OBJECT": "events"}
-    w.run("seed", SOURCE_SQL="SELECT 0 AS id", **params)
+    w.run("seed", SELECT_QUERY="SELECT 0 AS id", **params)
     contexts = [
-        w.task("first", SOURCE_SQL="SELECT 1 AS id UNION ALL SELECT 2", **params),
+        w.task("first", SELECT_QUERY="SELECT 1 AS id UNION ALL SELECT 2", **params),
         w.task(
             "second",
-            SOURCE_SQL="SELECT 3 AS id UNION ALL SELECT 4",
+            SELECT_QUERY="SELECT 3 AS id UNION ALL SELECT 4",
             **{**params, "TARGET_OBJECT": w.name("events").upper()},
         ),
     ]
@@ -95,7 +95,7 @@ def test_failed_computed_allocation_releases_the_target_lock(sql_world, monkeypa
     params = {
         "SQL_ACTION": "APPEND_TABLE",
         "TARGET_OBJECT": "events",
-        "SOURCE_SQL": "SELECT 1 AS id",
+        "SELECT_QUERY": "SELECT 1 AS id",
     }
     with monkeypatch.context() as patch:
         patch.setattr(Session, "count", fail_after_max)

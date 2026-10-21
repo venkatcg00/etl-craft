@@ -213,7 +213,7 @@ def test_parent_sigkill_reconciles_and_retries_real_child(cli_project):
     if sys.platform != "linux":
         pytest.skip("process-tree recovery requires Linux /proc")
     project = cli_project
-    script = project.config.ingestion_scripts_dir / "load.py"
+    script = project.config.python_scripts_dir / "load.py"
     script.write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    first = not Path('ready').exists()\n    Path('ready').touch()\n"
@@ -281,7 +281,7 @@ def test_child_sigkill_is_failed_by_live_parent(cli_project):
     if sys.platform != "linux":
         pytest.skip("process-tree recovery requires Linux /proc")
     project = cli_project
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "import time\ndef run(task):\n    time.sleep(60)\n"
     )
     parent = project.start("run", "--pipeline-code", "P")

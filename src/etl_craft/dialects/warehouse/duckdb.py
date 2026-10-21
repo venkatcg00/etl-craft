@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import FailureClass
@@ -19,6 +20,10 @@ class DuckDBWarehouse(WarehouseDialect):
 
     Only one process may write a DuckDB file at a time, so warehouse access is queued.
     """
+
+    def script_autocommit(self, engine: Engine, driver: DBAPIConnection) -> None:
+        """Keep the native driver's autocommit outside explicit file transactions."""
+        return None
 
     def classify_failure(self, error: BaseException) -> Failure:
         """DuckDB reports SQL and transaction errors as native exception classes."""

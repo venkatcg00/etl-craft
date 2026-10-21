@@ -117,7 +117,7 @@ CREATE TABLE CFG_TASKS (
     TARGET_ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_tasks_target_active CHECK (TARGET_ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_code CHECK (TASK_CODE ~ '^[A-Za-z][A-Za-z0-9_]{0,127}$'),
     CONSTRAINT ck_tasks_task_type       CHECK (TASK_TYPE IN ('INGESTION','ETL')),
-    CONSTRAINT ck_tasks_handler         CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT','RUN_PIPELINE')),
+    CONSTRAINT ck_tasks_handler         CHECK (HANDLER IN ('PYTHON','SQL','SQL_SCRIPT','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT','RUN_PIPELINE')),
     CONSTRAINT ck_tasks_active_flag     CHECK (ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_run_condition   CHECK (RUN_CONDITION IS NULL OR RUN_CONDITION IN ('ALL','ANY','N')),
     CONSTRAINT ck_tasks_run_condition_count CHECK (
@@ -184,7 +184,7 @@ CREATE UNIQUE INDEX ux_taskparameters_name_identity
 CREATE TRIGGER trg_audit_cfg_task_parameters
     BEFORE INSERT OR UPDATE ON CFG_TASK_PARAMETERS
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
-COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, SOURCE_SQL, ...); TARGET_OBJECT is derived from the task table reference. Which names each handler reads is documented in the task parameter reference.';
+COMMENT ON TABLE CFG_TASK_PARAMETERS IS 'A task''s settings as name and value pairs (SQL_ACTION, SELECT_QUERY, ...); TARGET_OBJECT is derived from the task table reference. Which names each handler reads is documented in the task parameter reference.';
 
 -- A BUSINESS_RULES task's rules: a correlated SELECT that finds rows of the referenced target that
 -- break it, and what a failing row gets flagged as.
@@ -367,7 +367,7 @@ CREATE INDEX ix_brresults_run ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_I
 CREATE INDEX ix_brresults_rule ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_ID);
 COMMENT ON TABLE AUD_BUSINESS_RULES_RESULTS IS 'One row per record a business rule flagged. A record that passes on a later run is cleared: ACTIVE_FLAG = ''N'' and END_DATE set.';
 
--- Where each incremental ingestion script got to: the offset it reads from next.
+-- Where each incremental Python script got to: the offset it reads from next.
 CREATE TABLE AUD_TASK_OFFSET_TRACKER (
     TASK_ID                 BIGINT PRIMARY KEY REFERENCES CFG_TASKS(TASK_ID),
     OFFSET_TYPE             VARCHAR NOT NULL,
@@ -375,7 +375,7 @@ CREATE TABLE AUD_TASK_OFFSET_TRACKER (
     LAST_UPDATED_TIMESTAMP  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ck_offset_type CHECK (OFFSET_TYPE IN ('NUMBER','TEXT','TIMESTAMP'))
 );
-COMMENT ON TABLE AUD_TASK_OFFSET_TRACKER IS 'The watermark an incremental ingestion script reads and advances.';
+COMMENT ON TABLE AUD_TASK_OFFSET_TRACKER IS 'The watermark an incremental Python script reads and advances.';
 
 -- Column lineage traced from each SQL task's SELECT, stored by a hash of what it depends on.
 CREATE TABLE AUD_COLUMN_LINEAGE (

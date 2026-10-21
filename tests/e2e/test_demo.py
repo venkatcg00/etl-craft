@@ -3,7 +3,7 @@
 With pip, every Engine DB with every local warehouse; with uv, SQLite and DuckDB, since the
 installer changes how the package got there, not what it does. Each case runs through the engine.
 The runs cover
-ingestion with offsets, the eight SQL actions, business rules in two waves, alerts and a failure
+python with offsets, the eight SQL actions, business rules in two waves, alerts and a failure
 watcher, the SLA email, a task that fails once, a timeout, a stopped run resumed, cross-pipeline
 gates and cloning; then the warehouse's data, the audit rows, the emails, and what ``validate``,
 ``doctor``, ``history``, ``graph``, ``lineage`` and ``generate-docs`` report.

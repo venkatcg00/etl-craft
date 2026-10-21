@@ -45,7 +45,7 @@ from etl_craft.services.catalog.storage import MARKER as MARKER
 from etl_craft.services.catalog.trigger_html import trigger_edges
 from etl_craft.services.lineage import COPY
 
-SQL_PARAMETERS = frozenset({"SOURCE_SQL"})
+SQL_PARAMETERS = frozenset({"SELECT_QUERY"})
 ZOOM_BUTTONS = (
     '<span class="zoom">'
     '<button type="button" class="zoom-out" title="Zoom out">&minus;</button>'
@@ -66,7 +66,7 @@ class Pages:
     """Builds each catalog page's HTML from the catalog, with links relative to it."""
 
     catalog: Catalog
-    sql_files: SqlFiles
+    sql_scripts: SqlFiles
 
     def _link(self, url: str, text: str, root: str = "../") -> str:
         return f'<a href="{_e(root + url)}">{_e(text)}</a>'
@@ -558,13 +558,13 @@ class Pages:
             shown = (
                 f"<pre>{_e(value)}</pre>" if name in SQL_PARAMETERS else f"<code>{_e(value)}</code>"
             )
-            if name == "SOURCE_SQL_FILE":
-                shown += self._sql_file(value)
+            if name == "SCRIPT_FILE" and not task.script:
+                shown += self._sql_script(value)
             rows.append([f"<code>{_e(name)}</code>", shown])
         return "<h2>Parameters</h2>" + _table(["Parameter", "Value"], rows, "No parameters.")
 
-    def _sql_file(self, name: str) -> str:
-        value = self.sql_files[name]
+    def _sql_script(self, name: str) -> str:
+        value = self.sql_scripts[name]
         if isinstance(value, str):
             return f"<pre>{_e(value)}</pre>"
         return f'<p class="note">The file cannot be read: {_e(value)}</p>'
@@ -679,7 +679,7 @@ class Pages:
         script = self.catalog.scripts[name]
         facts = _facts(
             [
-                ("File", f"<code>ingestion_scripts/{_e(name)}</code>"),
+                ("File", f"<code>{_e(name)}</code>"),
                 ("Found", "yes" if script.exists else '<span class="badge warn">missing</span>'),
                 ("Run by", ", ".join(self._task_link(t) for t in script.tasks)),
             ]

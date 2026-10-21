@@ -9,7 +9,16 @@ import pytest
 from etl_craft.core import text
 from etl_craft.handlers.sql.analysis import Reading, read_only_problem, read_query
 
-DEMO_SQL = sorted((Path(__file__).parents[2] / "examples" / "demo" / "sql_files").glob("*.sql"))
+DEMO = Path(__file__).parents[2] / "examples" / "demo"
+DEMO_SQL = sorted(
+    DEMO / name
+    for name in set(
+        re.findall(
+            r"'SCRIPT_FILE', '(sql_scripts/[^']+)'",
+            (DEMO / "metadata" / "support_insights.sql").read_text("utf-8"),
+        )
+    )
+)
 
 pytestmark = pytest.mark.unit
 

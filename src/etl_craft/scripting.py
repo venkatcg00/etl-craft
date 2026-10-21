@@ -1,7 +1,7 @@
-"""What an ingestion script receives and returns: the ``HANDLER=PYTHON`` contract.
+"""What a Python script receives and returns: the ``HANDLER=PYTHON`` contract.
 
-A task with ``HANDLER = 'PYTHON'`` names a script under the project's ``ingestion_scripts/`` in
-``SCRIPT_NAME``. The script defines ``run``, which takes a ``ScriptTask`` and returns a
+A task with ``HANDLER = 'PYTHON'`` names a script in ``SCRIPT_FILE`` by its project path, such as
+``python_scripts/orders.py``. The script defines ``run``, which takes a ``ScriptTask`` and returns a
 ``ScriptResult``::
 
     from etl_craft.scripting import Offset, ScriptResult, ScriptTask

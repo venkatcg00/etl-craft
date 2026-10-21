@@ -29,8 +29,8 @@ from etl_craft.core.resources import Sizing
 
 CONFIG_FILENAME = "craft-connector.yml"
 PROJECT_DIRNAME = "etl-craft"
-SQL_FILES_DIRNAME = "sql_files"
-INGESTION_SCRIPTS_DIRNAME = "ingestion_scripts"
+SQL_SCRIPTS_DIRNAME = "sql_scripts"
+PYTHON_SCRIPTS_DIRNAME = "python_scripts"
 MIGRATIONS_DIRNAME = "migrations"
 EXAMPLE_PATH = "docs/craft-connector.example.yml"
 DEFAULT_TASK_TIMEOUT_SECONDS = 6 * 60 * 60
@@ -183,8 +183,8 @@ class ExecutionLimits:
 
     ``task_timeout_seconds`` of 0 means no limit. ``gate_wait_minutes`` is how long a
     cross-pipeline gate waits for a running upstream, 0 for not at all. The local pool runs at
-    most ``max_parallel_tasks`` task processes, of which at most ``local_ingestion_slots`` run
-    Python ingestion scripts and ``local_warehouse_slots`` run everything else; unset, each kind
+    most ``max_parallel_tasks`` task processes, of which at most ``local_python_slots`` run
+    Python scripts and ``local_warehouse_slots`` run everything else; unset, each kind
     may use all of ``max_parallel_tasks``.
 
     A process that has reached the Engine DB waits up to ``engine_db_outage_seconds`` for it to
@@ -201,7 +201,7 @@ class ExecutionLimits:
     gate_wait_minutes: int = DEFAULT_GATE_WAIT_MINUTES
     shutdown_grace_seconds: int = 60
     engine_db_outage_seconds: int = 120
-    local_ingestion_slots: int | None = None
+    local_python_slots: int | None = None
     local_warehouse_slots: int | None = None
     max_parallel_tasks_written: bool = False
     """Whether the team wrote ``Max_parallel_tasks``: then it is a deployment profile's ceiling."""
@@ -230,7 +230,7 @@ class ConnectorConfig:
     came from, in file order, for ``doctor``.
 
     The directory holding the file is the project directory (conventionally ``etl-craft/``).
-    It holds the project's ``sql_files/``, ``ingestion_scripts/`` and ``migrations/``.
+    It holds the project's ``sql_scripts/``, ``python_scripts/`` and ``migrations/``.
     """
 
     source: SourceConfig
@@ -266,14 +266,14 @@ class ConnectorConfig:
         return self.config_path.absolute().parent
 
     @property
-    def sql_files_dir(self) -> Path:
-        """Where ``SOURCE_SQL_FILE`` names are found: ``sql_files/`` in the project."""
-        return self.project_dir / SQL_FILES_DIRNAME
+    def sql_scripts_dir(self) -> Path:
+        """Where ``SCRIPT_FILE`` names are found: ``sql_scripts/`` in the project."""
+        return self.project_dir / SQL_SCRIPTS_DIRNAME
 
     @property
-    def ingestion_scripts_dir(self) -> Path:
-        """Where Python ingestion scripts are found: ``ingestion_scripts/`` in the project."""
-        return self.project_dir / INGESTION_SCRIPTS_DIRNAME
+    def python_scripts_dir(self) -> Path:
+        """Where Python scripts are found: ``python_scripts/`` in the project."""
+        return self.project_dir / PYTHON_SCRIPTS_DIRNAME
 
     @property
     def migrations_dir(self) -> Path:

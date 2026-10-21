@@ -6,8 +6,8 @@ remedy, so no action ever starts on a half-valid definition.
 - ``SQL_ACTION``: one of the nine actions.
 - ``TARGET_OBJECT``: ``schema.table``, in the active warehouse profile's database, or
   ``database.schema.table``.
-- ``SOURCE_SQL`` or ``SOURCE_SQL_FILE`` (every action but ``DROP_TABLE``): the read-only
-  SELECT, inline or as a file under ``sql_files/``; exactly one of them.
+- ``SELECT_QUERY`` or ``SCRIPT_FILE`` (every action but ``DROP_TABLE``): the read-only
+  SELECT, inline or as a file under ``sql_scripts/``; exactly one of them.
 - ``PIPELINE_RUN_ID_SUBSTITUTION``: ``true`` replaces ``$$pipeline_run_id`` with the run id.
 - ``PIPELINE_RUN_ID_FILTER``: ``true`` replaces ``$$pipeline_run_id_filter`` with
   ``pipeline_run_id = <id>``, or ``1=1`` on a FULL refresh.
@@ -45,7 +45,7 @@ from datetime import date
 from sqlglot import exp
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import sql_file
+from etl_craft.config.project import sql_script
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import MetadataError, SqlGuardError
 from etl_craft.core.text import (
@@ -92,8 +92,8 @@ PARAMETERS = frozenset(
     {
         "SQL_ACTION",
         "TARGET_OBJECT",
-        "SOURCE_SQL",
-        "SOURCE_SQL_FILE",
+        "SELECT_QUERY",
+        "SCRIPT_FILE",
         "PIPELINE_RUN_ID_SUBSTITUTION",
         "PIPELINE_ID_SUBSTITUTION",
         "TASK_RUN_ID_SUBSTITUTION",
@@ -181,7 +181,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
 
     select_sql, source = None, "none"
     if action == SqlAction.DROP_TABLE:
-        given = [name for name in ("SOURCE_SQL", "SOURCE_SQL_FILE") if params.get(name)]
+        given = [name for name in ("SELECT_QUERY", "SCRIPT_FILE") if params.get(name)]
         if given:
             raise SqlGuardError(f"SQL_ACTION=DROP_TABLE takes no SELECT, but {given[0]} is set")
     else:
@@ -292,27 +292,27 @@ def resolve_select(
     Also returns where it came from, for messages. ``SqlGuardError`` or ``MetadataError`` when
     the task has no usable single read-only SELECT.
     """
-    inline = params.get("SOURCE_SQL")
-    file_name = params.get("SOURCE_SQL_FILE")
+    inline = params.get("SELECT_QUERY")
+    file_name = params.get("SCRIPT_FILE")
     if inline and file_name:
         raise SqlGuardError(
-            "set SOURCE_SQL or SOURCE_SQL_FILE, not both: the task would have two SELECTs"
+            "set SELECT_QUERY or SCRIPT_FILE, not both: the task would have two SELECTs"
         )
     if file_name:
-        path = sql_file(config, file_name)
+        path = sql_script(config, file_name)
         try:
             raw = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
             raise MetadataError(
-                f"SOURCE_SQL_FILE={file_name!r}: cannot read {path}: {error}"
+                f"SCRIPT_FILE={file_name!r}: cannot read {path}: {error}"
             ) from error
-        source = f"SOURCE_SQL_FILE={file_name!r}"
+        source = f"SCRIPT_FILE={file_name!r}"
     elif inline:
-        raw, source = inline, "SOURCE_SQL"
+        raw, source = inline, "SELECT_QUERY"
     else:
         raise SqlGuardError(
-            f"SQL_ACTION={params.get('SQL_ACTION')} needs a SELECT: set SOURCE_SQL, or "
-            "SOURCE_SQL_FILE naming a file under sql_files/"
+            f"SQL_ACTION={params.get('SQL_ACTION')} needs a SELECT: set SELECT_QUERY, or "
+            "SCRIPT_FILE naming a project path such as sql_scripts/orders.sql"
         )
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
     watermark = read_watermark(params, stored)
