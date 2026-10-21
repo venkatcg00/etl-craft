@@ -19,7 +19,10 @@ pytestmark = pytest.mark.unit
         ("from helpers import run\n", None),
         ("run = lambda task: None\n", None),
         ("async def run(task):\n    pass\n", "s.py: run is async"),
-        ("def main(task):\n    pass\n", "SCRIPT_NAME='s.py' defines no run(task) function"),
+        (
+            "def main(task):\n    pass\n",
+            "SCRIPT_FILE='s.py' defines no run(task) function",
+        ),
     ],
 )
 def test_a_script_is_read_without_running_it(tmp_path, source, problem):

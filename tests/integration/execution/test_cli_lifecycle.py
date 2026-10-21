@@ -77,7 +77,7 @@ def test_a_hard_exit_after_binding_does_not_fabricate_cancellation_acknowledgeme
 @pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP])
 def test_signal_stops_the_real_cli_child_and_grandchild(cli_project, sig):
     project = cli_project
-    script = project.config.ingestion_scripts_dir / "load.py"
+    script = project.config.python_scripts_dir / "load.py"
     script.write_text(
         "import subprocess, sys, time\ndef run(task):\n"
         "    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"

@@ -124,7 +124,7 @@ def blocking_script(project):
     raw = yaml.safe_load(project.config.config_path.read_text())
     raw["Orchestration"]["Shutdown_grace_seconds"] = 0
     project.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    marker=Path('server-first-attempt')\n"
         "    if not marker.exists():\n        marker.write_text('started')\n"
@@ -255,7 +255,9 @@ def test_operator_cancellation_takes_precedence_over_shutdown_resume(cli_project
     p = cli_project
     blocking_script(p)
     with p.engine.begin() as conn:
-        after = add_task(conn, p.pipeline_id, "after", "PYTHON", SCRIPT_NAME="load.py")
+        after = add_task(
+            conn, p.pipeline_id, "after", "PYTHON", SCRIPT_FILE="python_scripts/load.py"
+        )
         add_dependency(conn, p.pipeline_id, after, p.task_id)
     assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "cancel")[0] == 0
     server = p.start("controller")
@@ -289,7 +291,7 @@ def wait_for_output(command, text_, timeout=15):
 
 
 def released_script(project):
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    Path('started').write_text('started')\n"
         "    while not Path('release').exists():\n        time.sleep(0.05)\n"

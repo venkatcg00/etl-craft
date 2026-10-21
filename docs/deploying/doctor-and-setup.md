@@ -15,7 +15,7 @@ first. Each line is one check:
 [OK  ] Warehouse connection: Trino, schema analytics exists
 [OK  ] Warehouse catalog: an Iceberg catalog
 [OK  ] Email relay: smtp.example.com:587 answers
-[OK  ] Project folders: sql_files, migrations in /srv/etl-craft
+[OK  ] Project folders: sql_scripts, migrations in /srv/etl-craft
 8 ok, 1 warning(s), 1 failed
 ```
 

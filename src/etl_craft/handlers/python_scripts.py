@@ -1,7 +1,7 @@
-"""``HANDLER=PYTHON``: run an ingestion script from the project's ``ingestion_scripts/``.
+"""``HANDLER=PYTHON``: run a Python script from the project's ``python_scripts/``.
 
-The task's ``SCRIPT_NAME`` names the script, a path inside ``ingestion_scripts/``; the script
-defines ``run(task)``, or ``run()`` when it needs nothing from the task (see
+The task's ``SCRIPT_FILE`` names the script by its project path, inside ``python_scripts/``;
+the script defines ``run(task)``, or ``run()`` when it needs nothing from the task (see
 ``etl_craft.scripting``). It runs in the task's own process, so what it prints and logs goes to
 the attempt's log, and the task's time limit applies to it.
 
@@ -31,7 +31,8 @@ from typing import Any
 
 from sqlalchemy.engine import Engine
 
-from etl_craft.config.project import ingestion_script
+from etl_craft.config.model import PYTHON_SCRIPTS_DIRNAME
+from etl_craft.config.project import python_script
 from etl_craft.core.errors import HandlerError, PermanentError, TransientError
 from etl_craft.core.log import capture_all_loggers
 from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
@@ -40,22 +41,22 @@ from etl_craft.scripting import Offset, ScriptResult, ScriptTask
 
 logger = logging.getLogger(__name__)
 
-PARAMETERS = frozenset({"SCRIPT_NAME", "INPUT_PARAMS"})
-"""The task parameters an ingestion-script task reads."""
+PARAMETERS = frozenset({"SCRIPT_FILE", "INPUT_PARAMS"})
+"""The task parameters a Python-script task reads."""
 
 SCRIPT_LOGGER = "etl_craft_script"
 """The logger a script is given as ``task.logger``, named after its task."""
 
 
 def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
-    """Run the task's ingestion script and return the counts it reports."""
+    """Run the task's Python script and return the counts it reports."""
     params = context.task_params
-    name = (params.get("SCRIPT_NAME") or "").strip()
+    name = (params.get("SCRIPT_FILE") or "").strip()
     if not name:
         raise HandlerError(
-            "SCRIPT_NAME is required for HANDLER=PYTHON: a .py file under ingestion_scripts/"
+            "SCRIPT_FILE is required for HANDLER=PYTHON, such as python_scripts/load.py"
         )
-    path = ingestion_script(context.config, name)
+    path = python_script(context.config, name)
     input_params = {
         name: list(context.event_files) if value == "$$event_files" else value
         for name, value in parse_input_params(params.get("INPUT_PARAMS")).items()
@@ -159,7 +160,8 @@ def load_script(path: Path, name: str) -> Callable[..., Any]:
         sys.path.insert(0, folder)
     # Compiled from its source every time, never from cached bytecode, so an edited script is
     # always the one that runs.
-    module_name = f"etl_craft_script_{name.replace('/', '_').replace('.', '_')}"
+    relative = name.removeprefix(f"{PYTHON_SCRIPTS_DIRNAME}/")
+    module_name = f"etl_craft_script_{relative.replace('/', '_').replace('.', '_')}"
     module = types.ModuleType(module_name)
     module.__file__ = str(path)
     module.__spec__ = importlib.util.spec_from_file_location(module_name, path)
@@ -173,13 +175,13 @@ def load_script(path: Path, name: str) -> Callable[..., Any]:
             raise
         logger.exception("importing %s failed", path)
         raise HandlerError(
-            f"SCRIPT_NAME={name!r}: importing it failed: {type(error).__name__}: {error}"
+            f"SCRIPT_FILE={name!r}: importing it failed: {type(error).__name__}: {error}"
         ) from error
     entry = getattr(module, "run", None)
     if not callable(entry):
         sys.modules.pop(module_name, None)
         raise HandlerError(
-            f"SCRIPT_NAME={name!r} defines no run(task) function; see etl_craft.scripting"
+            f"SCRIPT_FILE={name!r} defines no run(task) function; see etl_craft.scripting"
         )
     return entry  # type: ignore[no-any-return]
 
@@ -193,9 +195,9 @@ def script_definition_problem(path: Path, name: str) -> str | None:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError as error:
-        return f"SCRIPT_NAME={name!r} has a syntax error at line {error.lineno}: {error.msg}"
+        return f"SCRIPT_FILE={name!r} has a syntax error at line {error.lineno}: {error.msg}"
     except (OSError, UnicodeDecodeError) as error:
-        return f"SCRIPT_NAME={name!r} cannot be read: {error}"
+        return f"SCRIPT_FILE={name!r} cannot be read: {error}"
     functions = [
         node
         for node in tree.body
@@ -216,7 +218,7 @@ def script_definition_problem(path: Path, name: str) -> str | None:
         }
         if "run" in bound:
             return None
-        return f"SCRIPT_NAME={name!r} defines no run(task) function; see etl_craft.scripting"
+        return f"SCRIPT_FILE={name!r} defines no run(task) function; see etl_craft.scripting"
     if isinstance(functions[-1], ast.AsyncFunctionDef):
         return f"{name}: run is async; it must be a plain function that returns a ScriptResult"
     args = functions[-1].args

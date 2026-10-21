@@ -1,4 +1,4 @@
-"""Typed SQL high-water marks, using the same offset store as ingestion scripts."""
+"""Typed SQL high-water marks, using the same offset store as Python scripts."""
 
 from __future__ import annotations
 

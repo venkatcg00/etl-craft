@@ -393,7 +393,7 @@ def _check_run_condition(task: TaskNode, total_edges: int) -> None:
 def _check_acyclic(graph: DependencyGraph) -> None:
     """Raise ``CycleError`` naming a cycle, if the graph has one.
 
-    A depth-first search with an explicit stack, so a dependency chain deeper than Python's
+    A depth-first search with an explicit stack, so a dependency chain deeper tha Python's
     recursion limit is still checked.
     """
     white, gray, black = 0, 1, 2

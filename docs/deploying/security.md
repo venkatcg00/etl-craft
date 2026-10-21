@@ -10,7 +10,7 @@ taken as written. Keep the secrets file out of version control and readable only
 that runs etl-craft.
 
 Secrets never appear in logs, in error messages, or in the connection URLs etl-craft logs. An
-ingestion script receives its own settings through `CFG_TASK_PARAMETERS`, which are not secret:
+Python script receives its own settings through `CFG_TASK_PARAMETERS`, which are not secret:
 a script that needs a credential reads it from its environment. Values in
 `CFG_TASK_PARAMETERS` and anything a script prints or logs are the team's responsibility.
 
@@ -204,7 +204,7 @@ Your team writes the `CFG_` rows; the account etl-craft runs as only needs to re
 
 A SQL task supplies one read-only `SELECT`. The engine checks it (one statement, a query, with
 no write anywhere in its parse tree), and wraps it in one of nine actions that it owns, so a task's SQL cannot write, drop or grant
-anything by itself. Ingestion scripts are Python run by your team, with the account's rights:
+anything by itself. Python scripts are Python run by your team, with the account's rights:
 review them like any code that runs in production.
 
 ## Connections

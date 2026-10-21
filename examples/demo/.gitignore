@@ -4,5 +4,5 @@ warehouse.duckdb*
 logs/
 catalog/
 .catalog.*
-ingestion_scripts/.flaky-has-failed
+python_scripts/.flaky-has-failed
 __pycache__/

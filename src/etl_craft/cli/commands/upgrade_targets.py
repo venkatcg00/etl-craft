@@ -16,7 +16,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         choices=[
             kind for kind in SqlAction if kind not in {SqlAction.DROP_TABLE, SqlAction.CREATE_VIEW}
         ],
-        help="Filter by SQL action; defaults to configured SQL and ingestion targets.",
+        help="Filter by SQL action; defaults to configured SQL and python targets.",
     )
     parser.add_argument(
         "--target",

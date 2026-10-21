@@ -38,7 +38,7 @@ def restore_logger():
 @pytest.fixture
 def project(engine_db, tmp_path, monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
-    """A project with a DuckDB warehouse, email, a SQL file and an ingestion script."""
+    """A project with a DuckDB warehouse, email, a SQL file and an Python script."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
@@ -58,10 +58,10 @@ def project(engine_db, tmp_path, monkeypatch):
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
-    (root / "sql_files").mkdir(exist_ok=True)
-    (root / "sql_files" / "orders.sql").write_text("SELECT id, amount FROM raw.orders", "utf-8")
-    (root / "ingestion_scripts").mkdir(exist_ok=True)
-    (root / "ingestion_scripts" / "load.py").write_text(GOOD_SCRIPT, "utf-8")
+    (root / "sql_scripts").mkdir(exist_ok=True)
+    (root / "sql_scripts" / "orders.sql").write_text("SELECT id, amount FROM raw.orders", "utf-8")
+    (root / "python_scripts").mkdir(exist_ok=True)
+    (root / "python_scripts" / "load.py").write_text(GOOD_SCRIPT, "utf-8")
     monkeypatch.chdir(root)
     return engine_db.engine, load_config(root / "craft-connector.yml"), root
 
@@ -85,14 +85,16 @@ def add_rule(conn, pipeline, task, name, *, key="id", target="sales.orders", sql
 def good_pipeline(conn, code="SALES"):
     """ingest, then stage (from a file) and setup, then load, rules and alert."""
     p = add_pipeline(conn, code)
-    ingest = add_task(conn, p, "ingest", "PYTHON", SCRIPT_NAME="load.py", INPUT_PARAMS='{"a": 1}')
+    ingest = add_task(
+        conn, p, "ingest", "PYTHON", SCRIPT_FILE="python_scripts/load.py", INPUT_PARAMS='{"a": 1}'
+    )
     setup = add_task(
         conn,
         p,
         "setup",
         SQL_ACTION="SETUP_TABLE",
         TARGET_OBJECT="sales.orders",
-        SOURCE_SQL_FILE="orders.sql",
+        SOURCE_SQL_FILE="sql_scripts/orders.sql",
     )
     load = add_task(
         conn,
@@ -138,9 +140,9 @@ def test_a_clean_project_has_no_findings(project):
 
 def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
     engine, config, root = project
-    (root / "ingestion_scripts" / "two.py").write_text("def run(a, b):\n    pass\n", "utf-8")
-    (root / "ingestion_scripts" / "broken.py").write_text("def run(:\n", "utf-8")
-    (root / "ingestion_scripts" / "none.py").write_text("x = 1\n", "utf-8")
+    (root / "python_scripts" / "two.py").write_text("def run(a, b):\n    pass\n", "utf-8")
+    (root / "python_scripts" / "broken.py").write_text("def run(:\n", "utf-8")
+    (root / "python_scripts" / "none.py").write_text("x = 1\n", "utf-8")
     with engine.begin() as conn:
         p = add_pipeline(conn, "BAD")
         add_task(conn, p, "no_action", TARGET_OBJECT="s.t", SOURCE_SQL="SELECT 1 AS a")
@@ -158,7 +160,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             "no_file",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="s.u",
-            SOURCE_SQL_FILE="missing.sql",
+            SOURCE_SQL_FILE="sql_scripts/missing.sql",
         )
         add_task(
             conn,
@@ -195,10 +197,12 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
             TARGET_OBJECT="s.z",
             SOURCE_SQL="SELECT id, PIPELINE_RUN_ID, row_id AS ROW_ID FROM s.y",
         )
-        add_task(conn, p, "two_args", "PYTHON", SCRIPT_NAME="two.py")
-        add_task(conn, p, "syntax", "PYTHON", SCRIPT_NAME="broken.py")
-        add_task(conn, p, "no_run", "PYTHON", SCRIPT_NAME="none.py", INPUT_PARAMS="[1]")
-        add_task(conn, p, "no_script", "PYTHON", SCRIPT_NAME="gone.py")
+        add_task(conn, p, "two_args", "PYTHON", SCRIPT_FILE="python_scripts/two.py")
+        add_task(conn, p, "syntax", "PYTHON", SCRIPT_FILE="python_scripts/broken.py")
+        add_task(
+            conn, p, "no_run", "PYTHON", SCRIPT_FILE="python_scripts/none.py", INPUT_PARAMS="[1]"
+        )
+        add_task(conn, p, "no_script", "PYTHON", SCRIPT_FILE="python_scripts/gone.py")
         add_task(conn, p, "no_rules", "BUSINESS_RULES")
         add_task(
             conn,
@@ -273,8 +277,12 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
         "the SELECT returns PIPELINE_RUN_ID, ROW_ID, which etl-craft writes itself; leave them "
         "out, or alias them"
     )
-    assert only("two_args") == "two.py: run takes 2 arguments; it takes the task, or nothing"
-    assert only("syntax").startswith("SCRIPT_NAME='broken.py' has a syntax error at line 1")
+    assert only("two_args") == (
+        "python_scripts/two.py: run takes 2 arguments; it takes the task, or nothing"
+    )
+    assert only("syntax").startswith(
+        "SCRIPT_FILE='python_scripts/broken.py' has a syntax error at line 1"
+    )
     assert "INPUT_PARAMS must be a JSON object" in only("no_run")
     assert "gone.py" in only("no_script")
     assert "no active row in CFG_BUSINESS_RULES" in only("no_rules")
@@ -297,10 +305,12 @@ def test_dependencies_and_pipeline_settings(project):
     with engine.begin() as conn:
         good = good_pipeline(conn, "GOOD")
         up = add_pipeline(conn, "UP")
-        off = add_task(conn, up, "off", "PYTHON", SCRIPT_NAME="load.py")
+        off = add_task(conn, up, "off", "PYTHON", SCRIPT_FILE="python_scripts/load.py")
         down = add_pipeline(conn, "DOWN")
-        waits = add_task(conn, down, "waits", "PYTHON", SCRIPT_NAME="load.py")
-        rules_data = add_task(conn, down, "after_rules", "PYTHON", SCRIPT_NAME="load.py")
+        waits = add_task(conn, down, "waits", "PYTHON", SCRIPT_FILE="python_scripts/load.py")
+        rules_data = add_task(
+            conn, down, "after_rules", "PYTHON", SCRIPT_FILE="python_scripts/load.py"
+        )
         alert = add_task(
             conn,
             down,
@@ -335,7 +345,7 @@ def test_dependencies_and_pipeline_settings(project):
             conn.exec_driver_sql("ALTER TABLE CFG_PIPELINES DROP CONSTRAINT ck_pipelines_code")
             conn.exec_driver_sql("ALTER TABLE CFG_TASKS DROP CONSTRAINT ck_tasks_code")
         bad_code = add_pipeline(conn, "bad code")
-        add_task(conn, bad_code, "x.y", "PYTHON", SCRIPT_NAME="load.py")
+        add_task(conn, bad_code, "x.y", "PYTHON", SCRIPT_FILE="python_scripts/load.py")
         if conn.dialect.name == "sqlite":
             conn.exec_driver_sql("PRAGMA ignore_check_constraints=OFF")
     report = validate(engine, config)
@@ -386,8 +396,8 @@ def test_a_cycle_inside_a_pipeline(project):
     engine, config, _ = project
     with engine.begin() as conn:
         p = add_pipeline(conn, "LOOP")
-        a = add_task(conn, p, "a", "PYTHON", SCRIPT_NAME="load.py")
-        b = add_task(conn, p, "b", "PYTHON", SCRIPT_NAME="load.py")
+        a = add_task(conn, p, "a", "PYTHON", SCRIPT_FILE="python_scripts/load.py")
+        b = add_task(conn, p, "b", "PYTHON", SCRIPT_FILE="python_scripts/load.py")
         add_dependency(conn, p, a, b)
         add_dependency(conn, p, b, a)
     (finding,) = validate(engine, config).findings
@@ -406,8 +416,8 @@ def test_the_command(project, capsys):
     )
     assert main(["validate"]) == ExitCode.FAILURE
     assert capsys.readouterr().out.splitlines() == [
-        "[FAIL] OTHER.bad: SCRIPT_NAME is required for HANDLER=PYTHON: a .py file under "
-        "ingestion_scripts/",
+        "[FAIL] OTHER.bad: SCRIPT_FILE is required for HANDLER=PYTHON, such as "
+        "python_scripts/load.py",
         "checked 2 pipeline(s) and 6 task(s): 1 failed, 0 warning(s)",
     ]
     assert main(["validate", "--pipeline-code", "NOPE"]) == ExitCode.METADATA
@@ -517,7 +527,7 @@ def test_validate_rejects_invalid_retry_parameters(project, parameters):
 
 def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project):
     engine, config, root = project
-    (root / "sql_files" / "orders.sql").write_text(
+    (root / "sql_scripts" / "orders.sql").write_text(
         "SELECT id,\n       amount FROM raw.orders WHERE", "utf-8"
     )
     with engine.begin() as conn:
@@ -532,7 +542,8 @@ def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project
     assert not report.failed
     warnings = {where: message for where, status, message in found(report) if status is Status.WARN}
     assert warnings["SALES.setup"].startswith(
-        "SOURCE_SQL_FILE='orders.sql': sqlglot cannot read it as duckdb SQL (line 2, column "
+        "SOURCE_SQL_FILE='sql_scripts/orders.sql': sqlglot cannot read it as duckdb SQL "
+        "(line 2, column "
     )
     assert warnings["SALES.setup"].endswith(
         "); the warehouse decides when the task runs, and column lineage cannot trace it"

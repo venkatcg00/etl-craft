@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 
 from etl_craft.config.auth import WarehouseSpec
 from etl_craft.core.enums import AuthMode, TableFormat
@@ -232,6 +233,10 @@ class WarehouseDialect:
             cursor.execute(self.session_sql)
         finally:
             cursor.close()
+
+    def script_autocommit(self, engine: Engine, driver: DBAPIConnection) -> None:
+        """Enable native autocommit without SQLAlchemy starting an implicit transaction."""
+        engine.dialect.set_isolation_level(driver, "AUTOCOMMIT")
 
     def load_table_metadata(self, conn: Connection, schema: str, table: str) -> None:
         """Make information_schema.columns describe ``schema.table``; it already does by default."""

@@ -36,7 +36,7 @@ flowchart LR
     resolve --> spawn["One child process<br/>per task"]
     spawn --> handler{"Task handler"}
     handler -->|SQL| sql["SQL action"]
-    handler -->|PYTHON| script["Ingestion script"]
+    handler -->|PYTHON| script["Python script"]
     handler -->|BUSINESS_RULES| rules["Business rules"]
     handler -->|EMAIL_ALERT| mail["Email alert"]
     sql --> wh[("Warehouse")]

@@ -1,4 +1,4 @@
-"""Ingestion offsets: where each script task left off, in ``AUD_TASK_OFFSET_TRACKER``."""
+"""Script offsets: where each script task left off, in ``AUD_TASK_OFFSET_TRACKER``."""
 
 from __future__ import annotations
 

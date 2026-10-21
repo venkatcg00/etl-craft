@@ -61,7 +61,7 @@ def rule_url(rule_id: int) -> str:
 
 
 def script_url(name: str) -> str:
-    """Return the URL of an ingestion script's page, from the site's root."""
+    """Return the URL of a Python script's page, from the site's root."""
     return f"scripts/{slug(name)}.html"
 
 

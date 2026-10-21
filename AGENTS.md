@@ -101,11 +101,12 @@ that damages the package is not helpful; saying so, with a better option, is.
   recorded task-dependency consumption together. Pipeline endings commit status, SLA and
   recorded pipeline-dependency consumption together; finalization hooks run after commit.
 - Order comes from `CFG_TASK_DEPENDENCY` and `CFG_PIPELINE_DEPENDENCY` rows, never from code.
-- SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of nine actions
+- Managed SQL tasks supply exactly one read-only SELECT; the engine wraps it in one of nine actions
   (`CREATE_TABLE`, `SETUP_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE`, `SCD2_MERGE`,
   `DROP_TABLE`, `DELETE_ROWS`, `CREATE_VIEW`) and owns every write. Only `CREATE_TABLE` and
   `SETUP_TABLE` create tables; `CREATE_VIEW` creates or replaces views but never a table; the
-  others fail when their target is missing.
+  others fail when their target is missing. `SQL_SCRIPT` tasks run unmanaged SQL with full
+  statement audit.
 - Merge hashes use typed, NULL-tagged, length-prefixed values and UTC timestamps. Fresh merge
   targets publish hash version 2 after creation; existing targets need `etl-craft rehash` before
   merging. Never publish a hash version before its warehouse update commits. Target mutations
@@ -113,8 +114,8 @@ that damages the package is not helpful; saying so, with a better option, is.
 - One warehouse per deployment. Third-party SQLAlchemy dialects are optional extras and never
   imported by engine code; DuckDB's, the default local warehouse, is the one core dependency.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always
-  variable names, never values. Its directory is the project directory, holding `sql_files/`,
-  `ingestion_scripts/`, `config/`, `migrations/` and `logs/`; relative paths start there.
+  variable names, never values. Its directory is the project directory, holding `sql_scripts/`,
+  `python_scripts/`, `config/`, `migrations/` and `logs/`; relative paths start there.
 - Every write to etl-craft's Engine DB tables goes through etl-craft and names its actor; the
   Engine DB refuses any other. Extra team-owned `CFG_` tables are outside this rule: teams
   maintain them with their own scripts, without package guards, history or field requirements.
@@ -147,8 +148,8 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 | `controller` | leadership, active-run working set, local supervision and shutdown |
 | `services` | actor-scoped operations, doctor, setup, validate, config files, cloning, lineage, docs site |
 | `execution` | task runner, process supervisor, ready-task scheduler, run lifecycle, cross-pipeline gates |
-| `handlers` | SQL actions, business rules, Python ingestion scripts, email alerts |
-| `scripting` | the helper module ingestion scripts import |
+| `handlers` | SQL actions, business rules, Python scripts, email alerts |
+| `scripting` | the helper module Python scripts import |
 | `engine` / `warehouse` | Engine DB access and warehouse access (siblings, independent) |
 | `dialects` | per-database SQL and connection details |
 | `config` | `craft-connector.yml` model and loader |

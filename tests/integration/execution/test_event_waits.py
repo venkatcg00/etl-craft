@@ -150,7 +150,7 @@ def test_validation_uses_the_runtime_condition_checks(world):
 
 def test_pipeline_releases_downstream_scripts_and_sql(world):
     engine, config, pipeline, task, _ = setup(world, EVENT_FILE="*.csv", EVENT_SETTLE_SECONDS="0")
-    folder = config.project_dir / "ingestion_scripts"
+    folder = config.project_dir / "python_scripts"
     folder.mkdir()
     (folder / "consume.py").write_text(
         "from pathlib import Path\n"
@@ -187,7 +187,7 @@ def test_pipeline_releases_downstream_scripts_and_sql(world):
             pipeline,
             "consume",
             "PYTHON",
-            SCRIPT_NAME="consume.py",
+            SCRIPT_FILE="python_scripts/consume.py",
             INPUT_PARAMS='{"files":"$$event_files"}',
         )
         add_dependency(conn, pipeline, downstream, task)
@@ -219,7 +219,7 @@ def test_scheduler_checks_events_with_no_available_worker_and_resumes(world):
 
     class FullPool:
         def capacity(self):
-            return Capacity({"ingestion": 1, "warehouse": 1}, {"ingestion": 0, "warehouse": 0})
+            return Capacity({"python": 1, "warehouse": 1}, {"python": 0, "warehouse": 0})
 
         def submit(self, spec):
             pytest.fail("an event wait must never submit to an agent")
@@ -300,7 +300,7 @@ def test_timeout_dependents_follow_normal_dependency_types(world, policy, expect
 
     class Pool:
         def capacity(self):
-            return Capacity({"ingestion": 1, "warehouse": 1}, {"ingestion": 0, "warehouse": 0})
+            return Capacity({"python": 1, "warehouse": 1}, {"python": 0, "warehouse": 0})
 
         def submit(self, spec):
             pytest.fail("event waits never use an agent")

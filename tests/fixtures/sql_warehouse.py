@@ -58,7 +58,7 @@ class SqlWorld:
 
     @property
     def project(self) -> Path:
-        """The project directory, holding ``sql_files/``."""
+        """The project directory, holding ``sql_scripts/``."""
         return self.config.project_dir
 
     def name(self, table: str) -> str:
@@ -169,7 +169,7 @@ class SqlWorld:
 
 def _config(tmp_path: Path, profile: ConnectionProfile) -> ConnectorConfig:
     project = tmp_path / "etl-craft"
-    (project / "sql_files").mkdir(parents=True, exist_ok=True)
+    (project / "sql_scripts").mkdir(parents=True, exist_ok=True)
     engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:engine.db", "", "NONE")
     return ConnectorConfig(
         source=SourceConfig(type=SecretsSource.ENVIRONMENT),

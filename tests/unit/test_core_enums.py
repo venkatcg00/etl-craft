@@ -78,7 +78,15 @@ EXPECTED = {
     enums.SlaStatus: {"MET", "BREACHED"},
     enums.RefreshType: {"FULL", "INCREMENTAL"},
     enums.DependencyType: {"SUCCESS", "FAILURE", "ALWAYS", "HAS_DATA"},
-    enums.Handler: {"PYTHON", "SQL", "BUSINESS_RULES", "EMAIL_ALERT", "EVENT_WAIT", "RUN_PIPELINE"},
+    enums.Handler: {
+        "PYTHON",
+        "SQL",
+        "SQL_SCRIPT",
+        "BUSINESS_RULES",
+        "EMAIL_ALERT",
+        "EVENT_WAIT",
+        "RUN_PIPELINE",
+    },
     enums.RunCondition: {"ALL", "ANY", "N"},
     enums.OffsetType: {"NUMBER", "TEXT", "TIMESTAMP"},
     enums.SqlAction: {

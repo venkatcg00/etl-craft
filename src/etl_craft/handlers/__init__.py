@@ -1,1 +1,1 @@
-"""Task handlers: SQL actions, business rules, Python ingestion scripts and email alerts."""
+"""Task handlers: SQL actions, business rules, Python scripts and email alerts."""

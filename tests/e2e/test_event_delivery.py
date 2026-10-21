@@ -55,9 +55,9 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
         "ON upstream.PIPELINE_ID=downstream.PIPELINE_ID "
         "WHERE downstream.TASK_CODE='files' AND upstream.TASK_CODE='wait';\n"
     )
-    scripts = project / "ingestion_scripts"
+    scripts = project / "python_scripts"
     scripts.mkdir()
-    shutil.copy(DEMO / "ingestion_scripts" / "delivery.py", scripts / "delivery.py")
+    shutil.copy(DEMO / "python_scripts" / "delivery.py", scripts / "delivery.py")
     inbox = project / "inbox"
     inbox.mkdir()
     delivery = inbox / "batch-001.csv"

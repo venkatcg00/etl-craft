@@ -78,10 +78,10 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
         ("alert", "EMAIL_TO", "sales-data@example.com|sales-leads@example.com"),
         ("fetch_orders", "INPUT_PARAMS", '{"region": "eu", "days": 1}'),
         ("fetch_orders", "TARGET_OBJECT", "lnd.orders_eu"),
-        ("load_orders", "SOURCE_SQL_FILE", "sales/orders_eu.sql"),
+        ("load_orders", "SOURCE_SQL_FILE", "sql_scripts/sales/orders_eu.sql"),
         ("load_orders", "TARGET_OBJECT", "sales.orders_eu"),
         ("on_failure", "EMAIL_TO", "sales-oncall@example.com"),
-        ("setup_orders", "SOURCE_SQL_FILE", "sales/orders_eu.sql"),
+        ("setup_orders", "SOURCE_SQL_FILE", "sql_scripts/sales/orders_eu.sql"),
         ("setup_orders", "TARGET_OBJECT", "sales.orders_eu"),
     ]
     assert metadata_project.rows(

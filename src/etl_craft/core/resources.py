@@ -217,7 +217,7 @@ POLICIES = {
 }
 CONTROLLER_CPUS = 0.5
 CONTROLLER_MEMORY = 256 * MIB
-TASK_COST = {"warehouse": (0.25, 128 * MIB), "ingestion": (1.0, 512 * MIB)}
+TASK_COST = {"warehouse": (0.25, 128 * MIB), "python": (1.0, 512 * MIB)}
 """Per task process: CPUs and memory. Warehouse tasks mostly wait on the warehouse."""
 SERVER_THREADS_PER_CPU = 4
 SUPERVISION_CONNECTIONS = 2
@@ -232,7 +232,7 @@ class Ceilings:
     """Settings the team wrote explicitly; ``None`` where it left the default."""
 
     max_parallel_tasks: int | None = None
-    ingestion_slots: int | None = None
+    python_slots: int | None = None
     warehouse_slots: int | None = None
 
 
@@ -252,7 +252,7 @@ class Sizing:
     reserve_cpus: float | None
     reserve_memory: float | None
     task_slots: Size
-    ingestion_slots: Size
+    python_slots: Size
     warehouse_slots: Size
     server_threads: Size
     engine_pool: Size
@@ -286,10 +286,10 @@ def size(
         else (memory - reserve_memory - CONTROLLER_MEMORY)
     )
     if policy.runs_tasks:
-        total, ingestion, warehouse = _slots(free_cpus, free_memory, ceilings)
+        total, python, warehouse = _slots(free_cpus, free_memory, ceilings)
     else:
         none = Size(0, f"{profile}: the controller runs no tasks; agents do")
-        total, ingestion, warehouse = none, none, none
+        total, python, warehouse = none, none, none
     threads = (
         Size(1, "CPU allocation unavailable: at most one server thread")
         if allocation.cpus.value is None
@@ -304,7 +304,7 @@ def size(
         reserve_cpus,
         reserve_memory,
         total,
-        ingestion,
+        python,
         warehouse,
         threads,
         Size(
@@ -331,11 +331,11 @@ def _slots(
         else:
             fits[kind] = Size(by_cpu, f"CPU: {max(free_cpus, 0):g} free at {cpu_cost:g} each")
     total = _ceiling(fits["warehouse"], ceilings.max_parallel_tasks, "Max_parallel_tasks")
-    ingestion = _ceiling(fits["ingestion"], ceilings.ingestion_slots, "Local_ingestion_slots")
+    python = _ceiling(fits["python"], ceilings.python_slots, "Local_python_slots")
     warehouse = _ceiling(total, ceilings.warehouse_slots, "Local_warehouse_slots")
-    if ingestion.value > total.value:
-        ingestion = Size(total.value, "no more than the task slots")
-    return total, ingestion, warehouse
+    if python.value > total.value:
+        python = Size(total.value, "no more than the task slots")
+    return total, python, warehouse
 
 
 def _ceiling(derived: Size, ceiling: int | None, setting: str) -> Size:

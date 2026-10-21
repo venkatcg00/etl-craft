@@ -1,7 +1,7 @@
 # A pipeline waiting for a delivery
 
 This optional project migration runs on SQLite and PostgreSQL Engine DBs. It adds a local
-pipeline with a one-minute schedule and a file wait before an ingestion script:
+pipeline with a one-minute schedule and a file wait before a Python script:
 
 ```sql
 INSERT INTO CFG_PIPELINES
@@ -29,12 +29,12 @@ WHERE TASK_CODE='wait' AND PIPELINE_ID=(SELECT PIPELINE_ID FROM CFG_PIPELINES
 
 The omitted parameters use a 30-second settling interval, a 60-second fallback scan,
 a 60-minute timeout and a `FAILED`
-outcome on timeout. Add a `PYTHON` task with `SCRIPT_NAME='delivery.py'` and a `SUCCESS`
+outcome on timeout. Add a `PYTHON` task with `SCRIPT_FILE='python_scripts/delivery.py'` and a `SUCCESS`
 dependency on `wait`. Its script reads `task.event_files`; alternatively,
 `INPUT_PARAMS='{"files":"$$event_files"}'` supplies a list at `task.input_params['files']`.
 
 The demo provides the full migration as `metadata/event_waits.sql` and its script as
-`ingestion_scripts/delivery.py`. After the normal demo setup, run from `examples/demo/`:
+`python_scripts/delivery.py`. After the normal demo setup, run from `examples/demo/`:
 
 ```bash
 python prepare.py metadata metadata/event_waits.sql

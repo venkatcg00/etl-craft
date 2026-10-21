@@ -586,6 +586,22 @@ def execute_attempt(
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=spec.lease_seconds),
             host=socket.gethostname(),
         )
+        conn.execute(
+            statement(conn, "attempt_log_path"),
+            {
+                "attempt_id": spec.attempt_id,
+                "owner": owner,
+                "log_path": str(
+                    attempt_log_path(
+                        config,
+                        spec.pipeline_code,
+                        spec.pipeline_run_id,
+                        spec.task_code,
+                        spec.attempt_number,
+                    )
+                ),
+            },
+        )
     try:
         fault_point("runner.after_bind")
         return _start_and_record(engine, config, spec, child, owner)

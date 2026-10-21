@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")
 
 def cloud_world(tmp_path, name, fields, table_format, schema):
     project = tmp_path / "etl-craft"
-    (project / "sql_files").mkdir(parents=True)
+    (project / "sql_scripts").mkdir(parents=True)
     config = write_config(project, name, fields, table_format)
     engine_db = sqlite_engine_db(project).engine
     apply_schema(engine_db)

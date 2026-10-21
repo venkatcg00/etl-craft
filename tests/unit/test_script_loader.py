@@ -1,4 +1,4 @@
-"""Ingestion script module registration, names and source reloads."""
+"""Python script module registration, names and source reloads."""
 
 import sys
 

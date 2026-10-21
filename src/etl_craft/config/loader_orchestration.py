@@ -17,7 +17,7 @@ ORCHESTRATION_KEYS = frozenset(
         "Max_parallel_tasks",
         "Shutdown_grace_seconds",
         "Engine_db_outage_seconds",
-        "Local_ingestion_slots",
+        "Local_python_slots",
         "Local_warehouse_slots",
         "Timezone",
         "Enforce_sla",
@@ -63,9 +63,7 @@ def parse_limits(settings: Profiled, path: Path) -> ExecutionLimits:
         engine_db_outage_seconds=number("Engine_db_outage_seconds"),
         enforce_sla=flag(settings, "Enforce_sla", False, path),
         gate_wait_minutes=number("Gate_wait_minutes"),
-        local_ingestion_slots=whole_number(
-            settings, "Local_ingestion_slots", None, path, minimum=1
-        ),
+        local_python_slots=whole_number(settings, "Local_python_slots", None, path, minimum=1),
         local_warehouse_slots=whole_number(
             settings, "Local_warehouse_slots", None, path, minimum=1
         ),

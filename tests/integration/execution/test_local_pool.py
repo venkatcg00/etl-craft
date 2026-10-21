@@ -14,7 +14,7 @@ from fixtures.metadata import add_task
 def hold(project, name="load.py"):
     """A script that says it started, then waits for the test to release it."""
     folder = project.config.project_dir
-    (project.config.ingestion_scripts_dir / name).write_text(
+    (project.config.python_scripts_dir / name).write_text(
         "import time\nfrom pathlib import Path\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n"
         f"    Path({str(folder)!r}, 'ready-' + task.task_code).touch()\n"
@@ -52,7 +52,7 @@ def test_an_attempt_submitted_twice_runs_once_and_unknown_handles_say_so(cli_pro
         assert pool.status(handle).state is HandleState.RUNNING
         assert pool.reconcile()[0].handle == handle
         capacity = pool.capacity()
-        assert capacity.free["ingestion"] == capacity.slots["ingestion"] - 1
+        assert capacity.free["python"] == capacity.slots["python"] - 1
         (project.config.project_dir / "release").touch()
         wait_until(lambda: pool.status(handle).state is not HandleState.RUNNING)
     finally:
@@ -87,19 +87,21 @@ def test_cancel_stops_the_task_process_and_records_the_attempt(cli_project):
     assert "interrupted" in row.error or "SIGTERM" in row.error, row.error
 
 
-def test_ingestion_slots_keep_python_tasks_from_overlapping(cli_project):
+def test_python_slots_keep_python_tasks_from_overlapping(cli_project):
     project = cli_project
     raw = yaml.safe_load(project.config.config_path.read_text())
-    raw["Orchestration"]["Local_ingestion_slots"] = 1
+    raw["Orchestration"]["Local_python_slots"] = 1
     project.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     script = (
         "import time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    time.sleep(0.5)\n    return ScriptResult(1)\n"
     )
-    (project.config.ingestion_scripts_dir / "load.py").write_text(script)
-    (project.config.ingestion_scripts_dir / "second.py").write_text(script)
+    (project.config.python_scripts_dir / "load.py").write_text(script)
+    (project.config.python_scripts_dir / "second.py").write_text(script)
     with project.engine.begin() as conn:
-        add_task(conn, project.pipeline_id, "second", "PYTHON", SCRIPT_NAME="second.py")
+        add_task(
+            conn, project.pipeline_id, "second", "PYTHON", SCRIPT_FILE="python_scripts/second.py"
+        )
     code, output = project.run("run", "--pipeline-code", "P")
     assert code == 0, output
     with project.engine.connect() as conn:

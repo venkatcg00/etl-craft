@@ -166,7 +166,7 @@ def resource_checks(config: ConnectorConfig, host: Host | None = None) -> list[C
             ok(f"Sizing: {name}", f"{item.value} ({item.reason})")
             for name, item in (
                 ("task slots", sizing.task_slots),
-                ("ingestion slots", sizing.ingestion_slots),
+                ("python slots", sizing.python_slots),
                 ("warehouse slots", sizing.warehouse_slots),
                 ("server threads", sizing.server_threads),
                 ("Engine DB pool", sizing.engine_pool),
@@ -418,7 +418,7 @@ def _warehouse(config: ConnectorConfig, *, queue_on_engine_db: bool) -> list[Che
         checks.append(
             ok(
                 "Warehouse writers",
-                "one writer at a time: tasks and ingestion scripts writing to it queue behind "
+                "one writer at a time: tasks and Python scripts writing to it queue behind "
                 "each other",
             )
         )
@@ -526,7 +526,7 @@ def _docs_site(config: ConnectorConfig) -> list[Check]:
 def _project(config: ConnectorConfig) -> list[Check]:
     present = [
         folder.name
-        for folder in (config.sql_files_dir, config.ingestion_scripts_dir, config.migrations_dir)
+        for folder in (config.sql_scripts_dir, config.python_scripts_dir, config.migrations_dir)
         if folder.is_dir()
     ]
     return [
@@ -534,6 +534,6 @@ def _project(config: ConnectorConfig) -> list[Check]:
             "Project folders",
             f"{', '.join(present)} in {config.project_dir}"
             if present
-            else f"no sql_files/, ingestion_scripts/ or migrations/ in {config.project_dir} yet",
+            else f"no sql_scripts/, python_scripts/ or migrations/ in {config.project_dir} yet",
         )
     ]

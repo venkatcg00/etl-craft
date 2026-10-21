@@ -1,4 +1,4 @@
-"""Ingestion scripts: the contract, offsets, INPUT_PARAMS, captured output and every mistake."""
+"""Python scripts: the contract, offsets, INPUT_PARAMS, captured output and every mistake."""
 
 import logging
 import os
@@ -74,7 +74,7 @@ def restore_logging():
 
 @pytest.fixture
 def project(engine_db, tmp_path):
-    """A project with a DuckDB warehouse, scripts in ingestion_scripts/, and task P.load."""
+    """A project with a DuckDB warehouse, scripts in python_scripts/, and task P.load."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
     block = {"Jdbc_url": profile.jdbc_url, "Schema": schema}
@@ -85,8 +85,8 @@ def project(engine_db, tmp_path):
             "Secret": profile.secret_var,
         }
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
-    (root / "ingestion_scripts").mkdir()
-    (root / "ingestion_scripts" / "load.py").write_text(SCRIPT, encoding="utf-8")
+    (root / "python_scripts").mkdir()
+    (root / "python_scripts" / "load.py").write_text(SCRIPT, encoding="utf-8")
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60},
@@ -98,7 +98,7 @@ def project(engine_db, tmp_path):
     engine = engine_db.engine
     with engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
-        task = add_task(conn, pipeline, "load", "PYTHON", SCRIPT_NAME="load.py")
+        task = add_task(conn, pipeline, "load", "PYTHON", SCRIPT_FILE="python_scripts/load.py")
         conn.execute(
             text(
                 "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
@@ -136,7 +136,10 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
     assert "reading eu after 0" in log
     assert "INFO my_ingestion [task_run_id=" in log and "the source has 2 new rows" in log
     assert "WARNING etl_craft_script.load [" in log
-    assert "running load.py from offset none (first run) with input params count, region" in log
+    assert (
+        "running python_scripts/load.py from offset none (first run) with input params "
+        "count, region" in log
+    )
 
     # The next run starts where this one left off.
     assert "load.py wrote 2 row(s)" in log
@@ -165,7 +168,7 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
 
 def run_in_process(project, script, **params):
     engine, config, _, task = project
-    (config.ingestion_scripts_dir / "load.py").write_text(textwrap.dedent(script), "utf-8")
+    (config.python_scripts_dir / "load.py").write_text(textwrap.dedent(script), "utf-8")
     with engine.begin() as conn:
         run_id = runlog.fetch_active_pipeline_run_id(conn, project[2])
         binding = transitions.find_or_create_task_run(conn, task, run_id)
@@ -325,7 +328,7 @@ def test_result_variables_accept_a_mapping_besides_a_dictionary(project):
 @pytest.mark.parametrize(
     ("script", "params", "message"),
     [
-        ("x = 1\n", {}, r"SCRIPT_NAME='load.py' defines no run\(task\) function"),
+        ("x = 1\n", {}, r"SCRIPT_FILE='python_scripts/load.py' defines no run\(task\) function"),
         ("def run(task:\n", {}, r"importing it failed: SyntaxError"),
         ("def run(task):\n    raise KeyError('id')\n", {}, r"load.py failed: KeyError: 'id'"),
         ("import sys\ndef run(task):\n    sys.exit(3)\n", {}, r"load.py called sys.exit\(3\)"),
@@ -343,7 +346,7 @@ def test_result_variables_accept_a_mapping_besides_a_dictionary(project):
         ("def run(a, b):\n    pass\n", {}, "run takes 2 arguments; it takes the task, or nothing"),
         ("def run(task):\n    pass\n", {"INPUT_PARAMS": '["eu", 2]'}, "must be a JSON object"),
         ("def run(task):\n    pass\n", {"INPUT_PARAMS": "[1,"}, "INPUT_PARAMS is not valid JSON"),
-        ("def run(task):\n    pass\n", {"SCRIPT_NAME": ""}, "SCRIPT_NAME is required"),
+        ("def run(task):\n    pass\n", {"SCRIPT_FILE": ""}, "SCRIPT_FILE is required"),
     ],
 )
 def test_script_mistakes_fail_with_what_is_wrong(project, script, params, message):
@@ -352,8 +355,8 @@ def test_script_mistakes_fail_with_what_is_wrong(project, script, params, messag
 
 
 def test_a_missing_script_is_named(project):
-    with pytest.raises(MetadataError, match=r"SCRIPT_NAME='nope.py': no such file"):
-        run_in_process(project, "def run(task):\n    pass\n", SCRIPT_NAME="nope.py")
+    with pytest.raises(MetadataError, match=r"SCRIPT_FILE='python_scripts/nope.py': no such file"):
+        run_in_process(project, "def run(task):\n    pass\n", SCRIPT_FILE="python_scripts/nope.py")
 
 
 def test_an_offset_keeps_its_type(project):
@@ -387,7 +390,7 @@ def test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset(pr
             return ScriptResult(0, Offset.number(99))
         """
     )
-    (config.ingestion_scripts_dir / "load.py").write_text(script, "utf-8")
+    (config.python_scripts_dir / "load.py").write_text(script, "utf-8")
     with engine.begin() as conn:
         run_id = runlog.fetch_active_pipeline_run_id(conn, project[2])
         transitions.finalize_pipeline_run(conn, run_id, "SUCCESS")
@@ -407,7 +410,7 @@ def test_a_backfill_run_gives_the_date_and_neither_reads_nor_stores_an_offset(pr
 
 def with_script(project, script, **params):
     engine, config, _, task = project
-    (config.ingestion_scripts_dir / "load.py").write_text(textwrap.dedent(script), "utf-8")
+    (config.python_scripts_dir / "load.py").write_text(textwrap.dedent(script), "utf-8")
     with engine.begin() as conn:
         for name, value in params.items():
             conn.execute(
@@ -527,7 +530,7 @@ def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project):
     agent = threading.Thread(target=server.serve_forever, daemon=True)
     agent.start()
     url = f"http://127.0.0.1:{server.server_port}/?api_key=hidden-key"
-    (config.ingestion_scripts_dir / "load.py").write_text(
+    (config.python_scripts_dir / "load.py").write_text(
         "import logging, requests\n"
         "from etl_craft.scripting import ScriptResult\n"
         "def run(task):\n"
@@ -556,7 +559,7 @@ def test_handler_returns_the_offset_without_persisting_it(project):
     from etl_craft.engine.repository.offsets import StoredOffset
 
     engine, config, pipeline, task = project
-    (config.ingestion_scripts_dir / "load.py").write_text(
+    (config.python_scripts_dir / "load.py").write_text(
         RESULT + "def run(task):\n    return ScriptResult(1, Offset.number(9))\n"
     )
     with engine.begin() as conn:

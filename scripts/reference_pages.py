@@ -27,7 +27,7 @@ SCHEMA = REPO / "src" / "etl_craft" / "dialects" / "engine" / "postgres" / "sche
 HANDLER_GUIDES = {
     "Every task": "../guides/pipelines-and-tasks.md#cfg_task_parameters",
     "SQL": "../guides/sql-tasks.md",
-    "PYTHON": "../guides/ingestion-scripts.md",
+    "PYTHON": "../guides/python-scripts.md",
     "EMAIL_ALERT": "../guides/email-alerts.md",
     "EVENT_WAIT": "../guides/event-waits.md",
     "RUN_PIPELINE": "../guides/pipeline-triggers.md",

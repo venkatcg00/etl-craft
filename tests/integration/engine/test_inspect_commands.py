@@ -57,7 +57,9 @@ def project(engine_db, tmp_path, monkeypatch):
         ids["UP"] = add_pipeline(conn, "UP")
         ids["publish"] = add_task(conn, ids["UP"], "publish")
         ids["SALES"] = add_pipeline(conn, "SALES", refresh_type="INCREMENTAL", sla_in_hours=2)
-        ids["extract"] = add_task(conn, ids["SALES"], "extract", "PYTHON", SCRIPT_NAME="x.py")
+        ids["extract"] = add_task(
+            conn, ids["SALES"], "extract", "PYTHON", SCRIPT_FILE="python_scripts/x.py"
+        )
         ids["load"] = add_task(
             conn, ids["SALES"], "load", SQL_ACTION="SCD1_MERGE", TARGET_OBJECT="s.orders"
         )
@@ -126,7 +128,7 @@ def test_steps(project, capsys):
     assert out.splitlines() == [
         "TASK_CODE\tSTATUS\tHANDLER\tTASK_TYPE\tRUN_CONDITION\tPARAMETERS",
         "alert\tNOT-RUN\tEMAIL_ALERT\tETL\tANY\t",
-        "extract\tFAILED\tPYTHON\tETL\tALL\tSCRIPT_NAME=x.py",
+        "extract\tFAILED\tPYTHON\tETL\tALL\tSCRIPT_FILE=python_scripts/x.py",
         "load\tNOT-RUN\tSQL\tETL\tALL\tSQL_ACTION=SCD1_MERGE, TARGET_OBJECT=s.orders",
     ]
 

@@ -58,7 +58,7 @@ class TaskContext:
 class HandlerResult(Counts):
     """The counts a handler reports for ``AUD_TASK_RUN_LOG``, and any named values.
 
-    ``variables`` are the values a task reports by name (an ingestion script's declared return
+    ``variables`` are the values a task reports by name (a Python script's declared return
     values); they are listed in ``TASK_LOG`` as ``NAME = value`` lines. ``offset`` is stored
     together with the attempt's SUCCESS outcome, rather than by the handler.
     """
@@ -86,6 +86,7 @@ def format_task_log(result: HandlerResult) -> str | None:
 Handler = Callable[[TaskContext, Engine], HandlerResult]
 
 HANDLERS: dict[str, str] = {
+    enums.Handler.SQL_SCRIPT: "etl_craft.handlers.sql_script:run",
     enums.Handler.SQL: "etl_craft.handlers.sql:run",
     enums.Handler.BUSINESS_RULES: "etl_craft.handlers.business_rules:run",
     enums.Handler.PYTHON: "etl_craft.handlers.python_scripts:run",

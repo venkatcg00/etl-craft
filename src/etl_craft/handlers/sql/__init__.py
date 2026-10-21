@@ -1,7 +1,7 @@
 """``HANDLER=SQL``: wrap the task's read-only SELECT in one of nine actions on the warehouse.
 
 The task supplies a SELECT, inline in ``SOURCE_SQL`` or as a file under the project's
-``sql_files/`` in ``SOURCE_SQL_FILE``, and names its ``SQL_ACTION`` and ``TARGET_OBJECT``; the
+``sql_scripts/`` in ``SOURCE_SQL_FILE``, and names its ``SQL_ACTION`` and ``TARGET_OBJECT``; the
 engine owns every write. The parameters are checked first (``spec``), then the action uses the
 warehouse's transaction or publication strategy (``actions``), with every statement logged
 (``session``).

@@ -42,7 +42,7 @@ def test_slow_sql_event_does_not_block_other_events_or_scheduler_shutdown(sql_wo
 
     class FullPool:
         def capacity(self):
-            return Capacity({"ingestion": 1, "warehouse": 1}, {"ingestion": 0, "warehouse": 0})
+            return Capacity({"python": 1, "warehouse": 1}, {"python": 0, "warehouse": 0})
 
         def submit(self, spec):
             pytest.fail("event waits must never occupy an agent")

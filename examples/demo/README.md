@@ -89,8 +89,8 @@ use `--api https://etl.example.com` or `ETL_CRAFT_API`, with the usual service t
 |---|---|
 | `craft-connector.yml` | SQLite Engine DB, DuckDB warehouse, Mailpit, cloning into `aud` |
 | `metadata/support_insights.sql` | source-column definitions and the pipelines, tasks, parameters, dependencies and rules, as `CFG_` rows; runs as written on SQLite and PostgreSQL |
-| `ingestion_scripts/` | the scripts that land each source, plus a flaky feed and a slow task |
-| `sql_files/` | the SELECTs the SQL tasks wrap in their actions |
+| `python_scripts/` | the scripts that land each source, plus a flaky feed and a slow task |
+| `sql_scripts/` | the SELECTs the SQL tasks wrap in their actions |
 | `warehouse_schemas.sql` | the schemas to create first: etl-craft never creates warehouse schemas |
 | `prepare.py` | creates those schemas in `warehouse.duckdb`, and loads the metadata into `engine.db` |
 
@@ -241,3 +241,11 @@ edit `config/grants.csv` and apply it as admin to grant `viewer` or `operator` o
 `PIPELINE_CODE` or `TAG` per row. Deployment viewers can then operate only their granted
 pipelines. The [permission guide](../../docs/deploying/security.md#pipeline-permission-groups)
 explains SSO group IDs, retained run claims and the whole-project static catalog boundary.
+
+## Unmanaged SQL steps
+
+A `SQL_SCRIPT` task can follow a managed task through an ordinary `SUCCESS` dependency.
+Set `SCRIPT_FILE=sql_scripts/maintenance.sql` and `RETRY_ON=NONE`; the optional
+[`sql_scripts/maintenance.sql`](sql_scripts/maintenance.sql) example reads the run context.
+It is not wired into the demo pipelines. See the [SQL scripts guide](../../docs/guides/sql-scripts.md)
+for writes, autocommit, retries and the per-statement attempt log.

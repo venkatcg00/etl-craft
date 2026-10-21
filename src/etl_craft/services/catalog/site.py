@@ -43,7 +43,7 @@ from etl_craft.services.catalog.html import task_url as task_url
 from etl_craft.services.catalog.incremental import (
     SqlFiles,
     page_versions,
-    read_sql_files,
+    read_sql_scripts,
     reuse_pages,
     write_manifest,
 )
@@ -102,9 +102,9 @@ def _write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site
         encoding="utf-8",
     )
     try:
-        sql_files = read_sql_files(catalog, config)
-        writer = _Writer(catalog, building, sql_files)
-        versions = page_versions(catalog, config, sql_files)
+        sql_scripts = read_sql_scripts(catalog, config)
+        writer = _Writer(catalog, building, sql_scripts)
+        versions = page_versions(catalog, config, sql_scripts)
         reuse_pages(folder, building, versions)
         writer.write_all()
         write_manifest(building, versions)
@@ -118,11 +118,11 @@ def _write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site
 class _Writer(Pages):
     """Writes every page, keeping the links between them relative."""
 
-    def __init__(self, catalog: Catalog, folder: Path, sql_files: SqlFiles) -> None:
+    def __init__(self, catalog: Catalog, folder: Path, sql_scripts: SqlFiles) -> None:
         self.catalog = catalog
         self.folder = folder
         self.pages = 0
-        self.sql_files = sql_files
+        self.sql_scripts = sql_scripts
 
     def write_all(self) -> None:
         for name in ASSETS:
@@ -206,13 +206,13 @@ class _Writer(Pages):
         for name in c.scripts:
             crumbs = [
                 ("dags.html", "DAGs"),
-                ("dags.html#scripts", "Ingestion scripts"),
+                ("dags.html#scripts", "Python scripts"),
                 (None, name),
             ]
             self._page(
                 script_url(name),
                 name,
-                "ingestion script",
+                "Python script",
                 partial(self._script, name),
                 "dags",
                 crumbs,
@@ -315,7 +315,7 @@ class _Writer(Pages):
                 ("Tasks", str(len(c.tasks))),
                 ("Warehouse", self._link("warehouse.html", f"{tables} table(s)", "")),
                 ("Business rules", str(len(c.rules))),
-                ("Ingestion scripts", self._link("dags.html#scripts", str(len(c.scripts)), "")),
+                ("Python scripts", self._link("dags.html#scripts", str(len(c.scripts)), "")),
                 (
                     "Untraced SQL tasks",
                     self._link("gaps.html", f"{len(c.untraced)} task(s)", "")
@@ -365,7 +365,7 @@ class _Writer(Pages):
             "No active pipelines.",
         )
         scripts = _table(
-            ["Ingestion script", "Run by", "Found"],
+            ["Python script", "Run by", "Found"],
             (
                 [
                     self._link(script_url(name), name, ""),
@@ -374,7 +374,7 @@ class _Writer(Pages):
                 ]
                 for name, script in sorted(c.scripts.items())
             ),
-            "No ingestion scripts.",
+            "No Python scripts.",
         )
         untraced = _table(
             ["Task", "Why its columns cannot be traced"],
@@ -395,7 +395,7 @@ class _Writer(Pages):
         )
         return (
             f'{filters}<div class="tag-pipelines">{pipelines}</div>{trigger_edges(c)}'
-            f'<h2 id="scripts">Ingestion scripts</h2>{scripts}'
+            f'<h2 id="scripts">Python scripts</h2>{scripts}'
             f'<h2 id="untraced">Column lineage unavailable</h2>{untraced}'
         )
 

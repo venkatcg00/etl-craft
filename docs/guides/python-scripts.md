@@ -1,14 +1,22 @@
-# Ingestion scripts
+# Python scripts
 
-A task with `HANDLER = 'PYTHON'` runs one of your team's Python scripts to bring data in: it reads
+A task with `HANDLER = 'PYTHON'` runs your team's Python code. Ingestion is one use: it reads
 its source from where the last run left off and writes a warehouse table. The engine runs it,
 captures everything it prints and logs, records its counts, and keeps its offset.
+
+Project upgrades move `ingestion_scripts/` to `python_scripts/` and change each Python task's
+`SCRIPT_NAME` parameter to `SCRIPT_FILE` in its config CSV, written as a path from the project
+directory (`python_scripts/load.py` instead of `load.py`). `etl-craft migrate` updates existing
+Engine DB parameter rows the same way. Rename `Orchestration.Local_ingestion_slots` to `Local_python_slots`
+in `craft-connector.yml`; the old setting and folder are not aliases. SQL files move from
+`sql_files/` to `sql_scripts/`, shared by managed SELECTs and unmanaged SQL scripts, and
+`SOURCE_SQL_FILE` values gain the `sql_scripts/` prefix.
 
 ## The task
 
 | Parameter | Value |
 |---|---|
-| `SCRIPT_NAME` | the script, a path inside the project's `ingestion_scripts/` folder, such as `crm/customers.py` |
+| `SCRIPT_FILE` | the script's path from the project directory, inside `python_scripts/`, such as `python_scripts/crm/customers.py` |
 | `INPUT_PARAMS` | optional: a JSON object the script receives as a dictionary, such as `{"region": "eu", "days": 30}` |
 | `SOURCE_OBJECT` | optional: where the script reads from, for the [catalog](catalog.md)'s lineage graphs |
 
@@ -84,9 +92,9 @@ a crash after it preserves the complete success. A failed attempt is retried fro
 and the offset keeps its datatype from one run to the next. Warehouse writes made by the script
 commit separately; make them safe to repeat when an attempt must be retried.
 
-Scripts may import helper modules kept beside them in `ingestion_scripts/`.
+Scripts may import helper modules kept beside them in `python_scripts/`.
 Each script is compiled from its current source and registered as a module named
-`etl_craft_script_` followed by its path relative to `ingestion_scripts/`, with `/` and `.`
+`etl_craft_script_` followed by its path relative to `python_scripts/`, with `/` and `.`
 replaced by `_`: `crm/customers.py` becomes `etl_craft_script_crm_customers_py`. The script's
 own future imports apply; dataclasses, enums, pickling and `typing.get_type_hints` work as in
 other modules. A script may use `ProcessPoolExecutor` with the `fork` start method on platforms
@@ -123,7 +131,8 @@ OFFSET = 1042 (NUMBER)
 
 The task fails with a message that names the script and the problem when:
 
-- `SCRIPT_NAME` is missing, points outside `ingestion_scripts/`, or names no `.py` file there;
+- `SCRIPT_FILE` is missing, does not start with `python_scripts/`, points outside that folder, or
+  names no `.py` file there;
 - `INPUT_PARAMS` is not a JSON object;
 - the script cannot be imported, or defines no `run`, or a `run` that takes more than the task;
 - `run` raises: the message has the exception, and the traceback is in the attempt's log;

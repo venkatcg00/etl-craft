@@ -22,7 +22,7 @@ def install_writer(project, *, hold=False):
         if hold
         else ""
     )
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "from pathlib import Path\nimport time\n"
         "from sqlalchemy import text\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n"

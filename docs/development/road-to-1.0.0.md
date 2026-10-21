@@ -75,7 +75,7 @@ item's text, or work done early under another item.
 | S2.B Signals and the task process | Done | #79 | B3, B53, B54 |
 | S2.C Real transactions on SQLite | Done | #77 | B18 |
 | S2.D SQL action guards | Done | #80 | B5, B12, B17, B21, B34, B41, B42, B44, B45, B46; B57 for SQL actions and rules |
-| S2.E The ingestion script contract | Done | #82 | B19, B60 |
+| S2.E The Python script contract | Done | #82 | B19, B60 |
 | S2.F Alerts and SMTP | Done | #83 | B20, B50, B61 |
 | S2.G Configuration and secrets | Done | #84 | B48, B49, B55, B56, B58, B59 |
 | S2.H Export and publishing | Done | #85 | B47, B64, B65 |
@@ -143,7 +143,7 @@ item's text, or work done early under another item.
 | S5.AD Pipeline permission groups | Done | #225 | Admin-managed groups, audited direct/tag grants, effective pipeline roles, retained SSO group IDs and child-start permission checks |
 | S5.AE One gateway | In progress | #227 | Slice 1: stateless PostgreSQL `ui`, headless health-only controller, package schema checks, `ui`/`all` extras and `--api`; agent API and deployment layouts remain with S5.C/S7.F |
 | S5.AF Indexes for every query | Done | #229 | Selective history indexes, bounded catalog reads and a PostgreSQL full-scan guard |
-| S5.X Unmanaged SQL tasks | Planned | | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
+| S5.X Unmanaged SQL tasks | Done | #230 | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -242,7 +242,7 @@ does not move worker work ahead of the metadata, account or operator-control cor
 **Direction after S7.N (owner, 15 October 2026).**
 - **Two repositories.** This package and the Support Insights repository. Support Insights
   holds the demo code, its deployment and the etl-craft project in `project/`: `craft-connector.yml`,
-  `config/`, `sql_files/`, `ingestion_scripts/`, `validation_scripts/`, `migrations/` and `seeds/`.
+  `config/`, `sql_scripts/`, `python_scripts/`, `validation_scripts/`, `migrations/` and `seeds/`.
 - **The package's CI tests the package only.** A very small demo stays in the package for its
   tests. Package CI does not run or prove the Support Insights demo; it validates the result
   evidence the demo publishes for a candidate (S7.O and the revised S8.G).
@@ -299,6 +299,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.X (#230) exercises ordered unmanaged statements, bind inputs, partial failures and attempt
+logs on all four local warehouses. Dependency chains, retry policies and process loss are
+checked on both Engine DBs, with released-schema upgrades retaining rows and constraints.
+Native Databricks and Snowflake acceptance passed. Managed SQL guards remain in place.
 
 S5.AF (#229) covers the resolved PostgreSQL query catalog with a growing-table scan guard
 and full-volume plans for 10,000 pipelines of 20 tasks with a year of daily history. Index
@@ -589,6 +594,20 @@ checks passed on SQLite/PostgreSQL. Warehouse SQL is unchanged; no cloud suite w
 The separate frozen 0.4 soak deployment is unchanged.
 
 **Choices that differ from the item text.**
+
+- S5.X names both handlers' files scripts (owner, 21 October 2026): `python_scripts/` and
+  `sql_scripts/`, with the latter holding managed SELECTs and unmanaged scripts. Python tasks
+  use `SCRIPT_FILE`; `Local_python_slots` replaces `Local_ingestion_slots`. Existing Engine DB
+  task-parameter rows migrate; projects move their folders and update config, with no aliases.
+  Current plan references use the same names. `SCRIPT_FILE` and `SOURCE_SQL_FILE` are full paths
+  from the project directory (`python_scripts/load.py`, `sql_scripts/orders.sql`), like
+  `EVENT_FILE` and the paths in `craft-connector.yml`; 0047 adds the folder to existing values.
+
+- S5.X uses native autocommit by default, with file-controlled transactions where supported
+  (owner, 21 October 2026). Earlier commits survive a later failure; retries restart at statement
+  1. Full per-statement records use the existing attempt log, linked by `LOG_PATH`, rather than
+  a new audit column. Unknown driver row counts are recorded as unknown. Bound values and SQL
+  literals are omitted from audit text; procedure effects remain explicitly unmanaged.
 
 - S5.AF reuses the existing schedule-key index for `MAX(RUN_KEY)` and the existing
   `(TASK_RUN_ID, ATTEMPT_NUMBER)` index for the attempt purge prefix. Neither needs a duplicate.
@@ -1348,7 +1367,7 @@ The separate frozen 0.4 soak deployment is unchanged.
   S5.F and S5.C, which use them. The pool claims each admitted attempt, as S5.C's workers will.
   `run --task_code` runs its one attempt in the foreground through `execute_attempt`, the function
   the local pool runs on its threads. `LocalPool.cancel` stops a task process with the grace its
-  `ChildOptions` set at submit. `Local_ingestion_slots` and `Local_warehouse_slots` default to
+  `ChildOptions` set at submit. `Local_python_slots` and `Local_warehouse_slots` default to
   `Max_parallel_tasks`, so nothing changes unless they are set.
 
 - S4.I.6 also removes the non-POSIX branch of `execution/reconcile.stop_process` and the Windows
@@ -1614,7 +1633,7 @@ docs-site test records its build duration and has a 240-second timeout.
 ### What 1.0.0 is
 
 etl-craft 1.0.0 is a standalone ETL orchestrator. A team describes its ETL as metadata (rows in the
-`CFG_` tables), SQL (one read-only SELECT per SQL task) and Python ingestion scripts. etl-craft
+`CFG_` tables), SQL (one read-only SELECT per SQL task) and Python scripts. etl-craft
 derives the dependency graph, schedules runs, dispatches tasks to agents, records everything in the
 Engine DB, and shows it through the CLI, an HTTP API and a web UI. Neither Airflow nor dbt is
 used or supported; another scheduler can start runs through the CLI or the HTTP API.
@@ -1630,7 +1649,7 @@ row-level rejects, stewardship uploads, SCD human-override protection and schema
 
 It owns less of the transformation. There is no mapping designer and no transformation engine:
 - each transformation is the team's own SQL SELECT, run inside the warehouse, or the team's
-  ingestion script;
+  Python script;
 - etl-craft owns how the result is written (the nine SQL actions), and when and in what order
   things run.
 
@@ -1697,7 +1716,7 @@ flowchart LR
    The CLI, the API and the UI reach it only through that row.
 7. A `kill -9` of the controller, a agent or a task process leaves the Engine DB telling the truth,
    and a restart reconciles without an operator.
-8. Ingestion scripts belong to the team. etl-craft owns how they are loaded, what they receive, how
+8. Python scripts belong to the team. etl-craft owns how they are loaded, what they receive, how
    their outcome and offset are recorded, and signalling the process group it started.
 9. Every load is auditable from the Engine DB alone: who started it, what it read (its watermark
    range, the event that started it), what it wrote, what it set aside and why. A feature that moves
@@ -2159,19 +2178,19 @@ active flag keys of the rule from the Engine DB in chunks of 1,000, check which 
 `ACTIVE_FLAG` column, add `t.ACTIVE_FLAG = 'Y'` to the rule's scope so closed SCD2 versions are not
 judged. An incremental run never clears keys it didn't see. Test both cases on all local warehouses.
 
-### S2.E The ingestion script contract
+### S2.E The Python script contract
 
 **Status: done** (#82).
 
 Branch: `fix/handlers-script-loader`. Files: `handlers/python_scripts.py`, `scripting.py`,
-`docs/guides/ingestion-scripts.md`.
+`docs/guides/python-scripts.md`.
 
 **S2.E.1 Load scripts as real modules (B19).**
 
 - *Change.* In `load_script`:
   1. Compile with `compile(source, str(path), "exec", dont_inherit=True)`, so the loader's own
      `from __future__ import annotations` no longer leaks into scripts.
-  2. Name the module `etl_craft_script_<path relative to ingestion_scripts with / and . replaced by _>`
+  2. Name the module `etl_craft_script_<path relative to python_scripts with / and . replaced by _>`
      and register it in `sys.modules` before `exec`; remove it again if `exec` raises.
   3. Set `module.__spec__ = importlib.util.spec_from_file_location(name, path)` so tools that look at
      the spec work.
@@ -2748,7 +2767,7 @@ read the existing table's format where the warehouse exposes it and refuse a mis
   that a retry can duplicate rows, and `etl-craft upgrade-targets [--action APPEND_TABLE]` adds missing
   nullable identity columns to configured SQL and ingestion targets without rewriting historical rows.
 - *Tests.* An append attempt that fails after inserting, then a retry: rows appear once. Every SQL
-  writer stamps its executing identities; ingestion scripts and business rules receive the same
+  writer stamps its executing identities; Python scripts and business rules receive the same
   named values. Upgrading preserves historical rows and leaves their new identity fields NULL.
 
 ### S3.H The chaos suite
@@ -3186,7 +3205,7 @@ can confirm and says when it can't. The overseer only talks to pools through thi
 ### S5.B The local provider
 
 Branch: `feat/pools-local`. Wraps today's supervisor: one child process per attempt on the overseer's
-host, slots from `Orchestration.Max_parallel_tasks` split by kind (settings `Local_ingestion_slots`,
+host, slots from `Orchestration.Max_parallel_tasks` split by kind (settings `Local_python_slots`,
 `Local_warehouse_slots`). It is the default pool, the only one on SQLite, and what the CLI uses.
 Once it owns local submission, delete the executor lifecycle and child-dispatch plumbing from
 `execution.scheduler`; keep one local execution path behind the provider. Do not retain the current
@@ -3230,7 +3249,7 @@ Branch: `feat/sql-watermarks`. After S5.K.
 
 - *Problem.* An incremental SQL task reads only rows its own pipeline's runs wrote
   (`$$pipeline_run_id_filter`). A task reading a source table etl-craft did not write cannot read
-  only what changed since its last success: ingestion scripts have offsets
+  only what changed since its last success: Python scripts have offsets
   (`AUD_TASK_OFFSET_TRACKER`), SQL tasks do not.
 - *Where.* `handlers/sql/spec.py` (tokens), the offset tracker and the atomic attempt ending,
   `execution/interventions.py`.
@@ -3293,7 +3312,7 @@ Branch: `feat/services-lineage-schemas`. After S5.M.
   1. Lineage reads metadata only. A table an active SQL task writes takes its columns from that
      task's own traced output, in dependency order, so an upstream target is known before a
      downstream SELECT reads it.
-  2. A table etl-craft does not write, an external source or a table an ingestion script lands,
+  2. A table etl-craft does not write, an external source or a table a Python script lands,
      takes its columns from source definitions: `CFG_SOURCE_COLUMNS` (`TABLE_NAME`,
      `COLUMN_NAME`, `DATA_TYPE`, `COLUMN_POSITION`, `ACTIVE_FLAG`), kept as `source_columns.csv`
      among the configuration files, as a repository keeps source definitions.
@@ -3986,7 +4005,7 @@ this classification.
   - Every warehouse error is a `HandlerError`, which is retryable. A syntax error, a missing
     table or a refused permission is therefore retried `RETRIES` times and fails the same way
     each time.
-  - An ingestion script's exception is retried the same way.
+  - A Python script's exception is retried the same way.
 
   `AUD_TASK_ATTEMPTS.RETRYABLE` records the decision but not why, so an operator cannot tell
   a failure that is worth retrying from one that is not.
@@ -4008,7 +4027,7 @@ this classification.
        its external, resource and internal errors; Snowflake's compile errors against network
        errors; Databricks and DuckDB errors.
      - **etl-craft's own errors** keep their `retryable` flag: `False` is `PERMANENT`.
-     - **Ingestion scripts** may raise `TransientError` or `PermanentError` from
+     - **Python scripts** may raise `TransientError` or `PermanentError` from
        `etl_craft.scripting`. Any other exception is `UNKNOWN`.
   3. **Configuration.**
      - `Orchestration.Retry_on` sets the project default:
@@ -4062,7 +4081,7 @@ Branch: `feat/handlers-sql-script`. After S5.W, which supplies `RETRY_ON`.
   `OPTIMIZE`), custom DML. PowerCenter offers this as pre- and post-session SQL and the Command
   task. Today the only route is a Python task that opens `task.warehouse()`.
 - *Change.*
-  1. **A `SQL_SCRIPT` handler** (`core.enums`). It runs a file in `sql_files/` named by
+  1. **A `SQL_SCRIPT` handler** (`core.enums`). It runs a file in `sql_scripts/` named by
      `SCRIPT_FILE`, statement by statement in order, on the task's warehouse connection.
      - **Bound inputs.** Statements receive bound values: `:pipeline_id`, `:pipeline_run_id`,
        `:task_run_id`, `:run_date`, and each key of the task's `INPUT_PARAMS`. A team can then
@@ -4851,7 +4870,7 @@ connection.
   warehouse/runtime's job, including Databricks. Python scripts remain whole tasks unless their
   own runtime implements parallelism. Agent resources govern placement; warehouse capacity
   governs query admission separately.
-- *Schema.* `AUD_AGENTS (AGENT_ID, POOL, HOST, VERSION, INGESTION_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS)`
+- *Schema.* `AUD_AGENTS (AGENT_ID, POOL, HOST, VERSION, PYTHON_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS)`
   with `STATUS` in `ACTIVE`, `DRAINING`, `GONE`. `AUD_TASK_ATTEMPTS` gains `POOL`, `SLOT_KIND`,
   `PRIORITY`, `CANCEL_REQUESTED_AT`, `CANCEL_ACKNOWLEDGED_AT`.
 - *Dispatch.* The controller's queue provider sets `STATUS = 'QUEUED'`, `POOL`, `SLOT_KIND` and
@@ -4872,7 +4891,7 @@ RETURNING a.ATTEMPT_ID
 ```
 
   The cluster provider requires PostgreSQL; `doctor` refuses it on SQLite.
-- *Agent loop* (`etl-craft agent --pool default --ingestion-slots 4 --warehouse-slots 16`):
+- *Agent loop* (`etl-craft agent --pool default --python-slots 4 --warehouse-slots 16`):
   1. Register (the API inserts `AUD_AGENTS`); the API refuses an agent of another package
      version (S5.AE).
   2. Every 10 s: one *renew* call heartbeats the agent row, renews the leases of its running
@@ -4961,7 +4980,7 @@ on SIGTERM.
 
 Branch: `feat/pools-bundles`.
 
-- *Problem.* Agents on other hosts need the project's `sql_files/`, `ingestion_scripts/` and config,
+- *Problem.* Agents on other hosts need the project's `sql_scripts/`, `python_scripts/` and config,
   and every attempt of a run must use the same versions (today each task process re-reads files and
   `craft-connector.yml` when it starts).
 - **Metadata point today.** `WorkingSet.refresh` in `controller/supervisor.py` reloads an
@@ -4970,7 +4989,7 @@ Branch: `feat/pools-bundles`.
   pins each run to its DAG version.
 - *Change.*
   1. `etl-craft bundle publish [--project P]` builds a manifest (relative path to SHA-256) of
-     `sql_files/`, `ingestion_scripts/`, `seeds/` and the project's `craft-connector.yml`
+     `sql_scripts/`, `python_scripts/`, `seeds/` and the project's `craft-connector.yml`
      (secrets stay variable names), uploads the files to the artifact store (`Artifacts.Store: file:///shared/etl-craft` or
      `s3://bucket/prefix`), and records `AUD_PROJECT_BUNDLES (BUNDLE_ID, PROJECT_ID, MANIFEST, CREATED_BY, CREATED_AT)`.
      `etl-craft bundle publish` also works through `--api`: the API stores the files in the
@@ -5436,7 +5455,7 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
        - every other task depends on it, directly or through others, with `SUCCESS`.
      - `validate` refuses the handler in any pipeline whose `STEWARDABLE_FLAG` is `N`.
      - **Task parameters:**
-       - `SCRIPT_NAME`: the dev team's validation script, a path inside the project's
+       - `SCRIPT_FILE`: the dev team's validation script, a path inside the project's
          `validation_scripts/` folder. Each stewardable pipeline has its own;
        - `FILE_FORMAT`: `CSV` or `TXT` (delimited text, always separated by a pipe `|`, with
          RFC 4180 quoting; there is no delimiter setting), or `XLSX` (an Excel workbook);
@@ -5444,7 +5463,7 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
        - `ENCODING`, for text (default UTF-8);
        - `MAX_FILE_MB`: this pipeline's limit. `validate` refuses a value above the blanket
          limit in `craft-connector.yml`, and an unset value uses the blanket limit;
-       - `INPUT_PARAMS`: optional JSON, as for ingestion scripts.
+       - `INPUT_PARAMS`: optional JSON, as for Python scripts.
      - **The engine checks before the script runs:**
        - the file's size against `MAX_FILE_MB`;
        - its extension against `FILE_FORMAT`;
@@ -5467,7 +5486,7 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
          expected and the remedy. Returning anything other than `None` fails the task as a
          script defect.
      - A refused file fails the task, so no downstream task runs. The downstream tasks the dev
-       team writes (ingestion scripts reading `task.upload`, then SQL actions) land and
+       team writes (Python scripts reading `task.upload`, then SQL actions) land and
        process the accepted file. In the demo, these are the `dm` mart and the `ds` reference
        tables (S8.H item 3).
   3. **Uploading.** One service sits behind `etl-craft upload --pipeline_code P FILE`,
@@ -5710,7 +5729,7 @@ The documentation gate must inspect rendered content and links on the landing pa
 `ScriptTask`, `ScriptResult` and `Offset` reference, so an empty page cannot pass a strict build.
 
 - Concepts: runs, attempts, run keys, revisions, leases, pools, projects.
-- Guides: operating a cluster, upgrading, backups, alerts, the UI, writing ingestion scripts (with
+- Guides: operating a cluster, upgrading, backups, alerts, the UI, writing Python scripts (with
   the contract: what a script gets, what it returns, when its offset is stored, how it is stopped).
 - Reference: every config key, task parameter, CLI command, API endpoint and JSON document, generated
   from the code where possible (as the existing reference pages are).
@@ -5856,7 +5875,7 @@ S8.G.
     Iceberg demo cases are S7.N's critical path, at 290-326 seconds each.
   - The owner's direction is two repositories: this package and Support Insights. The demo
     repository holds its deployment and its etl-craft project under `project/`, including
-    `craft-connector.yml`, `config/`, `sql_files/`, `ingestion_scripts/`,
+    `craft-connector.yml`, `config/`, `sql_scripts/`, `python_scripts/`,
     `validation_scripts/`, `migrations/` and `seeds/`.
 
     A very small demo stays in the package for its tests. For the Support Insights demo,
@@ -5865,7 +5884,7 @@ S8.G.
   1. **A very small demo stays** (`examples/demo`, cut down). It is the smallest project that
      exercises what today's installed-wheel tests assert:
        - each SQL action;
-       - an ingestion script with an offset;
+       - a Python script with an offset;
        - a business rule;
        - an event wait;
        - an email alert through Mailpit;
@@ -6055,7 +6074,7 @@ candidate is cut, never worked around in the example.
 **Where it lives.** Two repositories in total (S7.O): this package and Support Insights.
 The Support Insights repository's `etl-craft` branch replaces its `master` once this stage
 passes. It holds the demo code, deployment, acceptance checks and the etl-craft project in
-`project/`: `craft-connector.yml`, `config/`, `sql_files/`, `ingestion_scripts/`,
+`project/`: `craft-connector.yml`, `config/`, `sql_scripts/`, `python_scripts/`,
 `validation_scripts/`, `migrations/` and `seeds/`.
 
 The demo installs the candidate wheel attached to this package's GitHub release, pinned by
@@ -6070,7 +6089,7 @@ never runs the demo itself.
 | Sources | MongoDB (client Alpha documents), Kafka (Beta events), MinIO (Gamma gzipped CSVs) | Kept: they are the sources |
 | Synthetic generators and their UI (port 1212) | `generators/*.py`, `infra/entrypoint/data_generator_orchestrator.py` | Kept and extended with S8.H's named mixed-quality cases: they stand in for real source systems |
 | Orchestration | Airflow (webserver, scheduler, its own database), three DAGs `Client_{Alpha,Beta,Gamma}_ETL_Task_Flow` | **Replaced** by the etl-craft controller and agents |
-| Processing | PySpark in local mode, writing to PostgreSQL over JDBC | **Replaced** by etl-craft SQL tasks running in the warehouse, and Python ingestion scripts |
+| Processing | PySpark in local mode, writing to PostgreSQL over JDBC | **Replaced** by etl-craft SQL tasks running in the warehouse, and Python scripts |
 | Checkpoints | `get_current_checkpoint` and `aud.dag_runs.source_checkpoint` | **Replaced** by etl-craft offsets |
 | Run audit | `aud.dag_runs`, filled by each DAG's finalize task | **Replaced** by etl-craft's run, task and attempt tables |
 | Data errors | `aud.data_error_history`, written by the CDC-to-PRE_DM step | **Replaced** by business rules and their results |
@@ -6087,8 +6106,8 @@ Supports-Insights-Docker/
 ├── project/                          the etl-craft project directory
 │   ├── craft-connector.yml           secrets as variable names
 │   ├── config/                       one CSV per CFG_ table
-│   ├── sql_files/                    one SELECT per SQL task; maintenance SQL_SCRIPT files
-│   ├── ingestion_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py,
+│   ├── sql_scripts/                    one SELECT per SQL task; maintenance SQL_SCRIPT files
+│   ├── python_scripts/            mongo_to_lnd.py, kafka_to_lnd.py, minio_to_lnd.py,
 │   │                                 steward_to_lnd.py
 │   ├── validation_scripts/           one FILE_VALIDATION script per stewardable pipeline
 │   ├── migrations/                   project migrations
@@ -6170,7 +6189,7 @@ Rules for building them:
    with a design note in this plan, then cut a new release candidate. Example: the Data Metrics
    view needs a duplicate count per run; if the `SCD2_MERGE` dedupe step doesn't report it, add
    `DUPLICATE_COUNT` to the action's counts rather than computing it in a script.
-2. Each ingestion script replaces its landing table's rows every run and returns
+2. Each Python script replaces its landing table's rows every run and returns
    `ScriptResult(row_count, offset)`. If the scripting helper cannot replace, record a package
    gap under rule 1. All clients share `pre_dm.customer_support_stage`, with a source column.
    Their `<client>_predm_delete` and `<client>_cdc_to_predm` tasks commit separately: between
@@ -6310,7 +6329,7 @@ acceptance runs once every required handling feature exists. A scenario without 
 package gap to resolve first.
 
 **Where.** The Support Insights repository's `generators/`, generator UI and orchestrator,
-`project/` config files, SQL and ingestion scripts, `tests/`, etl-craft UI, and root `README.md`.
+`project/` config files, SQL and Python scripts, `tests/`, etl-craft UI, and root `README.md`.
 The package repository pins the tested example commit and records release evidence through
 S8.G; no example-specific workaround belongs in the package.
 
@@ -6458,7 +6477,7 @@ and the soak on the example passed. A partial coverage matrix cannot pass the re
 - [ ] Gate decisions and consumed upstream runs (with revisions) are explainable after repairs and
       backfills.
 - [ ] Each SQL action has a tested failure and retry contract on every supported warehouse, and the
-      ingestion script contract is documented.
+      Python script contract is documented.
 - [ ] The controller handles schedules with time zones, catch-up, overlap and retries; no cron or
       Airflow is needed.
 - [ ] The pool interface has two providers that pass the contract tests.
@@ -6509,7 +6528,7 @@ Defects found by the reviews, with the work item that fixes each. Severity as de
 | B16 | Medium | `mark` of a run succeeds while a live process still runs it | S3.B, S3.D |
 | B17 | Medium | Soft-deleted keys are not revived by SCD merges | S2.D.9 |
 | B18 | Medium | SQLite savepoints commit the outer transaction early | S2.C |
-| B19 | High | Any dataclass in an ingestion script fails to import | S2.E.1 |
+| B19 | High | Any dataclass in a Python script fails to import | S2.E.1 |
 | B20 | Medium | A multi-line error in an alert subject stops the alert | S2.F.1 |
 | B21 | Medium | Business-rule flags stick for deleted keys; forced runs judge closed SCD2 versions | S2.D.10 |
 | B22 | Medium | `HASH_KEY` can't tell NULL from empty text, and its separator collides | S3.G.1 |

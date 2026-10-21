@@ -7,7 +7,7 @@ remedy, so no action ever starts on a half-valid definition.
 - ``TARGET_OBJECT``: ``schema.table``, in the active warehouse profile's database, or
   ``database.schema.table``.
 - ``SOURCE_SQL`` or ``SOURCE_SQL_FILE`` (every action but ``DROP_TABLE``): the read-only
-  SELECT, inline or as a file under ``sql_files/``; exactly one of them.
+  SELECT, inline or as a file under ``sql_scripts/``; exactly one of them.
 - ``PIPELINE_RUN_ID_SUBSTITUTION``: ``true`` replaces ``$$pipeline_run_id`` with the run id.
 - ``PIPELINE_RUN_ID_FILTER``: ``true`` replaces ``$$pipeline_run_id_filter`` with
   ``pipeline_run_id = <id>``, or ``1=1`` on a FULL refresh.
@@ -45,7 +45,7 @@ from datetime import date
 from sqlglot import exp
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import sql_file
+from etl_craft.config.project import sql_script
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import MetadataError, SqlGuardError
 from etl_craft.core.text import (
@@ -299,7 +299,7 @@ def resolve_select(
             "set SOURCE_SQL or SOURCE_SQL_FILE, not both: the task would have two SELECTs"
         )
     if file_name:
-        path = sql_file(config, file_name)
+        path = sql_script(config, file_name)
         try:
             raw = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
@@ -312,7 +312,7 @@ def resolve_select(
     else:
         raise SqlGuardError(
             f"SQL_ACTION={params.get('SQL_ACTION')} needs a SELECT: set SOURCE_SQL, or "
-            "SOURCE_SQL_FILE naming a file under sql_files/"
+            "SOURCE_SQL_FILE naming a project path such as sql_scripts/orders.sql"
         )
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
     watermark = read_watermark(params, stored)

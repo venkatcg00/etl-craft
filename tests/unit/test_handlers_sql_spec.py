@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def project(tmp_path):
     root = tmp_path / "etl-craft"
-    (root / "sql_files").mkdir(parents=True)
+    (root / "sql_scripts").mkdir(parents=True)
     return root
 
 
@@ -66,8 +66,8 @@ def test_a_complete_merge_task(project):
     assert task.source == "SOURCE_SQL"
 
 
-def test_a_sql_file_is_read_from_sql_files(project):
-    (project / "sql_files" / "orders.sql").write_text(
+def test_a_sql_script_is_read_from_sql_scripts(project):
+    (project / "sql_scripts" / "orders.sql").write_text(
         "-- all orders on a full refresh\nSELECT $$pipeline_run_id AS run\nFROM raw.orders\n"
         "WHERE $$pipeline_run_id_filter\n",
         encoding="utf-8",
@@ -76,14 +76,14 @@ def test_a_sql_file_is_read_from_sql_files(project):
         context(
             project,
             refresh_type="FULL",
-            SOURCE_SQL_FILE="orders.sql",
+            SOURCE_SQL_FILE="sql_scripts/orders.sql",
             PIPELINE_RUN_ID_SUBSTITUTION="true",
             PIPELINE_RUN_ID_FILTER="true",
             **BASE,
         )
     )
     assert task.select_sql.endswith("SELECT 42 AS run\nFROM raw.orders\nWHERE 1=1")
-    assert task.source == "SOURCE_SQL_FILE='orders.sql'"
+    assert task.source == "SOURCE_SQL_FILE='sql_scripts/orders.sql'"
 
 
 def test_drop_table_takes_no_select(project):
@@ -110,7 +110,7 @@ def test_drop_table_takes_no_select(project):
         ),
         (BASE, "needs a SELECT: set SOURCE_SQL, or SOURCE_SQL_FILE"),
         (
-            {**BASE, "SOURCE_SQL": "SELECT 1", "SOURCE_SQL_FILE": "a.sql"},
+            {**BASE, "SOURCE_SQL": "SELECT 1", "SOURCE_SQL_FILE": "sql_scripts/a.sql"},
             "set SOURCE_SQL or SOURCE_SQL_FILE, not both",
         ),
         (
@@ -212,12 +212,16 @@ def test_setup_for_names_the_writing_action(project):
         )
 
 
-def test_a_missing_or_unreadable_sql_file_is_metadata(project):
-    with pytest.raises(MetadataError, match=r"SOURCE_SQL_FILE='nope\.sql': no such file"):
-        read_sql_task(context(project, SOURCE_SQL_FILE="nope.sql", **BASE))
-    (project / "sql_files" / "latin1.sql").write_bytes(b"SELECT '\xe9'")
-    with pytest.raises(MetadataError, match=r"SOURCE_SQL_FILE='latin1\.sql': cannot read"):
-        read_sql_task(context(project, SOURCE_SQL_FILE="latin1.sql", **BASE))
+def test_a_missing_or_unreadable_sql_script_is_metadata(project):
+    with pytest.raises(
+        MetadataError, match=r"SOURCE_SQL_FILE='sql_scripts/nope\.sql': no such file"
+    ):
+        read_sql_task(context(project, SOURCE_SQL_FILE="sql_scripts/nope.sql", **BASE))
+    (project / "sql_scripts" / "latin1.sql").write_bytes(b"SELECT '\xe9'")
+    with pytest.raises(
+        MetadataError, match=r"SOURCE_SQL_FILE='sql_scripts/latin1\.sql': cannot read"
+    ):
+        read_sql_task(context(project, SOURCE_SQL_FILE="sql_scripts/latin1.sql", **BASE))
 
 
 def test_flags():

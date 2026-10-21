@@ -38,7 +38,7 @@ def scene(tmp_path):
         },
         tmp_path / "craft-connector.yml",
     )
-    (tmp_path / "sql_files").mkdir()
+    (tmp_path / "sql_scripts").mkdir()
     catalog = Catalog(AT, {}, {}, {}, {}, {}, [], [])
     for task_id, code in enumerate(("ALPHA", "BETA"), 1):
         target, label = f"data.{code.lower()}", f"{code}.load"
@@ -49,7 +49,7 @@ def scene(tmp_path):
             {
                 "SQL_ACTION": "CREATE_TABLE",
                 "TARGET_OBJECT": target,
-                "SOURCE_SQL_FILE": f"{code}.sql",
+                "SOURCE_SQL_FILE": f"sql_scripts/{code}.sql",
             },
             None,
             None,
@@ -60,7 +60,7 @@ def scene(tmp_path):
         catalog.column_edges.append(edge)
         catalog.tasks[label] = task
         catalog.tables[target] = TableAsset(target, columns={"id": Column("id")}, writers=[label])
-        (tmp_path / f"sql_files/{code}.sql").write_text("SELECT 1 AS id")
+        (tmp_path / f"sql_scripts/{code}.sql").write_text("SELECT 1 AS id")
     folder = tmp_path / "catalog"
     write_site(catalog, config, folder)
     for page in folder.rglob("*.html"):
@@ -89,9 +89,9 @@ def test_metadata_change_rebuilds_its_pipeline_without_rebuilding_another(scene)
     assert (folder / "pipelines/ALPHA.html").stat().st_mtime_ns == STAMP
 
 
-def test_sql_file_changes_invalidate_the_task_page(scene):
+def test_sql_script_changes_invalidate_the_task_page(scene):
     catalog, config, folder = scene
-    (config.project_dir / "sql_files/BETA.sql").write_text("SELECT 2 AS id")
+    (config.project_dir / "sql_scripts/BETA.sql").write_text("SELECT 2 AS id")
     write_site(catalog, config, folder)
     assert "SELECT 2 AS id" in (folder / "tasks/BETA.load.html").read_text()
     assert (folder / "pipelines/ALPHA.html").stat().st_mtime_ns == STAMP
@@ -107,9 +107,9 @@ def test_new_history_rebuilds_only_its_pipeline_and_adds_the_run_page(scene):
     assert (folder / "pipelines/ALPHA.html").stat().st_mtime_ns == STAMP
 
 
-def test_sql_file_changed_during_generation_uses_one_content_snapshot(scene):
+def test_sql_script_changed_during_generation_uses_one_content_snapshot(scene):
     catalog, config, folder = scene
-    source = config.project_dir / "sql_files/BETA.sql"
+    source = config.project_dir / "sql_scripts/BETA.sql"
     source.write_text("SELECT 2 AS id")
     with paused_after(
         lambda: write_site(catalog, config, folder),
@@ -256,7 +256,7 @@ def test_comparison_age_change_rebuilds_coverage_without_changing_the_observatio
     assert (folder / "tables/data.alpha.html").stat().st_mtime_ns == STAMP
 
 
-def test_empty_sql_filename_keeps_its_read_error_visible_and_does_not_break_regeneration(scene):
+def test_empty_sql_scriptname_keeps_its_read_error_visible_and_does_not_break_regeneration(scene):
     catalog, config, folder = scene
     catalog.tasks["BETA.load"].params["SOURCE_SQL_FILE"] = ""
     write_site(catalog, config, folder)

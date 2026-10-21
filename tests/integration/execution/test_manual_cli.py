@@ -15,8 +15,8 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
     cli_project, with_downstream
 ):
     project = cli_project
-    project.config.sql_files_dir.mkdir()
-    (project.config.sql_files_dir / "one.sql").write_text("SELECT 1 AS id")
+    project.config.sql_scripts_dir.mkdir()
+    (project.config.sql_scripts_dir / "one.sql").write_text("SELECT 1 AS id")
     with project.engine.begin() as conn:
         selected_id = add_task(
             conn,
@@ -24,7 +24,7 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
             "only",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="main.selected",
-            SOURCE_SQL_FILE="one.sql",
+            SOURCE_SQL_FILE="sql_scripts/one.sql",
         )
         downstream = add_task(
             conn,
@@ -32,7 +32,7 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
             "after",
             SQL_ACTION="CREATE_TABLE",
             TARGET_OBJECT="main.after",
-            SOURCE_SQL_FILE="one.sql",
+            SOURCE_SQL_FILE="sql_scripts/one.sql",
         )
         add_dependency(conn, project.pipeline_id, downstream, selected_id)
     args = (

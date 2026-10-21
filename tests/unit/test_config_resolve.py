@@ -201,14 +201,14 @@ def test_the_search_finds_a_project_directory_in_each_parent(tmp_path, monkeypat
     monkeypatch.delenv("ETL_CRAFT_CONFIG", raising=False)
     repo = tmp_path / "repo"
     project = repo / "etl-craft"
-    (project / "sql_files").mkdir(parents=True)
+    (project / "sql_scripts").mkdir(parents=True)
     (project / "craft-connector.yml").write_text("{}", encoding="utf-8")
     elsewhere = repo / "docs" / "notes"
     elsewhere.mkdir(parents=True)
     # From the repository, from anywhere below it, and from inside the project itself.
     assert resolve_config_path(start=repo) == project / "craft-connector.yml"
     assert resolve_config_path(start=elsewhere) == project / "craft-connector.yml"
-    assert resolve_config_path(start=project / "sql_files") == project / "craft-connector.yml"
+    assert resolve_config_path(start=project / "sql_scripts") == project / "craft-connector.yml"
 
 
 def test_two_candidates_in_one_directory_are_refused(tmp_path, monkeypatch):

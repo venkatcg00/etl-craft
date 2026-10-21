@@ -48,7 +48,7 @@ FROM (VALUES
     ('SALES_MART', 'customer_totals', 'TARGET_OBJECT', 'mart.customer_totals'),
     ('SALES_MART', 'customer_totals', 'SOURCE_SQL',
      'SELECT customer_id, SUM(amount) AS total_amount FROM sales.orders_uk GROUP BY customer_id'),
-    ('SALES_MART', 'publish', 'SCRIPT_NAME', 'sales/publish.py'),
+    ('SALES_MART', 'publish', 'SCRIPT_FILE', 'python_scripts/sales/publish.py'),
     ('SALES_MART', 'alert', 'EMAIL_TO', 'sales-data@example.com'),
     ('SALES_MART', 'alert', 'EMAIL_SUBJECT', '$$pipeline_code: $$status'),
     ('SALES_MART', 'alert', 'EMAIL_BODY', 'Run $$pipeline_run_id ended $$status.')

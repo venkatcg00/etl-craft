@@ -1,4 +1,4 @@
-"""The ingestion-script contract's offsets."""
+"""The Python-script contract's offsets."""
 
 from datetime import UTC, datetime
 from decimal import Decimal

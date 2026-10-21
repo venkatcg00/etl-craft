@@ -334,7 +334,7 @@ def test_setup_table_refuses_writers_that_need_different_audit_columns(sql_world
     assert "customers" not in w.tables()
 
 
-def test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows(sql_world):
+def test_a_sql_script_with_pipeline_run_id_filter_reads_this_runs_rows(sql_world):
     w = sql_world
     w.run("seed", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT="events", SOURCE_SQL="SELECT 1 AS id")
     other_run = w.pipeline_run_id
@@ -342,9 +342,9 @@ def test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows(sql_world):
     w.execute(
         f"INSERT INTO {w.name('events')} (id, pipeline_run_id) VALUES (2, {w.pipeline_run_id})"
     )
-    sql_file = w.project / "sql_files" / "loads" / "events.sql"
-    sql_file.parent.mkdir(parents=True)
-    sql_file.write_text(
+    sql_script = w.project / "sql_scripts" / "loads" / "events.sql"
+    sql_script.parent.mkdir(parents=True)
+    sql_script.write_text(
         f"-- this run's events\nSELECT id, $$pipeline_run_id AS loaded_by\n"
         f"FROM {w.name('events')}\n"
         "WHERE $$pipeline_run_id_filter;\n",
@@ -354,7 +354,7 @@ def test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows(sql_world):
         "incremental",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="loaded",
-        SOURCE_SQL_FILE="loads/events.sql",
+        SOURCE_SQL_FILE="sql_scripts/loads/events.sql",
         PIPELINE_RUN_ID_SUBSTITUTION="true",
         PIPELINE_RUN_ID_FILTER="true",
     )
@@ -367,7 +367,7 @@ def test_a_sql_file_with_pipeline_run_id_filter_reads_this_runs_rows(sql_world):
         "incremental",
         SQL_ACTION="CREATE_TABLE",
         TARGET_OBJECT="loaded",
-        SOURCE_SQL_FILE="loads/events.sql",
+        SOURCE_SQL_FILE="sql_scripts/loads/events.sql",
         PIPELINE_RUN_ID_SUBSTITUTION="true",
         PIPELINE_RUN_ID_FILTER="true",
     )

@@ -46,8 +46,8 @@ def project(engine_db, tmp_path, monkeypatch):
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
-    (root / "sql_files").mkdir(exist_ok=True)
-    (root / "sql_files" / "convert.sql").write_text(
+    (root / "sql_scripts").mkdir(exist_ok=True)
+    (root / "sql_scripts" / "convert.sql").write_text(
         "SELECT o.id, o.amount * r.rate AS amount_usd\n"
         "FROM analytics.staging.orders o JOIN ref.rates r ON r.currency = o.currency\n"
         "WHERE $$pipeline_run_id_filter\n",
@@ -72,7 +72,7 @@ def project(engine_db, tmp_path, monkeypatch):
             "convert",
             SQL_ACTION="OVERWRITE_TABLE",
             TARGET_OBJECT="sales.orders",
-            SOURCE_SQL_FILE="convert.sql",
+            SOURCE_SQL_FILE="sql_scripts/convert.sql",
             PIPELINE_RUN_ID_FILTER="true",
             DOCUMENTATION="Converts orders to US dollars.",
         )

@@ -103,7 +103,7 @@ policy, because the old policy cannot be reconstructed.
 
 Cancelled attempts never retry. Lost leases and supervisor timeouts remain transient process
 failures. Lost attempts get a new owner only after reconciliation fences the old lease;
-their side effects can be uncertain, so use retry-safe ingestion scripts. A process that exits
+their side effects can be uncertain, so use retry-safe Python tasks. A process that exits
 without reporting its outcome is unknown.
 
 

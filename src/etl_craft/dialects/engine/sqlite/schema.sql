@@ -93,7 +93,7 @@ CREATE TABLE CFG_TASKS (
     TARGET_ACTIVE_FLAG VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_tasks_target_active CHECK (TARGET_ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_code CHECK (TASK_CODE GLOB '[A-Za-z]*' AND TASK_CODE NOT GLOB '*[^A-Za-z0-9_]*' AND length(TASK_CODE) <= 128 AND instr(TASK_CODE, char(0)) = 0),
     CONSTRAINT ck_tasks_task_type     CHECK (TASK_TYPE IN ('INGESTION','ETL')),
-    CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT','RUN_PIPELINE')),
+    CONSTRAINT ck_tasks_handler       CHECK (HANDLER IN ('PYTHON','SQL','SQL_SCRIPT','BUSINESS_RULES','EMAIL_ALERT','EVENT_WAIT','RUN_PIPELINE')),
     CONSTRAINT ck_tasks_active_flag   CHECK (ACTIVE_FLAG IN ('Y','N')),
     CONSTRAINT ck_tasks_run_condition CHECK (RUN_CONDITION IS NULL OR RUN_CONDITION IN ('ALL','ANY','N')),
     CONSTRAINT ck_tasks_run_condition_count CHECK (
@@ -337,7 +337,7 @@ CREATE TABLE AUD_BUSINESS_RULES_RESULTS (
 CREATE INDEX ix_brresults_run ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_ID);
 CREATE INDEX ix_brresults_rule ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_ID);
 
--- Where each incremental ingestion script got to: the offset it reads from next.
+-- Where each incremental Python script got to: the offset it reads from next.
 CREATE TABLE AUD_TASK_OFFSET_TRACKER (
     TASK_ID                 BIGINT PRIMARY KEY REFERENCES CFG_TASKS(TASK_ID),
     OFFSET_TYPE             VARCHAR NOT NULL,

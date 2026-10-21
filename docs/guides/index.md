@@ -10,11 +10,13 @@ How to model and run pipelines with etl-craft.
   migrations, with an example of each kind of change.
 - [Dependencies and run conditions](dependencies.md): dependency types, `ALL`, `ANY` and `N`
   conditions, waves, and which tasks run, wait or are skipped.
-- [SQL tasks](sql-tasks.md): the SELECT, inline or from `sql_files/`, the pipeline-id tokens,
+- [SQL tasks](sql-tasks.md): the SELECT, inline or from `sql_scripts/`, the pipeline-id tokens,
   the nine actions, and what the engine checks and logs.
+- [SQL scripts](sql-scripts.md): unmanaged procedures, maintenance and DML, bound inputs,
+  transactions and per-statement audit.
 - [Business rules](business-rules.md): writing rules, flagging and clearing rows, waves and
   retries.
-- [Ingestion scripts](ingestion-scripts.md): the script contract, `INPUT_PARAMS`, offsets, and
+- [Python scripts](python-scripts.md): the script contract, `INPUT_PARAMS`, offsets, and
   where a script's output goes.
 - [Email alerts](email-alerts.md): the alert task, its outcomes and tokens, SLA emails, and
   sending through SMTP or `sendmail`.

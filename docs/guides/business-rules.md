@@ -39,7 +39,7 @@ whether flagged rows now pass.
 
 Rule SQL receives `:pipeline_id`, `:pipeline_run_id` and `:task_run_id` as bound integer inputs.
 They identify the pipeline definition, its execution and the business-rule task execution.
-The table's `t.TASK_RUN_ID` records the SQL or ingestion task that wrote that row; the rule's
+The table's `t.TASK_RUN_ID` records the SQL or Python script task that wrote that row; the rule's
 `:task_run_id` identifies the task evaluating the rule. Evaluating a rule preserves the row's
 provenance. For example:
 

@@ -114,33 +114,33 @@ DROP TABLE task_targets;
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
-    ('CLIENT_ALPHA', 'land', 'SCRIPT_NAME', 'alpha.py'),
+    ('CLIENT_ALPHA', 'land', 'SCRIPT_FILE', 'python_scripts/alpha.py'),
     ('CLIENT_ALPHA', 'land', 'INPUT_PARAMS', '{"rows": 12}'),
     ('CLIENT_ALPHA', 'land', 'SOURCE_OBJECT', 'Client Alpha support desk'),
     ('CLIENT_ALPHA', 'land', 'DOCUMENTATION', 'Lands the interactions Client Alpha''s desk exported since the last one loaded, every field as text.'),
     ('CLIENT_ALPHA', 'setup_prs', 'SQL_ACTION', 'SETUP_TABLE'),
     ('CLIENT_ALPHA', 'setup_prs', 'SOURCE_SQL', 'SELECT CAST(a.interaction_id AS BIGINT) AS interaction_id, a.agent_code, a.support_area, CAST(a.contact_date AS DATE) AS contact_date, a.status, CAST(a.duration_seconds AS INTEGER) AS handle_seconds, CAST(a.rating AS INTEGER) AS rating, CAST(0 AS BIGINT) AS parsed_by FROM lnd.client_alpha a WHERE 1 = 0'),
     ('CLIENT_ALPHA', 'parse', 'SQL_ACTION', 'APPEND_TABLE'),
-    ('CLIENT_ALPHA', 'parse', 'SOURCE_SQL_FILE', 'prs_alpha.sql'),
+    ('CLIENT_ALPHA', 'parse', 'SOURCE_SQL_FILE', 'sql_scripts/prs_alpha.sql'),
     ('CLIENT_ALPHA', 'parse', 'PIPELINE_RUN_ID_SUBSTITUTION', 'true'),
     ('CLIENT_ALPHA', 'parse', 'DOCUMENTATION', 'Types Client Alpha''s landed interactions and appends the new ones, stamped with the run that parsed them.'),
     ('CLIENT_ALPHA', 'purge_test_calls', 'SQL_ACTION', 'DELETE_ROWS'),
     ('CLIENT_ALPHA', 'purge_test_calls', 'SOURCE_SQL', 'SELECT interaction_id FROM prs.alpha_interactions WHERE agent_code = ''TEST'''),
     ('CLIENT_ALPHA', 'purge_test_calls', 'MERGE_KEY', 'interaction_id'),
     ('CLIENT_ALPHA', 'purge_test_calls', 'HARD_DELETE', 'true'),
-    ('CLIENT_BETA', 'land', 'SCRIPT_NAME', 'beta.py'),
+    ('CLIENT_BETA', 'land', 'SCRIPT_FILE', 'python_scripts/beta.py'),
     ('CLIENT_BETA', 'land', 'INPUT_PARAMS', '{"rows": 8}'),
     ('CLIENT_BETA', 'land', 'SOURCE_OBJECT', 'Client Beta event stream'),
     ('CLIENT_BETA', 'setup_prs', 'SQL_ACTION', 'SETUP_TABLE'),
     ('CLIENT_BETA', 'setup_prs', 'SOURCE_SQL', 'SELECT b.support_identifier AS interaction_id, b.agent AS agent_code, b.regarding AS support_area, CAST(b.event_time AS DATE) AS contact_date, b.status, CAST(b.handle_time AS INTEGER) AS handle_seconds, CAST(b.score AS INTEGER) AS rating, CAST(0 AS BIGINT) AS parsed_by FROM lnd.client_beta b WHERE 1 = 0'),
     ('CLIENT_BETA', 'parse', 'SQL_ACTION', 'APPEND_TABLE'),
-    ('CLIENT_BETA', 'parse', 'SOURCE_SQL_FILE', 'prs_beta.sql'),
+    ('CLIENT_BETA', 'parse', 'SOURCE_SQL_FILE', 'sql_scripts/prs_beta.sql'),
     ('CLIENT_BETA', 'parse', 'PIPELINE_RUN_ID_SUBSTITUTION', 'true'),
-    ('SUPPORT_DM', 'land_agents', 'SCRIPT_NAME', 'agents.py'),
+    ('SUPPORT_DM', 'land_agents', 'SCRIPT_FILE', 'python_scripts/agents.py'),
     ('SUPPORT_DM', 'land_agents', 'SOURCE_OBJECT', 'HR agent directory'),
     ('SUPPORT_DM', 'support_areas', 'SQL_ACTION', 'CREATE_TABLE'),
-    ('SUPPORT_DM', 'support_areas', 'SOURCE_SQL_FILE', 'support_areas.sql'),
-    ('SUPPORT_DM', 'flaky_feed', 'SCRIPT_NAME', 'flaky.py'),
+    ('SUPPORT_DM', 'support_areas', 'SOURCE_SQL_FILE', 'sql_scripts/support_areas.sql'),
+    ('SUPPORT_DM', 'flaky_feed', 'SCRIPT_FILE', 'python_scripts/flaky.py'),
     ('SUPPORT_DM', 'flaky_feed', 'DOCUMENTATION', 'A feed that is not ready the first time it is read.'),
     ('SUPPORT_DM', 'on_failure', 'EMAIL_TO', 'support-oncall@example.com'),
     ('SUPPORT_DM', 'on_failure', 'EMAIL_ON_STATUS', 'FAILED'),
@@ -165,14 +165,14 @@ FROM (VALUES
     ('SUPPORT_DM', 'agent_history', 'MERGE_COMPARE_COLUMNS', 'team'),
     ('SUPPORT_DM', 'agent_history', 'DOCUMENTATION', 'Keeps every team an agent has been in, and when.'),
     ('SUPPORT_DM', 'interactions', 'SQL_ACTION', 'CREATE_TABLE'),
-    ('SUPPORT_DM', 'interactions', 'SOURCE_SQL_FILE', 'pre_dm_interactions.sql'),
+    ('SUPPORT_DM', 'interactions', 'SOURCE_SQL_FILE', 'sql_scripts/pre_dm_interactions.sql'),
     ('SUPPORT_DM', 'setup_fact', 'SQL_ACTION', 'SETUP_TABLE'),
-    ('SUPPORT_DM', 'setup_fact', 'SOURCE_SQL_FILE', 'support_fact.sql'),
+    ('SUPPORT_DM', 'setup_fact', 'SOURCE_SQL_FILE', 'sql_scripts/support_fact.sql'),
     ('SUPPORT_DM', 'fact', 'SQL_ACTION', 'OVERWRITE_TABLE'),
-    ('SUPPORT_DM', 'fact', 'SOURCE_SQL_FILE', 'support_fact.sql'),
+    ('SUPPORT_DM', 'fact', 'SOURCE_SQL_FILE', 'sql_scripts/support_fact.sql'),
     ('SUPPORT_DM', 'fact', 'DOCUMENTATION', 'One row per interaction, from every client, with the agent''s team and the support area''s name.'),
     ('SUPPORT_DM', 'area_summary', 'SQL_ACTION', 'CREATE_TABLE'),
-    ('SUPPORT_DM', 'area_summary', 'SOURCE_SQL_FILE', 'area_summary.sql'),
+    ('SUPPORT_DM', 'area_summary', 'SOURCE_SQL_FILE', 'sql_scripts/area_summary.sql'),
     ('SUPPORT_DM', 'source_counts', 'SQL_ACTION', 'CREATE_TABLE'),
     ('SUPPORT_DM', 'source_counts', 'SOURCE_SQL', 'SELECT source_system, COUNT(*) AS interactions FROM pre_dm.interactions GROUP BY source_system'),
     ('SUPPORT_DM', 'drop_source_counts', 'SQL_ACTION', 'DROP_TABLE'),
@@ -180,12 +180,12 @@ FROM (VALUES
     ('SUPPORT_DM', 'alert', 'EMAIL_SUBJECT', '$$pipeline_code: $$status'),
     ('SUPPORT_DM', 'alert', 'EMAIL_BODY', 'Run $$pipeline_run_id of $$pipeline_code ended $$status.'),
     ('SUPPORT_DM', 'alert', 'EMAIL_PIPELINES', 'CLIENT_ALPHA|CLIENT_BETA|SUPPORT_DM'),
-    ('SUPPORT_EXPORT', 'export', 'SCRIPT_NAME', 'wait.py'),
+    ('SUPPORT_EXPORT', 'export', 'SCRIPT_FILE', 'python_scripts/wait.py'),
     ('SUPPORT_EXPORT', 'export', 'INPUT_PARAMS', '{"seconds": 8}'),
     ('SUPPORT_EXPORT', 'export', 'TASK_TIMEOUT_SECONDS', '2'),
-    ('SUPPORT_BACKFILL', 'prepare', 'SCRIPT_NAME', 'wait.py'),
+    ('SUPPORT_BACKFILL', 'prepare', 'SCRIPT_FILE', 'python_scripts/wait.py'),
     ('SUPPORT_BACKFILL', 'prepare', 'INPUT_PARAMS', '{"seconds": 0}'),
-    ('SUPPORT_BACKFILL', 'backfill', 'SCRIPT_NAME', 'wait.py'),
+    ('SUPPORT_BACKFILL', 'backfill', 'SCRIPT_FILE', 'python_scripts/wait.py'),
     ('SUPPORT_BACKFILL', 'backfill', 'INPUT_PARAMS', '{"seconds": 30}')
 ) v
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1
@@ -260,7 +260,7 @@ FROM (VALUES
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = 'SUPPORT_DM'
 JOIN CFG_TASKS t ON t.PIPELINE_ID = p.PIPELINE_ID AND t.TASK_CODE = 'quality';
 
--- Source shapes the ingestion scripts land, available before the first run.
+-- Source shapes the Python scripts land, available before the first run.
 
 INSERT INTO CFG_COLUMNS (TABLE_ID, COLUMN_NAME, DATA_TYPE, COLUMN_POSITION) VALUES
     ((SELECT TABLE_ID FROM CFG_TABLES WHERE SCHEMA_NAME='lnd' AND TABLE_NAME='client_alpha'), 'interaction_id', 'BIGINT', 1),

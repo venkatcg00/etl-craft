@@ -42,7 +42,7 @@ LEFT JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1 AND p.ACTIVE_FLAG = 'Y'
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
-    ('SALES_DAILY', 'fetch_orders', 'SCRIPT_NAME', 'sales/fetch_orders.py'),
+    ('SALES_DAILY', 'fetch_orders', 'SCRIPT_FILE', 'python_scripts/sales/fetch_orders.py'),
     ('SALES_DAILY', 'fetch_orders', 'INPUT_PARAMS', '{"region": "uk", "days": 1}'),
     ('SALES_DAILY', 'fetch_orders', 'TARGET_OBJECT', 'lnd.orders_uk'),
     ('SALES_DAILY', 'fetch_orders', 'SOURCE_OBJECT', 'Order service API'),
@@ -51,10 +51,10 @@ FROM (VALUES
     ('SALES_DAILY', 'fetch_orders', 'TASK_TIMEOUT_SECONDS', '1800'),
     ('SALES_DAILY', 'setup_orders', 'SQL_ACTION', 'SETUP_TABLE'),
     ('SALES_DAILY', 'setup_orders', 'TARGET_OBJECT', 'sales.orders_uk'),
-    ('SALES_DAILY', 'setup_orders', 'SOURCE_SQL_FILE', 'sales/orders_uk.sql'),
+    ('SALES_DAILY', 'setup_orders', 'SOURCE_SQL_FILE', 'sql_scripts/sales/orders_uk.sql'),
     ('SALES_DAILY', 'load_orders', 'SQL_ACTION', 'APPEND_TABLE'),
     ('SALES_DAILY', 'load_orders', 'TARGET_OBJECT', 'sales.orders_uk'),
-    ('SALES_DAILY', 'load_orders', 'SOURCE_SQL_FILE', 'sales/orders_uk.sql'),
+    ('SALES_DAILY', 'load_orders', 'SOURCE_SQL_FILE', 'sql_scripts/sales/orders_uk.sql'),
     ('SALES_DAILY', 'load_orders', 'DOCUMENTATION', 'Appends the day''s orders to the region''s table.'),
     ('SALES_DAILY', 'on_failure', 'EMAIL_TO', 'sales-oncall@example.com'),
     ('SALES_DAILY', 'on_failure', 'EMAIL_ON_STATUS', 'FAILED'),

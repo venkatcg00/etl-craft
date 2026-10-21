@@ -42,7 +42,7 @@ def test_project_directory_lookup_order(tmp_path, monkeypatch):
     assert migrations.resolve_project_migrations_dir("explicit", project) == Path("explicit")
 
 
-def test_a_stream_reads_sql_files_in_order_with_their_checksums(tmp_path):
+def test_a_stream_reads_sql_scripts_in_order_with_their_checksums(tmp_path):
     (tmp_path / "0002_b.sql").write_bytes(b"SELECT 2;")
     (tmp_path / "0001_a.sql").write_bytes(b"SELECT 1;")
     (tmp_path / "notes.md").write_text("ignored", encoding="utf-8")

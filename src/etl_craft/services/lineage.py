@@ -36,13 +36,15 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.lineage import lineage as sqlglot_lineage
 from sqlglot.optimizer.qualify import qualify as qualify_columns
+from sqlglot.optimizer.qualify_tables import qualify_tables
 from sqlglot.schema import MappingSchema
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.config.project import sql_script
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import Handler, RefreshType, SqlAction
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError, MetadataError
-from etl_craft.core.text import sha256_hex
+from etl_craft.core.text import sha256_hex, split_statements
 from etl_craft.engine.locks import LINEAGE
 from etl_craft.engine.repository.lineage import (
     SqlTaskRef,
@@ -56,7 +58,7 @@ from etl_craft.engine.repository.lineage import (
 )
 from etl_craft.engine.repository.source_columns import fetch_source_columns
 from etl_craft.engine.repository.tasks import fetch_all_task_parameters
-from etl_craft.engine.repository.validation import fetch_task_dependency_edges
+from etl_craft.engine.repository.validation import fetch_active_tasks, fetch_task_dependency_edges
 from etl_craft.handlers.sql.spec import resolve_select
 from etl_craft.services.source_columns import definition_problem
 from etl_craft.warehouse.connection import warehouse_dialect
@@ -93,6 +95,7 @@ class TaskLineage:
     error: str | None = None
     cached: bool = False
     sources: tuple[str, ...] = ()
+    targets: tuple[str, ...] = ()
 
 
 def table_name(parts: Iterable[str], catalog: str | None) -> str:
@@ -446,7 +449,7 @@ def collect(
                 _, catalog = dialect_and_catalog(config)
                 with engine.begin() as conn:
                     record_lineage_versions(conn, catalog.lower() if catalog else None, keys)
-            return results
+            return results + _script_lineages(engine, config)
     except LockTimeoutError as error:
         raise LockTimeoutError(
             f"lineage recording lock unavailable: {error}; check the current lineage or docs "
@@ -635,3 +638,92 @@ def _sort_key(edge: Edge) -> tuple[str, str, str, str]:
         edge.target_object,
         edge.target_column,
     )
+
+
+def script_lineage(sql: str, name: str, config: ConnectorConfig) -> TaskLineage:
+    """Best-effort unmanaged lineage; procedure effects cannot be inferred."""
+    dialect, catalog = dialect_and_catalog(config)
+    targets: set[str] = set()
+    sources: set[str] = set()
+    edges: list[Edge] = []
+    unparsed: list[str] = []
+    for index, statement_sql in enumerate(split_statements(sql), 1):
+        try:
+            tree = sqlglot.parse_one(statement_sql, read=dialect, error_message_context=0)
+            if config.warehouse is not None:
+                tree = qualify_tables(tree, db=config.warehouse.schema or None, catalog=catalog)
+        except SqlglotError:
+            unparsed.append(str(index))
+            continue
+        target = (
+            tree.this
+            if isinstance(tree, (exp.DDL, exp.DML, exp.Drop, exp.Alter, exp.Copy))
+            else None
+        )
+        target = target.this if isinstance(target, exp.Schema) else target
+        if isinstance(target, exp.Table):
+            written = table_name((part.name for part in target.parts), catalog)
+            targets.add(written)
+            try:
+                edges.extend(_script_columns(tree.expression, written, name, config))
+            except EtlCraftError:
+                unparsed.append(str(index))
+        elif isinstance(tree, (exp.TruncateTable, exp.Drop)):
+            for table in tree.expressions or tree.args.get("tables") or []:
+                if isinstance(table, exp.Table):
+                    targets.add(table_name((part.name for part in table.parts), catalog))
+        elif isinstance(tree, exp.Command):
+            unparsed.append(str(index))
+        ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
+        for table in tree.find_all(exp.Table):
+            if table is not target and (table.db or table.name.lower() not in ctes):
+                sources.add(table_name((part.name for part in table.parts), catalog))
+    reason = "unmanaged"
+    if unparsed:
+        reason += "; incomplete lineage for statement(s) " + ", ".join(unparsed)
+    ordered = tuple(sorted(targets))
+    return TaskLineage(
+        name,
+        ordered[0] if ordered else None,
+        edges,
+        error=reason,
+        sources=tuple(sorted(sources)),
+        targets=ordered,
+    )
+
+
+def _script_lineages(engine: Engine, config: ConnectorConfig) -> list[TaskLineage]:
+    with engine.connect() as conn:
+        tasks = fetch_active_tasks(conn)
+        params = fetch_all_task_parameters(conn, Handler.SQL_SCRIPT)
+    result = []
+    for task in tasks:
+        if task.handler != Handler.SQL_SCRIPT:
+            continue
+        try:
+            name = params.get(task.task_id, {}).get("SCRIPT_FILE", "")
+            sql = sql_script(config, name, setting="SCRIPT_FILE").read_text(encoding="utf-8")
+            result.append(script_lineage(sql, task.label, config))
+        except (EtlCraftError, OSError, UnicodeError) as error:
+            result.append(TaskLineage(task.label, None, [], error=f"unmanaged: {error}"))
+    return result
+
+
+def _script_columns(
+    query: exp.Expr | None, target: str, name: str, config: ConnectorConfig
+) -> list[Edge]:
+    """Trace the SELECT portion of an unmanaged write where it is understood."""
+    if not isinstance(query, exp.Query):
+        return []
+    dialect, catalog = dialect_and_catalog(config)
+    return [
+        Edge(
+            e.target_object,
+            e.target_column,
+            e.source_object,
+            e.source_column,
+            e.transformation,
+            name,
+        )
+        for e in extract(query.sql(dialect=dialect), target, dialect=dialect, catalog=catalog)
+    ]

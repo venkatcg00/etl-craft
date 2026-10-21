@@ -87,7 +87,7 @@ def test_pipeline_consumes_the_admitted_revision_after_upstream_reopens(cli_proj
 def test_task_consumes_its_claim_snapshot_after_upstream_repairs(cli_project):
     project = cli_project
     run, task_run = upstream(project, task_edge=True, pipeline_edge=False)
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    while not Path('release').exists():\n        time.sleep(0.05)\n"
         "    return ScriptResult(1)\n"
@@ -382,7 +382,7 @@ def test_attempt_success_offset_and_consumption_roll_back_together(cli_project, 
     upstream(project, task_edge=True, pipeline_edge=False)
     code, output = project.run("run", "--pipeline-code", "P", "--init-only")
     assert code == 0, output
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "from etl_craft.scripting import ScriptResult, Offset\n"
         "def run(task):\n    assert task.offset == Offset.number(3)\n"
         "    return ScriptResult(1, Offset.number(9))\n"
@@ -427,7 +427,7 @@ def test_a_child_crashing_after_commit_keeps_the_complete_success(cli_project):
     upstream(project, task_edge=True, pipeline_edge=False)
     code, output = project.run("run", "--pipeline-code", "P", "--init-only")
     assert code == 0, output
-    (project.config.ingestion_scripts_dir / "load.py").write_text(
+    (project.config.python_scripts_dir / "load.py").write_text(
         "from etl_craft.scripting import ScriptResult, Offset\n"
         "def run(task):\n    return ScriptResult(1, Offset.number(9))\n"
     )
