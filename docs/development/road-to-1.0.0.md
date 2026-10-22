@@ -147,7 +147,7 @@ item's text, or work done early under another item.
 | S5.C The PostgreSQL queue and the agent | Done | #231 | API-only agents with claims, renewals, fenced reports, shared log chunks and durable drain/resume/stop; durable resource locks that pass only after the expired holder's warehouse statements are confirmed stopped |
 | S5.AI Event waits on signal rows | Done | #233 | Keyed SQL waits consume each signal once with the wait's success, like files; bounded probes; always-true queries are refused |
 | S5.AH Partitioned offsets for streams | Done | #234 | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
-| S5.AJ Fewer warehouse round trips | In progress | | Query reductions and exact action/attempt budgets built; final cloud rerun blocked by Databricks table quota |
+| S5.AJ Fewer warehouse round trips | Done | #235 | Task-scoped warehouse engines, DDL-aware metadata, combined queries and exact action/attempt budgets; parallel cloud suites under 15 minutes |
 | S5.D and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -308,7 +308,7 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
-S5.AJ ran the unit, action, merge, crash, released-schema upgrade and API checks on
+S5.AJ (#235) ran the unit, action, merge, crash, released-schema upgrade and API checks on
 both Engine DBs where applicable and all four local warehouses. Lock, lease, fencing,
 transition and ROW_ID checks passed twenty rounds. Both clouds were available: six-worker
 Snowflake passed 33 tests in 12m25.92s, and Databricks passed 32 in 7m50.98s; the Snowflake
@@ -318,8 +318,10 @@ A paired serial/parallel Databricks run retained identical evidence apart from t
 After tightening the Databricks capability-refusal guard, its rerun passed 25 tests and failed
 seven because Unity Catalog refused new tables (559 against a limit of 500). A subsequent
 quota query and allocation probe still refused creation at 552/500; this is a failed acceptance
-run, not an unavailable-cloud waiver. Final acceptance and the PR remain pending. The source
-review found no security issue, and all 2,698 unit tests pass.
+run, not an unavailable-cloud waiver. The owner accepted the prior passing run plus the new
+refusal-path regressions (23 October 2026): comparing every runtime file with that wheel showed
+only the stricter temporary-table capability-error classifier changed. The source review found
+no security issue, and all 2,698 unit tests pass.
 
 S5.X (#230) exercises ordered unmanaged statements, bind inputs, partial failures and attempt
 logs on all four local warehouses. Dependency chains, retry policies and process loss are
@@ -660,6 +662,10 @@ Warehouse SQL is unchanged; no cloud suite was needed.
   and `test_rules_receive_pipeline_and_task_run_identities`. The removed cloud demo is covered
   by installed-wheel `test_the_demo_runs_locally`; its removal is flagged in the PR. Vendor
   composite merges, lifecycle/upgrades, rejects, literals, event waits and source checks remain.
+- S5.AJ acceptance uses the previous full Databricks pass plus the stricter capability-error
+  classifier regressions (owner-approved, 23 October 2026). A later run failed on the provider's
+  table quota, still confirmed by an allocation probe. The successful SQL paths match the
+  passing wheel; the failed run is retained in the PR rather than treated as unavailable.
 - S5.AJ also carries the owner's S7.W plan addition (22 October 2026): evaluate the complete
   documentation toolchain after MkDocs 1.x. The existing pin and warning remain unchanged.
 
