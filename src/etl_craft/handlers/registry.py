@@ -12,6 +12,7 @@ import importlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from typing import Any
 
 from sqlalchemy.engine import Engine
 
@@ -53,6 +54,8 @@ class TaskContext:
     attempt_id: int | None = None
     owner: str | None = None
     event_files: tuple[str, ...] = ()
+    event_keys: tuple[str, ...] = ()
+    event_rows: tuple[Mapping[str, Any], ...] = ()
     writer: str = SYSTEM_ACTOR.name
 
 

@@ -203,26 +203,6 @@ def extract(
     return edges
 
 
-def output_columns(select_sql: str, *, dialect: str | None) -> list[str] | None:
-    """Return the names of the columns ``select_sql`` returns, or ``None`` when they are unknown.
-
-    They are unknown when the SELECT does not parse, or returns ``*`` or a column with no name.
-    """
-    try:
-        tree = sqlglot.parse_one(select_sql, read=dialect)
-    except SqlglotError:
-        return None
-    if not isinstance(tree, exp.Query):
-        return None
-    names: list[str] = []
-    for projection in tree.selects:
-        name = projection.alias_or_name
-        if not name or name == "*" or isinstance(projection, exp.Star):
-            return None
-        names.append(name)
-    return names
-
-
 def referenced_tables(
     select_sql: str, *, dialect: str | None, catalog: str | None = None
 ) -> tuple[str, ...]:

@@ -95,6 +95,7 @@ def bindings(sql, name=""):
         "target_contract_update_rule": {"table": 1},
         "lineage_cache_edges": {"confirmed_keys": [(1, "plan")]},
         "clear_rule_results": {"keys": ["key_1"]},
+        "event_consumed_keys": {"keys": ["key_1", "key_2"]},
     }.get(name, {})
     parameters = text(sql).compile().params
     values = {}

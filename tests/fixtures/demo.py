@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -430,6 +431,18 @@ class Demo:
             p=pipeline,
         )
         return int(row[0]), str(row[1])
+
+    def wait_for_email(self, subject: str, seconds: float = 30) -> set[str]:
+        """Return every subject once ``subject`` is among them, polling within ``seconds``.
+
+        Mailpit indexes a delivered message asynchronously, so an immediate read can miss it.
+        """
+        deadline = time.monotonic() + seconds
+        subjects = {found for found, _ in self.emails()}
+        while subject not in subjects and time.monotonic() < deadline:
+            time.sleep(0.5)
+            subjects = {found for found, _ in self.emails()}
+        return subjects
 
     def emails(self) -> list[tuple[str, list[str]]]:
         """Return the subject and recipients of every email sent to this demo's addresses."""

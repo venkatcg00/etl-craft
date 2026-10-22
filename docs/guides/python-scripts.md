@@ -152,6 +152,9 @@ task is recorded `FAILED`.
 
 A downstream script receives `task.event_files` from successful file waits under its exact
 pipeline run. A top-level `INPUT_PARAMS` value `"$$event_files"` becomes a list of those paths.
+Keyed SQL waits also supply `task.event_keys` (a tuple), `task.event_rows` (a tuple of mappings
+of the other selected columns), and the `"$$event_keys"` input token. All come from the exact
+run's saved successful evidence, including after recovery. See [external signals](external-events.md).
 See [Event waits](event-waits.md) for settling, evidence and consumption.
 
 Scripts receive optional `TARGET_OBJECT` from the task's active `TARGET_TABLE_ID` reference.

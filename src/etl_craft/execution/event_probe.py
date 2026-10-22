@@ -67,7 +67,8 @@ def _query(
     threading.Thread(target=_watch_parent, args=(limit,), daemon=True).start()
     engine = None
     try:
-        engine = build_engine(config)
+        # Metadata validation may hold uncommitted edits; its probe reads only the warehouse.
+        engine = build_engine(config) if event.task_id else None
         with acting_as(actor):
             evidence, _ = probe(event, config, engine, datetime.now(UTC), {}, set())
         send.send(("ready", evidence))

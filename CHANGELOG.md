@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Keyed warehouse event waits consume each `EVENT_KEY_COLUMN` once per task in
+  `AUD_EVENT_KEYS`, atomically with success. Downstream SQL uses `$$event_keys`; Python
+  receives `task.event_keys` and `task.event_rows`, including on retry and recovery.
+  `EVENT_MAX_ROWS` bounds SQL probes (default 10000); invalid keys and unconditional
+  aggregates fail validation. Apply `0049_event_keys.sql` before using keyed waits.
+
 - PostgreSQL queue execution for `Deployment.Profile: CONTROLLER_AGENTS`, with API-only
   agents, 30-second claims, measured capacity, leases, fenced reports and shared log chunks.
   `etl-craft agent` runs from its own `--project` copy; `agents` lists capacity and

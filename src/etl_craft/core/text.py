@@ -371,7 +371,7 @@ def substitute_task_tokens(
     pipeline_id_substitution: bool = False,
     task_run_id_substitution: bool = False,
     watermark_literal: str | None = None,
-    event_files_literal: str | None = None,
+    event_literals: Mapping[str, str | None] | None = None,
 ) -> str:
     """Replace execution-identity and run-date tokens, each only when its switch is on.
 
@@ -399,11 +399,7 @@ def substitute_task_tokens(
         if not protected
         for match in TOKEN.finditer(part)
     }
-    if "event_files" in found and event_files_literal == "":
-        raise HandlerError(
-            f"{source} uses $$event_files, but this run has no successful file EVENT_WAIT; "
-            "add a SUCCESS dependency on the file wait before reading its files"
-        )
+    events = _event_literals(source, found, event_literals)
     known = {
         PIPELINE_ID_TOKEN[2:]: pipeline_id_substitution,
         PIPELINE_RUN_ID_TOKEN[2:]: pipeline_run_id_substitution,
@@ -412,6 +408,7 @@ def substitute_task_tokens(
         RUN_DATE_TOKEN[2:]: run_date_substitution,
         "watermark": watermark_literal is not None,
         "event_files": "event_files" in found,
+        "event_keys": "event_keys" in found,
     }
     switch = {
         PIPELINE_ID_TOKEN[2:]: "PIPELINE_ID_SUBSTITUTION",
@@ -421,6 +418,7 @@ def substitute_task_tokens(
         RUN_DATE_TOKEN[2:]: "RUN_DATE_SUBSTITUTION",
         "watermark": "WATERMARK_COLUMN, WATERMARK_TYPE and WATERMARK_START",
         "event_files": "a successful EVENT_WAIT in this run",
+        "event_keys": "a successful keyed EVENT_WAIT in this run",
     }
     unknown = sorted(found - known.keys())
     if unknown:
@@ -448,7 +446,7 @@ def substitute_task_tokens(
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
         RUN_DATE_TOKEN[2:]: f"DATE '{run_date.isoformat()}'",
         "watermark": watermark_literal or "NULL",
-        "event_files": event_files_literal or "NULL",
+        **{name: literal or "NULL" for name, literal in events.items()},
     }
     return "".join(
         part if protected else TOKEN.sub(lambda match: replacements[match.group(1)], part)
@@ -604,3 +602,18 @@ def suggest(unknown: str, candidates: Iterable[str], *, limit: int = 3) -> list[
         if lowered.startswith(unknown.lower()) and candidate not in ranked:
             ranked.append(candidate)
     return ranked[:limit]
+
+
+def _event_literals(
+    source: str, found: set[str], literals: Mapping[str, str | None] | None
+) -> Mapping[str, str | None]:
+    """Require durable event evidence only for runtime token expansion."""
+    values = {"event_files": None, "event_keys": None} | dict(literals or {})
+    for name, literal in values.items():
+        if name in found and literal == "":
+            kind = "file" if name == "event_files" else "keyed SQL"
+            raise HandlerError(
+                f"{source} uses $${name}, but this run has no successful {kind} EVENT_WAIT; "
+                f"add a SUCCESS dependency on the wait before reading its {name}"
+            )
+    return values

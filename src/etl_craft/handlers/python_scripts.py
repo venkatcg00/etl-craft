@@ -58,10 +58,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
             "SCRIPT_FILE is required for HANDLER=PYTHON, such as python_scripts/load.py"
         )
     path = python_script(context.config, name)
-    input_params = {
-        name: list(context.event_files) if value == "$$event_files" else value
-        for name, value in parse_input_params(params.get("INPUT_PARAMS")).items()
-    }
+    input_params = event_input_params(context)
     store = task_store(context, engine_db)
     stored = store.state().offset
     offset = (
@@ -87,6 +84,8 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
         run_date=context.run_date,
         backfill=context.backfill,
         event_files=context.event_files,
+        event_keys=context.event_keys,
+        event_rows=context.event_rows,
     )
     logger.info(
         "running %s from offset %s with input params %s",
@@ -297,3 +296,12 @@ def check_result(result: Any, name: str, stored: StoredOffset | None) -> ScriptR
             "such as {'REGION': 'eu'}"
         )
     return result
+
+
+def event_input_params(context: TaskContext) -> dict[str, Any]:
+    """Expand exact top-level event tokens through the same path for files and keys."""
+    tokens = {"$$event_files": context.event_files, "$$event_keys": context.event_keys}
+    return {
+        name: list(tokens[value]) if isinstance(value, str) and value in tokens else value
+        for name, value in parse_input_params(context.task_params.get("INPUT_PARAMS")).items()
+    }

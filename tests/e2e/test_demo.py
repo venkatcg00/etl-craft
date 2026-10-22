@@ -195,8 +195,9 @@ def check_the_warehouse(demo: Demo) -> None:
 
 
 def check_the_emails(demo: Demo, *, failed: bool, outcome: str = "SUCCESS") -> None:
-    subjects = {subject for subject, _ in demo.emails()}
-    assert f"SUPPORT_DM: {outcome}" in subjects
+    expected = f"SUPPORT_DM: {outcome}"
+    subjects = demo.wait_for_email(expected)
+    assert expected in subjects
     if failed:
         assert {
             "SUPPORT_DM: FAILED",

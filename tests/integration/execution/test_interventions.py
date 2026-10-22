@@ -399,8 +399,10 @@ def test_cancel_stops_a_running_run(config, pipeline):
         "wrong data",
     )
     assert cancelled.pipeline_run_id == run_id
-    assert cancelled.status in {"REQUESTED", "ACKNOWLEDGED"}
-    assert cancelled.run_status == RunStatus.IN_PROGRESS
+    # A fast supervisor may already have applied the cancel when abort returns; the outcome
+    # checks below are the same either way.
+    assert cancelled.status in {"REQUESTED", "ACKNOWLEDGED", "COMPLETED"}
+    assert cancelled.run_status in {RunStatus.IN_PROGRESS, RunStatus.CANCELLED}
     thread.join(timeout=30)
     assert not thread.is_alive()
     assert time.monotonic() - started < 30
