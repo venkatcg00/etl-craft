@@ -31,25 +31,19 @@ from __future__ import annotations
 
 import html
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import UTC, datetime
 
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
 
-from etl_craft.core.enums import EmailFlavour, Handler, RunStatus, SlaStatus
-from etl_craft.core.errors import HandlerError, MetadataError
+from etl_craft.core.enums import EmailFlavour, Handler, RunStatus
+from etl_craft.core.errors import HandlerError
 from etl_craft.core.text import TOKEN
-from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.pipelines import fetch_pipeline_detail, resolve_pipeline_id
+from etl_craft.engine.alerts import PipelineDigest
 from etl_craft.engine.repository.runs import (
     TaskStatus,
-    fetch_latest_pipeline_run,
-    fetch_task_statuses_for_run,
 )
-from etl_craft.engine.repository.tasks import fetch_failure_watch_messages
-from etl_craft.engine.runlog import SlaResult, elapsed_hours, fetch_run_sla
+from etl_craft.engine.task_store import TaskStore
 from etl_craft.handlers.mail import page, paragraph, parse_recipients, safe_subject, send_email
-from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 
 OUTCOMES = tuple(member.value for member in EmailFlavour)
 
@@ -91,55 +85,51 @@ PARAMETERS = frozenset(
 """The task parameters an alert task reads."""
 
 
-def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
+def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Work out the run's outcome and send the alert, or record why none was sent."""
     params = context.task_params
     recipients = parse_recipients(params.get("EMAIL_TO"), "EMAIL_TO")
     wanted = _wanted_outcomes(params.get("EMAIL_ON_STATUS"))
-    with engine_db.connect() as conn:
-        statuses = fetch_task_statuses_for_run(conn, context.pipeline_id, context.pipeline_run_id)
-        sla = sla_so_far(conn, context)
-        watched = fetch_failure_watch_messages(conn, context.task_id)
-        outcome = run_outcome(statuses, exclude_task_id=context.task_id, sla_missed=sla is not None)
-        if wanted is not None and outcome not in wanted:
-            return HandlerResult(
-                variables={
-                    "RUN_STATUS": outcome,
-                    "EMAIL_SENT": "false",
-                    "REASON": f"{outcome} is not in EMAIL_ON_STATUS",
-                }
-            )
-        subject_template = _template(params, "SUBJECT", outcome)
-        body_template = _template(params, "BODY", outcome)
-        pipelines = params.get("EMAIL_PIPELINES")
-        if not subject_template:
-            raise HandlerError(f"EMAIL_SUBJECT (or EMAIL_SUBJECT_{outcome}) is required")
-        if not body_template and not pipelines:
-            raise HandlerError(
-                f"EMAIL_BODY (or EMAIL_BODY_{outcome}) is required when EMAIL_PIPELINES is not set"
-            )
-        values = {
-            "status": outcome,
-            "pipeline_id": str(context.pipeline_id),
-            "pipeline_run_id": str(context.pipeline_run_id),
-            "task_run_id": str(context.task_run_id),
-            "pipeline_code": context.pipeline_code,
-            "task_code": context.task_code,
-            "error_message": "; ".join(m.error_message for m in watched if m.error_message),
-        }
-        subject = safe_subject(substitute(subject_template, values, "EMAIL_SUBJECT"))
-        parts = [
-            f'<p style="color:{OUTCOME_COLORS[EmailFlavour(outcome)]};font-weight:600">'
-            f"{html.escape(context.pipeline_code)}: {html.escape(outcome)}</p>"
-        ]
-        if sla is not None:
-            parts.append(f"<p><strong>{html.escape(sla.describe())}</strong></p>")
-        if body_template:
-            parts.append(paragraph(substitute(body_template, values, "EMAIL_BODY")))
-        if pipelines:
-            parts.append(
-                digest_html([latest_run_of(conn, code) for code in _codes(conn, pipelines)])
-            )
+    state = task_store(context, engine_db).alert(params.get("EMAIL_PIPELINES"))
+    statuses, sla, watched = state.statuses, state.sla, state.watched
+    outcome = run_outcome(statuses, exclude_task_id=context.task_id, sla_missed=sla is not None)
+    if wanted is not None and outcome not in wanted:
+        return HandlerResult(
+            variables={
+                "RUN_STATUS": outcome,
+                "EMAIL_SENT": "false",
+                "REASON": f"{outcome} is not in EMAIL_ON_STATUS",
+            }
+        )
+    subject_template = _template(params, "SUBJECT", outcome)
+    body_template = _template(params, "BODY", outcome)
+    pipelines = params.get("EMAIL_PIPELINES")
+    if not subject_template:
+        raise HandlerError(f"EMAIL_SUBJECT (or EMAIL_SUBJECT_{outcome}) is required")
+    if not body_template and not pipelines:
+        raise HandlerError(
+            f"EMAIL_BODY (or EMAIL_BODY_{outcome}) is required when EMAIL_PIPELINES is not set"
+        )
+    values = {
+        "status": outcome,
+        "pipeline_id": str(context.pipeline_id),
+        "pipeline_run_id": str(context.pipeline_run_id),
+        "task_run_id": str(context.task_run_id),
+        "pipeline_code": context.pipeline_code,
+        "task_code": context.task_code,
+        "error_message": "; ".join(m.error_message for m in watched if m.error_message),
+    }
+    subject = safe_subject(substitute(subject_template, values, "EMAIL_SUBJECT"))
+    parts = [
+        f'<p style="color:{OUTCOME_COLORS[EmailFlavour(outcome)]};font-weight:600">'
+        f"{html.escape(context.pipeline_code)}: {html.escape(outcome)}</p>"
+    ]
+    if sla is not None:
+        parts.append(f"<p><strong>{html.escape(sla.describe())}</strong></p>")
+    if body_template:
+        parts.append(paragraph(substitute(body_template, values, "EMAIL_BODY")))
+    if pipelines:
+        parts.append(digest_html(state.digests))
     warning = send_email(context.config, recipients, subject, page("".join(parts)))
     variables: dict[str, object] = {
         "RUN_STATUS": outcome,
@@ -216,21 +206,6 @@ def substitute(text: str, values: Mapping[str, str], setting: str) -> str:
     return TOKEN.sub(lambda m: values[m.group(1)], text)
 
 
-def sla_so_far(conn: Connection, context: TaskContext) -> SlaResult | None:
-    """Return the SLA the run has already missed when ``Enforce_sla`` is on, else ``None``."""
-    if not context.config.limits.enforce_sla:
-        return None
-    hours = fetch_pipeline_detail(conn, context.pipeline_id).sla_in_hours
-    if hours is None:
-        return None
-    elapsed = elapsed_hours(
-        fetch_run_sla(conn, context.pipeline_run_id).start_date, datetime.now(UTC)
-    )
-    if elapsed <= hours:
-        return None
-    return SlaResult(SlaStatus.BREACHED, hours, elapsed)
-
-
 def _wanted_outcomes(value: str | None) -> set[str] | None:
     if value is None or not value.strip():
         return None
@@ -246,50 +221,6 @@ def _wanted_outcomes(value: str | None) -> set[str] | None:
 
 def _template(params: Mapping[str, str], part: str, outcome: str) -> str | None:
     return params.get(f"EMAIL_{part}_{outcome}") or params.get(f"EMAIL_{part}")
-
-
-def _codes(conn: Connection, value: str) -> list[str]:
-    if value.strip().upper() == "ALL":
-        return [
-            str(code) for code in conn.execute(statement(conn, "active_pipeline_codes")).scalars()
-        ]
-    return [code.strip() for code in value.split("|") if code.strip()]
-
-
-@dataclass(frozen=True)
-class PipelineDigest:
-    """A pipeline's latest run, and its tasks, for the status table."""
-
-    pipeline_code: str
-    status: str
-    pipeline_run_id: int | None
-    start_date: datetime | None
-    end_date: datetime | None
-    tasks: list[TaskStatus]
-
-
-def latest_run_of(conn: Connection, pipeline_code: str) -> PipelineDigest:
-    """Return a pipeline's latest run; an unknown code is ``UNKNOWN``, one never run ``NEVER_RUN``.
-
-    One wrong code in ``EMAIL_PIPELINES`` shows as its own row rather than losing the report on
-    every other pipeline.
-    """
-    try:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-    except MetadataError:
-        return PipelineDigest(pipeline_code, "UNKNOWN", None, None, None, [])
-    latest = fetch_latest_pipeline_run(conn, pipeline_id)
-    if latest is None:
-        return PipelineDigest(pipeline_code, "NEVER_RUN", None, None, None, [])
-    tasks = fetch_task_statuses_for_run(conn, pipeline_id, latest.pipeline_run_id)
-    return PipelineDigest(
-        pipeline_code,
-        latest.status,
-        latest.pipeline_run_id,
-        latest.start_date,
-        latest.end_date,
-        tasks,
-    )
 
 
 def _status(status: str) -> str:

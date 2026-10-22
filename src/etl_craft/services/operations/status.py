@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection, RowMapping
 from etl_craft.core.enums import (
     ADMITTED_OUTCOMES,
     AttemptStatus,
+    DeploymentProfile,
     GatePolicy,
     RunCondition,
     RunStatus,
@@ -32,10 +33,11 @@ from etl_craft.engine.repository.pipelines import resolve_pipeline_id, tagged_pi
 from etl_craft.engine.repository.tasks import resolve_task_id
 from etl_craft.execution.gates import judge, satisfies
 from etl_craft.execution.readiness import BACKFILL_ASSUMED
+from etl_craft.services.operations.agents import AgentsView, list_agents
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
 from etl_craft.services.operations.permissions import visible_codes
-from etl_craft.services.operations.requests import RunFilter, RunSelection, TaskSelection
+from etl_craft.services.operations.requests import NoInput, RunFilter, RunSelection, TaskSelection
 from etl_craft.services.operations.snapshots import (
     pipeline_view,
     run_view,
@@ -213,6 +215,7 @@ class StatusView:
     duration_seconds: float | None
     tasks: tuple[TaskStatusView, ...]
     blocked_by_failures: tuple[str, ...]
+    agents: AgentsView | None = None
 
 
 def _snapshots(
@@ -437,6 +440,7 @@ class StatusListView:
 
     SCHEMA: ClassVar[str] = "etl-craft/status-list/1"
     runs: tuple[StatusView, ...]
+    agents: AgentsView | None = None
 
 
 def pipeline_status(ctx: OperationContext, request: RunFilter) -> StatusView | StatusListView:
@@ -466,7 +470,18 @@ def pipeline_status(ctx: OperationContext, request: RunFilter) -> StatusView | S
                 pipeline_code=request.pipeline_code, run_id=request.run_id, run_key=request.run_key
             ),
         )
-    return StatusListView(tuple(_pipeline_status(ctx, selection) for selection in selections))
+    return StatusListView(
+        tuple(_pipeline_status(ctx, selection) for selection in selections), _agents(ctx)
+    )
+
+
+def _agents(ctx: OperationContext) -> AgentsView | None:
+    """Use the same cluster resource view as doctor and the agents action."""
+    return (
+        list_agents(ctx, NoInput())
+        if ctx.config.deployment == DeploymentProfile.CONTROLLER_AGENTS
+        else None
+    )
 
 
 def _pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView:
@@ -506,6 +521,7 @@ def _pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView
         elapsed_seconds(run.start_date, run.end_date or now),
         tuple(tasks),
         tuple(t.task_code for t in tasks if t.explanation.state == "blocked by failure"),
+        _agents(ctx),
     )
 
 

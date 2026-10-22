@@ -70,6 +70,7 @@ def check_killed_merge(world, kind, point):
     import hashlib
     import multiprocessing
 
+    from fixtures.lock_fencing import expire_leases
     from fixtures.sql_warehouse import run_killed_sql
 
     w = world
@@ -102,6 +103,7 @@ def check_killed_merge(world, kind, point):
         if process.is_alive():
             process.kill()
             process.join(5)
+    expire_leases(w.engine_db)
     w.run("merge", **params)
     rows = merge_rows(w, target)
     expected = [(1, "new", "Y"), (2, "same", "Y"), (3, "add", "Y")]

@@ -15,6 +15,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import HandlerError
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.analysis import read_only_problem
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -107,7 +108,7 @@ def probe(
     """Return triggering evidence, or new durable file observations for the next check."""
     if event.sql:
         with (
-            open_warehouse(config, engine, wait_seconds=0.1) as warehouse,
+            open_warehouse(config, LocalLocker(engine, config), wait_seconds=0.1) as warehouse,
             warehouse.connect() as conn,
         ):
             row = conn.execute(text(event.sql)).first()

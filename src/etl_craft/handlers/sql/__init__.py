@@ -23,14 +23,8 @@ from etl_craft.core.faults import fault_point
 from etl_craft.core.text import qualify as qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
-from etl_craft.engine.repository.hash_versions import (
-    clear_hash_version,
-    save_hash_version,
-    save_view_statement,
-)
-from etl_craft.engine.repository.offsets import fetch_task_offset
-from etl_craft.engine.repository.tasks import conflicting_merge_action
-from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.engine.task_store import TargetPublication, TaskStore
+from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
 from etl_craft.handlers.sql.protection import (
     ProtectionRequest,
@@ -44,8 +38,9 @@ from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialec
 logger = logging.getLogger(__name__)
 
 
-def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
+def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Run the SQL task described by ``context`` and return its counts."""
+    store = task_store(context, engine_db)
     task = read_sql_task(context)
     config = context.config
     if config.warehouse is None:
@@ -67,20 +62,23 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
     logger.debug("the SELECT:\n%s", task.select_sql)
     # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
     # Generated keys still share mutation ordering with replacement and hash upgrades.
-    with locks.target(task.target_object, catalog).hold(engine_db):
+    lock = locks.target(task.target_object, catalog)
+    with store.hold(lock.key, lock.name, 30):
+        state = store.state(task.action)
         if task.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
-            with engine_db.connect() as conn:
-                other = conflicting_merge_action(conn, context.task_id, task.action)
+            other = state.merge_conflict
             if other is not None:
                 raise SqlGuardError(
                     f"{task.target_object}: {task.action} conflicts with an active {other} writer; "
                     "give the target one merge action before running"
                 )
         if task.watermark is not None:
-            with engine_db.connect() as conn:
-                stored = None if context.backfill else fetch_task_offset(conn, context.task_id)
+            stored = None if context.backfill else state.offset
             task = read_sql_task(context, stored)
-        with open_warehouse(config, engine_db) as warehouse, warehouse.begin() as conn:
+        with (
+            open_warehouse(config, store) as warehouse,
+            warehouse.begin() as conn,
+        ):
             session = Session(
                 conn,
                 dialect,
@@ -93,7 +91,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             action = ActionContext(
                 task=task,
                 context=context,
-                engine_db=engine_db,
+                store=store,
                 user=context.writer,
                 now=datetime.now(UTC),
             )
@@ -104,13 +102,14 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
             fault_point("sql.scd2.after_commit")
         if isinstance(outcome, SqlGuardError):
             raise outcome
-        with engine_db.begin() as conn:
-            if session.clear_hash_version:
-                clear_hash_version(conn, session.target)
-            if session.publish_hash_version is not None:
-                save_hash_version(conn, session.target, session.publish_hash_version)
-            if session.publish_view_statement is not None:
-                save_view_statement(conn, session.target, session.publish_view_statement)
+        store.publish(
+            TargetPublication(
+                session.target,
+                session.publish_hash_version,
+                session.clear_hash_version,
+                session.publish_view_statement,
+            )
+        )
     return replace(outcome, offset=session.watermark_to) if task.watermark is not None else outcome
 
 

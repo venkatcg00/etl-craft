@@ -17,6 +17,7 @@ from etl_craft.core.text import is_safe_identifier, is_safe_object_ref, qualify
 from etl_craft.engine.repository.source_columns import SourceColumn, fetch_source_columns
 from etl_craft.engine.repository.tasks import fetch_task_parameters
 from etl_craft.engine.repository.validation import fetch_active_tasks
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.spec import resolve_select
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -216,7 +217,10 @@ def seed_sources(engine: Engine, config: ConnectorConfig) -> list[SourceColumn]:
     tables = sources - managed
     if not tables:
         return seeded
-    with open_warehouse(config, engine) as warehouse, warehouse.connect() as conn:
+    with (
+        open_warehouse(config, LocalLocker(engine, config)) as warehouse,
+        warehouse.connect() as conn,
+    ):
         for table in sorted(tables):
             columns = warehouse_columns(conn, config, table)
             if columns:

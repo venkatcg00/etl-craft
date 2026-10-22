@@ -26,6 +26,11 @@ from etl_craft.services.catalog.gaps import GapSnapshot
 from etl_craft.services.config_files import ConfigExport, ConfigSync
 from etl_craft.services.operations import (
     accounts,
+    agent_claims,
+    agent_logs,
+    agent_models,
+    agent_reports,
+    agents,
     capabilities,
     catalog,
     config_files,
@@ -139,6 +144,23 @@ API = "/api/v1"
 HOST = Placement.CONTROLLER_HOST
 
 _ROWS = (
+    Action(ActionName.AGENTS, agents.list_agents, NoInput, agents.AgentsView, VIEWER, GET,
+           f"{API}/agents"),
+    Action(ActionName.AGENT_CONTROL, agents.command, agent_models.AgentControl,
+           agent_models.AgentReply, OPERATOR, POST, f"{API}/agents/commands", REQUEST),
+    Action(ActionName.AGENT_REGISTER, agents.register, agent_models.AgentRegister,
+           agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/register", REQUEST),
+    Action(ActionName.AGENT_DEREGISTER, agents.deregister, agent_models.AgentRequest,
+           agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/deregister", REQUEST),
+    Action(ActionName.AGENT_CLAIM, agent_claims.claim, agent_models.AgentClaim,
+           agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/claim"),
+    Action(ActionName.AGENT_RENEW, agents.renew, agent_models.AgentRenew,
+           agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/renew"),
+    Action(ActionName.AGENT_REPORT, agent_reports.report, agent_models.AgentTask,
+           agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/report", BY_ACTION),
+    Action(ActionName.AGENT_LOG, agent_logs.upload, agent_models.AgentLog,
+           agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/log"),
+
     # Sign-in: no role; the sign-in actions record their own row once the account is proven.
     Action(ActionName.LOGIN_METHODS, sessions.sign_in_methods, NoInput, sessions.SignInMethods,
            None, GET, f"{API}/login/methods"),
@@ -312,6 +334,8 @@ ACTIONS: dict[ActionName, Action] = {row.name: row for row in _ROWS}
 
 def has_role(role: ApiRole | None, required: ApiRole | None) -> bool:
     """Whether ``role`` meets ``required``; an unproven role meets only no requirement."""
+    if ApiRole.AGENT in {role, required}:
+        return role == required
     return required is None or (
         role is not None and tuple(ApiRole).index(role) >= tuple(ApiRole).index(required)
     )
@@ -347,6 +371,9 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
 def _authorize(
     ctx: OperationContext, action: Action, request: object, required: ApiRole | None
 ) -> None:
+    if ApiRole.AGENT in {ctx.role, required}:
+        _require_role(ctx, action, required)
+        return
     _require_trigger_groups(ctx, action, request)
     if ctx.role == ApiRole.ADMIN or (action.provisioning and ctx.provisioning):
         return
@@ -374,6 +401,11 @@ def _authorize(
             # Aggregate reads filter their selections; bulk controls invoke CONTROL per object.
             if not codes and required == ApiRole.VIEWER and ctx.role is not None:
                 return
+    _require_role(ctx, action, required)
+
+
+def _require_role(ctx: OperationContext, action: Action, required: ApiRole | None) -> None:
+    """Refuse both insufficient account roles and a different credential protocol."""
     if not has_role(ctx.role, required):
         raise PermissionDeniedError(
             f"account {ctx.actor.name!r}: role={ctx.role or 'unproven'}; action '{action.name}': "

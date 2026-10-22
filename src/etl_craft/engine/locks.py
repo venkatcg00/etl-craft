@@ -8,6 +8,7 @@ from hashlib import blake2b
 
 from sqlalchemy.engine import Engine
 
+from etl_craft.core.ownership import ResourceLocker
 from etl_craft.core.text import split_object_ref
 from etl_craft.dialects.engine import for_engine
 
@@ -37,7 +38,21 @@ LINEAGE = EngineLock("lineage", 8_241_009)
 """Serializes task cache computations and table lineage version publication."""
 
 
-def target(object_ref: str, catalog: str) -> EngineLock:
+@dataclass(frozen=True)
+class ResourceLock:
+    """One durable lock for a warehouse target, event probe or single writer."""
+
+    name: str
+    key: int
+
+    def hold(
+        self, locker: ResourceLocker, wait_seconds: float = 30
+    ) -> AbstractContextManager[None]:
+        """Keep resource ownership independent of any API process or DB session."""
+        return locker.hold(self.key, self.name, wait_seconds)
+
+
+def target(object_ref: str, catalog: str) -> ResourceLock:
     """Serialize target mutations and hash-contract publication across processes.
 
     The lock comes from the canonical resolved identity, ``catalog.schema.table`` in lowercase,
@@ -45,13 +60,13 @@ def target(object_ref: str, catalog: str) -> EngineLock:
     """
     database, schema, table = split_object_ref(object_ref)
     key = advisory_key(f"{database or catalog}.{schema}.{table}".lower())
-    return EngineLock(f"target-{key & ((1 << 64) - 1):016x}", key)
+    return ResourceLock(f"target {database or catalog}.{schema}.{table}", key)
 
 
-def event(task_id: int) -> EngineLock:
+def event(task_id: int) -> ResourceLock:
     """Serialize evaluation of one event-wait task across processes."""
     key = advisory_key(f"event:{task_id}")
-    return EngineLock(f"target-{key & ((1 << 64) - 1):016x}", key)
+    return ResourceLock(f"target-{key & ((1 << 64) - 1):016x}", key)
 
 
 def advisory_key(name: str) -> int:

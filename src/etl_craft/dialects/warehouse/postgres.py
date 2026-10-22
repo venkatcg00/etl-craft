@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
@@ -20,6 +21,36 @@ if TYPE_CHECKING:
 
 class PostgresWarehouse(WarehouseDialect):
     """PostgreSQL, native tables."""
+
+    session_fencing = True
+
+    def session_tag_args(self, tag: str) -> Mapping[str, Any]:
+        """Label the session through libpq's application_name, which caps it at 63 bytes."""
+        if len(tag.encode()) > 63:
+            raise SqlGuardError(f"session tag {tag!r} exceeds PostgreSQL's 63-byte limit")
+        return {"application_name": tag}
+
+    def stop_tagged(self, conn: Connection, tag: str) -> None:
+        """Terminate every other backend labelled ``tag``, ending its open statement."""
+        conn.execute(
+            text(
+                "SELECT pg_terminate_backend(pid) AS stopped FROM pg_stat_activity "
+                "WHERE application_name = :tag AND pid <> pg_backend_pid()"
+            ),
+            {"tag": tag},
+        ).all()
+
+    def running_tagged(self, conn: Connection, tag: str) -> int:
+        """Count the backends still labelled ``tag``, idle or not."""
+        return int(
+            conn.execute(
+                text(
+                    "SELECT count(*) AS running FROM pg_stat_activity "
+                    "WHERE application_name = :tag AND pid <> pg_backend_pid()"
+                ),
+                {"tag": tag},
+            ).scalar_one()
+        )
 
     def classify_failure(self, error: BaseException) -> Failure:
         """PostgreSQL supplies DB-API classes and SQLSTATE, including lock timeouts."""

@@ -15,8 +15,9 @@ from etl_craft.config.project import sql_script
 from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import mask_arguments, split_statements, sql_parts
+from etl_craft.engine.task_store import TaskStore
 from etl_craft.handlers.python_scripts import parse_input_params
-from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 logger = logging.getLogger(__name__)
@@ -90,11 +91,11 @@ def statement_text(sql: str) -> str:
     return " ".join(safe.split())[:240]
 
 
-def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
+def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Execute statements on one native session; failure stops the file immediately."""
     script = read_script(context)
     dialect = warehouse_dialect(context.config)
-    with open_warehouse(context.config, engine_db) as warehouse:
+    with open_warehouse(context.config, task_store(context, engine_db)) as warehouse:
         connection = warehouse.raw_connection()
         try:
             driver = connection.driver_connection

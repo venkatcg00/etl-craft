@@ -7,15 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy.engine import Engine
 from sqlglot import exp
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import OffsetType, SqlAction
 from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.text import is_safe_identifier
-from etl_craft.engine import transitions
 from etl_craft.engine.repository.offsets import StoredOffset
+from etl_craft.engine.task_store import TaskStore
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.sql.session import Session
 from etl_craft.scripting import Offset
@@ -96,7 +95,7 @@ def read_watermark(
 
 
 def record_range(
-    session: Session, stage: str, watermark: Watermark, context: TaskContext, engine_db: Engine
+    session: Session, stage: str, watermark: Watermark, context: TaskContext, store: TaskStore
 ) -> None:
     """Record the staged range before target writes; only success advances the offset."""
     columns = {name.lower(): name for name, _ in session.columns(stage)}
@@ -139,15 +138,7 @@ def record_range(
         ).scalar_one()
         if advances:
             end = candidate
-    with engine_db.begin() as conn:
-        transitions.record_watermark_range(
-            conn,
-            context.task_run_id,
-            watermark.start.stored(),
-            end.stored(),
-            attempt_id=context.attempt_id,
-            owner=context.owner,
-        )
+    store.watermark(watermark.start.stored(), end.stored())
     session.watermark_to = (
         StoredOffset(end.datatype, end.stored())
         if value is not None and not context.backfill

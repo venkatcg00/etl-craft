@@ -5,7 +5,8 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from etl_craft.cli.client import _error, server_url
+from etl_craft.config.remote import server_url
+from etl_craft.core.api_errors import response_error
 from etl_craft.core.enums import AccountKind, RunStatus, TokenKind
 from etl_craft.core.errors import PermissionDeniedError, ServerError, UsageError
 from etl_craft.core.graph import CycleError
@@ -86,13 +87,13 @@ def test_a_newer_server_may_add_fields_but_not_drop_or_change_them():
 def test_server_errors_keep_their_class_and_exit_code():
     def answer(error, code):
         body = {"error": error.__name__, "message": "refused", "exit_code": int(code)}
-        return _error(400, json.dumps(body).encode(), "https://etl")
+        return response_error(400, json.dumps(body).encode(), "https://etl")
 
     assert type(answer(PermissionDeniedError, PermissionDeniedError.exit_code)) is (
         PermissionDeniedError
     )
     assert type(answer(CycleError, CycleError.exit_code)) is CycleError
     assert type(answer(ServerError, 999)) is ServerError
-    detail = _error(422, b'{"detail": [{"loc": ["body", "reason"]}]}', "https://etl")
+    detail = response_error(422, b'{"detail": [{"loc": ["body", "reason"]}]}', "https://etl")
     assert isinstance(detail, UsageError) and "HTTP 422" in str(detail)
-    assert isinstance(_error(502, b"<html>bad gateway</html>", "https://etl"), ServerError)
+    assert isinstance(response_error(502, b"<html>bad gateway</html>", "https://etl"), ServerError)

@@ -28,8 +28,10 @@ from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     SETTLED_STATUSES,
     AttemptStatus,
+    DeploymentProfile,
     Handler,
     RunStatus,
+    YesNo,
 )
 from etl_craft.core.errors import (
     ConfigurationError,
@@ -547,6 +549,26 @@ def admit_attempt(
                 )
             attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
             transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on)
+        if active is None or active.status != AttemptStatus.QUEUED:
+            from etl_craft.engine.resource_locks import notify
+            from etl_craft.execution.pools import slot_kind
+
+            conn.execute(
+                statement(conn, "agent_queue"),
+                {
+                    "attempt_id": attempt_id,
+                    "kind": slot_kind(handler),
+                    "force": YesNo.YES if force else YesNo.NO,
+                    "rerun": YesNo.YES if rerun else YesNo.NO,
+                    "reason": (
+                        f"QUEUED in pool default: waiting for free {slot_kind(handler)} capacity; "
+                        "the controller does not execute cluster attempts"
+                        if config.deployment == DeploymentProfile.CONTROLLER_AGENTS
+                        else None
+                    ),
+                },
+            )
+            notify(conn)
         trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
         active = transitions.active_attempt(conn, binding.task_run_id)
         assert active is not None
@@ -576,6 +598,10 @@ def execute_attempt(
     ``FAILED`` with the cause, unless the task process recorded an outcome first, and is then
     raised.
     """
+    if config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
+        from etl_craft.execution.pools.queue import wait_attempt
+
+        return wait_attempt(engine, config, spec, child)
     owner = leases.owner_id()
     with engine.begin() as conn:
         transitions.claim_attempt(

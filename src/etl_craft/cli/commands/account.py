@@ -17,7 +17,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     add.add_argument(
         "--kind", type=AccountKind, choices=tuple(AccountKind), default=AccountKind.USER
     )
-    add.add_argument("--role", type=ApiRole, choices=tuple(ApiRole), required=True)
+    add.add_argument(
+        "--role",
+        type=ApiRole,
+        choices=tuple(role for role in ApiRole if role != ApiRole.AGENT),
+        required=True,
+    )
     add.add_argument("--email")
     add.add_argument("--oidc-subject")
     configure_output(add)
@@ -28,7 +33,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         sub = verbs.add_parser(verb)
         sub.add_argument("--name", required=True)
         if verb == "set-role":
-            sub.add_argument("--role", type=ApiRole, choices=tuple(ApiRole), required=True)
+            sub.add_argument(
+                "--role",
+                type=ApiRole,
+                choices=tuple(role for role in ApiRole if role != ApiRole.AGENT),
+                required=True,
+            )
         configure_output(sub)
 
 

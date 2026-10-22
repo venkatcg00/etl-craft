@@ -7,12 +7,13 @@ from datetime import datetime
 from typing import ClassVar
 
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums import ApiRole, DeploymentProfile
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.lineage import fetch_lineage_versions
 from etl_craft.engine.repository.pipelines import tagged_pipelines
 from etl_craft.services import doctor, lineage, validate
+from etl_craft.services.operations.agents import AgentsView, list_agents
 from etl_craft.services.operations.config_files import resolve_as_of
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.permissions import visible_codes
@@ -32,12 +33,21 @@ class DoctorView:
     SCHEMA: ClassVar[str] = "etl-craft/doctor/1"
     checks: tuple[doctor.Check, ...]
     failed: bool
+    agents: AgentsView | None = None
 
 
 def check_configuration(ctx: OperationContext, request: NoInput) -> DoctorView:
     """Report unreachable services rather than requiring an Engine DB connection first."""
     checks = tuple(doctor.run_checks(ctx.config))
-    return DoctorView(checks, any(c.status == doctor.Status.FAIL for c in checks))
+    failed = any(c.status == doctor.Status.FAIL for c in checks)
+    agents = (
+        list_agents(ctx, NoInput())
+        if not failed and ctx.config.deployment == DeploymentProfile.CONTROLLER_AGENTS
+        else None
+    )
+    if agents is not None and not any(any(a.free.values()) for a in agents.agents):
+        checks += (doctor.warn("Agent availability", "no eligible agent; attempts stay QUEUED"),)
+    return DoctorView(checks, failed, agents)
 
 
 def validate_metadata(ctx: OperationContext, request: ValidateInput) -> validate.Report:

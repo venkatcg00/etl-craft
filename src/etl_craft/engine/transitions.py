@@ -25,7 +25,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
-from etl_craft.engine import controls, run_scopes, runlog
+from etl_craft.engine import controls, dispatch, run_scopes, runlog
 from etl_craft.engine.attempts import (
     ActiveAttempt as ActiveAttempt,
 )
@@ -38,6 +38,8 @@ from etl_craft.engine.attempts import (
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
+from etl_craft.engine.rule_runs import finish_rule_run as finish_rule_run
+from etl_craft.engine.rule_runs import restart_rule_run as restart_rule_run
 
 
 def create_active_run(
@@ -541,6 +543,7 @@ def queue_attempt(
             attempt_id = int(
                 conn.execute(statement(conn, "transition_queue_attempt"), params).scalar_one()
             )
+            dispatch.inherit_dispatch(conn, attempt_id, task_run_id)
             _sync_summary(conn, attempt_id)
             return attempt_id
     except IntegrityError as error:
@@ -650,7 +653,13 @@ def finish_attempt(
     retryable: bool = True,
 ) -> None:
     """Record the owned outcome, summary, offset and admitted consumption atomically."""
-    if status not in {AttemptStatus.SUCCESS, AttemptStatus.FAILED, AttemptStatus.HANDED_OFF}:
+    if status not in {
+        AttemptStatus.SUCCESS,
+        AttemptStatus.FAILED,
+        AttemptStatus.HANDED_OFF,
+        AttemptStatus.TIMED_OUT,
+        AttemptStatus.CANCELLED,
+    }:
         raise _stale(conn, "attempt", attempt_id, "SUCCESS, FAILED or HANDED_OFF outcome", owner)
     with conn.begin_nested():
         _end_attempt(
@@ -760,24 +769,6 @@ def renew_lease(
         "CLAIMED or RUNNING; live lease",
         owner,
         {**_actor_params(actor), "lease": lease_expires_at},
-    )
-
-
-def restart_rule_run(conn: Connection, business_rule_run_id: int, now: datetime) -> None:
-    """Restart a business-rule summary that has not succeeded."""
-    conn.execute(
-        statement(conn, "transition_restart_business_rule_run"),
-        {"business_rule_run_id": business_rule_run_id, "now": now},
-    )
-
-
-def finish_rule_run(
-    conn: Connection, business_rule_run_id: int, status: str, now: datetime
-) -> None:
-    """Record a business-rule summary's outcome."""
-    conn.execute(
-        statement(conn, "transition_finish_business_rule_run"),
-        {"business_rule_run_id": business_rule_run_id, "status": status, "now": now},
     )
 
 

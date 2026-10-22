@@ -27,7 +27,11 @@ def require_variables(vendor, names):
 
 
 def write_config(directory, name, fields, table_format):
-    """Write and load a craft-connector.yml in ``directory`` for warehouse ``name``."""
+    """Write and load a craft-connector.yml in ``directory`` for warehouse ``name``.
+
+    Profile keys are written ``Capitalized_snake``, the only spelling the loader accepts.
+    """
+    fields = {key.capitalize(): value for key, value in fields.items()}
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {},

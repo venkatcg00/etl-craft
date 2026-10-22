@@ -212,7 +212,7 @@ class Fields:
             raw, f"{self.where}.{shown(key)}", profile=self.profile, field_name=key
         )
         text = str(value).strip() if value is not None else None
-        if text is not None and key == "jdbc_url":
+        if text is not None and key in {"jdbc_url", "listen_jdbc_url"}:
             return connection_url(text, self.path, f"{self.where}.{shown(key)}")
         return text
 

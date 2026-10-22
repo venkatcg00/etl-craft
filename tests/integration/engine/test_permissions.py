@@ -132,13 +132,14 @@ def test_cli_and_http_share_the_service_run_policy(project, role, monkeypatch, c
         json={"pipeline_code": "P", "init_only": True},
         headers={"Authorization": "Bearer " + token},
     )
-    if role == ApiRole.VIEWER:
+    # A viewer may not run a pipeline, and an agent token cannot invoke a person's action.
+    if role in {ApiRole.VIEWER, ApiRole.AGENT}:
         assert code == 26, output
         assert response.status_code == 403, response.text
         assert response.json()["exit_code"] == code
         refused = [a for a in actions(p.engine) if a.outcome == "REFUSED"]
         assert len(refused) == 2
-        assert all(a.actor == "policy-viewer" and a.command == "run" for a in refused)
+        assert all(a.actor == f"policy-{role}" and a.command == "run" for a in refused)
         with p.engine.connect() as conn:
             assert (
                 conn.execute(

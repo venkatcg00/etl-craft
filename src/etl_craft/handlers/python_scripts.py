@@ -35,8 +35,9 @@ from etl_craft.config.model import PYTHON_SCRIPTS_DIRNAME
 from etl_craft.config.project import python_script
 from etl_craft.core.errors import HandlerError, PermanentError, TransientError
 from etl_craft.core.log import capture_all_loggers
-from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
-from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.engine.repository.offsets import StoredOffset
+from etl_craft.engine.task_store import TaskStore
+from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.scripting import Offset, ScriptResult, ScriptTask
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ SCRIPT_LOGGER = "etl_craft_script"
 """The logger a script is given as ``task.logger``, named after its task."""
 
 
-def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
+def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Run the task's Python script and return the counts it reports."""
     params = context.task_params
     name = (params.get("SCRIPT_FILE") or "").strip()
@@ -61,8 +62,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         name: list(context.event_files) if value == "$$event_files" else value
         for name, value in parse_input_params(params.get("INPUT_PARAMS")).items()
     }
-    with engine_db.connect() as conn:
-        stored = fetch_task_offset(conn, context.task_id)
+    store = task_store(context, engine_db)
+    stored = store.state().offset
     offset = (
         Offset.from_stored(stored.offset_type, stored.offset_value)
         if stored is not None and stored.offset_value is not None and not context.backfill
@@ -81,7 +82,7 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         task_params=params,
         force=context.force,
         config=context.config,
-        engine_db=engine_db,
+        _locks=store,
         logger=logging.getLogger(f"{SCRIPT_LOGGER}.{context.task_code}"),
         run_date=context.run_date,
         backfill=context.backfill,

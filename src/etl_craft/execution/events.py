@@ -29,6 +29,7 @@ from etl_craft.execution.event_probe import probe_sql
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
 from etl_craft.handlers.event_wait import Event, probe, read_event
+from etl_craft.handlers.resources import LocalLocker
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ def check_event(
 ) -> EventCheck:
     """Check once; waiting never admits an attempt or holds an agent slot."""
     try:
-        with locks.event(task_id).hold(engine, wait_seconds=0.1):
+        with locks.event(task_id).hold(LocalLocker(engine, config), wait_seconds=0.1):
             with engine.begin() as conn:
                 fences = controls.blocked(conn, pipeline_run_id)
                 if None in fences or task_id in fences:

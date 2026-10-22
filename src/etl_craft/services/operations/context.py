@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 from sqlalchemy.engine import Engine
@@ -31,5 +32,7 @@ class OperationContext:
     provisioning: bool = False
     sso_group_ids: tuple[int, ...] = ()
     credential_token_id: int | None = None
+    credential_digest: str | None = None
     client_address: str | None = None
     client_scheme: HttpScheme | None = None
+    shutdown: threading.Event | None = None

@@ -36,7 +36,6 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import bindparam, text
@@ -53,16 +52,9 @@ from etl_craft.core.text import (
     split_object_ref,
     split_statements,
 )
-from etl_craft.engine.repository.business_rules import (
-    BusinessRule,
-    begin_rule_run,
-    clear_rule_keys,
-    fetch_active_rule_keys,
-    fetch_business_rules_for_task,
-    finish_rule_run,
-    flag_rule_keys,
-)
-from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.engine.repository.business_rules import BusinessRule
+from etl_craft.engine.task_store import RuleEnding, TaskStore
+from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.handlers.sql.analysis import read_only_problem
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -93,13 +85,13 @@ class _RuleFailedError(Exception):
     """A rule failed; the message names it, the step and the cause."""
 
 
-def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
+def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Run every active business rule of the task, wave by wave; return flagged and cleared."""
     config = context.config
     if config.warehouse is None:
         raise ConfigurationError("a BUSINESS_RULES task needs a Warehouse section")
-    with engine_db.connect() as conn:
-        rules = fetch_business_rules_for_task(conn, context.task_id)
+    store = task_store(context, engine_db)
+    rules = list(store.state().rules)
     if not rules:
         raise HandlerError(
             f"task {context.task_code} has HANDLER=BUSINESS_RULES but no active row in "
@@ -117,8 +109,8 @@ def run(context: TaskContext, engine_db: Engine) -> HandlerResult:
         "every row (forced)" if context.force else f"pipeline_run_id={context.pipeline_run_id}",
     )
     flagged = cleared = 0
-    with open_warehouse(config, engine_db) as warehouse:
-        runner = _RuleRunner(context, engine_db, warehouse, scope, string_type)
+    with open_warehouse(config, store) as warehouse:
+        runner = _RuleRunner(context, store, warehouse, scope, string_type)
         for number, wave in itertools.groupby(checked, key=lambda r: r.rule.sequence_number):
             outcomes = runner.wave(number, list(wave))
             flagged += sum(outcome.flagged for outcome in outcomes)
@@ -165,13 +157,13 @@ class _RuleRunner:
     def __init__(
         self,
         context: TaskContext,
-        engine_db: Engine,
+        store: TaskStore,
         warehouse: Engine,
         scope: str,
         string_type: str,
     ) -> None:
         self.context = context
-        self.engine_db = engine_db
+        self.store = store
         self.warehouse = warehouse
         self.scope = scope
         self.string_type = string_type
@@ -201,9 +193,7 @@ class _RuleRunner:
 
     def _run_rule(self, checked: _Rule) -> RuleOutcome:
         rule = checked.rule
-        now = datetime.now(UTC)
-        with self.engine_db.begin() as conn:
-            binding = begin_rule_run(conn, rule.business_rule_id, self.context.task_run_id, now)
+        binding = self.store.begin_rule(rule.business_rule_id)
         if binding.already_succeeded and not (self.context.force or self.context.rerun):
             logger.info(
                 "rule %s already succeeded under this task run; not run again",
@@ -217,8 +207,7 @@ class _RuleRunner:
             scope = self._scope(checked)
             step = "find the keys that break the rule"
             failing = self._keys(checked, scope, "EXISTS")
-            with self.engine_db.connect() as conn:
-                active = fetch_active_rule_keys(conn, rule.business_rule_id)
+            active = self.store.rule_keys(rule.business_rule_id)
             new = sorted(failing - active)
             step = "find the flagged keys that now pass"
             unflagged = sorted(active - failing)
@@ -230,16 +219,23 @@ class _RuleRunner:
                 step = "find the flagged keys whose rows are gone"
                 passing += self._gone(checked, scope, sorted(set(unflagged) - set(passing)))
             step = "record the flags"
-            with self.engine_db.begin() as conn:
-                flag_rule_keys(conn, rule, binding.business_rule_run_id, new, now)
-                clear_rule_keys(conn, rule.business_rule_id, passing, now)
-                finish_rule_run(
-                    conn, binding.business_rule_run_id, RunStatus.SUCCESS, datetime.now(UTC)
+            self.store.end_rule(
+                RuleEnding(
+                    rule.business_rule_id,
+                    binding.business_rule_run_id,
+                    RunStatus.SUCCESS,
+                    tuple(new),
+                    tuple(passing),
                 )
+            )
         except Exception as error:
-            with contextlib.suppress(Exception), self.engine_db.begin() as conn:
-                finish_rule_run(
-                    conn, binding.business_rule_run_id, RunStatus.FAILED, datetime.now(UTC)
+            with contextlib.suppress(Exception):
+                self.store.end_rule(
+                    RuleEnding(
+                        rule.business_rule_id,
+                        binding.business_rule_run_id,
+                        RunStatus.FAILED,
+                    )
                 )
             cause = getattr(error, "orig", None) or error
             detail = str(cause).strip().splitlines()[0] if str(cause).strip() else repr(cause)

@@ -74,6 +74,7 @@ from etl_craft.engine.repository.validation import (
     fetch_pipeline_edges,
     fetch_task_dependency_edges,
 )
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.actions import writer_action
 from etl_craft.handlers.sql.spec import read_action, read_setup_for
 from etl_craft.handlers.sql.tables import AUDIT_COLUMNS
@@ -509,7 +510,10 @@ def _add_warehouse_columns(catalog: Catalog, engine: Engine, config: ConnectorCo
     """Give each table the warehouse has its columns' types and comments, in warehouse order."""
     dialect = warehouse_dialect(config)
     default_catalog = active_catalog(config)
-    with open_warehouse(config, engine) as warehouse, warehouse.connect() as conn:
+    with (
+        open_warehouse(config, LocalLocker(engine, config)) as warehouse,
+        warehouse.connect() as conn,
+    ):
         for table in catalog.tables.values():
             if table.external:
                 continue

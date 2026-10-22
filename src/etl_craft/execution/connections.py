@@ -27,6 +27,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import EmailTransport, Handler, TlsMode
 from etl_craft.core.errors import ConnectionTestError, EtlCraftError
 from etl_craft.handlers.mail import open_smtp, sendmail_problem, tls_context
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.warehouse.connection import (
     READ_ONLY_WAIT_SECONDS,
     is_single_writer,
@@ -51,7 +52,11 @@ def probe_warehouse(
     With ``schema``, the profile's schema must exist too.
     """
     try:
-        with open_warehouse(config, engine_db, wait_seconds=READ_ONLY_WAIT_SECONDS) as warehouse:
+        with open_warehouse(
+            config,
+            None if engine_db is None else LocalLocker(engine_db, config),
+            wait_seconds=READ_ONLY_WAIT_SECONDS,
+        ) as warehouse:
             with warehouse.connect() as conn:
                 conn.execute(text("SELECT 1"))
             return warehouse_schema_problem(config, warehouse) if schema else None

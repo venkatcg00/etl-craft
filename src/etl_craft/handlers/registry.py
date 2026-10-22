@@ -21,6 +21,8 @@ from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.counts import Counts
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine.repository.offsets import StoredOffset
+from etl_craft.engine.task_store import LocalTaskStore, TaskIdentity, TaskStore
+from etl_craft.handlers.resources import LocalLocker
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,7 @@ def format_task_log(result: HandlerResult) -> str | None:
     return "\n".join(lines) or None
 
 
-Handler = Callable[[TaskContext, Engine], HandlerResult]
+Handler = Callable[[TaskContext, Engine | TaskStore], HandlerResult]
 
 HANDLERS: dict[str, str] = {
     enums.Handler.SQL_SCRIPT: "etl_craft.handlers.sql_script:run",
@@ -115,3 +117,22 @@ def resolve_handler(name: str) -> Handler:
     module_name, _, function_name = target.partition(":")
     handler: Handler = getattr(importlib.import_module(module_name), function_name)
     return handler
+
+
+def task_store(context: TaskContext, backend: Engine | TaskStore) -> TaskStore:
+    """Bind local metadata access or retain the agent's HTTP-only task service."""
+    if not isinstance(backend, Engine):
+        return backend
+    return LocalTaskStore(
+        backend,
+        context.config,
+        TaskIdentity(
+            context.pipeline_id,
+            context.task_id,
+            context.pipeline_run_id,
+            context.task_run_id,
+            context.attempt_id,
+            context.owner,
+        ),
+        LocalLocker(backend, context.config),
+    )

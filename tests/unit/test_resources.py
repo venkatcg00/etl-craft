@@ -165,13 +165,15 @@ def test_a_profile_sizes_the_role_within_written_ceilings(tmp_path):
     assert sized.limits.max_parallel_tasks == 4
 
 
-def test_server_workers_refuses_to_run_here(tmp_path):
+def test_controller_agents_reserves_no_local_execution_slots(tmp_path):
     config = load_config(write_config(tmp_path))
     from dataclasses import replace
 
     agents = replace(config, deployment=DeploymentProfile.CONTROLLER_AGENTS)
-    with pytest.raises(ConfigurationError, match="no agent queue provider"):
-        start_role(agents, server=True, host=machine(8, 16 * GIB))
+    sized = start_role(agents, server=True, host=machine(8, 16 * GIB))
+    assert sized.limits.max_parallel_tasks == 0
+    assert sized.limits.local_python_slots == 0
+    assert sized.limits.local_warehouse_slots == 0
 
 
 def test_an_allocation_too_small_for_a_slot_refuses_run_and_queues_on_the_server(tmp_path, caplog):

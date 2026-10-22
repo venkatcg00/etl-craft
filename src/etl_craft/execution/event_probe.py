@@ -11,6 +11,7 @@ from multiprocessing.connection import Connection
 from typing import Any, cast
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import Actor, acting_as, current_actor
 from etl_craft.core.errors import HandlerError, LockTimeoutError
 from etl_craft.dialects.engine import build_engine
 from etl_craft.handlers.event_wait import Event, probe
@@ -23,7 +24,9 @@ def probe_sql(
     context = multiprocessing.get_context("spawn")
     receive, send = context.Pipe(duplex=False)
     limit = min(30, remaining_seconds)
-    process = context.Process(target=_query, args=(send, config, event, limit), daemon=True)
+    # A spawned interpreter starts with no actor; the probe acts as whoever asked for it.
+    args = (send, config, event, limit, current_actor())
+    process = context.Process(target=_query, args=args, daemon=True)
     deadline = time.monotonic() + limit
     try:
         process.start()
@@ -58,12 +61,15 @@ def probe_sql(
             process.close()
 
 
-def _query(send: Connection, config: ConnectorConfig, event: Event, limit: float) -> None:
+def _query(
+    send: Connection, config: ConnectorConfig, event: Event, limit: float, actor: Actor
+) -> None:
     threading.Thread(target=_watch_parent, args=(limit,), daemon=True).start()
     engine = None
     try:
         engine = build_engine(config)
-        evidence, _ = probe(event, config, engine, datetime.now(UTC), {}, set())
+        with acting_as(actor):
+            evidence, _ = probe(event, config, engine, datetime.now(UTC), {}, set())
         send.send(("ready", evidence))
     except LockTimeoutError as error:
         send.send(("waiting", str(error)))

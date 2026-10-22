@@ -40,6 +40,7 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.execution import control_flow
 from etl_craft.execution.manual import select_tasks
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import OperationResult
 from etl_craft.services.operations.recovery import (
@@ -295,7 +296,9 @@ def control_scope(ctx: OperationContext, request: ControlRequest) -> Iterator[in
     try:
         with ExitStack() as stack:
             for task_id in sorted(event_ids):
-                stack.enter_context(locks.event(task_id).hold(ctx.engine, wait_seconds=0.1))
+                stack.enter_context(
+                    locks.event(task_id).hold(LocalLocker(ctx.engine, ctx.config), wait_seconds=0.1)
+                )
             yield selected.pipeline_run_id
     except LockTimeoutError as error:
         raise RunRefusedError(

@@ -71,6 +71,10 @@ def build_engine(
 
     ``supervised`` is for task processes: see ``EngineDialect.build_engine``.
     """
+    if config.engine.jdbc_url == "api-only:":
+        raise ConfigurationError(
+            "agent project: direct Engine DB access is forbidden; use the task's API service"
+        )
     profile = profile or config.engine
     engine = for_jdbc_url(profile.jdbc_url).build_engine(
         config, profile, supervised=supervised, **engine_kwargs

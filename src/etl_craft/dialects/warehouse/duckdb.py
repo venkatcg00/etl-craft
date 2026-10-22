@@ -21,6 +21,17 @@ class DuckDBWarehouse(WarehouseDialect):
     Only one process may write a DuckDB file at a time, so warehouse access is queued.
     """
 
+    session_fencing = True
+    """Embedded: a statement runs inside its own process, so that process ending stops it."""
+
+    def stop_tagged(self, conn: Connection, tag: str) -> None:
+        """Nothing runs outside a process; an expired holder's process has stopped writing."""
+        return None
+
+    def running_tagged(self, conn: Connection, tag: str) -> int:
+        """No other process's statement can be running in an embedded database."""
+        return 0
+
     def script_autocommit(self, engine: Engine, driver: DBAPIConnection) -> None:
         """Keep the native driver's autocommit outside explicit file transactions."""
         return None

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import replace
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -35,6 +36,7 @@ def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> Fast
         openapi_url="/api/v1/openapi.json",
     )
 
+    ctx = replace(ctx, shutdown=None if gateway is None else gateway.stop)
     app.state.gateway = gateway
     app.add_middleware(GatewayMiddleware, ctx=ctx, gateway=gateway)
 

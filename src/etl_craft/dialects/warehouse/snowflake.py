@@ -31,6 +31,27 @@ if TYPE_CHECKING:
 class SnowflakeWarehouse(WarehouseDialect):
     """Snowflake, ordinary tables."""
 
+    session_fencing = True
+
+    def session_tag_args(self, tag: str) -> Mapping[str, Any]:
+        """Label every query of the session through its QUERY_TAG session parameter."""
+        return {"session_parameters": {"QUERY_TAG": tag}}
+
+    _UNFINISHED = (
+        "SELECT query_id AS query_id FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY("
+        "RESULT_LIMIT => 10000)) WHERE query_tag = :tag AND execution_status NOT IN "
+        "('SUCCESS', 'FAILED_WITH_ERROR', 'FAILED_WITH_INCIDENT', 'ABORTED')"
+    )
+
+    def stop_tagged(self, conn: Connection, tag: str) -> None:
+        """Cancel each unfinished query labelled ``tag``."""
+        for row in conn.execute(text(self._UNFINISHED), {"tag": tag}).all():
+            conn.execute(text("SELECT SYSTEM$CANCEL_QUERY(:id) AS cancelled"), {"id": row.query_id})
+
+    def running_tagged(self, conn: Connection, tag: str) -> int:
+        """Count unfinished queries; a status this code does not know counts as running."""
+        return len(conn.execute(text(self._UNFINISHED), {"tag": tag}).all())
+
     def classify_failure(self, error: BaseException) -> Failure:
         """SQLSTATE and compile errors precede Snowflake's general network classes."""
         error = driver_error(error)

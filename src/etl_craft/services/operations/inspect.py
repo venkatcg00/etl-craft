@@ -305,6 +305,12 @@ def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
     """Stream a stored attempt's canonical log in bounded chunks from a byte offset."""
     attempt_id = request.attempt_id
     attempt = get_attempt(ctx, request)
+    with ctx.engine.connect() as conn:
+        shared = conn.execute(
+            statement(conn, "agent_chunk_last"), {"attempt_id": attempt_id}
+        ).first()
+    if shared is not None:
+        return shared_log(ctx, request)
     if attempt.log_path is None:
         raise ResourceNotFoundError(f"attempt_id={attempt_id}: no log has been recorded")
     with ctx.engine.connect() as conn:
@@ -335,3 +341,24 @@ def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
                 yield data
 
     return chunks()
+
+
+def shared_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
+    """Read bounded shared chunks without keeping a connection open while sending bytes."""
+    sequence = -1
+    while True:
+        with ctx.engine.connect() as conn:
+            rows = conn.execute(
+                statement(conn, "agent_chunks_read"),
+                {
+                    "attempt_id": request.attempt_id,
+                    "offset": request.offset,
+                    "sequence": sequence,
+                },
+            ).all()
+        if not rows:
+            return
+        for row in rows:
+            data = row.content.encode()
+            yield data[max(0, request.offset - row.byte_offset) :]
+            sequence = row.sequence_number

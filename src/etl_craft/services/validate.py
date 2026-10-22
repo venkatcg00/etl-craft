@@ -56,6 +56,7 @@ from etl_craft.execution.retries import task_retry_policy
 from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline, sql_script
 from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.actions import writer_action
 from etl_craft.handlers.sql.analysis import read_query
@@ -146,7 +147,10 @@ def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None 
             grouped.setdefault(table_name(column.table_name.split("."), catalog), []).append(column)
     if config.warehouse is not None and grouped:
         try:
-            with open_warehouse(config, engine) as warehouse, warehouse.connect() as conn:
+            with (
+                open_warehouse(config, LocalLocker(engine, config)) as warehouse,
+                warehouse.connect() as conn,
+            ):
                 for table, columns in grouped.items():
                     for message in drift(columns, warehouse_columns(conn, config, table), dialect):
                         report.fail(f"source {table}", f"schema drift: {message}")

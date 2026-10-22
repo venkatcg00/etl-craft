@@ -37,6 +37,7 @@ from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
 from etl_craft.engine import controls, transitions
 from etl_craft.engine.connection import engine_db
+from etl_craft.engine.resource_locks import attempt_scope
 from etl_craft.engine.transitions import finish_task_run
 from etl_craft.execution.classify import classify_failure
 from etl_craft.execution.context import build_task_context
@@ -148,7 +149,11 @@ def run_handler(
     try:
         if context.handler == Handler.RUN_PIPELINE and trigger is not None:
             return trigger(engine, context)
-        result = resolve_handler(context.handler)(context, engine)
+        if identity is None:
+            result = resolve_handler(context.handler)(context, engine)
+        else:
+            with attempt_scope(*identity):
+                result = resolve_handler(context.handler)(context, engine)
     except EtlCraftError as error:
         logger.error("task failed: %s", error)
         if context.handler != Handler.SQL_SCRIPT:

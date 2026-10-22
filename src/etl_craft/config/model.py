@@ -77,6 +77,7 @@ class ConnectionProfile:
     auth_mode: str
     extra: dict[str, Any] = field(default_factory=dict)
     schema: str = ""
+    listen_jdbc_url: str | None = None
 
     @property
     def secret_var(self) -> str:

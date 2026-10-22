@@ -56,6 +56,10 @@ class AccountAdd(Request):
 
     def __post_init__(self) -> None:
         """Check the name and how the account proves itself."""
+        if self.role == ApiRole.AGENT:
+            raise UsageError(
+                "agent is a token role only; use `etl-craft token create --role agent`"
+            )
         Actor(self.name, ActorKind.USER)
         if self.kind == AccountKind.SERVICE and (self.password is not None or self.oidc_subject):
             raise UsageError(
@@ -83,6 +87,13 @@ class AccountRole(AccountName):
     """An account's new role, inherited by every credential it holds."""
 
     role: ApiRole
+
+    def __post_init__(self) -> None:
+        """Keep the agent capability on tokens, never on an account."""
+        if self.role == ApiRole.AGENT:
+            raise UsageError(
+                "agent is a token role only; use `etl-craft token create --role agent`"
+            )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -161,6 +172,8 @@ def add_account(ctx: OperationContext, request: AccountAdd) -> Accounts:
 
 def set_role(ctx: OperationContext, request: AccountRole) -> Accounts:
     """Change the role inherited by every credential of this account."""
+    if request.role == ApiRole.AGENT:
+        raise UsageError("agent is a token role only; use `etl-craft token create --role agent`")
     return _update(ctx, request.name, "account_role", {"role": request.role})
 
 

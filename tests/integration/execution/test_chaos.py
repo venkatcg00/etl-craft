@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.errors import ExitCode
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.warehouse.connection import open_warehouse
 
 pytestmark = pytest.mark.chaos
@@ -58,7 +59,10 @@ def assert_complete(project):
     assert run.status == task.status == "SUCCESS"
     assert attempts[-1] == "SUCCESS"
     assert not set(attempts) & {"QUEUED", "CLAIMED", "RUNNING"}
-    with open_warehouse(project.config, project.engine) as warehouse, warehouse.connect() as conn:
+    with (
+        open_warehouse(project.config, LocalLocker(project.engine, project.config)) as warehouse,
+        warehouse.connect() as conn,
+    ):
         assert conn.execute(text("SELECT * FROM proof")).all() == [
             (project.pipeline_id, run.pipeline_run_id, task.task_run_id)
         ]
@@ -193,7 +197,9 @@ def test_three_pipeline_callers_waiting_on_a_repair_admit_one_supervisor(cli_pro
                     text("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG ORDER BY PIPELINE_RUN_ID")
                 ).scalars().all() == ["SUCCESS", "SUCCESS"]
             with (
-                open_warehouse(project.config, project.engine) as warehouse,
+                open_warehouse(
+                    project.config, LocalLocker(project.engine, project.config)
+                ) as warehouse,
                 warehouse.connect() as conn,
             ):
                 assert conn.execute(text("SELECT COUNT(*) FROM proof")).scalar_one() == 1

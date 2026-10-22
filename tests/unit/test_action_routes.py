@@ -21,6 +21,7 @@ from etl_craft.services.operations import OperationContext, actions
 from etl_craft.services.operations.actions import ACTIONS, invoke
 from etl_craft.services.operations.permissions import PipelineAccess
 from etl_craft.services.operations.serialization import encode
+from fixtures.agents import resources
 
 pytestmark = pytest.mark.unit
 
@@ -50,7 +51,10 @@ def sample(hint):
 GIVEN = {
     "MarkRequest": {"status": RunStatus.SUCCESS},
     "ControlRequest": {"run_id": 1, "request_key": "k"},
-    "AccountAdd": {"password": "secret"},
+    "AccountAdd": {"password": "secret", "role": ApiRole.ADMIN},
+    "AccountRole": {"role": ApiRole.ADMIN},
+    "AgentRegister": {"resources": resources()},
+    "AgentRenew": {"resources": resources()},
 }
 
 
@@ -59,7 +63,9 @@ def build(cls):
     required = {
         f.name: sample(hints[f.name])
         for f in fields(cls)
-        if f.default is MISSING and f.default_factory is MISSING
+        if f.default is MISSING
+        and f.default_factory is MISSING
+        and f.name not in GIVEN.get(cls.__name__, {})
     }
     return cls(**{**required, **GIVEN.get(cls.__name__, {})})
 
@@ -135,7 +141,7 @@ def test_the_client_and_the_route_hand_the_operation_the_same_request(server, mo
                 headers=dict(request.header_items()),
             )
 
-    monkeypatch.setattr("etl_craft.cli.client.build_opener", lambda *handlers: Opener())
+    monkeypatch.setattr("etl_craft.core.http_client.build_opener", lambda *handlers: Opener())
     request = build(ACTIONS[name].request)
     with pytest.raises(CapturedError):
         result = ApiClient("http://127.0.0.1:8000").invoke(name, request)
@@ -223,7 +229,7 @@ def no_record(*args):
 )
 def test_an_unaudited_action_records_no_request(operations, monkeypatch, name):
     monkeypatch.setattr(actions, "recorded", no_record)
-    invoke(context(), name, build(ACTIONS[name].request))
+    invoke(context(ACTIONS[name].role), name, build(ACTIONS[name].request))
     assert operations == [name]
 
 

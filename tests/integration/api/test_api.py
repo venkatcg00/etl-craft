@@ -28,7 +28,7 @@ from etl_craft.services.operations.requests import (
 )
 from fixtures.metadata import add_pipeline, add_task, start_run
 
-ROLES = tuple(ApiRole)
+ROLES = tuple(role for role in ApiRole if role != ApiRole.AGENT)
 
 
 def create_token(ctx, name, role, expires=None):

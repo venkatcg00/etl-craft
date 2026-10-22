@@ -24,9 +24,9 @@ from etl_craft.config.resolve import resolve_named_secret
 from etl_craft.config.targets import WarehouseUrl, active_catalog, parse_warehouse_url
 from etl_craft.core.enums import TableFormat, enum_value
 from etl_craft.core.errors import ConfigurationError, LockTimeoutError, SqlGuardError
+from etl_craft.core.ownership import ResourceLocker
 from etl_craft.core.text import public_url_query
 from etl_craft.dialects import credentials
-from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.warehouse import WarehouseDialect, resolve
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,9 @@ def task_warehouse_dialect(config: ConnectorConfig, params: Mapping[str, str]) -
     return dialect
 
 
-def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Engine:
+def build_warehouse_engine(
+    config: ConnectorConfig, *, session_tag: str | None = None, **engine_kwargs: Any
+) -> Engine:
     """Build a SQLAlchemy engine for the active warehouse profile.
 
     The profile is checked against its dialect first, so a missing auth field fails before
@@ -85,7 +87,8 @@ def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Eng
     dialect = warehouse_dialect(config)
     url = parse_warehouse_url(profile.jdbc_url)
     secret = profile_secret(config, profile)
-    connect = warehouse_creator(dialect, profile, secret, url)
+    tag_args = dialect.session_tag_args(session_tag) if session_tag is not None else {}
+    connect = warehouse_creator(dialect, profile, secret, url, tag_args)
 
     def creator() -> Any:
         connection_profile = profile
@@ -117,7 +120,11 @@ def build_warehouse_engine(config: ConnectorConfig, **engine_kwargs: Any) -> Eng
 
 
 def warehouse_creator(
-    dialect: WarehouseDialect, profile: ConnectionProfile, secret: str, url: WarehouseUrl
+    dialect: WarehouseDialect,
+    profile: ConnectionProfile,
+    secret: str,
+    url: WarehouseUrl,
+    tag_args: Mapping[str, Any] | None = None,
 ) -> Callable[[], Any]:
     """Return a function that opens one authenticated DBAPI connection to the warehouse.
 
@@ -139,7 +146,7 @@ def warehouse_creator(
                 database=url.database,
                 query={**url.query, **presented.query},
             )
-        return dbapi_connect(connection_url, dict(presented.connect_args))
+        return dbapi_connect(connection_url, {**presented.connect_args, **(tag_args or {})})
 
     return connect
 
@@ -190,36 +197,33 @@ def is_in_memory(config: ConnectorConfig) -> bool:
 
 @contextmanager
 def single_writer_lock(
-    config: ConnectorConfig, engine_db: Engine | None = None, *, wait_seconds: float = 0
+    config: ConnectorConfig, locks: ResourceLocker | None = None, *, wait_seconds: float = 0
 ) -> Iterator[None]:
     """Queue behind other writers when the warehouse admits one writing process; else nothing.
 
     The lock is held in the Engine DB, which every process that could contend can reach,
-    including agents on other machines. Waiters queue in order rather than retrying against
-    the warehouse's own lock error. ``wait_seconds`` 0 waits indefinitely; otherwise a
+    including agents reaching it through the API. Waiters use notifications and a bounded
+    polling fallback rather than warehouse lock errors. Zero selects the default wait; a
     ``LockTimeoutError`` says another task is still using the warehouse. A task whose own
     script writes to the warehouse is wrapped in this lock too, without an engine being opened
     for it.
     """
-    if engine_db is None or not is_single_writer(config):
+    if locks is None or not is_single_writer(config):
         yield
         return
     try:
-        with for_engine(engine_db).lock(
-            engine_db, WAREHOUSE_LOCK_KEY, "warehouse", wait_seconds=wait_seconds
-        ):
+        with locks.hold(WAREHOUSE_LOCK_KEY, "warehouse", wait_seconds):
             yield
     except LockTimeoutError as error:
         raise LockTimeoutError(
-            f"timed out after {wait_seconds:g}s waiting for the warehouse: it allows only one "
-            "writing process at a time, and another task is still using it"
+            f"the warehouse allows only one writing process at a time; {error}"
         ) from error
 
 
 @contextmanager
 def open_warehouse(
     config: ConnectorConfig,
-    engine_db: Engine | None = None,
+    locks: ResourceLocker | None = None,
     *,
     wait_seconds: float = 0,
     **engine_kwargs: Any,
@@ -229,8 +233,10 @@ def open_warehouse(
     This is how the engine reaches the warehouse. For a warehouse that accepts concurrent
     writers it takes no lock, so waves stay fully parallel. The engine is disposed afterwards.
     """
-    with single_writer_lock(config, engine_db, wait_seconds=wait_seconds):
-        warehouse_engine = build_warehouse_engine(config, **engine_kwargs)
+    with single_writer_lock(config, locks, wait_seconds=wait_seconds):
+        warehouse_engine = build_warehouse_engine(
+            config, session_tag=locks.session_tag if locks is not None else None, **engine_kwargs
+        )
         try:
             yield warehouse_engine
         finally:

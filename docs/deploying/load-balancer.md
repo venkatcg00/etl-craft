@@ -24,7 +24,7 @@ See [ALB attributes](https://docs.aws.amazon.com/elasticloadbalancing/latest/app
 On SIGTERM, a UI copy immediately reports 503 and rejects new requests with 503. Admitted
 requests can finish until `Orchestration.Shutdown_grace_seconds`; remaining streams are then
 closed. Long polls can use the same shutdown signal to return an empty answer and retry
-elsewhere; S5.C adds the agent routes. Give the container/process supervisor a stop deadline
+elsewhere. Agent claim polls use the same shutdown path. Give the container/process supervisor a stop deadline
 slightly longer than that setting so it can finish cleanup. A browser or agent reconnects to
 another copy without an affinity cookie.
 

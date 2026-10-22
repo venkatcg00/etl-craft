@@ -15,3 +15,5 @@ Running etl-craft on a machine or under an orchestrator.
 - [Security](security.md): secrets, least-privilege accounts, and what tasks can do.
 
 - [Controller](controller.md): leadership, submitting active runs, crash recovery and graceful shutdown.
+
+- [Agents and the queue](agents.md): API-only execution, capacity, fencing and controls.

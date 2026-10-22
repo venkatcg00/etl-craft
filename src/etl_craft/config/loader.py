@@ -47,9 +47,10 @@ from etl_craft.config.loader_orchestration import (
     parse_retry_on,
 )
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
-from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectorConfig
+from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectionProfile, ConnectorConfig
 from etl_craft.config.resolve import Resolver
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, MetadataError
 
 SECTIONS = (
@@ -81,7 +82,7 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Orchestration": ORCHESTRATION_KEYS - {"Email"},
         "Orchestration.Email": frozenset(map(shown, EMAIL_KEYS)),
         "Deployment": DEPLOYMENT_KEYS,
-        "Engine": frozenset({"Name"}) | fields,
+        "Engine": frozenset({"Name", "Listen_jdbc_url"}) | fields,
         "Warehouse": WAREHOUSE_SECTION_KEYS | fields | frozenset(map(shown, warehouse_fields)),
         "Cloning": CLONING_KEYS,
         "Docs_site": DOCS_SITE_KEYS,
@@ -132,7 +133,7 @@ class _StrictLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
-def load_config(path: str | Path) -> ConnectorConfig:
+def load_config(path: str | Path, *, agent: bool = False) -> ConnectorConfig:
     """Read, parse and validate the ``craft-connector.yml`` at ``path``."""
     path = Path(path)
     if not path.is_file():
@@ -146,10 +147,10 @@ def load_config(path: str | Path) -> ConnectorConfig:
         raise ConfigurationError(f"{path}: {error}") from error
     except yaml.YAMLError as error:
         raise ConfigurationError(f"{path} is not valid YAML: {error}") from error
-    return parse_config(raw, path)
+    return parse_config(raw, path, agent=agent)
 
 
-def parse_config(raw: object, path: Path) -> ConnectorConfig:
+def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorConfig:
     """Validate an already-loaded ``craft-connector.yml`` mapping; ``path`` is where it came from.
 
     Relative paths in it (``Secrets.Path``) resolve against ``path``'s directory.
@@ -179,7 +180,11 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
         raise ConfigurationError(f"{path}: Orchestration.Timezone: {error}") from error
     log_dir = relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
     email = parse_email(orchestration, path, resolver)
-    engine = parse_engine(raw, global_profile, path, resolver)
+    engine = (
+        ConnectionProfile("ENGINE", "api-only", "api-only:", "", AuthMode.NONE)
+        if agent
+        else parse_engine(raw, global_profile, path, resolver)
+    )
     warehouse, table_format = parse_warehouse(raw, global_profile, path, resolver)
     cloning = parse_cloning(raw, global_profile, path, resolver)
     docs_site = parse_docs_site(raw, global_profile, path, resolver)
@@ -190,7 +195,7 @@ def parse_config(raw: object, path: Path) -> ConnectorConfig:
         raw,
         path,
         resolver,
-        engine=engine_for_jdbc_url(engine.jdbc_url),
+        engine=engine_for_jdbc_url("jdbc:postgresql:" if agent else engine.jdbc_url),
         api_address=api_address,
     )
     config = ConnectorConfig(

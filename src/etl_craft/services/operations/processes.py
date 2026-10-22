@@ -9,6 +9,7 @@ from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import ConfigurationError, MigrationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.migrations import pending_migrations
+from etl_craft.engine.notifications import check_notifications
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import Health
 from etl_craft.services.operations.requests import NoInput
@@ -17,6 +18,7 @@ from etl_craft.services.operations.requests import NoInput
 def controller(ctx: OperationContext, request: NoInput) -> None:
     """Refuse to supervise with an Engine DB that does not match this package."""
     check_package_schema(ctx)
+    check_notifications(ctx.config, ctx.engine)
 
 
 def ui(ctx: OperationContext, request: NoInput) -> None:
@@ -33,6 +35,7 @@ def ui(ctx: OperationContext, request: NoInput) -> None:
             "for SQLite, or configure a PostgreSQL Engine DB"
         )
     check_package_schema(ctx)
+    check_notifications(ctx.config, ctx.engine)
 
 
 def check_package_schema(ctx: OperationContext) -> None:

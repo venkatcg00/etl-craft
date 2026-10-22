@@ -224,6 +224,46 @@ SEEDS = [
         f"{TASK_ID},'plan.table_'||p,'column_'||t,'INTEGER',t,'plan',{STAMP},'plan',{STAMP}",
         TASKS,
     ),
+    (
+        "CFG_ACCOUNTS",
+        "ACCOUNT_ID,ACCOUNT_NAME,ACCOUNT_KIND,ROLE",
+        "p,'agent_'||p,'SERVICE','viewer'",
+        "generate_series(1,:pipelines) p",
+    ),
+    (
+        "CFG_API_TOKENS",
+        "TOKEN_ID,NAME,TOKEN_SHA256,ACCOUNT_ID,TOKEN_KIND",
+        "p,'agent_'||p,'hash_'||p,p,'AGENT'",
+        "generate_series(1,:pipelines) p",
+    ),
+    (
+        "AUD_AGENTS",
+        "AGENT_ID,POOL,HOST,VERSION,PYTHON_SLOTS,WAREHOUSE_SLOTS,STARTED_AT,"
+        "HEARTBEAT_AT,STATUS,RESOURCE_REPORT",
+        f"p,'default','host_'||p,'test',1,1,{STAMP},{STAMP},'GONE',"
+        "json_build_object('node_id','node_'||p)::text",
+        "generate_series(1,:pipelines) p",
+    ),
+    (
+        "AUD_AGENT_COMMANDS",
+        "AGENT_ID,COMMAND,ACTOR,ACTOR_KIND,REQUESTED_AT,ACKNOWLEDGED_AT",
+        f"p,'DRAIN','plan','SYSTEM',{DAY},{DAY}",
+        RUNS,
+    ),
+    (
+        "AUD_RESOURCE_LOCKS",
+        "LOCK_KEY,RESOURCE_NAME,HOLDER_ID,ATTEMPT_ID,OWNER_ID,ACTOR,"
+        "ACTOR_KIND,ACQUIRED_AT,LEASE_EXPIRES_AT",
+        f"{TASK_RUN_ID},'target_'||p,'attempt:'||{TASK_RUN_ID},{TASK_RUN_ID},'plan','plan',"
+        f"'SYSTEM',{DAY},{DAY}+interval '1 minute'",
+        RUNS + " CROSS JOIN generate_series(1,1) t",
+    ),
+    (
+        "AUD_ATTEMPT_LOG_CHUNKS",
+        "ATTEMPT_ID,SEQUENCE_NUMBER,CONTENT_SHA256,CONTENT,BYTE_OFFSET,BYTE_LENGTH,CREATED_AT",
+        f"{TASK_RUN_ID},0,'plan','text',0,4,{DAY}",
+        RUNS + " CROSS JOIN generate_series(1,1) t",
+    ),
 ]
 
 

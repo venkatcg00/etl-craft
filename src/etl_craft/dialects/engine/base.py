@@ -83,6 +83,14 @@ class EngineDialect(ABC):
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install metadata capture and write guards for the current table definitions."""
 
+    def listen(self, conn: Connection, channels: tuple[str, ...]) -> None:
+        """Subscribe a dedicated session to the requested notification channels."""
+        return None
+
+    def notifications(self, conn: Connection, timeout: float) -> Iterator[tuple[str, str]]:
+        """Yield notifications available before the bounded wait ends; SQLite has none."""
+        return iter(())
+
     def controller_lock_path(self, engine: Engine) -> str | None:
         """Return the local leadership lock path, or None for session leadership."""
         return None

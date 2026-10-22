@@ -149,17 +149,21 @@ def test_sql_event_pipeline_finalizes_successfully(sql_world):
     with world.engine_db.begin() as conn:
         add_task(conn, world.pipeline_id, "wait", "EVENT_WAIT", EVENT_SQL="SELECT 1 AS ready")
     outcome = run_pipeline(world.engine_db, world.config, "P")
-    assert outcome.status == "SUCCESS"
+    with world.engine_db.connect() as conn:
+        errors = conn.execute(text("SELECT ERROR_MESSAGE FROM AUD_TASK_ATTEMPTS")).scalars().all()
+    assert outcome.status == "SUCCESS", errors
     with world.engine_db.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM AUD_TASK_EVENTS")).scalar_one() == 1
 
 
 def _probe_in_parent(config, query):
+    from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
     from etl_craft.execution.event_probe import probe_sql
     from etl_craft.handlers.event_wait import read_event
 
     event = read_event(config, {"EVENT_SQL": query})
-    probe_sql(config, event, 60, None)
+    with acting_as(SYSTEM_ACTOR):
+        probe_sql(config, event, 60, None)
 
 
 @warehouses("postgres")

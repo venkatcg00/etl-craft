@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from etl_craft.config import load_config
 from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url, warehouse_by_key
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.handlers.mail import send_email
 from etl_craft.services.doctor import Status, run_checks
 from etl_craft.warehouse.connection import build_warehouse_engine
@@ -74,8 +75,12 @@ def write(tmp_path: Path, **sections) -> Path:
 
 
 def checked(config, prefix: str) -> dict[str, tuple[Status, str]]:
-    """Run doctor's connection checks; return those about ``prefix``, and none may fail."""
-    checks = run_checks(config, engine_state=False)
+    """Run doctor's connection checks; return those about ``prefix``, and none may fail.
+
+    The doctor action runs under its requester; called directly here, it acts as the system.
+    """
+    with acting_as(SYSTEM_ACTOR):
+        checks = run_checks(config, engine_state=False)
     failed = [f"{c.name}: {c.detail}" for c in checks if c.status is Status.FAIL]
     assert failed == [], failed
     return {c.name: (c.status, c.detail) for c in checks if c.name.startswith(prefix)}

@@ -218,12 +218,16 @@ def test_cli_watermark_reset_does_not_change_run_status(metadata_project, capsys
 
 def test_real_task_processes_commit_each_sql_watermark(metadata_project):
     from etl_craft.execution.pipeline import run_pipeline
+    from etl_craft.handlers.resources import LocalLocker
     from etl_craft.services.operations.snapshots import task_run_view
     from etl_craft.warehouse.connection import open_warehouse
     from fixtures.metadata import add_dependency
 
     p = metadata_project
-    with open_warehouse(p.config, p.engine) as warehouse, warehouse.begin() as conn:
+    with (
+        open_warehouse(p.config, LocalLocker(p.engine, p.config)) as warehouse,
+        warehouse.begin() as conn,
+    ):
         conn.execute(text("CREATE SCHEMA s"))
         conn.execute(text("CREATE TABLE s.feed(id BIGINT)"))
         conn.execute(text("INSERT INTO s.feed VALUES (1), (2)"))
@@ -254,7 +258,10 @@ def test_real_task_processes_commit_each_sql_watermark(metadata_project):
         add_dependency(conn, pipeline, task, setup)
     first = run_pipeline(p.engine, p.config, "P")
     assert first.status == "SUCCESS", first.message
-    with open_warehouse(p.config, p.engine) as warehouse, warehouse.begin() as conn:
+    with (
+        open_warehouse(p.config, LocalLocker(p.engine, p.config)) as warehouse,
+        warehouse.begin() as conn,
+    ):
         conn.execute(text("INSERT INTO s.feed VALUES (3)"))
     second = run_pipeline(p.engine, p.config, "P")
     assert second.status == "SUCCESS", second.message
@@ -264,5 +271,8 @@ def test_real_task_processes_commit_each_sql_watermark(metadata_project):
             row = task_run_view(conn, pipeline, pipeline_run_id=run.pipeline_run_id, task_id=task)
             assert (row.watermark_from, row.watermark_to) == expected
             assert (row.attempts[0].watermark_from, row.attempts[0].watermark_to) == expected
-    with open_warehouse(p.config, p.engine) as warehouse, warehouse.connect() as conn:
+    with (
+        open_warehouse(p.config, LocalLocker(p.engine, p.config)) as warehouse,
+        warehouse.connect() as conn,
+    ):
         assert list(conn.execute(text("SELECT id FROM s.events ORDER BY id"))) == [(1,), (2,), (3,)]

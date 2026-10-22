@@ -6,7 +6,6 @@ import shutil
 import sqlite3
 import subprocess
 
-import duckdb
 import pytest
 import yaml
 
@@ -96,8 +95,20 @@ def test_installed_event_pipeline_records_rows_and_consumes_delivery(tmp_path):
         assert conn.execute("SELECT FILE_PATH FROM AUD_EVENT_FILES").fetchall() == [
             (str(delivery.resolve()),)
         ]
-    with duckdb.connect(str(project / "warehouse.duckdb"), read_only=True) as warehouse:
-        assert warehouse.execute("SELECT id FROM main.records ORDER BY id").fetchall() == [
-            (1,),
-            (2,),
-        ]
+    # Read with the writer's DuckDB version: the checkout may use an older storage format.
+    rows = subprocess.run(
+        [
+            str(cli.with_name("python")),
+            "-c",
+            "import duckdb, json\n"
+            "with duckdb.connect('warehouse.duckdb', read_only=True) as conn:\n"
+            "    rows = conn.execute('SELECT id FROM main.records ORDER BY id').fetchall()\n"
+            "    print(json.dumps(rows))",
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    assert json.loads(rows.stdout) == [[1], [2]]
