@@ -89,6 +89,15 @@ gets it back cast to that datatype: `task.offset.value` is an `int` or `Decimal`
 Timestamp offsets keep microsecond precision. A datetime with nonzero nanoseconds, such as a
 pandas `Timestamp`, is refused; round it to microseconds before building the offset.
 
+A source with a position per partition, such as a Kafka topic, returns a `PARTITIONS` offset:
+`Offset.partitions({"0": 1042, "1": 977})`, a map of partition key (text) to the next position
+to read (a whole number, 0 or more). It is stored as JSON with sorted keys, and the next run
+gets a read-only mapping back. The engine refuses the result, and stores nothing, when a
+partition moves behind its stored position or a stored partition is missing; a new partition is
+accepted and named in the task log. A partition that really went away is removed with
+`etl-craft mark --offset` (see [Stepping in](run-control.md#reset-a-python-scripts-offset)),
+never by leaving it out. [Reading from streams](streams.md) shows the whole pattern.
+
 The offset is stored in `AUD_TASK_OFFSET_TRACKER` if and only if the attempt is recorded
 `SUCCESS`. The attempt outcome, task summary, new offset and admitted task-dependency consumption
 commit in one Engine DB transaction. A crash before that commit preserves the previous offset;

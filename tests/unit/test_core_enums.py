@@ -88,7 +88,7 @@ EXPECTED = {
         "RUN_PIPELINE",
     },
     enums.RunCondition: {"ALL", "ANY", "N"},
-    enums.OffsetType: {"NUMBER", "TEXT", "TIMESTAMP"},
+    enums.OffsetType: {"NUMBER", "PARTITIONS", "TEXT", "TIMESTAMP"},
     enums.SqlAction: {
         "CREATE_TABLE",
         "SETUP_TABLE",

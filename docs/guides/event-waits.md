@@ -21,7 +21,8 @@ a queue of empty runs.
   `DEPENDENCY_TYPE='SUCCESS'`, which has its own `Orchestration.Gate_wait_minutes` budget.
 - **A stream** (Kafka, Kinesis, Event Hubs): not an event wait either. Read it in batches: a
   frequently scheduled Python task reads from its stored offset and returns the new one, and
-  downstream tasks that depend on it with `HAS_DATA` skip an empty batch.
+  downstream tasks that depend on it with `HAS_DATA` skip an empty batch. See
+  [Reading from streams](streams.md).
 
 ## Settings
 

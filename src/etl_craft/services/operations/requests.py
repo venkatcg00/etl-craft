@@ -378,12 +378,13 @@ class RunRequest(RunSelection):
 
 @dataclass(frozen=True, kw_only=True)
 class MarkRequest(RunSelection):
-    """A run, task or new stand-in run's status, or a task's watermark reset."""
+    """A run, task or new stand-in run's status, or a task's watermark or offset reset."""
 
     reason: str
     task_code: str | None = None
     status: RunStatus | None = None
     watermark: str | None = None
+    offset: str | None = None
     rows: int | None = None
     stale: bool = False
     new_run: bool = False
@@ -393,20 +394,21 @@ class MarkRequest(RunSelection):
         super().__post_init__()
         require_text("reason", self.reason, limit=MAX_REASON)
         optional_text("task_code", self.task_code)
-        if (self.status is None) == (self.watermark is None):
-            raise UsageError("mark needs exactly one of `status` or `watermark`")
+        if sum(value is not None for value in (self.status, self.watermark, self.offset)) != 1:
+            raise UsageError("mark needs exactly one of `status`, `watermark` or `offset`")
         if self.status is not None and self.status not in MARKABLE_STATUSES:
             raise UsageError(
                 f"`status` is {self.status!r}; choose one of {', '.join(MARKABLE_STATUSES)}"
             )
         if self.rows is not None and self.rows < 0:
             raise UsageError(f"`rows` is {self.rows}; give zero or more")
-        if self.watermark is not None and (
-            not self.task_code or self.rows is not None or self.stale or self.new_run
-        ):
-            raise UsageError(
-                "`watermark` needs `task_code`, without `status`, `rows`, `stale` or `new_run`"
-            )
+        for name in ("watermark", "offset"):
+            if getattr(self, name) is not None and (
+                not self.task_code or self.rows is not None or self.stale or self.new_run
+            ):
+                raise UsageError(
+                    f"`{name}` needs `task_code`, without `status`, `rows`, `stale` or `new_run`"
+                )
         if self.stale and (not self.task_code or self.new_run):
             raise UsageError("`stale` marks one task: give `task_code`, without `new_run`")
         if self.new_run and (self.run_id is not None or self.run_key is not None):

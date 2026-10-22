@@ -398,6 +398,7 @@ class OffsetType(StrEnum):
     NUMBER = "NUMBER"
     TEXT = "TEXT"
     TIMESTAMP = "TIMESTAMP"
+    PARTITIONS = "PARTITIONS"
 
 
 class SqlAction(StrEnum):

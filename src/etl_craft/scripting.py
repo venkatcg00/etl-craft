@@ -30,12 +30,14 @@ to the task attempt's log.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
+from types import MappingProxyType
 from typing import Any
 
 from sqlalchemy.engine import Engine
@@ -56,19 +58,27 @@ from etl_craft.core.ownership import ResourceLocker
 from etl_craft.core.text import qualify
 from etl_craft.warehouse.connection import open_warehouse
 
-OffsetValue = int | Decimal | str | datetime
+Partitions = Mapping[str, int]
+"""A stream's next position to read, per partition key."""
+
+OffsetValue = int | Decimal | str | datetime | Partitions
 
 
 @dataclass(frozen=True)
 class Offset:
-    """Where a script left off: a value and its datatype, ``NUMBER``, ``TEXT`` or ``TIMESTAMP``.
+    """Where a script left off: a value and its datatype.
+
+    The datatypes are ``NUMBER``, ``TEXT``, ``TIMESTAMP`` and ``PARTITIONS``.
 
     The datatype is always given, never guessed from the value. The value is cast to it, as
     ``CAST(value AS datatype)`` would in SQL: ``Offset("7", "NUMBER")`` holds ``7``, and
     ``Offset("abc", "NUMBER")`` fails. A ``NUMBER`` is an ``int`` or a ``Decimal``, a ``TEXT`` a
     ``str``, a ``TIMESTAMP`` a ``datetime`` (ISO 8601 text is read as one). The offset is
     stored as text beside its datatype, and a script gets it back cast to that datatype.
-    ``Offset.number``, ``Offset.text`` and ``Offset.timestamp`` are shorthands.
+    ``PARTITIONS`` maps each partition key (text) to the next position to read there, a whole
+    number of 0 or more, for a stream such as a Kafka topic; it is stored as JSON with sorted
+    keys. ``Offset.number``, ``Offset.text``, ``Offset.timestamp`` and ``Offset.partitions`` are
+    shorthands.
     """
 
     value: OffsetValue
@@ -80,7 +90,7 @@ class Offset:
             kind = OffsetType(str(self.datatype).strip().upper())
         except ValueError:
             raise HandlerError(
-                f"offset datatype {self.datatype!r} is not one of NUMBER, TEXT, TIMESTAMP"
+                f"offset datatype {self.datatype!r} is not one of {', '.join(OffsetType)}"
             ) from None
         object.__setattr__(self, "datatype", kind)
         object.__setattr__(self, "value", _cast(self.value, kind))
@@ -100,10 +110,17 @@ class Offset:
         """Build a ``TIMESTAMP`` offset, such as the latest change read."""
         return cls(value, OffsetType.TIMESTAMP)
 
+    @classmethod
+    def partitions(cls, value: Mapping[str, int]) -> Offset:
+        """Build a ``PARTITIONS`` offset: each partition's next position to read."""
+        return cls(value, OffsetType.PARTITIONS)
+
     def stored(self) -> str:
         """Return the text the offset is stored as, beside its datatype."""
         if isinstance(self.value, datetime):
             return self.value.isoformat()
+        if isinstance(self.value, Mapping):
+            return json.dumps(dict(self.value), sort_keys=True, separators=(",", ":"))
         return str(self.value)
 
     @classmethod
@@ -117,34 +134,48 @@ def _cast(value: object, kind: OffsetType) -> OffsetValue:
     failure = HandlerError(f"cannot cast {type(value).__name__} {value!r} to a {kind} offset")
     if isinstance(value, bool) or value is None:
         raise failure
-    if kind == OffsetType.NUMBER:
-        if isinstance(value, int | Decimal):
-            return value
-        try:
-            number = Decimal(str(value).strip())
-        except InvalidOperation:
-            raise failure from None
-        if not number.is_finite():
-            raise failure
-        return int(number) if number == number.to_integral_value() else number
-    if kind == OffsetType.TIMESTAMP:
-        if isinstance(value, datetime):
-            if getattr(value, "nanosecond", 0) != 0:
-                raise HandlerError(
-                    f"offset {value} has nanoseconds, which the offset store can't keep; "
-                    "round it to microseconds"
-                )
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.fromisoformat(value.strip())
-            except ValueError:
-                raise failure from None
+    if kind == OffsetType.PARTITIONS:
+        return _partitions(value)
+    if isinstance(value, Mapping):
         raise failure
+    if kind == OffsetType.NUMBER:
+        return _number(value, failure)
+    if kind == OffsetType.TIMESTAMP:
+        return _timestamp(value, failure)
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, str | int | Decimal):
         return str(value)
+    raise failure
+
+
+def _number(value: object, failure: HandlerError) -> int | Decimal:
+    """Cast to a finite number, an ``int`` when it is whole."""
+    if isinstance(value, int | Decimal):
+        return value
+    try:
+        number = Decimal(str(value).strip())
+    except InvalidOperation:
+        raise failure from None
+    if not number.is_finite():
+        raise failure
+    return int(number) if number == number.to_integral_value() else number
+
+
+def _timestamp(value: object, failure: HandlerError) -> datetime:
+    """Cast to a ``datetime`` the offset store can keep, from itself or ISO 8601 text."""
+    if isinstance(value, datetime):
+        if getattr(value, "nanosecond", 0) != 0:
+            raise HandlerError(
+                f"offset {value} has nanoseconds, which the offset store can't keep; "
+                "round it to microseconds"
+            )
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.strip())
+        except ValueError:
+            raise failure from None
     raise failure
 
 
@@ -209,3 +240,28 @@ class ScriptTask:
         """Open the warehouse, queued behind other writers where it allows only one."""
         with open_warehouse(self.config, self._locks) as engine:
             yield engine
+
+
+def _partitions(value: object) -> Partitions:
+    """Cast a mapping, or its stored JSON, to partition positions; ``HandlerError`` otherwise."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise HandlerError(f"PARTITIONS offset {value!r} is not JSON: {error}") from error
+    if not isinstance(value, Mapping):
+        raise HandlerError(
+            f"a PARTITIONS offset maps partition keys to positions, such as "
+            f'{{"0": 120}}; got {type(value).__name__} {value!r}'
+        )
+    positions: dict[str, int] = {}
+    for key, position in value.items():
+        if not isinstance(key, str) or not key:
+            raise HandlerError(f"partition key {key!r} must be non-empty text, such as '0'")
+        if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+            raise HandlerError(
+                f"partition {key!r} has position {position!r}; it must be a whole number, "
+                "0 or more: the next position to read"
+            )
+        positions[key] = position
+    return MappingProxyType(dict(sorted(positions.items())))

@@ -343,7 +343,7 @@ CREATE TABLE AUD_TASK_OFFSET_TRACKER (
     OFFSET_TYPE             VARCHAR NOT NULL,
     OFFSET_VALUE            VARCHAR,
     LAST_UPDATED_TIMESTAMP  TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00'),
-    CONSTRAINT ck_offset_type CHECK (OFFSET_TYPE IN ('NUMBER','TEXT','TIMESTAMP'))
+    CONSTRAINT ck_offset_type CHECK (OFFSET_TYPE IN ('NUMBER','TEXT','TIMESTAMP','PARTITIONS'))
 );
 
 -- Column lineage traced from each SQL task's SELECT, stored by a hash of what it depends on.

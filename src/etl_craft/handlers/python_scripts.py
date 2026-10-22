@@ -33,6 +33,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config.model import PYTHON_SCRIPTS_DIRNAME
 from etl_craft.config.project import python_script
+from etl_craft.core.enums import OffsetType
 from etl_craft.core.errors import HandlerError, PermanentError, TransientError
 from etl_craft.core.log import capture_all_loggers
 from etl_craft.engine.repository.offsets import StoredOffset
@@ -96,7 +97,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     started = time.monotonic()
     with capture_all_loggers():
         result = _call(entry, task, name)
-    checked = check_result(result, name, stored)
+    checked = check_result(result, name, stored, task=context)
     result_variables = dict(checked.variables)
     elapsed = time.monotonic() - started
     variables: dict[str, object] = {}
@@ -265,7 +266,9 @@ def _call(entry: Callable[..., Any], task: ScriptTask, name: str) -> Any:
         ) from error
 
 
-def check_result(result: Any, name: str, stored: StoredOffset | None) -> ScriptResult:
+def check_result(
+    result: Any, name: str, stored: StoredOffset | None, *, task: TaskContext
+) -> ScriptResult:
     """Check what the script returned; ``HandlerError`` naming each problem."""
     if not isinstance(result, ScriptResult):
         raise HandlerError(
@@ -290,12 +293,46 @@ def check_result(result: Any, name: str, stored: StoredOffset | None) -> ScriptR
             f"{name} returned a {result.offset.datatype} offset, but the stored one is "
             f"{stored.offset_type}; an offset keeps its datatype"
         )
+    if (
+        result.offset is not None
+        and stored is not None
+        and stored.offset_value is not None
+        and result.offset.datatype == OffsetType.PARTITIONS
+    ):
+        _check_partitions(
+            name, task, Offset.from_stored(stored.offset_type, stored.offset_value), result.offset
+        )
     if not isinstance(result.variables, Mapping):
         raise HandlerError(
             f"{name} returned variables={result.variables!r}; it must be a mapping, "
             "such as {'REGION': 'eu'}"
         )
     return result
+
+
+def _check_partitions(name: str, task: TaskContext, stored: Offset, returned: Offset) -> None:
+    """Refuse a partition that moves backwards or disappears; log one that appears."""
+    assert isinstance(stored.value, Mapping) and isinstance(returned.value, Mapping)
+    before, after = stored.value, returned.value
+    reset = f"etl-craft mark --pipeline-code {task.pipeline_code} --task-code {task.task_code}"
+    for key, position in before.items():
+        if key not in after:
+            raise HandlerError(
+                f"{task.pipeline_code}.{task.task_code}: {name} returned no position for "
+                f"partition {key!r}, stored at {position}; return every stored partition, or "
+                f"remove one that no longer exists with `{reset} --offset "
+                f"'{{\"{key}\": null}}' --reason ...`"
+            )
+        if after[key] < position:
+            raise HandlerError(
+                f"{task.pipeline_code}.{task.task_code}: {name} returned partition {key!r} at "
+                f"position {after[key]}, behind its stored position {position}; a position "
+                f"never moves backwards. To read it again on purpose, reset it with "
+                f"`{reset} --offset '{{\"{key}\": {after[key]}}}' --reason ...`"
+            )
+    added = sorted(set(after) - set(before))
+    if added:
+        logger.info("%s: new partition(s) %s recorded", name, ", ".join(added))
 
 
 def event_input_params(context: TaskContext) -> dict[str, Any]:

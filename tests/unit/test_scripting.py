@@ -64,3 +64,40 @@ def test_a_timestamp_offset_refuses_precision_the_store_cannot_keep():
     value = NanosecondTimestamp(2026, 1, 1, microsecond=123456)
     with pytest.raises(HandlerError, match=r"has nanoseconds.*round it to microseconds"):
         Offset.timestamp(value)
+
+
+def test_a_partitions_offset_is_stored_as_sorted_json_and_read_back():
+    offset = Offset.partitions({"7": 1200, "0": 15, "10": 3})
+    assert offset.stored() == '{"0":15,"10":3,"7":1200}'
+    assert Offset.from_stored("PARTITIONS", offset.stored()) == offset
+    assert dict(offset.value) == {"0": 15, "10": 3, "7": 1200}
+    # Kinesis sequence numbers are whole numbers far beyond 64 bits.
+    big = 49654712345678901234567890123456789012345678901234567890
+    assert (
+        Offset.from_stored("PARTITIONS", Offset.partitions({"shard-1": big}).stored()).value[
+            "shard-1"
+        ]
+        == big
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ([1, 2], "maps partition keys to positions"),
+        ({"": 1}, "partition key '' must be non-empty text"),
+        ({"0": -1}, "partition '0' has position -1; it must be a whole number, 0 or more"),
+        ({"0": 1.5}, "partition '0' has position 1.5"),
+        ({"0": True}, "partition '0' has position True"),
+        ({"0": "12"}, "partition '0' has position '12'"),
+        ("{not json", "is not JSON"),
+    ],
+)
+def test_a_partitions_offset_refuses_what_is_not_a_position(value, message):
+    with pytest.raises(HandlerError, match=message):
+        Offset(value, "PARTITIONS")
+
+
+def test_a_scalar_offset_refuses_a_mapping():
+    with pytest.raises(HandlerError, match="cannot cast"):
+        Offset({"0": 1}, "NUMBER")
