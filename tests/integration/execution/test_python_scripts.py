@@ -17,6 +17,7 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.config import load_config
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import HandlerError, MetadataError
 from etl_craft.engine import runlog, transitions
@@ -570,3 +571,121 @@ def test_handler_returns_the_offset_without_persisting_it(project):
     with engine.connect() as conn:
         assert fetch_task_offset(conn, task) is None
     assert task_row(engine, binding.task_run_id).status == "IN-PROGRESS"
+
+
+def partitions_script(positions):
+    body = f"    return ScriptResult(0, Offset.partitions({positions!r}))\n"
+    return RESULT + "def run(task):\n" + body
+
+
+def stored_offset(engine, task):
+    with engine.connect() as conn:
+        stored = fetch_task_offset(conn, task)
+    return stored and (stored.offset_type, stored.offset_value)
+
+
+def test_partition_offsets_move_forward_and_never_lose_a_partition(project, caplog):
+    engine, config, _, task = project
+    run_in_process(project, partitions_script({"1": 5, "0": 10}))
+    assert stored_offset(engine, task) == ("PARTITIONS", '{"0":10,"1":5}')
+    reader = RESULT + textwrap.dedent(
+        """
+        def run(task):
+            assert dict(task.offset.value) == {"0": 10, "1": 5}, task.offset
+            return ScriptResult(0, Offset.partitions({"0": 10, "1": 7, "2": 0}))
+        """
+    )
+    with caplog.at_level(logging.INFO):
+        run_in_process(project, reader)
+    assert "new partition(s) 2 recorded" in caplog.text
+    assert stored_offset(engine, task) == ("PARTITIONS", '{"0":10,"1":7,"2":0}')
+    with pytest.raises(HandlerError, match=r"partition '1'.*behind its stored position 7"):
+        run_in_process(project, partitions_script({"0": 11, "1": 6, "2": 0}))
+    with pytest.raises(HandlerError, match=r"no position for partition '2'.*--offset"):
+        run_in_process(project, partitions_script({"0": 11, "1": 7}))
+    assert stored_offset(engine, task) == ("PARTITIONS", '{"0":10,"1":7,"2":0}')
+    # In the task process, the refused offset fails the attempt and stores nothing.
+    with engine.begin() as conn:
+        run_id = runlog.fetch_active_pipeline_run_id(conn, project[2])
+        transitions.finalize_pipeline_run(conn, run_id, "SUCCESS")
+        start_run(conn, project[2])
+    with_script(project, partitions_script({"0": 9, "1": 7, "2": 0}))
+    outcome = run_task(engine, config, "P", "load")
+    assert outcome.status == RunStatus.FAILED
+    assert "behind its stored position 10" in task_row(engine, outcome.task_run_id).error
+    assert stored_offset(engine, task) == ("PARTITIONS", '{"0":10,"1":7,"2":0}')
+
+
+def test_an_offset_reset_sets_adds_and_removes_partitions_and_is_audited(project):
+    from etl_craft.core.errors import RunRefusedError, UsageError
+    from etl_craft.execution.interventions import OffsetReset, reset_offset
+
+    engine, config, pipeline, task = project
+    run_in_process(project, partitions_script({"0": 10, "1": 5}))
+
+    def reset(value, reason="rebalance"):
+        return reset_offset(engine, config, OffsetReset("P", "load", value, reason))
+
+    done = reset('{"0": 3, "1": null, "9": 0}')
+    assert done.message == (
+        'P.load: offset {"0":10,"1":5} (PARTITIONS) -> {"0":3,"9":0} (PARTITIONS)'
+    )
+    assert stored_offset(engine, task) == ("PARTITIONS", '{"0":3,"9":0}')
+    with engine.connect() as conn:
+        audit = conn.execute(
+            text(
+                "SELECT PREVIOUS_MESSAGE AS message, REASON AS reason "
+                "FROM AUD_RUN_INTERVENTIONS WHERE TASK_ID=:id"
+            ),
+            {"id": task},
+        ).one()
+    assert (audit.message, audit.reason) == (done.message, "rebalance")
+    for value, message in (
+        ('{"5": null}', "no stored partition '5'"),
+        ('{"0": -1}', "partition"),
+        ("12", "JSON object of partition positions"),
+    ):
+        with pytest.raises(UsageError, match=message):
+            reset(value)
+    with pytest.raises(UsageError, match="reason"):
+        reset('{"0": 4}', reason="")
+    with engine.begin() as conn:
+        run_id = runlog.fetch_active_pipeline_run_id(conn, pipeline)
+        binding = transitions.find_or_create_task_run(conn, task, run_id)
+        transitions.queue_attempt(conn, binding.task_run_id, current_actor())
+    with pytest.raises(RunRefusedError, match="active attempt"):
+        reset('{"0": 4}')
+    assert stored_offset(engine, task) == ("PARTITIONS", '{"0":3,"9":0}')
+
+
+def test_an_offset_reset_refuses_a_sql_task(project):
+    from etl_craft.core.errors import UsageError
+    from etl_craft.execution.interventions import OffsetReset, reset_offset
+
+    engine, config, pipeline, _ = project
+    with engine.begin() as conn:
+        add_task(
+            conn,
+            pipeline,
+            "sql",
+            "SQL",
+            SQL_ACTION="APPEND_TABLE",
+            TARGET_OBJECT="s.t",
+            SELECT_QUERY="SELECT 1 AS a",
+        )
+    with pytest.raises(UsageError, match="HANDLER=SQL; `offset` needs a Python task"):
+        reset_offset(engine, config, OffsetReset("P", "sql", '{"0": 1}', "why"))
+
+
+def test_mark_offset_on_the_cli_moves_a_scalar_offset(project, capsys, monkeypatch):
+    from etl_craft.cli import main
+
+    engine, config, _, task = project
+    number = RESULT + "def run(task):\n    return ScriptResult(0, Offset.number(7))\n"
+    run_in_process(project, number)
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine))
+    args = ["mark", "--config", str(config.config_path), "--pipeline-code", "P"]
+    args += ["--task-code", "load", "--offset", "3", "--reason", "replay"]
+    assert main(args) == 0
+    assert "offset 7 (NUMBER) -> 3 (NUMBER)" in capsys.readouterr().out
+    assert stored_offset(engine, task) == ("NUMBER", "3")

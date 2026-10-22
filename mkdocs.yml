@@ -110,6 +110,7 @@ nav:
       - Protecting human SCD edits: guides/human-overrides.md
       - Business rules: guides/business-rules.md
       - Python scripts: guides/python-scripts.md
+      - Reading from streams: guides/streams.md
       - Email alerts: guides/email-alerts.md
       - Validating pipelines: guides/validating.md
       - Inspecting pipelines: guides/inspecting.md

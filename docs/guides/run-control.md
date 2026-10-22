@@ -102,6 +102,21 @@ or are cancelled and reconciled. The target lock serializes resets with SQL read
 `AUD_RUN_INTERVENTIONS` records the actor, reason and old/new typed positions as a `MARK`;
 `AUD_ACTIONS` records the full request. Backfills do not change the stored position.
 
+## Reset a Python script's offset
+
+```bash
+etl-craft mark --pipeline-code CLICKS --task-code read_topic \
+  --offset '{"3": 120, "7": null}' --reason 'partition 7 removed; replay partition 3'
+```
+
+The task must be a Python task. For a `PARTITIONS` offset the value is a JSON object: each named
+partition is set or added, `null` removes it, and partitions not named keep their positions.
+Removing a partition the offset does not hold fails. For a `NUMBER`, `TEXT` or `TIMESTAMP`
+offset the value is the new offset, cast to the stored datatype. The reset needs a reason, takes
+the same run selection as `--watermark`, cannot be combined with `--status`, `--rows`, `--stale`
+or `--new-run`, and is refused while the task has a queued, claimed or running attempt.
+`AUD_RUN_INTERVENTIONS` records the old and new offsets as a `MARK`, with the actor and reason.
+
 Merges can reload without duplicate keys. Resetting an append can append a row already written
 by a different task run: use a merge when reloading earlier successful batches.
 

@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `Offset.partitions({...})` returns a `PARTITIONS` offset for streams: partition keys mapped to
+  the next position to read, stored as sorted JSON. An attempt fails, storing nothing, when a
+  partition moves backwards or a stored partition is missing; new partitions are logged.
+  `etl-craft mark --task-code T --offset VALUE --reason ...` resets a Python task's offset (a
+  JSON object sets, adds or, with `null`, removes partitions) and is audited. New guide:
+  "Reading from streams". Apply `0050_partition_offsets.sql` before using the type.
 - Keyed warehouse event waits consume each `EVENT_KEY_COLUMN` once per task in
   `AUD_EVENT_KEYS`, atomically with success. Downstream SQL uses `$$event_keys`; Python
   receives `task.event_keys` and `task.event_rows`, including on retry and recovery.

@@ -27,6 +27,11 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     change = parser.add_mutually_exclusive_group(required=True)
     change.add_argument("--status", choices=[str(s) for s in MARKABLE_STATUSES], help="The status.")
     change.add_argument("--watermark", help="Reset a SQL task watermark to this typed value.")
+    change.add_argument(
+        "--offset",
+        help="Reset a Python task's offset: a PARTITIONS JSON object (null removes a "
+        "partition), or a value of the stored type.",
+    )
     parser.add_argument("--reason", required=True, help="Why; recorded with the change.")
     parser.add_argument(
         "--rows",
@@ -55,7 +60,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 COMMAND = Command(
     name="mark",
-    help="Mark a status, record a stand-in run or reset a SQL watermark.",
+    help="Mark a status, record a stand-in run, or reset a SQL watermark or a script offset.",
     configure=_configure,
     run=_run,
     actions=(ActionName.MARK,),

@@ -21,8 +21,9 @@ and why, and no attempt, log or error is erased.
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection, Engine
@@ -36,9 +37,10 @@ from etl_craft.core.enums import (
     GatePolicy,
     Handler,
     InterventionAction,
+    OffsetType,
     RunStatus,
 )
-from etl_craft.core.errors import RunRefusedError, RunStateError, UsageError
+from etl_craft.core.errors import HandlerError, RunRefusedError, RunStateError, UsageError
 from etl_craft.engine import controls, locks, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import intervention_rows as record
@@ -532,6 +534,113 @@ def _reset_skipped(
         transitions.delete_skipped_task_run(conn, row.task_run_id)
         reset.append(row.task_code)
     return reset, kept
+
+
+@dataclass(frozen=True)
+class OffsetReset:
+    """One deliberate move of a Python task's offset, and why."""
+
+    pipeline_code: str
+    task_code: str
+    value: str
+    reason: str
+
+
+def reset_offset(
+    engine: Engine,
+    config: ConnectorConfig,
+    change: OffsetReset,
+    *,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
+) -> Intervened:
+    """Move a Python task's stored offset on purpose, recording before and after values.
+
+    For a ``PARTITIONS`` offset, ``change.value`` is a JSON object: each named partition is set
+    or added, and ``null`` removes it. For another type it is the new value, cast to that type.
+    """
+    pipeline_code, task_code, value, reason = (
+        change.pipeline_code,
+        change.task_code,
+        change.value,
+        change.reason,
+    )
+    _check(config, "an offset reset", reason, None, None)
+    with engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        task_id = resolve_task_id(conn, pipeline_id, task_code)
+        handler = fetch_task_execution_detail(conn, task_id).handler
+        if handler != Handler.PYTHON:
+            raise UsageError(
+                f"{pipeline_code}.{task_code} has HANDLER={handler}; `offset` needs a Python task; "
+                "a SQL task's position is reset with `watermark`"
+            )
+        selected = runlog.select_run(conn, pipeline_id, selector)
+        active = conn.execute(
+            statement(conn, "watermark_active_attempts"), {"task_id": task_id}
+        ).scalar_one()
+        if active:
+            raise RunRefusedError(
+                f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
+                "to end or cancel and reconcile before resetting its offset"
+            )
+        before = fetch_task_offset(conn, task_id)
+        try:
+            wanted = _reset_value(f"{pipeline_code}.{task_code}", before, value)
+        except HandlerError as error:
+            raise UsageError(f"{pipeline_code}.{task_code}: `offset` {value!r}: {error}") from error
+        save_task_offset(conn, task_id, StoredOffset(wanted.datatype, wanted.stored()))
+        shown = "none" if before is None else f"{before.offset_value} ({before.offset_type})"
+        message = (
+            f"{pipeline_code}.{task_code}: offset {shown} -> {wanted.stored()} ({wanted.datatype})"
+        )
+        record.record_intervention(
+            conn,
+            pipeline_id=pipeline_id,
+            pipeline_run_id=selected.pipeline_run_id,
+            task_id=task_id,
+            action=InterventionAction.MARK,
+            previous_message=message,
+            reason=reason,
+            requested_by=current_actor().name,
+        )
+    logger.warning("%s (by %s: %s)", message, current_actor().name, reason)
+    return Intervened(message, selected.pipeline_run_id)
+
+
+def _reset_value(task: str, before: StoredOffset | None, value: str) -> Offset:
+    """Apply ``value`` to the stored offset: partition changes, or a new scalar value."""
+    partitioned = before is None or before.offset_type == OffsetType.PARTITIONS
+    if partitioned:
+        try:
+            changes = json.loads(value)
+        except json.JSONDecodeError:
+            changes = None
+        if not isinstance(changes, dict):
+            if before is None:
+                raise UsageError(
+                    f"{task} has no stored offset; give a PARTITIONS object such as "
+                    f"'{{\"0\": 120}}', or let its first successful run store one"
+                )
+            raise UsageError(
+                f"{task} stores a PARTITIONS offset; `offset` must be a JSON object of partition "
+                f'positions, with null to remove one, such as \'{{"0": 120, "7": null}}\''
+            )
+        current: dict[str, object] = {}
+        if before is not None and before.offset_value is not None:
+            stored = Offset.from_stored(before.offset_type, before.offset_value).value
+            assert isinstance(stored, Mapping)
+            current = dict(stored)
+        for key, position in changes.items():
+            if position is None:
+                if key not in current:
+                    raise UsageError(f"{task} has no stored partition {key!r} to remove")
+                del current[key]
+            else:
+                current[key] = position
+        # Through the stored form, so every position is checked as a returned offset is.
+        return Offset.from_stored(OffsetType.PARTITIONS, json.dumps(current))
+    assert before is not None
+    return Offset.from_stored(before.offset_type, value)
 
 
 def reset_watermark(

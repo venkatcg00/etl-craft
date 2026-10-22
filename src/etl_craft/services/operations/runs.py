@@ -203,7 +203,7 @@ def _manual(ctx: OperationContext, request: RunRequest, pipeline_id: int) -> Ope
 
 
 def mark(ctx: OperationContext, request: MarkRequest) -> OperationResult:
-    """Mark a task, a run, or a new stand-in run, or reset a task's watermark."""
+    """Mark a task, a run, or a new stand-in run, or reset a task's watermark or offset."""
     pipeline_code, task_code, reason = request.pipeline_code, request.task_code, request.reason
     selector = request.selector
     if request.watermark is not None:
@@ -215,6 +215,14 @@ def mark(ctx: OperationContext, request: MarkRequest) -> OperationResult:
             task_code,
             request.watermark,
             reason,
+            selector=selector,
+        )
+    elif request.offset is not None:
+        assert task_code is not None
+        done = interventions.reset_offset(
+            ctx.engine,
+            ctx.config,
+            interventions.OffsetReset(pipeline_code, task_code, request.offset, reason),
             selector=selector,
         )
     elif request.new_run:

@@ -146,7 +146,7 @@ item's text, or work done early under another item.
 | S5.X Unmanaged SQL tasks | Done | #230 | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C The PostgreSQL queue and the agent | Done | #231 | API-only agents with claims, renewals, fenced reports, shared log chunks and durable drain/resume/stop; durable resource locks that pass only after the expired holder's warehouse statements are confirmed stopped |
 | S5.AI Event waits on signal rows | Done | #233 | Keyed SQL waits consume each signal once with the wait's success, like files; bounded probes; always-true queries are refused |
-| S5.AH Partitioned offsets for streams | Planned | | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
+| S5.AH Partitioned offsets for streams | Done | #234 | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
 | S5.AJ Fewer warehouse round trips | Planned | | One warehouse connection per task, cached table metadata, combined checks and a statement budget in CI; cloud suites under 15 minutes |
 | S5.D and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -610,7 +610,21 @@ S5.AI (#233) ran its signal, event-wait and event-query tests on every local war
 Engine DBs, the released-schema upgrades on both, and the event-wait cloud tests on Snowflake and
 Databricks (4 passed, native and Iceberg).
 
+S5.AH (#234) ran the scripting unit tests, the Python script tests on both Engine DBs (including
+the task process and `mark --offset` on the CLI) and the released-schema upgrades on both.
+Warehouse SQL is unchanged; no cloud suite was needed.
+
 **Choices that differ from the item text.**
+
+- S5.AH builds a partition offset with `Offset.partitions({...})` (or
+  `Offset(mapping, "PARTITIONS")`), with no `PartitionOffsets` type. Positions are whole numbers
+  of any size, which holds Kafka offsets and Kinesis sequence numbers; decimals are refused. The
+  offset reset holds no target lock, as a script offset has no target: it relies on the
+  active-attempt check in the same transaction. The guide's Kafka example runs against a broker
+  with the demo's checks in S8.H, as the item says.
+- Plan additions with S5.AH (owner, 22 October 2026): S7.A's command center, and S7.B's custom
+  roles and access bindings managed by commands like IAM, which replace S5.AD's `grants.csv` and
+  the account role column.
 
 - S5.AI looks up consumed keys only among the keys a probe returned (at most `EVENT_MAX_ROWS`,
   through the unique index), not the task's whole history, so a probe's cost stays with its
@@ -5628,8 +5642,25 @@ lists each element, its source and its data.
   - Uploads (S7.M): a drop-down of the stewardable pipelines the signed-in steward is assigned
     to, a single-file upload, the outcome with validation failures or rejected rows and
     reasons, and the upload history.
+  - Command center (owner, 22 October 2026): every action the signed-in person may run, in one
+    place, like a cloud provider's console.
+    - Commands only, never a shell: it runs actions from the action table through the API, and
+      never a host command. Host-only actions (controller, migrate) have no route and are not
+      listed; neither is any action that edits metadata (`config apply` and the like), which
+      stays in the config files and CI.
+    - The list comes from the action table, filtered by the person's role and pipeline grants
+      (S5.AD); the server checks again on every submit, as the API does.
+    - Each command's form is generated from its request type: fields, choices, defaults and
+      validation messages. The form shows the equivalent CLI line, so the same command can be
+      scripted.
+    - Mark, force, abort, rerun and offset resets need a typed reason and a confirmation.
+    - Results render as the CLI's text output, with the JSON available. A history panel shows the
+      person's own commands from `AUD_ACTIONS`; every command is audited like any API call.
 - *Tests.* Page tests with the API test client; an end-to-end browser test of the main operator flows
-  (Playwright in a separate CI job).
+  (Playwright in a separate CI job). The command center lists exactly the actions each role and
+  grant allows (generated from the action table, so a new action is covered automatically),
+  refuses a hand-crafted request for a hidden action, never lists a host or metadata action, and
+  shows the CLI line that runs the same request.
 
 ### S7.M Stewardship uploads
 
@@ -5919,6 +5950,38 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
 - The web UI's sign-in, on the same accounts and sessions, with password or SSO.
 - Roles per project once S5.G puts several projects in one Engine DB, with `admin` covering pools.
 - Agent service accounts that can claim only the attempts of their own pool.
+- **Custom roles and access, managed like IAM** (owner, 22 October 2026). Access is identity,
+  like accounts and groups, so it is managed by commands, the API and the S7.A command center,
+  never by config files.
+  - A role is a named set of actions from the action table:
+    `etl-craft role create | describe | add-action | remove-action | disable | list`, with
+    `CFG_ROLES` and `CFG_ROLE_ACTIONS` (history and actor guards as every `CFG_` table,
+    `ACTIVE_FLAG` instead of deletes).
+  - A binding gives a principal (an account or a group) a role on a scope: the deployment, one
+    pipeline, or a tag. `etl-craft access grant | revoke | list | explain`, in `CFG_ROLE_BINDINGS`.
+    It replaces S5.AD's `grants.csv` and the deployment role column on accounts, so there is one
+    way to give access; the migration turns both into bindings.
+  - The built-in roles (viewer, operator, steward, developer, admin) are package-defined
+    roles that cannot be edited or disabled, so a deployment using only them behaves as before.
+    `agent` stays a system role no person can hold.
+  - An action is allowed when any binding of the actor or its groups, on the deployment or on
+    the action's pipeline, includes it; S5.AD's open and restricted pipeline rule still holds.
+    `access explain --account A --action X [--pipeline-code P]` shows the binding that allows it
+    or the reason it is refused.
+  - Only `admin`, or a role that includes the `role` and `access` actions, manages roles and
+    bindings; nobody can grant a role with actions they do not hold themselves, and the last
+    deployment `admin` binding cannot be revoked.
+  - Refused: an unknown action, an agent-only or host-only action in a role, and a
+    deployment-scope action bound on a pipeline or tag, each naming the role, the action and the
+    remedy.
+  - One check serves the CLI, the API and the command center; a refusal names the actor, the
+    action and the roles that would allow it, and is audited. Every role and binding change is
+    an audited S5.AA action.
+  - Tests, generated from the action table so a new action is covered: for each built-in role
+    and a custom role, every listed action is allowed and every other refused, on the CLI and
+    the API, deployment-wide, on a pipeline and through a tag; group bindings; escalation and
+    last-admin refusals; the upgrade turns `grants.csv` rows and account roles into bindings; a
+    revoked binding stops working on the next request.
 
 ### S7.C Redaction (W13, B49)
 
