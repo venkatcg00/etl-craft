@@ -10,13 +10,15 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import InjectedFaultError
 from etl_craft.engine.repository.events import run_event_data
 from etl_craft.execution.events import check_event
-from fixtures.engine_db import ENGINE_CASES, postgres_engine_db
+from fixtures.engine_db import postgres_engine_db
 from fixtures.event_waits import SIGNAL_KEY, check_signal_queries, send_signal, signal_scene
 from fixtures.metadata import add_pipeline, start_run
 from fixtures.races import two_at_once
 
 
-@pytest.fixture(params=ENGINE_CASES)
+# Plain values, not ENGINE_CASES: each case carries only its warehouse's marker, so it runs on
+# that warehouse's CI shard, which also runs the PostgreSQL Engine DB.
+@pytest.fixture(params=["sqlite", "postgresql"])
 def signal_world(sql_world, request, monkeypatch):
     if request.param == "sqlite":
         yield sql_world
