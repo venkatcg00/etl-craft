@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.dialects.engine import build_engine
@@ -40,6 +40,14 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
     upgrade_started = datetime.now(UTC)
     apply_pending_migrations(engine, project_default=tmp_path / "migrations")
     upgrade_ended = datetime.now(UTC)
+    assert {"AUD_TASK_EVENTS", "AUD_EVENT_FILES", "AUD_EVENT_KEYS"} <= {
+        name.upper() for name in inspect(engine).get_table_names()
+    }
+    with engine.connect() as conn:
+        columns = conn.execute(text("SELECT * FROM AUD_EVENT_KEYS WHERE 1=0")).keys()
+        assert {"task_id", "event_key", "task_run_id", "created_by", "created_at"} <= {
+            name.lower() for name in columns
+        }
 
     if folder == "postgres":
         with engine.begin() as conn:
@@ -75,3 +83,32 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
         conn.execute(insert)
     # A second migrate has nothing left to do.
     assert apply_pending_migrations(engine, project_default=tmp_path / "migrations") == []
+
+
+def test_signal_migration_keeps_existing_file_consumption_and_evidence(engine_db):
+    from etl_craft.engine import transitions
+    from etl_craft.engine.repository.events import consumed_files, consumed_keys, record_event
+    from fixtures.metadata import add_pipeline, add_task, start_run
+
+    db = engine_db
+    with db.engine.begin() as conn:
+        conn.execute(text("DROP TABLE AUD_EVENT_KEYS"))
+        pipeline = add_pipeline(conn, "FILES")
+        task = add_task(conn, pipeline, "wait", "EVENT_WAIT", EVENT_FILE="inbox/*")
+        run = start_run(conn, pipeline)
+        task_run = transitions.find_or_create_task_run(conn, task, run).task_run_id
+        evidence = {"files": [{"path": "/kept/batch.csv", "size": 7}]}
+        record_event(conn, task, task_run, evidence)
+        migration = db.dialect.schema_path().parent / "migrations" / "0049_event_keys.sql"
+        for sql in db.dialect.split_statements(migration.read_text()):
+            conn.exec_driver_sql(sql)
+    with db.engine.connect() as conn:
+        assert consumed_files(conn, task) == {"/kept/batch.csv"}
+        assert consumed_keys(conn, task, ["any-key"]) == set()
+        row = conn.execute(
+            text("SELECT EVIDENCE AS evidence FROM AUD_TASK_EVENTS WHERE TASK_RUN_ID=:id"),
+            {"id": task_run},
+        ).one()
+        import json
+
+        assert json.loads(row.evidence) == evidence

@@ -194,7 +194,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
             refresh_type=context.refresh_type,
             run_date=context.run_date,
             stored=stored,
-            event_files=context.event_files,
+            event_values={"event_files": context.event_files, "event_keys": context.event_keys},
         )
 
     merge_key: tuple[str, ...] = ()
@@ -285,7 +285,7 @@ def resolve_select(
     pipeline_id: int = 0,
     task_run_id: int = 0,
     stored: StoredOffset | None = None,
-    event_files: tuple[str, ...] = (),
+    event_values: Mapping[str, tuple[str, ...]] | None = None,
 ) -> tuple[str, str]:
     """Return a SQL task's SELECT, inline or from its file, with the tokens replaced.
 
@@ -330,16 +330,10 @@ def resolve_select(
         run_date=run_date,
         run_date_substitution=parse_flag(params, "RUN_DATE_SUBSTITUTION"),
         watermark_literal=watermark.literal(config) if watermark is not None else None,
-        event_files_literal=", ".join(
-            exp.Literal.string(path)
-            .sql(
-                dialect=warehouse_dialect(config).sqlglot_dialect
-                if config.warehouse is not None
-                else None
-            )
-            .replace(":", "\\:")
-            for path in event_files
-        )
+        event_literals={
+            name: event_literals(config, (event_values or {}).get(name, ()))
+            for name in ("event_files", "event_keys")
+        }
         if pipeline_run_id
         else None,
     )
@@ -430,3 +424,11 @@ def _reject_limit(value: str | None, action: SqlAction) -> RejectLimit | None:
             "of the rows the SELECT returns from 0% to 100%, such as 0.5%"
         )
     return RejectLimit(parsed, percent)
+
+
+def event_literals(config: ConnectorConfig, values: tuple[str, ...]) -> str:
+    """Render paths and signal ids with the same dialect-aware literal escaping."""
+    dialect = warehouse_dialect(config).sqlglot_dialect if config.warehouse is not None else None
+    return ", ".join(
+        exp.Literal.string(value).sql(dialect=dialect).replace(":", "\\:") for value in values
+    )

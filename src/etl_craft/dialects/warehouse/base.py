@@ -24,6 +24,7 @@ from etl_craft.config.auth import WarehouseSpec
 from etl_craft.core.enums import AuthMode, TableFormat
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.failures import Failure
+from etl_craft.core.text import as_subquery
 from etl_craft.dialects import credentials
 from etl_craft.dialects.failure_evidence import classify
 
@@ -230,6 +231,10 @@ class WarehouseDialect:
     Cluster execution needs it: a statement keeps running on the server after its client
     dies, so a lock passes on only once the old holder's tagged statements are confirmed gone.
     """
+
+    def event_probe_sql(self, sql: str, max_rows: int) -> str:
+        """Bound returned event rows at the server, including one overflow sentinel."""
+        return f"SELECT * FROM {as_subquery(sql)} AS etl_craft_event LIMIT {max_rows}"
 
     def session_tag_args(self, tag: str) -> Mapping[str, Any]:
         """Driver connect arguments that label every statement of a session with ``tag``."""

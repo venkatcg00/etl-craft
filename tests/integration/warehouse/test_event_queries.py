@@ -193,8 +193,8 @@ def test_sql_probe_exits_when_its_supervisor_is_killed(sql_world):
         until = time.monotonic() + 5
         while time.monotonic() < until:
             active = sql_world.rows(
-                "SELECT count(*) FROM pg_stat_activity WHERE query=:query AND state='active'",
-                query=query,
+                "SELECT count(*) FROM pg_stat_activity WHERE query LIKE :query AND state='active'",
+                query=f"%{query}%",
             )[0][0]
             if active:
                 break

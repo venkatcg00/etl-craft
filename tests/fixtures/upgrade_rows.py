@@ -144,6 +144,9 @@ ROWS = {
     "AUD_TARGET_HASH_VERSION": [{}],
     "AUD_OVERSEERS": [{"OVERSEER_ID": 1601, "VERSION": "0.3.0"}],
     "AUD_GATE_WAITS": [{}],
+    "AUD_TASK_EVENTS": [{"EVIDENCE": "{}"}],
+    "AUD_EVENT_FILES": [{"FILE_PATH": "/kept/file.csv"}],
+    "AUD_EVENT_KEYS": [{"EVENT_KEY": "kept-signal"}],
     "AUD_TASK_ATTEMPTS": [
         {"ATTEMPT_ID": 1701, "RETRYABLE": False},
         {"ATTEMPT_ID": 1702, "ATTEMPT_NUMBER": 2, "RETRYABLE": True},

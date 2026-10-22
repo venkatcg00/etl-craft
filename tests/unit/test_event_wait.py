@@ -72,7 +72,7 @@ def test_file_tokens_escape_paths_and_leave_strings_and_comments_untouched():
         refresh_type="INCREMENTAL",
         pipeline_run_id_substitution=False,
         filter_enabled=False,
-        event_files_literal="'/tmp/a''b.csv', '/tmp/c.csv'",
+        event_literals={"event_files": "'/tmp/a''b.csv', '/tmp/c.csv'"},
     )
     assert sql == "SELECT '/tmp/a''b.csv', '/tmp/c.csv', '$$event_files' -- $$event_files\n"
 
@@ -85,7 +85,7 @@ def test_runtime_file_token_without_evidence_is_refused():
             refresh_type="INCREMENTAL",
             pipeline_run_id_substitution=False,
             filter_enabled=False,
-            event_files_literal="",
+            event_literals={"event_files": ""},
         )
 
 
@@ -96,3 +96,62 @@ def test_indefinite_wait_and_default_probe_interval():
     assert event.timeout_seconds is None
     assert event.poll_seconds == 60
     assert read_event(base_config(), {"EVENT_FILE": "a"}).timeout_seconds == 3600
+
+
+@pytest.mark.parametrize("maximum", ["0", "-1", "1.5", "nan", "1e2", "", "\u0661"])
+def test_event_max_rows_requires_a_positive_whole_number(maximum):
+    with pytest.raises(HandlerError) as caught:
+        read_event(base_config(), {"EVENT_FILE": "inbox/*", "EVENT_MAX_ROWS": maximum})
+    for part in ("EVENT_MAX_ROWS", repr(maximum), "positive whole number", "correct"):
+        assert part in str(caught.value)
+
+
+def test_a_file_wait_cannot_declare_a_signal_key_column():
+    with pytest.raises(HandlerError) as caught:
+        read_event(base_config(), {"EVENT_FILE": "inbox/*", "EVENT_KEY_COLUMN": "event_id"})
+    for part in (
+        "EVENT_FILE='inbox/*'",
+        "EVENT_KEY_COLUMN='event_id'",
+        "EVENT_SQL result",
+        "remove",
+    ):
+        assert part in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT count(*) AS ready FROM signals",
+        "(SELECT count(*) AS ready FROM signals)",
+        "SELECT sum(x) AS ready FROM signals WHERE 1=0",
+        "WITH events AS (SELECT * FROM signals) SELECT count(*) FROM events",
+        "SELECT coalesce(max(x), 0) AS ready FROM signals",
+    ],
+)
+def test_unconditional_aggregates_cannot_satisfy_an_event(sql):
+    config = replace(
+        base_config(),
+        warehouse=ConnectionProfile("WAREHOUSE", "test", "jdbc:duckdb:test.db", "", "NONE"),
+    )
+    with pytest.raises(HandlerError) as caught:
+        read_event(config, {"EVENT_SQL": sql})
+    for part in ("EVENT_SQL", "aggregate", "always returns a row", "HAVING count(*) > 0"):
+        assert part in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT count(*) AS ready FROM signals HAVING count(*) > 0",
+        "SELECT x, count(*) FROM signals GROUP BY x",
+        "SELECT count(*) OVER () AS ready FROM signals",
+        "SELECT * FROM signals WHERE x > (SELECT count(*) FROM other)",
+        "WITH counts AS (SELECT count(*) AS n FROM signals) SELECT * FROM counts WHERE n>0",
+    ],
+)
+def test_conditional_aggregates_and_windows_remain_valid(sql):
+    config = replace(
+        base_config(),
+        warehouse=ConnectionProfile("WAREHOUSE", "test", "jdbc:duckdb:test.db", "", "NONE"),
+    )
+    assert read_event(config, {"EVENT_SQL": sql}).sql == sql

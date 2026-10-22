@@ -145,8 +145,9 @@ item's text, or work done early under another item.
 | S5.AF Indexes for every query | Done | #229 | Selective history indexes, bounded catalog reads and a PostgreSQL full-scan guard |
 | S5.X Unmanaged SQL tasks | Done | #230 | `SQL_SCRIPT` runs any SQL as an ordinary dependent task with per-statement audit; pre- and post-SQL are upstream and downstream tasks |
 | S5.C The PostgreSQL queue and the agent | Done | #231 | API-only agents with claims, renewals, fenced reports, shared log chunks and durable drain/resume/stop; durable resource locks that pass only after the expired holder's warehouse statements are confirmed stopped |
-| S5.AI Event waits on signal rows | Planned | | Keyed SQL waits consume each signal once with the wait's success, like files; always-true queries are refused |
+| S5.AI Event waits on signal rows | Done | #233 | Keyed SQL waits consume each signal once with the wait's success, like files; bounded probes; always-true queries are refused |
 | S5.AH Partitioned offsets for streams | Planned | | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
+| S5.AJ Fewer warehouse round trips | Planned | | One warehouse connection per task, cached table metadata, combined checks and a statement budget in CI; cloud suites under 15 minutes |
 | S5.D and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -605,7 +606,23 @@ both Engine DBs, and released-schema upgrades on both. Lock races ran 20 times. 
 ran against PostgreSQL and Trino over Iceberg locally. Full cloud acceptance passed on
 Snowflake (39 tests, including takeover fencing) and Databricks (38 tests).
 
+S5.AI (#233) ran its signal, event-wait and event-query tests on every local warehouse and both
+Engine DBs, the released-schema upgrades on both, and the event-wait cloud tests on Snowflake and
+Databricks (4 passed, native and Iceberg).
+
 **Choices that differ from the item text.**
+
+- S5.AI looks up consumed keys only among the keys a probe returned (at most `EVENT_MAX_ROWS`,
+  through the unique index), not the task's whole history, so a probe's cost stays with its
+  window. Keys are recorded with `ON CONFLICT DO NOTHING`; when another outcome recorded one
+  first, the whole outcome rolls back and the wait checks again at once. Two runs cannot
+  normally race for a key (one pipeline has one exclusive run in progress, and event waits are
+  refused for independent selections), so the race test records one key from two transactions
+  at once rather than fabricating two runs.
+- S8.B's layers follow the owner (22 October 2026): LND, PRS SCD2, CDC, PRE_ODS (one shared
+  table, each client deleting then appending its rows), business rules, a normalized SCD1 ODS
+  and a flattened SCD2 DM. S7.M queues uploads that arrive during a run and runs them together,
+  validated per file, later uploads winning, each row attributed to its own uploader.
 
 - S5.C includes the query fencing S5.D's cancellation would otherwise supply (owner, 21 October
   2026); S5.D keeps operator cancellation acknowledged within seconds. A lock whose holder ended or
@@ -5071,6 +5088,43 @@ Branch: `feat/scripting-partitioned-offsets`. After S5.AI, before S5.D (owner, 2
 - *Done when.* A stream is read in bounded, repeatable micro-batches with per-partition positions
   etl-craft checks, and an operator can move a position deliberately, with a reason.
 
+### S5.AJ Fewer warehouse round trips
+
+Branch: `perf/warehouse-round-trips`. After S5.AH, before S5.D (owner, 22 October 2026).
+
+- *Problem.* Measured on Snowflake (22 October 2026): `test_every_action_on_snowflake[NATIVE]`,
+  every SQL action once on native tables, took 970 s. It ran 501 statements averaging 0.97 s
+  (484 s); the other 486 s went to opening connections, session setup, metadata and Engine DB
+  calls. One table's columns were read 20 times in that test. On a cloud warehouse each
+  statement and each login costs about a second, so a team's pipelines pay the same: the
+  number of round trips, not the SQL, sets the run time. The cloud suites take hours.
+- *Change.*
+  1. **One warehouse connection per task process.** `open_warehouse` and `task.warehouse()`
+     reuse the task's warehouse engine across its steps instead of building and disposing one
+     per unit of work: one login and one session setup per task. A minted credential is still
+     refreshed before it expires, and the single-writer lock and session tags (S5.C) apply as
+     before.
+  2. **Table metadata read once per task.** Columns and types of a table are cached for the
+     task and refreshed only after etl-craft's own DDL on that table (create, replace, add
+     column), so a stale cache cannot be read.
+  3. **Combined checks.** An action's validation counts (NULL keys, duplicate keys, source and
+     target rows, and the like) come from one statement returning every count, where the
+     warehouse allows it, with the same failure messages naming each check.
+  4. **A statement budget in CI.** A test runs every SQL action on DuckDB and counts
+     statements and connections per action, failing when either rises above a recorded budget.
+     Lowering the budget records the improvement, like the quality baseline. It adds no
+     measurable CI time.
+  5. **Cloud suites that finish.** The cloud suites keep only what local suites cannot prove
+     (S7.H's rule), run both clouds in parallel, and fail a test whose single statement waits
+     longer than a stated limit (a cold warehouse shows as a clear error, not a stall). Target:
+     each whole cloud suite under 15 minutes. Record each suite's duration in the PR.
+- *Tests.* The budget test above; the existing action, merge and crash suites unchanged on every
+  local warehouse; a reused connection survives an expired minted credential; metadata is
+  re-read after each kind of etl-craft DDL.
+- *Done when.* `test_every_action_on_snowflake[NATIVE]` runs in under 4 minutes, both cloud
+  suites finish within 15 minutes each, and CI fails when an action's statements or connections
+  grow.
+
 ### S5.D Cancellation across the cluster
 
 Cancelling a run sets `CANCEL_REQUESTED_AT` on its non-terminal attempts. `QUEUED` attempts end
@@ -5657,25 +5711,41 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
        - the request carries anything other than exactly one file;
        - the file is larger than the blanket `uploads.max_file_mb` in `craft-connector.yml`
          (default 50), which applies to every pipeline of the project;
-       - the file is identical (same SHA-256) to one already loaded for the pipeline; the
-         message names the earlier upload;
-       - the pipeline already has a run in progress; the message names that run and its
-         upload.
+       - the file is identical (same SHA-256) to one already queued or loaded for the
+         pipeline; the message names the earlier upload.
 
        Otherwise the original file is kept under the project's `uploads/` directory by upload
-       id, and the pipeline starts at once as a run requested by the uploader, with the upload
-       as its input (`$$upload_id` for SQL tasks, `task.upload` for scripts).
-     - The run's writer is the uploader (S5.S). Every row it inserts or updates in project
-       tables carries the uploader's account in `CREATED_BY` and `UPDATED_BY`. On protected
-       SCD tables these are human writes under S5.O.3's locks.
+       id, and recorded as `QUEUED`.
+     - **Queued uploads run together** (owner, 22 October 2026). With no run of the pipeline
+       in progress, the upload starts a run at once. While one is in progress, the upload stays
+       `QUEUED`, and the uploader is told which run it waits behind. When that run ends, the
+       controller starts one new run holding every queued upload, in upload order. The decision
+       is durable: a controller restart starts the pending run, and an upload is in exactly one
+       run.
+     - **The run's inputs.** `task.uploads` lists the run's uploads in order (each with its
+       id, file, uploader and SHA-256), and `$$upload_ids` gives SQL tasks their ids.
+     - **Validation per file.** The `FILE_VALIDATION` task checks each file on its own. A
+       refused file is recorded `REFUSED` with its reason and shown to its uploader; the run
+       continues with the files that passed. A run whose every file was refused ends without
+       loading anything, and says so.
+     - **Later uploads win.** Rows landed from an upload carry its `UPLOAD_ID`. Two uploads
+       in one run that change the same key resolve as if they had run one after another: a
+       stewardable pipeline's merge orders by upload (`MERGE_DEDUPE_ORDER` on the upload
+       sequence, newest last), and `validate` refuses a stewardable merge without that order.
+     - **Each row names its own uploader.** A run can hold several stewards' files, so the
+       writer is the row's uploader, not the run's requester. Every row inserted or updated in
+       project tables carries its upload's account in `CREATED_BY` and `UPDATED_BY`, and on
+       protected SCD tables it is that person's human write under S5.O.3's locks.
   4. **Record.**
      - `AUD_UPLOADS` holds:
        - `UPLOAD_ID`, the pipeline and the account;
        - the file name, SHA-256 and size;
-       - `PIPELINE_RUN_ID`;
-       - the status: `REFUSED` (before a run, or by the `FILE_VALIDATION` task, with the
-         reason), `LOADED`, or `FAILED` with the run's outcome;
-       - the times.
+       - `PIPELINE_RUN_ID`, set when a run takes the upload;
+       - the status: `QUEUED`, `REFUSED` (before a run, or by the `FILE_VALIDATION` task, with
+         the reason), `LOADED`, or `FAILED` with the run's outcome;
+       - the times: uploaded, taken by a run, and ended.
+     - A failed run keeps its uploads: its retries and reruns process the same set, and an upload
+       that arrived after it started waits for the next run.
      - After the retention period, move the file to `Uploads.Archive_to` (`file://`, or
        `s3://` through an S5.F `Object_stores` profile), recording its archive location and SHA-256, then remove it from live storage.
        The audit row stays forever: uploader, time, file name, size, SHA-256 and the run started.
@@ -5699,7 +5769,12 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
   - Starting: `run`, the API and the UI refuse a stewardable pipeline without an upload;
     retries and reruns reuse the stored file.
   - Requests: zero and two files; files over the blanket limit and over the pipeline's limit;
-    a duplicate file; an upload while the pipeline is running.
+    a duplicate of a queued and of a loaded file.
+  - Queueing, on both Engine DBs: uploads during a run are `QUEUED` and then run together, in
+    upload order, in exactly one next run, also across a controller restart; one refused file
+    leaves the others loading; two uploads changing the same key leave the later one's value;
+    each row carries its own uploader in `CREATED_BY`, `UPDATED_BY` and S5.O.3's locks; a
+    failed run's retry keeps its uploads while a later upload waits for the next run.
   - Formats:
     - pipe-delimited CSV and TXT, including quoted pipes;
     - XLSX on a named and a default sheet;
@@ -6418,21 +6493,22 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 
 | Pipeline | Task | Handler and action | Replaces |
 | --- | --- | --- | --- |
-| `SI_SETUP` (manual, once and on schema change) | one `SETUP_TABLE` per target table in `lnd`, `prs`, `cdc`, `pre_dm`, `dm`, `dwh` | SQL `SETUP_TABLE` | `infra/sql/06` to `11` |
+| `SI_SETUP` (manual, once and on schema change) | one `SETUP_TABLE` per target table in `lnd`, `prs`, `cdc`, `pre_ods`, `ods`, `dm`, `dwh` | SQL `SETUP_TABLE` | `infra/sql/06` to `11` |
 | `SI_REFERENCE` (deploy after `seed apply`, or detached stewardship trigger; no daily schedule) | `ds_*_to_dwh`, `info_data_dictionary_to_dwh` | SQL `SCD2_MERGE` for the four `ds` tables and dictionary | reference-history triggers |
 | | `<table>_deletes_to_dwh` (one per copy) | SQL `DELETE_ROWS` (soft), selecting `dwh` keys absent from the source | the triggers' `D` rows |
 | `SI_CLIENT_ALPHA` (every 15 min outside the maintenance hour) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
 | | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
 | | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_run_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
-| | `alpha_predm_delete` | SQL `DELETE_ROWS`, `HARD_DELETE = true`: selects Alpha's keys from `pre_dm.customer_support_stage` | replacement of Alpha's stage rows |
-| | `alpha_cdc_to_predm` (depends on delete with `SUCCESS`) | SQL `APPEND_TABLE`: joins `ds` lookups, maps codes and writes the source column | the transform half of `client_alpha_cdc_to_predm` |
-| | `alpha_rules` | BUSINESS_RULES on only Alpha's rows in `pre_dm.customer_support_stage`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
-| | `alpha_predm_to_dm` | SQL `SCD2_MERGE` into `dm.customer_support_fact`, keyed on `source_system_identifier`, excluding rejected keys | `client_alpha_predm_to_dm` |
+| | `alpha_preods_delete` | SQL `DELETE_ROWS`, `HARD_DELETE = true`: selects Alpha's keys from `pre_ods.customer_support_stage` | replacement of Alpha's stage rows |
+| | `alpha_cdc_to_preods` (depends on the delete with `SUCCESS`) | SQL `APPEND_TABLE` into `pre_ods.customer_support_stage`: joins `ds` lookups, maps codes and writes the source column | the transform half of `client_alpha_cdc_to_predm` |
+| | `alpha_rules` | BUSINESS_RULES on only Alpha's rows in `pre_ods.customer_support_stage`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
+| | `alpha_preods_to_ods` (one task per ODS table, depending on the rules) | SQL `SCD1_MERGE` into the normalized ODS: one table per entity (interactions, customers, agents, support areas and the like), each keyed on its own business key and referring to the others by key, excluding rejected keys | the normalized half of `client_alpha_predm_to_dm` |
+| | `alpha_ods_to_dm` (depends on every ODS merge) | SQL `SCD2_MERGE` into `dm.customer_support_fact`, one flattened wide table joining the ODS tables and `ds` lookups, keyed on `source_system_identifier` | `client_alpha_predm_to_dm` |
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
 | `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
 | `SI_CLIENT_GAMMA` | as Alpha, with `minio_to_lnd.py` (the last processed object key, `{sequence_number:10d}_...`, as a `TEXT` offset) | | `Client_Gamma_ETL_Task_Flow` |
 | `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per stewarded `ds` table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
-| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads `task.upload` into the table's landing table | |
+| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads every file in `task.uploads` into the table's landing table, each row with its `UPLOAD_ID` | |
 | | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table | |
 | | `reference_refresh` (final task after the merge) | S5.AC `RUN_PIPELINE` for `SI_REFERENCE`, `DETACH` | carries corrections to `dwh` |
 | `SI_MAINTENANCE` (nightly, outside client schedules) | one task per layer | S5.X `SQL_SCRIPT`, explicit lake-table maintenance; `RETRY_ON = NONE` | Iceberg file and snapshot maintenance |
@@ -6449,14 +6525,18 @@ Rules for building them:
    `DUPLICATE_COUNT` to the action's counts rather than computing it in a script.
 2. Each Python script replaces its landing table's rows every run and returns
    `ScriptResult(row_count, offset)`. If the scripting helper cannot replace, record a package
-   gap under rule 1. All clients share `pre_dm.customer_support_stage`, with a source column.
-   Their `<client>_predm_delete` and `<client>_cdc_to_predm` tasks commit separately: between
-   them that source has no PRE_DM rows, and a retry re-runs only the append. Rules and the DM
-   merge depend on the append; each client's rules evaluate only its own source rows. If
-   `BUSINESS_RULES` cannot scope to those rows, that is a package gap under rule 1. PRS and
-   DM stay SCD2, and CDC stays overwrite.
-3. The `dm.customer_support_fact` table is created by `SETUP_TABLE` with etl-craft's SCD2 audit
-   columns. Its source-based partitions are dropped (the data is small); `is_active` becomes
+   gap under rule 1. The layers (owner, 22 October 2026): LND overwrite, PRS SCD2, CDC
+   overwrite, PRE_ODS, business rules, ODS SCD1 and normalized, DM SCD2 as one flattened wide
+   table. All clients share `pre_ods.customer_support_stage`, with a source column. Each client
+   replaces its own rows: `<client>_preods_delete` (`DELETE_ROWS`, `HARD_DELETE`) then
+   `<client>_cdc_to_preods` (`APPEND_TABLE`). They commit separately: between them that source
+   has no PRE_ODS rows, and a retry re-runs only the append. The rules and the ODS merges depend
+   on the append; each client's rules evaluate only its own source rows. If `BUSINESS_RULES`
+   cannot scope to those rows, that is a package gap under rule 1.
+3. The ODS tables are created by `SETUP_TABLE` with etl-craft's SCD1 audit columns, one per
+   entity, so a correction to a customer or agent changes one row in one table. The
+   `dm.customer_support_fact` table is created by `SETUP_TABLE` with etl-craft's SCD2 audit
+   columns, flattened from the ODS for reporting. Its source-based partitions are dropped (the data is small); `is_active` becomes
    `ACTIVE_FLAG = 'Y'`, and validity comes from the business rules.
 4. Pools: ingestion tasks run in the `ingestion` pool on agent 1, SQL and rules in the `warehouse`
    pool on agent 2, so the example exercises the cluster.
@@ -6535,7 +6615,7 @@ each checked by S8.F's independent reference queries.
    | `batch_count` | the ingestion task's `SOURCE_COUNT` |
    | `insert_count`, `update_count` | the `lnd_to_prs` task: `UPDATE_COUNT` counts closed versions; `INSERT_COUNT - UPDATE_COUNT` counts new keys |
    | `duplicate_count` | the `lnd_to_prs` dedupe count (S8.B rule 1) |
-   | `valid_count`, `validity_percentage` | the source's run rows in PRE_DM minus that run's rejected keys |
+   | `valid_count`, `validity_percentage` | the source's run rows in PRE_ODS minus that run's rejected keys |
    | `dag_run_status = 'SUCCESS'` filter | `STATUS = 'SUCCESS'` |
 
 The README and UI guide inspection; no dashboard exports or imports remain.

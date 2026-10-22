@@ -173,6 +173,8 @@ class ScriptTask:
     day it started, or the date a backfill run is for. In a backfill (``backfill``), ``offset``
     is ``None`` and an offset the script returns is not stored: a backfill reads its source for
     ``run_date``, and leaves the next scheduled run where the last one left off.
+    ``event_files`` and ``event_keys`` are tuples from successful waits in this exact run.
+    ``event_rows`` holds the keyed waits' other selected columns, paired with their keys.
     """
 
     pipeline_code: str
@@ -190,6 +192,8 @@ class ScriptTask:
     run_date: date = field(default_factory=lambda: datetime.now(UTC).date())
     backfill: bool = False
     event_files: tuple[str, ...] = ()
+    event_keys: tuple[str, ...] = ()
+    event_rows: tuple[Mapping[str, Any], ...] = ()
     _locks: ResourceLocker | None = field(default=None, repr=False)
 
     def table(self, name: str) -> str:

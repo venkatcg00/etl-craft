@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -104,7 +104,7 @@ def _check_event(wait: _EventWait, now: datetime) -> EventCheck:
     try:
         task_timeout_seconds(task_params, config)
         task_retry_policy(task_params, config)
-        event = read_event(config, task_params)
+        event = replace(read_event(config, task_params), task_id=task_id)
         deadline = (
             (as_utc(row.wait_until) if row.wait_until is not None else None)
             if row
@@ -131,15 +131,23 @@ def _check_event(wait: _EventWait, now: datetime) -> EventCheck:
         status, message = RunStatus.FAILED, f"EVENT_WAIT task_id={task_id}: {error}"
         deadline = as_utc(row.wait_until) if row and row.wait_until is not None else now
     next_check = None if status is not None else _next_check(event, observations, now, deadline)
-    with engine.begin() as conn:
-        _save_wait(conn, params, (first, deadline, next_check), observations)
-        if status is None:
-            return EventCheck(next_check)
-        binding = transitions.find_or_create_task_run(conn, task_id, wait.pipeline_run_id)
-        if binding.status in _ENDED:
-            return EventCheck(status=binding.status, task_run_id=binding.task_run_id)
-        _complete(conn, wait, binding.task_run_id, (status, message), evidence)
+    try:
+        with engine.begin() as conn:
+            _save_wait(conn, params, (first, deadline, next_check), observations)
+            if status is None:
+                return EventCheck(next_check)
+            binding = transitions.find_or_create_task_run(conn, task_id, wait.pipeline_run_id)
+            if binding.status in _ENDED:
+                return EventCheck(status=binding.status, task_run_id=binding.task_run_id)
+            _complete(conn, wait, binding.task_run_id, (status, message), evidence)
+    except _KeysTakenError:
+        # Another run consumed a key between this probe and this outcome; nothing committed.
+        return EventCheck(now)
     return EventCheck(status=status, task_run_id=binding.task_run_id, message=message)
+
+
+class _KeysTakenError(Exception):
+    """Another run consumed one of this outcome's event keys first; never raised out of here."""
 
 
 def _save_wait(
@@ -265,7 +273,8 @@ def _complete(
         )
         trackers.record_decisions(conn, wait.pipeline_run_id, wait.decisions, attempt_id=attempt)
         if evidence:
-            record_event(conn, wait.task_id, task_run_id, evidence)
+            if not record_event(conn, wait.task_id, task_run_id, evidence):
+                raise _KeysTakenError
             fault_point("event.after_evidence")
         transitions.finish_attempt(
             conn,
@@ -273,8 +282,14 @@ def _complete(
             status,
             current_actor(),
             owner=owner,
-            counts=Counts(source_count=len(evidence.get("files", [1])) if evidence else None),
+            counts=Counts(
+                source_count=len(evidence.get("files", evidence.get("keys", [1])))
+                if evidence
+                else None
+            ),
             task_log=f"EVENT_EVIDENCE = {json.dumps(evidence, default=str)}" if evidence else None,
             error_message=message or None,
             retryable=False,
         )
+        # This attempt records a completed probe; it starts no process or warehouse session.
+        controls.observe_exit(conn, attempt, queries_ended=True)

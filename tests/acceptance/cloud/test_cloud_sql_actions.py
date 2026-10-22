@@ -347,6 +347,7 @@ def walk_schema_evolution(w):
     finally:
         for target in targets:
             w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
         w.warehouse.dispose()
         w.engine_db.dispose()
 
@@ -584,6 +585,7 @@ def walk_identity_inputs(w):
         check_identity_inputs(w, target)
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
         w.warehouse.dispose()
         w.engine_db.dispose()
 
@@ -658,6 +660,7 @@ def walk_ingestion_upgrade(w):
         check_ingestion_target_upgrade(w, target)
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
         w.warehouse.dispose()
         w.engine_db.dispose()
 
@@ -784,13 +787,15 @@ def test_watermark_literals_on_snowflake(tmp_path, table_format):
 
 def walk_events(w):
     """Read-only warehouse event waits and portable file literals."""
-    from fixtures.event_waits import check_event_queries
+    from fixtures.event_waits import check_event_queries, check_signal_queries
 
     target = f"etl_craft_event_{uuid.uuid4().hex[:8]}"
     try:
         check_event_queries(w, target)
+        check_signal_queries(w, target + "_signals")
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
         w.warehouse.dispose()
         w.engine_db.dispose()
 
@@ -891,6 +896,7 @@ def walk_source_definitions(w, folder):
         assert compared.columns["id"].warehouse_type != "VARCHAR"
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
         w.warehouse.dispose()
         w.engine_db.dispose()
 

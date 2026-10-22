@@ -213,6 +213,12 @@ SEEDS = [
         RUNS + " CROSS JOIN generate_series(1,1) t",
     ),
     (
+        "AUD_EVENT_KEYS",
+        "TASK_ID,EVENT_KEY,TASK_RUN_ID,CREATED_BY,CREATED_AT",
+        f"{TASK_ID},'signal/'||d,{TASK_RUN_ID},'plan',{DAY}",
+        RUNS + " CROSS JOIN generate_series(1,1) t",
+    ),
+    (
         "AUD_ATTEMPT_ACKNOWLEDGEMENTS",
         "ATTEMPT_ID,KIND,OBSERVED_AT",
         f"{TASK_RUN_ID},'PROCESS',{DAY}",

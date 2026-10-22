@@ -51,6 +51,7 @@ from etl_craft.engine.repository.validation import (
     fetch_pipeline_parameters,
     fetch_task_dependency_edges,
 )
+from etl_craft.execution.event_probe import probe_sql
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
 from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline, sql_script
@@ -59,14 +60,13 @@ from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.actions import writer_action
-from etl_craft.handlers.sql.analysis import read_query
+from etl_craft.handlers.sql.analysis import output_columns, read_query
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.services.doctor import Status
 from etl_craft.services.lineage import (
     dialect_and_catalog,
-    output_columns,
     script_lineage,
     table_name,
 )
@@ -572,7 +572,9 @@ def _email_alert(conn: Connection, context: TaskContext, data: _Metadata) -> lis
 
 
 def _event_wait(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
-    event_wait.read_event(context.config, context.task_params)
+    event = event_wait.read_event(context.config, context.task_params)
+    if event.key_column:
+        probe_sql(context.config, event, 30, None)
     return []
 
 

@@ -13,7 +13,9 @@ a queue of empty runs.
   changing.
 - **A file in cloud storage** (S3, Azure Blob, Google Cloud Storage): use the cloud's own event
   for a new object, and a small function that writes a row to a table, then wait for that row
-  with `EVENT_SQL`. etl-craft does not list buckets.
+  with `EVENT_SQL` and `EVENT_KEY_COLUMN`. See
+  [Signalling a pipeline from other systems](external-events.md) for INSERT-only cloud functions.
+  etl-craft does not list buckets.
 - **Something another system finished** (a job, a webhook, a message): the same kind of row.
 - **Another pipeline's success:** not an event wait. Use `CFG_PIPELINE_DEPENDENCY` with
   `DEPENDENCY_TYPE='SUCCESS'`, which has its own `Orchestration.Gate_wait_minutes` budget.
@@ -27,6 +29,8 @@ a queue of empty runs.
 |---|---|
 | `EVENT_FILE` | a filesystem glob, absolute or relative to the directory holding `craft-connector.yml` |
 | `EVENT_SQL` | one read-only SELECT on the configured warehouse; any returned row satisfies it, so select rows such as `SELECT 1 ... WHERE ...`, never `count(*)`, which returns a row even when the count is 0 |
+| `EVENT_KEY_COLUMN` | optional SQL result column containing a stable, nonempty scalar event id; consumed ids are ignored; refused on file waits |
+| `EVENT_MAX_ROWS` | positive whole number; default `10000`; a SQL result above it fails before consumption; bound the query's window |
 | `EVENT_SETTLE_SECONDS` | seconds a file's size and modification time must stay unchanged; default `30` |
 | `EVENT_TIMEOUT_MINUTES` | total wait budget in minutes; default `60`; `NONE` waits indefinitely; `0` checks files once and allows no SQL connection wait |
 | `EVENT_POLL_SECONDS` | seconds between SQL probes or fallback file scans; default `60`, minimum `1` |
@@ -65,6 +69,14 @@ probe, which also exits if its supervisor dies. The original deadline is committ
 querying. Keep queries short and read-only: an event probe holds no target lock, so stopping it
 does not guarantee that a remote warehouse cancels its query at once.
 
+For keyed SQL waits, `validate` also performs a bounded, read-only warehouse probe, without
+changing run state. The query must return `EVENT_KEY_COLUMN`, including when no rows match.
+Keys match column names without regard to case. NULL, empty or structured ids are refused.
+A probe reads at most `EVENT_MAX_ROWS + 1` rows at the server and reports the overflow as
+"at least" that count; it never fetches the entire result to count it. This bound applies to
+SQL waits with or without keys. Top-level aggregates without GROUP BY or HAVING are refused
+in validation and at runtime; use `SELECT 1 AS ready ... WHERE ...`, or add `HAVING count(*) > 0`.
+
 ## Resources and outcomes
 
 
@@ -80,7 +92,16 @@ At timeout, the task ends `FAILED` or `SKIPPED`; ordinary `SUCCESS`, `FAILURE`, 
 an event task reports no target rows, so `validate` refuses `HAS_DATA` on it. Timeouts and probe
 errors do not automatically retry or receive a fresh budget. To wait for a new delivery, start a new run.
 
-## Evidence and downstream files
+## Evidence and downstream values
+
+Keyed SQL evidence records `keys` and `rows` (the selected columns other than the key).
+`AUD_EVENT_KEYS` records each key once per event task, with the task run, actor and timestamp.
+Its append-only rows commit with success exactly as file consumption does. A failed completion
+records no keys. A downstream failure keeps the original evidence for retry and recovery;
+new signals arriving after success wait for the next run. `task.event_keys` and
+`task.event_rows` expose that exact run's saved keys and payload mappings.
+`$$event_keys` uses the same escaping as `$$event_files`; an exact top-level `INPUT_PARAMS`
+value `"$$event_keys"` becomes a list.
 
 The task summary and `AUD_TASK_ATTEMPTS.TASK_LOG` contain `EVENT_EVIDENCE`: file paths, byte sizes and
 nanosecond modification times, or the query's first row. `AUD_TASK_EVENTS` keeps that evidence

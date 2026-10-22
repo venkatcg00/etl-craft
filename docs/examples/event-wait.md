@@ -49,6 +49,11 @@ The run waits, records the settled file and lets the script read it. A later run
 `etl-craft controller start` with the project's connector configuration.
 
 For a table instead of a file, replace `EVENT_FILE` with `EVENT_SQL`, such as
-`SELECT delivery_id FROM source.deliveries WHERE ready=true`. Each run checks that query anew;
-it must select rows for the delivery it intends to process. Query events do not consume rows.
+`SELECT delivery_id FROM source.deliveries WHERE ready=true`. Set `EVENT_KEY_COLUMN=delivery_id` to consume each delivery once. Without that parameter,
+each run checks the query anew and retains its first-row readiness behavior.
 See [Event waits](../guides/event-waits.md) for timeout and evidence behavior.
+
+The optional `examples/demo/metadata/signal_waits.sql` and `python_scripts/signals.py` show
+a keyed signal table. Create `lnd.external_signals` first using the
+[external signal guide](../guides/external-events.md), choose its bounded retention window,
+and narrow the example's `EVENT_SQL` to that window before deploying it.
