@@ -55,7 +55,7 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
-- Fewer warehouse and Engine DB round trips. A task uses one warehouse connection for all its
+- Fewer warehouse and Engine DB round trips. Tasks reuse their warehouse engine across
   steps, including repeated `task.warehouse()` calls, keeping single-writer reservations and
   attempt tags. Managed SQL actions read each table's shape once until their own DDL, fold
   row and key counts into one statement, merge with one `MERGE` where the warehouse has it,
@@ -66,6 +66,10 @@ All notable changes are recorded here. The format follows
   Snowflake or Databricks target is published by renaming its candidate. No lease, ownership
   or fencing check is cached. Cloud acceptance uses parallel pytest workers; release evidence
   is collected and written once by the controller, preserving serial test IDs and outcomes.
+  UTC session settings travel with login; Snowflake reads its default schema from the
+  authenticated session. Databricks immutable SQL stages use session tables where supported,
+  retaining persistent stages for mutable work and explicit capability refusals. Development
+  API tests use the supported `httpx2` TestClient dependency.
 
 - Target, event and single-writer warehouse ownership use shared durable resource locks.
   Agents stop their children before lease expiry when renewal fails. A lock left by an ended
