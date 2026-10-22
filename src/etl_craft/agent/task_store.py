@@ -30,6 +30,7 @@ class RemoteTaskStore:
     attempt_id: int
     confirm: Callable[[str], None]
     held: set[int] = field(default_factory=set)
+    contracts: dict[str, TargetState] = field(default_factory=dict)
 
     @property
     def holder_id(self) -> str:
@@ -52,10 +53,15 @@ class RemoteTaskStore:
 
     def state(self, sql_action: str | None = None) -> TaskState:
         """Read the admitted task's metadata, checkpoints and related writers."""
-        return from_json(TaskState, self.call(self.request(AgentReport.STATE)))
+        state = from_json(TaskState, self.call(self.request(AgentReport.STATE)))
+        if state.target is not None and state.contract is not None:
+            self.contracts[state.target.lower()] = state.contract
+        return state
 
     def target(self, target: str) -> TargetState:
         """Read only the locked target's published contract."""
+        if target.lower() in self.contracts:
+            return self.contracts[target.lower()]
         return from_json(
             TargetState, self.call(replace(self.request(AgentReport.TARGET), target=target))
         )
@@ -117,12 +123,14 @@ class RemoteTaskStore:
             confirm_stale(self.confirm, name, stale)
             request = replace(request, confirmed_holder=stale)
         self.held.add(key)
+        self.contracts.clear()
         completed = False
         try:
             yield
             completed = True
         finally:
             self.held.remove(key)
+            self.contracts.clear()
             if not completed:
                 confirm_stale(self.confirm, name, self.holder_id)
             self.call(replace(self.request(AgentReport.UNLOCK), lock_key=key))

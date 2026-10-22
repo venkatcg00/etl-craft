@@ -6,11 +6,13 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Connection, CursorResult, Engine
 from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.exc import SQLAlchemyError
+from sqlglot import exp
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode, FailureClass, TableFormat
@@ -24,6 +26,7 @@ from etl_craft.dialects.warehouse.base import (
     SurrogateKey,
     WarehouseDialect,
 )
+from etl_craft.dialects.warehouse.metadata import TableMetadata
 from etl_craft.dialects.warehouse.replacement import identity_replacement, replacement_ddl
 
 if TYPE_CHECKING:
@@ -55,6 +58,98 @@ class DatabricksWarehouse(WarehouseDialect):
         return failure
 
     spec = warehouse_by_key("databricks")
+    catalog_columns = False
+    metadata_types_complete = True
+    dml_rowcounts = True
+
+    def read_metadata(self, conn: Connection, table: str) -> TableMetadata:
+        """DESCRIBE JSON supplies complete types, nullability and table properties together."""
+        try:
+            result = conn.execute(text(f"DESCRIBE TABLE EXTENDED {table} AS JSON")).scalar_one()
+        except SQLAlchemyError as error:
+            if self.classify_failure(error).code == "42P01":
+                return TableMetadata(())
+            raise
+        try:
+            description = json.loads(str(result))
+            columns = tuple(
+                (
+                    str(column["name"]),
+                    self.json_type(column["type"]),
+                    None,
+                    None,
+                    "YES" if column["nullable"] else "NO",
+                )
+                for column in description["columns"]
+            )
+            storage = (
+                None
+                if "VIEW" in str(description["type"]).upper()
+                else self.metadata_format(
+                    table, description["provider"], description.get("table_properties")
+                )
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise SqlGuardError(
+                f"{table}: DESCRIBE returned invalid column metadata; expected complete JSON "
+                "types and nullability; repair the table's metadata before writing"
+            ) from error
+        return TableMetadata(columns, table_format=storage)
+
+    def json_type(self, description: object) -> str:
+        """Render only the documented structured type metadata, including nested fields."""
+        if not isinstance(description, dict):
+            raise SqlGuardError(
+                "Databricks column type: expected DESCRIBE JSON type metadata; repair the table"
+            )
+        name = str(description["name"]).upper()
+        if name == "DECIMAL":
+            return f"DECIMAL({int(description['precision'])},{int(description['scale'])})"
+        if name in {"CHAR", "VARCHAR"}:
+            return f"{name}({int(description['length'])})"
+        if name == "ARRAY":
+            return f"ARRAY<{self.json_type(description['element_type'])}>"
+        if name == "MAP":
+            key, value = description["key_type"], description["value_type"]
+            return f"MAP<{self.json_type(key)},{self.json_type(value)}>"
+        if name == "STRUCT":
+            fields = (
+                f"{exp.to_identifier(field['name'], quoted=True).sql(dialect='databricks')}:"
+                f"{self.json_type(field['type'])}"
+                for field in description["fields"]
+            )
+            return f"STRUCT<{','.join(fields)}>"
+        if name in {
+            "TINYINT",
+            "SMALLINT",
+            "INT",
+            "BIGINT",
+            "FLOAT",
+            "DOUBLE",
+            "STRING",
+            "BINARY",
+            "BOOLEAN",
+            "DATE",
+            "TIMESTAMP_LTZ",
+            "TIMESTAMP_NTZ",
+            "VARIANT",
+            "VOID",
+        }:
+            return name
+        raise SqlGuardError(
+            f"Databricks column type {name!r}: expected a supported DESCRIBE JSON type; "
+            "cast the column to a supported type or migrate it explicitly"
+        )
+
+    def affected_rows(self, result: CursorResult[Any]) -> int:
+        """Read either the protocol's modified count or SQL's explicit DML result."""
+        if result.rowcount >= 0:
+            return result.rowcount
+        row = result.mappings().one()
+        if "num_affected_rows" in row:
+            return int(row["num_affected_rows"])
+        return super().affected_rows(result)
+
     sqlglot_dialect = "databricks"
     replace_strategy: ReplaceStrategy = "create_or_replace"
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
@@ -107,22 +202,29 @@ class DatabricksWarehouse(WarehouseDialect):
     def existing_table_format(self, conn: Connection, target: str) -> TableFormat:
         """Distinguish ordinary Delta from Delta exposing Iceberg metadata through UniForm."""
         detail = conn.execute(text(f"DESCRIBE DETAIL {target}")).mappings().one()
-        provider = str(detail["format"]).lower()
+        return self.metadata_format(target, detail["format"], detail.get("properties"))
+
+    def metadata_format(self, target: str, format: object, properties: object) -> TableFormat:
+        """Apply the same Delta and UniForm checks to either metadata response."""
+        provider = str(format).lower()
         if provider != "delta":
             raise SqlGuardError(
                 f"{target}: existing storage format is {provider!r}; this warehouse writes "
                 "Delta or Delta with UniForm. Migrate the table explicitly or use another target"
             )
-        properties = detail["properties"]
+        unreadable = f"{target}: cannot read table properties to determine its format"
         try:
             if isinstance(properties, str):
                 properties = json.loads(properties)
-            properties = dict(properties)
+            # A mapping, or the key and value pairs some drivers return.
+            if isinstance(properties, Mapping):
+                properties = list(properties.items())
+            if not isinstance(properties, (list, tuple)):
+                raise SqlGuardError(unreadable)
+            mapping = {str(key): value for key, value in properties}
         except (TypeError, ValueError) as error:
-            raise SqlGuardError(
-                f"{target}: cannot read table properties to determine its format"
-            ) from error
-        enabled = str(properties.get("delta.universalFormat.enabledFormats", ""))
+            raise SqlGuardError(unreadable) from error
+        enabled = str(mapping.get("delta.universalFormat.enabledFormats", ""))
         return (
             TableFormat.ICEBERG
             if "iceberg" in {value.strip().lower() for value in enabled.split(",")}
@@ -236,7 +338,9 @@ class DatabricksWarehouse(WarehouseDialect):
         )
         return f"REPLACE(DATE_FORMAT({utc}, 'yyyy-MM-dd HH:mm:ss.SSSSSS'), ' ', 'T')"
 
-    session_sql = "SET TIME ZONE 'UTC'"
+    session_connect_args: ClassVar[Mapping[str, Any]] = {
+        "session_configuration": {"timezone": "UTC"}
+    }
 
     def replacement_ddl(
         self,

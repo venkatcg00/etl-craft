@@ -90,6 +90,8 @@ class Pool(Protocol):
     """Runs admitted attempts; see the module's rules."""
 
     name: str
+    status_reads_engine: bool
+    """Whether ``status`` queries the Engine DB rather than this process's own records."""
 
     def capacity(self) -> Capacity:
         """Return the slots per kind and how many are free."""

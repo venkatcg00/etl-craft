@@ -14,10 +14,10 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from sqlalchemy import text
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Connection, CursorResult, Engine
 from sqlalchemy.engine.interfaces import DBAPIConnection
 
 from etl_craft.config.auth import WarehouseSpec
@@ -27,6 +27,7 @@ from etl_craft.core.failures import Failure
 from etl_craft.core.text import as_subquery
 from etl_craft.dialects import credentials
 from etl_craft.dialects.failure_evidence import classify
+from etl_craft.dialects.warehouse.metadata import TableMetadata
 
 if TYPE_CHECKING:
     from etl_craft.config import CloningConfig, ConnectionProfile
@@ -88,6 +89,18 @@ class WarehouseDialect:
         return classify(error)
 
     spec: WarehouseSpec
+    catalog_columns = True
+
+    dml_rowcounts = False
+
+    def affected_rows(self, result: CursorResult[Any]) -> int:
+        """Require an exact DML count from a driver that promises to supply it."""
+        if result.rowcount < 0:
+            raise SqlGuardError(
+                f"{self.spec.display_name}: DML returned rowcount={result.rowcount}; "
+                "expected an affected-row count; use a driver that reports DML counts"
+            )
+        return result.rowcount
 
     # The STORAGE_PARAMETERS a task may set on this warehouse and table format.
     storage_parameters: frozenset[str] = frozenset()
@@ -148,6 +161,14 @@ class WarehouseDialect:
     def identity_table_ddl(self, target: str, columns: str, params: Mapping[str, str]) -> str:
         """Create an empty table with the supplied columns and a generated ROW_ID."""
         raise NotImplementedError(f"{self.spec.key} does not declare identity columns in CREATE")
+
+    def identity_setup_sql(self, target: str) -> tuple[str, ...]:
+        """Prepare a separately declared generator only where the warehouse requires it."""
+        return ()
+
+    def describe_select(self, conn: Connection, sql: str) -> list[tuple[str, str]] | None:
+        """Return complete source types without staging when the dialect can describe queries."""
+        return None
 
     def identity_replacement_ddl(
         self,
@@ -224,6 +245,14 @@ class WarehouseDialect:
 
     session_sql: str | None = None
     """Setup SQL for each new warehouse connection."""
+
+    session_connect_args: ClassVar[Mapping[str, Any]] = {}
+    """Session options negotiated at login, without a setup statement."""
+
+    def add_column_sql(self, table: str, column: str, kind: str, *, target: bool) -> str:
+        """Temporary native stages use ordinary ALTER, independently of target storage."""
+        keyword = self.alter_table_keyword() if target else "ALTER TABLE"
+        return f"{keyword} {table} ADD COLUMN {column} {kind}"
 
     session_fencing = False
     """Whether a new lock holder can stop an expired holder's warehouse statements.
@@ -395,9 +424,40 @@ class WarehouseDialect:
             {"table": parts[-1], "schema": parts[-2], "catalog": catalog},
         )
 
+    def relation_types_query(self, tables: tuple[str, ...]) -> tuple[str, dict[str, str | None]]:
+        """Read a set of relation kinds in one statement, preserving input identity."""
+        queries = []
+        parameters: dict[str, str | None] = {}
+        for index, table in enumerate(tables):
+            query, values = self.relation_type_query(table)
+            for name, value in values.items():
+                query = query.replace(f":{name}", f":{name}_{index}")
+                parameters[f"{name}_{index}"] = value
+            queries.append(f"SELECT {index} AS position, table_type FROM ({query}) relation")
+        return " UNION ALL ".join(queries), parameters
+
     def alter_table_keyword(self) -> str:
         """Return the keyword that alters a table this dialect created."""
         return "ALTER TABLE"
+
+    def key_counts(self, stage: str, keys: tuple[str, ...], target: str | None = None) -> str:
+        """Count invalid and duplicate keys against the same staged snapshot."""
+        listed = ", ".join(f"{key} AS k{i}" for i, key in enumerate(keys))
+        grouped = ", ".join(keys)
+        nulls = " OR ".join(f"k{i} IS NULL" for i in range(len(keys)))
+        new = ""
+        if target is not None:
+            match = " AND ".join(f"t.{key}=s.{key}" for key in keys)
+            new = (
+                f", (SELECT COUNT(*) FROM {stage} s WHERE NOT EXISTS "
+                f"(SELECT 1 FROM {target} t WHERE {match})) AS new_keys"
+            )
+        return (
+            "SELECT COALESCE(SUM(n), 0) AS source_rows, "
+            f"COALESCE(SUM(CASE WHEN {nulls} THEN n ELSE 0 END), 0) AS null_keys, "
+            f"COALESCE(SUM(CASE WHEN n > 1 THEN 1 ELSE 0 END), 0) AS duplicate_keys {new} "
+            f"FROM (SELECT {listed}, COUNT(*) AS n FROM {stage} GROUP BY {grouped}) counted"
+        )
 
     def column_metadata_query(
         self, conn: Connection, table: str, columns: str
@@ -417,6 +477,51 @@ class WarehouseDialect:
             f"SELECT {columns} FROM information_schema.columns "
             f"WHERE {where} ORDER BY ordinal_position",
             {"table": name, "schema": schema, "catalog": catalog},
+        )
+
+    def read_metadata(self, conn: Connection, table: str) -> TableMetadata:
+        """Read ordered types and nullability from the dialect's metadata source."""
+        query, parameters = self.column_metadata_query(
+            conn, table, self.hash_metadata_columns + ", is_nullable"
+        )
+        return TableMetadata(
+            tuple(
+                (str(row[0]), str(row[1]), row[2], row[3], str(row[4]))
+                for row in conn.execute(text(query), parameters)
+            )
+        )
+
+    def task_metadata_query(
+        self, conn: Connection, target: str, related: tuple[str, ...]
+    ) -> tuple[str, dict[str, str | None]]:
+        """Read target columns and related relation kinds in a single catalog snapshot."""
+        query, parameters = self.column_metadata_query(
+            conn, target, self.hash_metadata_columns + ", is_nullable"
+        )
+        fields = []
+        for index, name in enumerate(related):
+            sql, values = self.relation_type_query(name)
+            for key, value in values.items():
+                sql = sql.replace(f":{key}", f":{key}_{index}")
+                parameters[f"{key}_{index}"] = value
+            fields.append(f"({sql}) AS relation_{index}")
+        return (
+            f"SELECT columns.*, {', '.join(fields)} FROM (SELECT 1 AS present) one_row "
+            f"LEFT JOIN ({query}) columns ON 1=1",
+            parameters,
+        )
+
+    def hashed_stage(self, select_sql: str, hashed: str) -> str:
+        """Materialize the source and its hash in the same CTAS."""
+        return f"SELECT etl_src.*, {hashed} AS HASH_KEY FROM {as_subquery(select_sql)} etl_src"
+
+    def new_table_insert(self, target: str, columns: list[str], select_sql: str) -> str:
+        """Populate an explicitly declared table with the source and admitted audit ids."""
+        return (
+            f"INSERT INTO {target} ({', '.join(columns)}, "
+            "PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID) "
+            "SELECT etl_src.*, :pipeline_run_id, :pipeline_id, :task_run_id "
+            f"FROM {as_subquery(select_sql)} etl_src"
         )
 
     def full_column_types(self, conn: Connection, table: str) -> dict[str, str]:
@@ -485,6 +590,9 @@ class WarehouseDialect:
     def scratch_table_keyword(self) -> str:
         """Return ``TEMPORARY TABLE``, or ``TABLE`` where temporary tables are unusable."""
         return "TEMPORARY TABLE" if self.temporary_tables else "TABLE"
+
+    metadata_types_complete = False
+    """Whether information_schema retains reusable type sizes and nested declarations."""
 
     hash_metadata_columns = "column_name, data_type, numeric_precision, numeric_scale"
 
@@ -575,6 +683,18 @@ class WarehouseDialect:
     update_uses_merge: bool = False
     """Whether a joined update needs MERGE rather than UPDATE ... FROM."""
 
+    def row_id_base_sql(self, target: str) -> str | None:
+        """Inline the allocation only where INSERT may read its own target."""
+        return None
+
+    def merge_source(self, target: str, stage: str, keys: tuple[str, ...]) -> str | None:
+        """Return a source carrying identifiers when the dialect can allocate within MERGE."""
+        return None
+
+    def supports_insert_merge(self, conn: Connection) -> bool:
+        """Whether one MERGE can update and insert source rows."""
+        return True
+
     def update_from_stage(
         self,
         target: str,
@@ -582,15 +702,20 @@ class WarehouseDialect:
         keys: tuple[str, ...],
         assignments: Mapping[str, str],
         condition: str,
+        insert: tuple[str, str] | None = None,
     ) -> str:
         """Update matching target rows from a deduplicated stage using aliases t and s."""
         match = " AND ".join(f"t.{key} = s.{key}" for key in keys)
         values = ", ".join(f"{column} = {value}" for column, value in assignments.items())
-        if self.update_uses_merge:
-            return (
+        if self.update_uses_merge or insert is not None:
+            sql = (
                 f"MERGE INTO {target} t USING {stage} s ON {match} "
                 f"WHEN MATCHED AND ({condition}) THEN UPDATE SET {values}"
             )
+            if insert is not None:
+                columns, expressions = insert
+                sql += f" WHEN NOT MATCHED THEN INSERT ({columns}) VALUES ({expressions})"
+            return sql
         return f"UPDATE {target} t SET {values} FROM {stage} s WHERE {match} AND ({condition})"
 
     def prepare_update_stage(self, stage: str, keys: tuple[str, ...]) -> tuple[str, ...]:

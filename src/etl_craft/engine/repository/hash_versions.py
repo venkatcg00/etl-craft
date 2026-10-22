@@ -53,3 +53,9 @@ def save_view_statement(conn: Connection, target: str, sha256: str) -> None:
         statement(conn, "save_target_view_statement"),
         {**_key(target), "sha256": sha256, "now": datetime.now(UTC)},
     )
+
+
+def fetch_target_contract(conn: Connection, target: str) -> tuple[int | None, str | None]:
+    """Read both published contracts in one round trip under the target lock."""
+    row = conn.execute(statement(conn, "target_contract"), _key(target)).one()
+    return row.hash_version, row.statement_sha256

@@ -18,7 +18,7 @@ from etl_craft.core.enums import (
     ControlAction,
     RunStatus,
 )
-from etl_craft.engine import controls, runlog, transitions
+from etl_craft.engine import attempt_starts, controls, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
@@ -209,15 +209,15 @@ def _task_log(values: str | None, output_tail: str) -> str | None:
 def attempt_started(engine: Engine, attempt_id: int, owner: str, pid: int) -> None:
     """Record the process started by this attempt's owner."""
     with engine.begin() as conn:
-        transitions.ensure_attempt_started(
+        attempt_starts.ensure_attempt_started(
             conn,
             attempt_id,
             current_actor(),
             owner=owner,
-            host=socket.gethostname(),
-            pid=pid,
+            process=attempt_starts.StartedProcess(
+                socket.gethostname(), pid, leases.process_start(pid)
+            ),
             completed=True,
-            process_start=leases.process_start(pid),
         )
 
 

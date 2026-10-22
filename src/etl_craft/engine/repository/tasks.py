@@ -92,11 +92,21 @@ class TargetTask:
 
 def fetch_target_tasks(conn: Connection, pipeline_id: int, task_id: int) -> list[TargetTask]:
     """Return the other active SQL tasks sharing the stored target of ``task_id``."""
+    return list(fetch_target_task_states(conn, pipeline_id, task_id, None)[0])
+
+
+def fetch_target_task_states(
+    conn: Connection, pipeline_id: int, task_id: int, pipeline_run_id: int | None
+) -> tuple[tuple[TargetTask, ...], dict[str, str | None]]:
+    """Read peers and their exact run statuses together, without one read per peer."""
     rows = conn.execute(
         statement(conn, "target_tasks"),
-        {"pipeline_id": pipeline_id, "task_id": task_id},
+        {"pipeline_id": pipeline_id, "task_id": task_id, "pipeline_run_id": pipeline_run_id},
+    ).all()
+    return (
+        tuple(TargetTask(row.task_id, row.task_code, row.sql_action) for row in rows),
+        {str(row.task_id): row.status for row in rows},
     )
-    return [TargetTask(**row._mapping) for row in rows]
 
 
 def conflicting_merge_action(conn: Connection, task_id: int, sql_action: str) -> str | None:

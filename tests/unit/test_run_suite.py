@@ -89,3 +89,100 @@ def test_environment_selection_is_refused(monkeypatch, capsys):
     monkeypatch.setenv("PYTEST_ADDOPTS", "-k test_one")
     assert run_suite.main(["unit"]) == 2
     assert "unset PYTEST_ADDOPTS" in capsys.readouterr().err
+
+
+def test_only_cloud_suites_use_parallel_workers(tmp_path):
+    for name, suite in suites.load_suites().items():
+        command = run_suite.pytest_command(suite, tmp_path / "e.json", None, [])
+        assert ("-n" in command) == (name in {"cloud-snowflake", "cloud-databricks"})
+        if "-n" in command:
+            assert command[command.index("-n") : command.index("-n") + 4] == [
+                "-n",
+                "6",
+                "--dist",
+                "loadgroup",
+            ]
+
+
+def test_parallel_evidence_matches_serial_including_grouped_ids(pytester):
+    import subprocess
+
+    tests_path = Path(__file__).resolve().parents[1]
+    pytester.makeconftest(
+        f"import sys\nsys.path.insert(0, {str(tests_path)!r})\n"
+        "pytest_plugins = ['plugins.evidence']\n"
+    )
+    pytester.makepyfile(
+        """import pytest
+@pytest.mark.xdist_group('serialized')
+@pytest.mark.parametrize('value', ['one@literal', 'two'])
+def test_pass(value): pass
+@pytest.mark.skip(reason='fixture unavailable')
+def test_skip(): pass
+@pytest.mark.xfail(reason='expected failure')
+def test_xfail(): assert False
+def test_failure(): assert False
+"""
+    )
+    recordings = []
+    for workers in (0, 4):
+        path = pytester.path / f"evidence-{workers}.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-o",
+                "addopts=",
+                "-n",
+                str(workers),
+                "--dist",
+                "loadgroup",
+                f"--evidence={path}",
+            ],
+            cwd=pytester.path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        evidence = json.loads(path.read_text())
+        recordings.append(
+            (
+                evidence["collected"],
+                evidence["counts"],
+                [(row["nodeid"], row["outcome"]) for row in evidence["tests"]],
+            )
+        )
+    assert recordings[0] == recordings[1]
+    assert recordings[0][1] == {
+        "passed": 2,
+        "skipped": 1,
+        "xfailed": 1,
+        "xpassed": 0,
+        "failed": 1,
+        "error": 0,
+    }
+
+
+@pytest.mark.parametrize("problem", ["crashed", "missing", "different"])
+def test_parallel_evidence_refuses_incomplete_worker_collections(pytestconfig, tmp_path, problem):
+    from types import SimpleNamespace
+
+    from plugins.evidence import EvidenceRecorder
+
+    recorder = EvidenceRecorder(pytestconfig, tmp_path / "evidence.json")
+    recorder.collected = ["test_one.py::test_one"]
+    output = (
+        {}
+        if problem == "missing"
+        else {
+            "evidence_collected": [
+                "different" if problem == "different" else "test_one.py::test_one"
+            ]
+        }
+    )
+    node = SimpleNamespace(workeroutput=output, gateway=SimpleNamespace(id="gw0"))
+    recorder.pytest_testnodedown(node, "crashed" if problem == "crashed" else None)
+    assert set(recorder.outcomes.values()) == {"error"}
+    assert recorder.collected == ["test_one.py::test_one"]

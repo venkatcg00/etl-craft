@@ -69,6 +69,7 @@ VALUES = {
     "arguments": "{}",
     "evidence": "{}",
     "observations": "{}",
+    "resources": '[{"lock_key": 1, "resource_name": "plan", "confirmed": null}]',
     "task_run_ids": "[1,2]",
     "attempt_ids": "[1,2]",
     "sso_group_ids": "[]",

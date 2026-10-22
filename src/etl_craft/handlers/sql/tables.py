@@ -97,6 +97,11 @@ def check_stage_columns(session: Session, stage: str) -> None:
     is not in that case, such as ``"CustomerId"`` on PostgreSQL.
     """
     names = [name for name, _ in session.columns(stage)]
+    check_column_names(session, names)
+
+
+def check_column_names(session: Session, names: list[str]) -> None:
+    """Apply the same reserved-name and identifier checks to staged and described columns."""
     reserved = [name for name in names if name.lower() in ENGINE_COLUMNS]
     if reserved:
         raise SqlGuardError(
@@ -129,15 +134,8 @@ def create_target_shape(session: Session, stage: str, audit_columns: tuple[str, 
     """Create the target, empty: the stage's columns, ``PIPELINE_RUN_ID``, ``audit_columns``."""
     if session.dialect.identity_in_create:
         types = session.column_types(stage)
-        columns = [f"{name} {types[name.lower()]}" for name, _ in session.columns(stage)]
-        columns.append("PIPELINE_RUN_ID BIGINT")
-        columns.extend(
-            f"{name} {session.dialect.audit_column_type(name)}" for name in audit_columns
-        )
-        session.run(
-            session.dialect.identity_table_ddl(session.target, ", ".join(columns), session.params),
-            step="create the target with an identity ROW_ID",
-        )
+        business = [(name, types[name.lower()]) for name, _ in session.columns(stage)]
+        create_declared_target(session, business, audit_columns)
         return
     parts = [f"s.{name}" for name, _ in session.columns(stage)]
     parts.append("CAST(NULL AS BIGINT) AS PIPELINE_RUN_ID")
@@ -156,6 +154,25 @@ def create_target_shape(session: Session, stage: str, audit_columns: tuple[str, 
     )
     if not computed:
         add_row_id(session)
+
+
+def create_declared_target(
+    session: Session,
+    business: list[tuple[str, str]],
+    audit_columns: tuple[str, ...],
+    name: str | None = None,
+) -> None:
+    """Declare business columns and the complete generated key in the CREATE statement."""
+    columns = [f"{name} {kind}" for name, kind in business]
+    columns.append("PIPELINE_RUN_ID BIGINT")
+    columns.extend(f"{name} {session.dialect.audit_column_type(name)}" for name in audit_columns)
+    target = session.target if name is None else name
+    for sql in session.dialect.identity_setup_sql(target):
+        session.run(sql, step="create the ROW_ID sequence")
+    session.run(
+        session.dialect.identity_table_ddl(target, ", ".join(columns), session.params),
+        step="create the target with an identity ROW_ID",
+    )
 
 
 def sequence_name(session: Session) -> str:
@@ -231,7 +248,9 @@ def check_or_evolve(session: Session, stage: str, action: str, *, schema_evoluti
     target_columns = check_target_audit(session, action)
     required = ("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action])
     managed = {column.lower() for column in required} | {ROW_ID_COLUMN.lower()}
-    stage_columns = session.columns(stage)
+    stage_columns = [
+        (name, kind) for name, kind in session.columns(stage) if name.upper() != "HASH_KEY"
+    ]
     stage_names = [name for name, _ in stage_columns]
     stage_set = {name.lower() for name in stage_names}
     business = [name for name, _ in target_columns if name.lower() not in managed]
@@ -277,21 +296,20 @@ def evolve(session: Session, columns: list[tuple[str, str]]) -> None:
         if problem:
             raise SqlGuardError(f"{session.target}.{name}: {problem}")
     for name, data_type in columns:
-        session.run(
-            f"{session.dialect.alter_table_keyword()} {session.target} "
-            f"ADD COLUMN {name} {data_type}",
-            step=f"add column {name} ({data_type})",
-        )
+        session.add_column(session.target, name, data_type)
 
 
-def refuse_null_keys(session: Session, stage: str, merge_key: tuple[str, ...]) -> None:
+def refuse_null_keys(
+    session: Session, stage: str, merge_key: tuple[str, ...], count: int | None = None
+) -> None:
     """Fail when a staged row has a NULL in a merge key column, before the target is touched.
 
     A NULL key matches no target row, so a merge would insert it again on every run and a
     delete would never find it.
     """
     nulls = " OR ".join(f"{key} IS NULL" for key in merge_key)
-    count = session.count(f"SELECT COUNT(*) FROM {stage} WHERE {nulls}", step="NULL merge keys")
+    if count is None:
+        count = session.count(f"SELECT COUNT(*) FROM {stage} WHERE {nulls}", step="NULL merge keys")
     if count:
         raise SqlGuardError(
             f"{session.action} {session.target}: the SELECT returns {count} row(s) with a NULL "
@@ -300,7 +318,13 @@ def refuse_null_keys(session: Session, stage: str, merge_key: tuple[str, ...]) -
         )
 
 
-def dedupe(session: Session, stage: str, merge_key: tuple[str, ...], order: str | None) -> str:
+def dedupe(
+    session: Session,
+    stage: str,
+    merge_key: tuple[str, ...],
+    order: str | None,
+    count: int | None = None,
+) -> str:
     """Return a stage with one row per merge key: this one, or a copy keeping ``order``'s first.
 
     Without ``MERGE_DEDUPE_ORDER``, duplicate keys fail before the target is touched: which row
@@ -309,7 +333,8 @@ def dedupe(session: Session, stage: str, merge_key: tuple[str, ...], order: str 
     """
     keys = ", ".join(merge_key)
     duplicated = f"SELECT {keys} FROM {stage} GROUP BY {keys} HAVING COUNT(*) > 1"
-    count = session.count(f"SELECT COUNT(*) FROM ({duplicated}) d", step="duplicate merge keys")
+    if count is None:
+        count = session.count(f"SELECT COUNT(*) FROM ({duplicated}) d", step="duplicate merge keys")
     if not count:
         return stage
     if order is None:
@@ -362,7 +387,7 @@ def add_hash_key(session: Session, stage: str, compare_columns: tuple[str, ...])
 
     Added after the schema check, which compares the SELECT's own columns only.
     """
-    session.run(f"ALTER TABLE {stage} ADD COLUMN HASH_KEY VARCHAR(32)", step="add HASH_KEY")
+    session.add_column(stage, "HASH_KEY", "VARCHAR(32)")
     hashed = session.hash([f"{stage}.{column}" for column in compare_columns], compare_columns)
     session.run(f"UPDATE {stage} SET HASH_KEY = {hashed}", step="hash the compare columns")
 

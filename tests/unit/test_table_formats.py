@@ -59,7 +59,9 @@ def test_unknown_snowflake_metadata_is_not_assumed_native():
         for_key("snowflake").existing_table_format(conn, "cat.s.t")
 
 
-def test_format_metadata_errors_name_the_action_and_target():
+def test_format_metadata_errors_name_the_action_and_target(monkeypatch):
+    # A Mock connection takes no SQLAlchemy event listeners.
+    monkeypatch.setattr("etl_craft.handlers.sql.session.event", Mock())
     dialect = Mock()
     dialect.existing_table_format.side_effect = SQLAlchemyError("no access")
     session = Session(
@@ -110,7 +112,8 @@ def test_unreadable_delta_metadata_is_refused(properties):
         ("snowflake_iceberg", "ALTER ICEBERG TABLE"),
     ],
 )
-def test_snowflake_rename_keeps_the_explicit_destination_namespace(key, keyword):
+def test_snowflake_rename_keeps_the_explicit_destination_namespace(key, keyword, monkeypatch):
+    monkeypatch.setattr("etl_craft.handlers.sql.session.event", Mock())
     conn = Mock()
     session = Session(
         conn,
@@ -125,3 +128,56 @@ def test_snowflake_rename_keeps_the_explicit_destination_namespace(key, keyword)
     assert str(conn.execute.call_args.args[0]) == (
         f"{keyword} other.schema.candidate RENAME TO other.schema.target"
     )
+
+
+def test_an_iceberg_tasks_native_stage_uses_native_alter():
+    dialect = for_key("snowflake_iceberg")
+    assert dialect.add_column_sql("stage", "HASH_KEY", "VARCHAR(32)", target=False) == (
+        "ALTER TABLE stage ADD COLUMN HASH_KEY VARCHAR(32)"
+    )
+    assert dialect.add_column_sql("target", "value", "VARCHAR", target=True) == (
+        "ALTER ICEBERG TABLE target ADD COLUMN value VARCHAR"
+    )
+
+
+def test_databricks_view_metadata_needs_no_table_provider():
+    dialect = for_key("databricks")
+    conn = Mock()
+    conn.execute.return_value.scalar_one.return_value = json.dumps(
+        {"type": "VIEW", "columns": [{"name": "id", "type": {"name": "bigint"}, "nullable": True}]}
+    )
+    found = dialect.read_metadata(conn, "catalog.schema.view")
+    assert found.columns == (("id", "BIGINT", None, None, "YES"),)
+    assert found.table_format is None
+
+
+@pytest.mark.parametrize("key", ["snowflake", "snowflake_iceberg"])
+def test_relation_read_also_supplies_the_storage_guard(key, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr("etl_craft.handlers.sql.session.event", Mock())
+    dialect = for_key(key)
+    conn = Mock()
+    result = MagicMock()
+    result.__iter__.return_value = iter([SimpleNamespace(position=0, table_type="BASE TABLE")])
+    result.mappings.return_value = [
+        {"position": 0, "table_type": "BASE TABLE", "table_format": dialect.spec.table_format}
+    ]
+    conn.execute.return_value = result
+    monkeypatch.setattr(
+        dialect, "existing_table_format", Mock(side_effect=AssertionError("second read"))
+    )
+    session = Session(
+        conn,
+        dialect,
+        catalog="cat",
+        action="SCD1_MERGE",
+        target_object="s.target",
+        task_run_id=1,
+        params={},
+    )
+    assert session.relation_types(("cat.s.target",)) == {0: "BASE TABLE"}
+    session.check_target_format()
+    assert conn.execute.call_count == 1
+    assert "AS table_format" in str(conn.execute.call_args.args[0])

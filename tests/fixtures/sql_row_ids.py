@@ -61,23 +61,22 @@ def check_row_id_generation(w, target):
 
 
 def run_paused_append(context, pause, attempted, allocated, release, results):
-    """Run a task in a fresh process, optionally pausing after reading its ROW_ID base."""
+    """Run a task in a fresh process, optionally pausing before its allocating INSERT."""
     from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
     from etl_craft.dialects.engine import build_engine
     from etl_craft.engine import resource_locks
     from etl_craft.handlers import sql
 
     engine = build_engine(context.config)
-    original_count = Session.count
+    original_run = Session.run
     original_hold = resource_locks.hold
 
-    def count(session, statement, *, step):
-        value = original_count(session, statement, step=step)
-        if step == "largest ROW_ID":
+    def run(session, statement, params=None, *, step):
+        if step == "append the SELECT's rows":
             allocated.set()
             if pause and not release.wait(30):
                 raise RuntimeError("the test did not release the paused ROW_ID allocation")
-        return value
+        return original_run(session, statement, params, step=step)
 
     def hold(owner, key, *args, **kwargs):
         attempted.set()
@@ -85,7 +84,7 @@ def run_paused_append(context, pause, attempted, allocated, release, results):
 
     try:
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(Session, "count", count)
+            patch.setattr(Session, "run", run)
             patch.setattr(resource_locks, "hold", hold)
             with acting_as(SYSTEM_ACTOR):
                 result = sql.run(context, engine)

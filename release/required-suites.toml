@@ -82,13 +82,13 @@ description = "The documentation site builds with --strict."
 
 [suites.cloud-databricks]
 marker = "cloud_databricks"
-description = "Connections and the demo subset on Databricks, native and Iceberg."
+description = "Vendor SQL, connections and fencing on Databricks, native and Iceberg."
 wheel = true
 where = "local"
 
 [suites.cloud-snowflake]
 marker = "cloud_snowflake"
-description = "Connections and the demo subset on Snowflake, native and Iceberg."
+description = "Vendor SQL, connections and fencing on Snowflake, native and Iceberg."
 wheel = true
 where = "local"
 

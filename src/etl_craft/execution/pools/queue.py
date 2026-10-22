@@ -28,6 +28,7 @@ class QueuePool:
     """Observe durable attempts independently of controller and API process lifetimes."""
 
     name = "queue"
+    status_reads_engine = True
 
     def __init__(self, engine: Engine, config: ConnectorConfig) -> None:
         """Refuse unsupported storage before admitting cluster work."""

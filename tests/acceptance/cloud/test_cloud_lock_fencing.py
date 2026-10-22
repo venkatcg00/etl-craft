@@ -11,7 +11,11 @@ from etl_craft.handlers.resources import LocalLocker
 from fixtures.cloud import SNOWFLAKE_VARS, require_variables
 from fixtures.lock_fencing import KEY, OLD, expired_lock, lock_holder, start_old_write
 
-pytestmark = [pytest.mark.timeout(600), pytest.mark.usefixtures("engine_actor")]
+pytestmark = [
+    pytest.mark.timeout(600),
+    pytest.mark.usefixtures("engine_actor"),
+    pytest.mark.xdist_group("warehouse-fencing"),
+]
 
 
 @pytest.mark.cloud_snowflake

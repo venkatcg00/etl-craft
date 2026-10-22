@@ -40,6 +40,7 @@ from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import TaskStore
 from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.scripting import Offset, ScriptResult, ScriptTask
+from etl_craft.warehouse.connection import warehouse_task
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ SCRIPT_LOGGER = "etl_craft_script"
 """The logger a script is given as ``task.logger``, named after its task."""
 
 
+@warehouse_task()
 def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Run the task's Python script and return the counts it reports."""
     params = context.task_params

@@ -18,6 +18,10 @@ class LocalLocker:
     engine: Engine
     config: ConnectorConfig
     identity: str = field(default_factory=lambda: uuid4().hex)
+    # A task that opens the warehouse in this process under every lock it takes reserves a
+    # single-writer warehouse in the same acquisition. Other holders, such as an event check
+    # whose query runs in a child process, must not hold the warehouse for that child.
+    with_warehouse: bool = False
 
     @property
     def session_tag(self) -> str:
@@ -31,4 +35,11 @@ class LocalLocker:
     def hold(self, key: int, name: str, wait_seconds: float) -> AbstractContextManager[None]:
         """Keep Engine DB ownership while warehouse work is confirmed gone."""
         owner = resource_locks.Owner(self.engine, self.config, self.confirm, self.identity)
-        return resource_locks.hold(owner, key, name, wait_seconds)
+        from etl_craft.warehouse.connection import WAREHOUSE_LOCK_KEY, is_single_writer
+
+        extra = (
+            ((WAREHOUSE_LOCK_KEY, "warehouse"),)
+            if self.with_warehouse and key != WAREHOUSE_LOCK_KEY and is_single_writer(self.config)
+            else ()
+        )
+        return resource_locks.hold(owner, key, name, wait_seconds, extra)

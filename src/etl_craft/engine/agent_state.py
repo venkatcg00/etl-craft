@@ -11,30 +11,20 @@ def fence(
     conn: Connection, attempt_id: int, owner: str, expected: AttemptStatus | None = None
 ) -> int:
     """Serialize a live owned request with reconciliation and every competing ending."""
-    row = conn.execute(
-        statement(conn, "transition_row_attempt"), {"row_id": attempt_id}
-    ).one_or_none()
-    if (
-        row is not None
-        and expected is None
-        and row.status
-        in {
-            AttemptStatus.CLAIMED,
-            AttemptStatus.RUNNING,
-        }
-    ):
-        expected = AttemptStatus(row.status)
-    found = None
-    if expected is not None:
-        found = conn.execute(
-            statement(conn, "agent_fence"),
-            {
-                "attempt_id": attempt_id,
-                "owner": owner,
-                "expected": expected,
-            },
-        ).scalar_one_or_none()
+    found = conn.execute(
+        statement(conn, "agent_fence"),
+        {"attempt_id": attempt_id, "owner": owner, "expected": expected},
+    ).scalar_one_or_none()
     if found is None:
+        row = conn.execute(
+            statement(conn, "transition_row_attempt"), {"row_id": attempt_id}
+        ).one_or_none()
+        if (
+            row is not None
+            and expected is None
+            and row.status in {AttemptStatus.CLAIMED, AttemptStatus.RUNNING}
+        ):
+            expected = AttemptStatus(row.status)
         actual = "missing" if row is None else f"status={row.status}, owner={row.owner_id}"
         raise StaleTransitionError(
             f"attempt {attempt_id}, requesting owner={owner}: {actual}; expected a live "

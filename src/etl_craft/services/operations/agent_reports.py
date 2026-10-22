@@ -31,7 +31,7 @@ from etl_craft.core.errors import (
 from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.text import qualify, sha256_hex
 from etl_craft.core.time import as_utc
-from etl_craft.engine import locks, resource_locks, transitions
+from etl_craft.engine import attempt_starts, locks, resource_locks, transitions
 from etl_craft.engine.agent_state import fence
 from etl_craft.engine.audit import ActionRequest
 from etl_craft.engine.notifications import notification_hub
@@ -238,14 +238,14 @@ def _start(ctx: OperationContext, task: TaskContext, request: AgentTask) -> Agen
         agent = conn.execute(
             statement(conn, "agent_get"), {"agent_id": ctx.credential_token_id}
         ).one()
-        transitions.ensure_attempt_started(
+        attempt_starts.ensure_attempt_started(
             conn,
             request.attempt_id,
             ctx.actor,
             owner=task.owner or "",
-            host=agent.host,
-            pid=required(request.pid, "pid"),
-            process_start=request.process_start,
+            process=attempt_starts.StartedProcess(
+                agent.host, required(request.pid, "pid"), request.process_start
+            ),
         )
     if task.handler == Handler.RUN_PIPELINE:
         from etl_craft.services.operations.task_process import execute_trigger

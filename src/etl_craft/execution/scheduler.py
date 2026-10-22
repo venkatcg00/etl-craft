@@ -40,6 +40,10 @@ from etl_craft.execution.trigger_waits import check_trigger_waits
 
 logger = logging.getLogger(__name__)
 
+# While attempts run and nothing this process can see has changed, the run is re-read from the
+# Engine DB at most this often; an ended local attempt or a cancel is acted on at once.
+ENGINE_POLL_SECONDS = 1.0
+
 
 class Scheduler:
     """Advance one run without sleeping; submit attempts to the pool only after admission."""
@@ -95,6 +99,7 @@ class Scheduler:
         self.never_ready: list[int] = []
         self.next_check_at: datetime | None = None
         self.outage = OutageBudget(config.limits.engine_db_outage_seconds)
+        self.engine_due: datetime | None = None
 
     def step_riding_outages(self) -> bool:
         """Step, treating a dropped Engine DB connection as not settled until it answers.
@@ -114,6 +119,9 @@ class Scheduler:
 
     def step(self) -> bool:
         """Harvest completions, recompute readiness and dispatch; return true when settled."""
+        return False if self._quiet() else self._step()
+
+    def _step(self) -> bool:
         self._harvest()
         control_flow.advance(self.engine, self.pipeline_run_id, observed=True)
         with self.engine.connect() as conn:
@@ -366,12 +374,29 @@ class Scheduler:
             return
         self.jobs[task_id] = self.pool.submit(spec)
 
-    def _harvest(self) -> None:
-        """Take the outcome of every ended attempt; an unexpected error is raised."""
+    def _quiet(self) -> bool:
+        """Whether attempts run, nothing this process sees changed and no Engine DB read is due."""
+        if (
+            not self.jobs
+            or self.engine_due is None
+            or self.clock.now() >= self.engine_due
+            or self.cancel.is_set()
+            or self.file_events.pending()
+            or any(check.done() for check in self.event_checks.values())
+            or not (self.pool.status_reads_engine or not self._harvest())
+        ):
+            self.engine_due = self.clock.now() + timedelta(seconds=ENGINE_POLL_SECONDS)
+            return False
+        return True
+
+    def _harvest(self) -> bool:
+        """Take every ended attempt's outcome; return whether any ended. Unexpected errors raise."""
+        ended = False
         for task_id, handle in list(self.jobs.items()):
             status = self.pool.status(handle)
             if status.state is HandleState.RUNNING:
                 continue
+            ended = True
             del self.jobs[task_id]
             self.completed.add(task_id)
             if isinstance(status.error, (EtlCraftError, OSError, SQLAlchemyError)):
@@ -383,6 +408,7 @@ class Scheduler:
                 )
             elif status.error is not None:
                 raise status.error
+        return ended
 
     def _stop_running(self) -> None:
         self.event_stop.set()

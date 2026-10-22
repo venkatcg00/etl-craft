@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Row
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor, sso_groups
@@ -24,7 +24,6 @@ from etl_craft.core.enums import (
 )
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.faults import fault_point
-from etl_craft.core.time import as_utc
 from etl_craft.engine import controls, dispatch, run_scopes, runlog
 from etl_craft.engine.attempts import (
     ActiveAttempt as ActiveAttempt,
@@ -280,6 +279,13 @@ def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> None:
 def delete_skipped_task_run(conn: Connection, task_run_id: int) -> None:
     """Remove a ``SKIPPED`` row of a task that never ran, so the resumed run decides again."""
     conn.execute(statement(conn, "delete_task_run"), {"task_run_id": task_run_id})
+
+
+def stale_attempt(
+    conn: Connection, attempt_id: int, expected: str, owner: str | None
+) -> StaleTransitionError:
+    """Describe an attempt row that is not in the ``expected`` state for ``owner``."""
+    return _stale(conn, "attempt", attempt_id, expected, owner)
 
 
 def _stale(
@@ -772,8 +778,10 @@ def renew_lease(
     )
 
 
-def assert_attempt(conn: Connection, attempt_id: int, task_run_id: int, owner: str | None) -> None:
-    """Reject a result referring to another task, owner or superseded attempt."""
+def assert_attempt(
+    conn: Connection, attempt_id: int, task_run_id: int, owner: str | None
+) -> Row[Any]:
+    """Reject a result referring to another task, owner or superseded attempt; return its row."""
     row = conn.execute(
         statement(conn, "transition_row_attempt"), {"row_id": attempt_id}
     ).one_or_none()
@@ -789,6 +797,7 @@ def assert_attempt(conn: Connection, attempt_id: int, task_run_id: int, owner: s
         raise _stale(
             conn, "attempt", attempt_id, f"latest attempt of task_run_id={task_run_id}", owner
         )
+    return row
 
 
 def set_task_log(
@@ -809,39 +818,6 @@ def set_task_log(
             "now": datetime.now(UTC),
         },
     )
-
-
-def ensure_attempt_started(
-    conn: Connection,
-    attempt_id: int,
-    actor: Actor,
-    *,
-    owner: str,
-    host: str,
-    pid: int,
-    completed: bool = False,
-    process_start: str | None = None,
-) -> None:
-    """Accept the same start acknowledged by parent and child, with no second write."""
-    try:
-        start_attempt(
-            conn, attempt_id, actor, owner=owner, host=host, pid=pid, process_start=process_start
-        )
-    except StaleTransitionError:
-        row = conn.execute(
-            statement(conn, "transition_row_attempt"), {"row_id": attempt_id}
-        ).one_or_none()
-        running = {AttemptStatus.RUNNING}
-        allowed = running | {AttemptStatus.SUCCESS, AttemptStatus.FAILED} if completed else running
-        if row is not None and row.status == AttemptStatus.RUNNING:
-            expiry = row.lease_expires_at
-            instant = None if expiry is None else as_utc(expiry)
-            if instant is None or runlog.elapsed_hours(instant, datetime.now(UTC)) >= 0:
-                raise
-        if row is not None and process_start is not None and row.process_start != process_start:
-            raise
-        if row is None or row.owner_id != owner or row.pid != pid or row.status not in allowed:
-            raise
 
 
 def create_rule_run(conn: Connection, business_rule_id: int, task_run_id: int) -> int:

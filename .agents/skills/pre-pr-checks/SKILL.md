@@ -159,12 +159,12 @@ when `.env.acceptance` does not exist:
 uv run python -c 'import os, sys; from pathlib import Path; import pytest
 from etl_craft.core.text import parse_env_file
 os.environ.update(parse_env_file(Path(".env.acceptance").read_text()), ETL_CRAFT_REQUIRE_SERVICES="1")
-sys.exit(pytest.main(["-q", "-p", "no:cacheprovider", "-m", sys.argv[1],
+sys.exit(pytest.main(["-q", "-n", "6", "--dist", "loadgroup", "-p", "no:cacheprovider", "-m", sys.argv[1],
                       "tests/acceptance/cloud", "-k", sys.argv[2]]))' cloud_snowflake 'append'
 ```
 
-Whole suites (release evidence, or a change across many cloud paths) take about 85 minutes,
-both clouds at once:
+Whole suites (release evidence, or a change across many cloud paths) run both clouds at once,
+with six workers per cloud and a target of under fifteen minutes per suite:
 
 ```bash
 make acceptance-cloud                    # both clouds at once; reads .env.acceptance
@@ -223,8 +223,9 @@ Recognize these before blaming the change:
   `docker compose up -d --wait --force-recreate iceberg-rest trino`.
 - **A run that hits its timeout** is usually waiting on a broken service, not a slow test. Read
   the end of its log once and check `docker ps` before running it again.
-- **No pytest-xdist.** `pytest -n` is not installed; the unit and integration tests take about
-  35 minutes serially. Run the touched tests locally and leave the complete suite to CI.
+- **Cloud parallelism.** Cloud suites use `-n 6 --dist loadgroup`; keep workers at or below
+  warehouse query concurrency and inspect query history for queueing. Keep local suites serial
+  unless their parallel safety and memory use have been measured. Required PR CI keeps its shards.
 - **Shells that do not split words.** In zsh, `pytest $files` passes one argument. Write the
   list to a file and use `xargs -a <file> uv run pytest ...`.
 - **Stopping a background run.** `pkill -f <pattern>` also matches the shell that runs the

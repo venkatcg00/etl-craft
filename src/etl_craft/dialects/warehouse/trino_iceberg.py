@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -33,6 +33,21 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     session_fencing = True
+
+    def row_id_base_sql(self, target: str) -> str:
+        """Read the previous committed snapshot under the target lock."""
+        return f"(SELECT COALESCE(MAX(ROW_ID), 0) FROM {target})"
+
+    def merge_source(self, target: str, stage: str, keys: tuple[str, ...]) -> str:
+        """Allocate only new keys, preventing duplicate targets from multiplying source rows."""
+        match = " AND ".join(f"found.{key}=src.{key}" for key in keys)
+        missing = f"found.{keys[0]} IS NULL"
+        return (
+            f"(SELECT src.*, CASE WHEN {missing} THEN {self.row_id_base_sql(target)} + "
+            f"CAST(ROW_NUMBER() OVER (PARTITION BY {missing} ORDER BY NULL) AS BIGINT) "
+            f"END AS ROW_ID FROM {stage} src LEFT JOIN "
+            f"(SELECT DISTINCT {', '.join(keys)} FROM {target}) found ON {match})"
+        )
 
     def session_tag_args(self, tag: str) -> Mapping[str, Any]:
         """Label every query of the session through the client's source."""
@@ -91,7 +106,10 @@ class TrinoIcebergWarehouse(WarehouseDialect):
         }.get(str(getattr(error, "error_type", "")), failure.kind)
         return replace(failure, kind=kind)
 
+    metadata_types_complete = True
+
     spec = warehouse_by_key("trino_iceberg")
+    dml_rowcounts = True
     sqlglot_dialect = "trino"
     catalog_connector_sql = (
         "SELECT connector_name AS connector_name FROM system.metadata.catalogs "
@@ -168,7 +186,7 @@ class TrinoIcebergWarehouse(WarehouseDialect):
             f"RPAD(SUBSTR({fraction}, 1, 6), 6, '0')"
         )
 
-    session_sql = "SET TIME ZONE 'UTC'"
+    session_connect_args: ClassVar[Mapping[str, Any]] = {"timezone": "UTC"}
 
     def replacement_ddl(
         self,

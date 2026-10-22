@@ -32,6 +32,10 @@ class DuckDBIcebergWarehouse(DuckDBWarehouse):
 
     views = False
 
+    def supports_insert_merge(self, conn: Connection) -> bool:
+        """Use separate joined UPDATE and INSERT mutations with the Iceberg extension."""
+        return False
+
     atomic_protection = False
     spec = warehouse_by_key("duckdb_iceberg")
     replace_strategy: ReplaceStrategy = "copy_and_restore"

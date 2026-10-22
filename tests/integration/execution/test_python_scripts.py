@@ -689,3 +689,20 @@ def test_mark_offset_on_the_cli_moves_a_scalar_offset(project, capsys, monkeypat
     assert main(args) == 0
     assert "offset 7 (NUMBER) -> 3 (NUMBER)" in capsys.readouterr().out
     assert stored_offset(engine, task) == ("NUMBER", "3")
+
+
+def test_script_warehouse_calls_share_one_task_session(project):
+    engine, config, _, _ = project
+    script = config.project_dir / "python_scripts" / "load.py"
+    script.write_text("""from etl_craft.scripting import ScriptResult
+
+def run(task):
+    with task.warehouse() as first, first.begin() as conn:
+        conn.exec_driver_sql("CREATE TEMPORARY TABLE task_session AS SELECT 1 AS id")
+    with task.warehouse() as second, second.connect() as conn:
+        assert first is second
+        assert conn.exec_driver_sql("SELECT id FROM task_session").scalar_one() == 1
+    return ScriptResult(row_count=1)
+""")
+    outcome = run_task(engine, config, "P", "load")
+    assert outcome.status == RunStatus.SUCCESS, outcome.message
