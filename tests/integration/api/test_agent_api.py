@@ -22,11 +22,15 @@ from etl_craft.services.operations.tokens import TokenCreate
 from fixtures.agents import resources
 from fixtures.metadata import add_pipeline, add_task
 
+pytestmark = pytest.mark.parametrize(
+    "empty_engine_db",
+    [pytest.param("postgresql", marks=pytest.mark.engine_postgres)],
+    indirect=True,
+)
+
 
 @pytest.fixture
 def agent_scene(engine_db, tmp_path):
-    if not engine_db.dialect.supports_api_replicas:
-        pytest.skip("cluster execution requires PostgreSQL")
     warehouse = ConnectionProfile(
         "WAREHOUSE", "test", f"jdbc:duckdb:{tmp_path / 'w.duckdb'}", "", "NONE", schema="main"
     )

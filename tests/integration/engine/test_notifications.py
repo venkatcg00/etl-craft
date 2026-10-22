@@ -13,9 +13,12 @@ def test_notification_round_trip_on_the_resolved_connection(engine_db):
 
 
 @pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize(
+    "empty_engine_db",
+    [pytest.param("postgresql", marks=pytest.mark.engine_postgres)],
+    indirect=True,
+)
 def test_a_listener_that_drops_notifications_is_refused(engine_db, monkeypatch, explicit):
-    if not engine_db.dialect.supports_api_replicas:
-        pytest.skip("SQLite has no session notifications")
     cfg = engine_db.config
     if explicit:
         cfg = replace(cfg, engine=replace(cfg.engine, listen_jdbc_url=cfg.engine.jdbc_url))

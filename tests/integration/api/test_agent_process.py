@@ -17,14 +17,16 @@ from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.tokens import TokenCreate
 
-pytestmark = pytest.mark.engine_postgres
+pytestmark = pytest.mark.parametrize(
+    "empty_engine_db",
+    [pytest.param("postgresql", marks=pytest.mark.engine_postgres)],
+    indirect=True,
+)
 
 
 @pytest.fixture
 def cluster(cli_project, monkeypatch, tmp_path):
     p = cli_project
-    if p.engine.dialect.name != "postgresql":
-        pytest.skip("cluster execution requires PostgreSQL")
     raw = yaml.safe_load(p.config.config_path.read_text())
     raw = {
         "Secrets": raw["Secrets"],
