@@ -75,7 +75,8 @@ def run_the_demo(demo: Demo) -> None:
         ("REJECT", 2),
         ("REPORT", 3),
     ]
-    subjects = {subject for subject, _ in demo.emails()}
+    # The success alert is sent last; waiting for it covers the earlier ones.
+    subjects = demo.wait_for_email("SUPPORT_DM: SUCCESS")
     assert {"SUPPORT_DM: FAILED", "SUPPORT_DM: SUCCESS", "SUPPORT_DM: a feed failed"} <= subjects
     if demo.warehouse_kind != "snowflake_iceberg":
         assert [int(n) for (n,) in demo.rows("SELECT COUNT(*) FROM {c}.aud.CFG_PIPELINES")] == [5]
