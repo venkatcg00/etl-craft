@@ -73,7 +73,9 @@ ENGINE_COLUMNS = frozenset(
 _PLAIN_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def build_stage(session: Session, select_sql: str, *, empty: bool = False) -> str:
+def build_stage(
+    session: Session, select_sql: str, *, empty: bool = False, immutable: bool = False
+) -> str:
     """Materialize the SELECT once into this task run's stage table; return its name.
 
     Every later statement reads the stage, so the SELECT runs exactly once. ``empty`` keeps
@@ -82,7 +84,7 @@ def build_stage(session: Session, select_sql: str, *, empty: bool = False) -> st
     """
     stage = session.scratch("stage")
     body = f"SELECT * FROM {as_subquery(select_sql)} etl_src WHERE 1 = 0" if empty else select_sql
-    session.create_scratch(stage, body, step="stage the SELECT")
+    stage = session.create_scratch(stage, body, step="stage the SELECT", immutable=immutable)
     check_stage_columns(session, stage)
     return stage
 

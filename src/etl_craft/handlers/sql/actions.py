@@ -234,7 +234,7 @@ def _merge_stage(
         session.select_columns(stage, action.select_sql)
         check_stage_columns(session, stage)
         check_or_evolve(session, stage, kind, schema_evolution=False)
-        session.create_hashed_stage(stage, action.select_sql, task.merge_compare_columns)
+        stage = session.create_hashed_stage(stage, action.select_sql, task.merge_compare_columns)
     else:
         stage = action.build_stage(session)
     count_target = session.target if hashed and kind == SqlAction.SCD1_MERGE else None

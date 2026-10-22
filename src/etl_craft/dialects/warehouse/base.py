@@ -90,6 +90,7 @@ class WarehouseDialect:
 
     spec: WarehouseSpec
     catalog_columns = True
+    sqlalchemy_driver: str | None = None
 
     dml_rowcounts = False
 
@@ -590,6 +591,14 @@ class WarehouseDialect:
     def scratch_table_keyword(self) -> str:
         """Return ``TEMPORARY TABLE``, or ``TABLE`` where temporary tables are unusable."""
         return "TEMPORARY TABLE" if self.temporary_tables else "TABLE"
+
+    def scratch_ddl(self, name: str, body: str, *, immutable: bool = False) -> tuple[str, str]:
+        """Return the scratch relation and its creation statement."""
+        return name, f"CREATE {self.scratch_table_keyword()} {name} AS {body}"
+
+    def temporary_stage_unavailable(self, error: BaseException | None) -> bool:
+        """Whether the server explicitly refused session temporary tables."""
+        return False
 
     metadata_types_complete = False
     """Whether information_schema retains reusable type sizes and nested declarations."""

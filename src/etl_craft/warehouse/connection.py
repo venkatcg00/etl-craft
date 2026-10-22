@@ -128,7 +128,7 @@ def build_warehouse_engine(
     if profile.auth_mode in credentials.MINTED_AUTH_MODES:
         engine_kwargs.setdefault("pool_recycle", credentials.MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS)
     logged_url = URL.create(
-        url.dialect,
+        dialect.sqlalchemy_driver or url.dialect,
         username=profile.user or None,
         host=url.host,
         port=url.port,

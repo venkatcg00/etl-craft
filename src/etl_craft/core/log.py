@@ -180,7 +180,7 @@ def capture_all_loggers() -> Iterator[None]:
     handler.addFilter(
         lambda record: record.name != ROOT_LOGGER and not record.name.startswith(f"{ROOT_LOGGER}.")
     )
-    noisy = ("urllib3", "httpx", "httpcore", "requests", "botocore", "boto3", "s3transfer")
+    noisy = ("urllib3", "httpx2", "httpcore2", "requests", "botocore", "boto3", "s3transfer")
     previous_levels: dict[logging.Logger, int] = {}
     if ours.getEffectiveLevel() > logging.DEBUG:
         names = set(noisy) | {

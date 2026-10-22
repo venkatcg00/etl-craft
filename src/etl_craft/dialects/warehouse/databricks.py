@@ -34,6 +34,19 @@ if TYPE_CHECKING:
     from etl_craft.config.targets import WarehouseUrl
 
 
+_TEMPORARY_TABLE_UNAVAILABLE = frozenset(
+    {
+        "TEMP_TABLE_CREATION_LEGACY_WITH_QUERY",
+        "TEMP_TABLE_CREATION_NOT_SUPPORTED_IN_COMPUTE",
+        "TEMP_TABLE_NOT_SUPPORTED_WITH_DATABRICKS_JOBS",
+        "TEMP_TABLE_NOT_SUPPORTED_WITH_HMS",
+        "TEMP_TABLE_REQUIRES_DATABRICKS_ENV",
+        "TEMP_TABLE_REQUIRES_DELTA",
+        "TEMP_TABLE_REQUIRES_UC",
+    }
+)
+
+
 class DatabricksWarehouse(WarehouseDialect):
     """Databricks, Delta tables. A session has no default schema, so scratch tables are named."""
 
@@ -155,6 +168,23 @@ class DatabricksWarehouse(WarehouseDialect):
     storage_parameters = frozenset({"EXTERNAL_LOCATION"})
     update_uses_merge = True
     temporary_tables = False
+
+    def scratch_ddl(self, name: str, body: str, *, immutable: bool = False) -> tuple[str, str]:
+        """Use session tables only for stages that need neither ALTER nor DELETE."""
+        if immutable:
+            bare = name.rsplit(".", 1)[-1]
+            return bare, f"CREATE TEMPORARY TABLE {bare} AS {body}"
+        return super().scratch_ddl(name, body)
+
+    def temporary_stage_unavailable(self, error: BaseException | None) -> bool:
+        """Only documented compute/catalog capability refusals permit persistent staging."""
+        message = "" if error is None else str(driver_error(error))
+        primary = re.match(
+            r"\[(?:RequestId=[0-9a-fA-F-]+ ErrorClass=)?([A-Z][A-Z0-9_.]*)\]",
+            message.lstrip(),
+        )
+        return primary is not None and primary[1] in _TEMPORARY_TABLE_UNAVAILABLE
+
     qualified_rename = True
     surrogate_key: SurrogateKey = "identity"
     identity_in_create = True

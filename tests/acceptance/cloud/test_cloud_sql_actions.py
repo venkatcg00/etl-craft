@@ -32,7 +32,6 @@ from fixtures.sql_row_ids import check_row_id_generation
 from fixtures.sql_warehouse import SqlWorld
 from fixtures.sql_watermarks import check_watermark_literals
 
-# Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
 pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")]
 
 

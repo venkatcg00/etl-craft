@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy import text
+from sqlalchemy.dialects import registry
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -28,6 +29,8 @@ from etl_craft.dialects.warehouse.replacement import identity_replacement, repla
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile
     from etl_craft.config.targets import WarehouseUrl
+
+registry.register("snowflake.etl_craft", "etl_craft.dialects.warehouse.snowflake_driver", "dialect")
 
 
 class SnowflakeWarehouse(WarehouseDialect):
@@ -63,6 +66,7 @@ class SnowflakeWarehouse(WarehouseDialect):
         return failure
 
     spec = warehouse_by_key("snowflake")
+    sqlalchemy_driver = "snowflake+etl_craft"
     catalog_columns = False
     metadata_types_complete = True
     dml_rowcounts = True

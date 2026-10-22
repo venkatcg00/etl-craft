@@ -8,7 +8,7 @@ from datetime import datetime
 from etl_craft.engine.task_store import TaskState, TaskStore
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.sql.session import Session
-from etl_craft.handlers.sql.spec import SqlTask
+from etl_craft.handlers.sql.spec import MERGES, SqlTask
 from etl_craft.handlers.sql.tables import build_stage
 from etl_craft.handlers.sql.watermarks import record_range
 
@@ -36,7 +36,12 @@ class ActionContext:
         """Stage the SELECT once and record its watermark before any target mutation."""
         if self.staged is not None:
             return self.staged
-        stage = build_stage(session, self.select_sql, empty=empty)
+        immutable = (
+            self.task.action not in MERGES
+            and self.task.reject_limit is None
+            and session.protection is None
+        )
+        stage = build_stage(session, self.select_sql, empty=empty, immutable=immutable)
         if self.task.watermark is not None:
             record_range(session, stage, self.task.watermark, self.context, self.store)
         return stage
