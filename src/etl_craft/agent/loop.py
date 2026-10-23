@@ -29,9 +29,14 @@ from etl_craft.core.enums import (
     SlotKind,
 )
 from etl_craft.core.errors import ConfigurationError, EtlCraftError, RunStateError, ServerError
+from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.resources import Ceilings
+from etl_craft.core.text import sha256_hex
+from etl_craft.engine.resource_locks import holder_tag
+from etl_craft.execution.control_flow import process_local_queries
 from etl_craft.execution.leases import process_start
 from etl_craft.execution.processes import ChildResult, ChildSpec, run_child
+from etl_craft.execution.query_cancellation import confirm
 from etl_craft.services.operations.agent_models import (
     AgentClaim,
     AgentLog,
@@ -220,11 +225,29 @@ class AgentLoop:
         if not isinstance(reply.data, dict):
             return
         if reply.data.get("controls_pending"):
+            for attempt in reply.data.get("cleanup", []):
+                self._cleanup(int(str(attempt)))
             self.wake.set()
             self.closed.wait(0.1)
             return
         work = from_json(Work, reply.data)
         self._start(work, started)
+
+    def _cleanup(self, attempt_id: int) -> None:
+        """Confirm a prior owned process's queries without ever opening the Engine DB."""
+        assert self.client.token is not None
+        tag = holder_tag(attempt_holder(attempt_id, sha256_hex(self.client.token.encode())))
+        reason = confirm(self.config, tag)
+        self.client.call(
+            ActionName.AGENT_REPORT,
+            AgentTask(
+                version=__version__,
+                attempt_id=attempt_id,
+                operation=AgentReport.CANCEL,
+                queries_ended=reason is None,
+                error_message=reason,
+            ),
+        )
 
     def _start(self, work: Work, started: float) -> None:
         attempt_id = int(str(work.task["attempt_id"]))
@@ -362,8 +385,7 @@ class AgentLoop:
         if task.trigger and not future.done():
             return
         if task.trigger and (task.folder / "result").is_file():
-            self._finish(task, future.result())
-            self._forget(task)
+            self._complete(task, future.result())
             return
         if task.pending:
             self.client.call(
@@ -393,14 +415,18 @@ class AgentLoop:
             task.decoded = True
             if task.pending:
                 return
-        self._finish(task, future.result())
-        self._forget(task)
+        self._complete(task, future.result())
 
-    def _finish(self, task: RunningTask, outcome: ChildResult) -> None:
+    def _complete(self, task: RunningTask, outcome: ChildResult) -> None:
+        """Keep a pending cancellation owned until its queries are confirmed stopped."""
+        if self._finish(task, outcome):
+            self._forget(task)
+
+    def _finish(self, task: RunningTask, outcome: ChildResult) -> bool:
         path = task.folder / "result"
         result = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
         if isinstance(result, dict) and result.get("trigger"):
-            return
+            return True
         if result is None:
             ending = AgentTask(
                 version=__version__,
@@ -418,7 +444,28 @@ class AgentLoop:
             )
         if task.forced_status is not None:
             ending = replace(ending, status=task.forced_status, error_message=task.forced_message)
+        queries_ended = task.kind != SlotKind.PYTHON or process_local_queries(self.config)
+        assert self.client.token is not None
+        if outcome.cancelled or outcome.timed_out or outcome.returncode < 0:
+            tag = holder_tag(
+                attempt_holder(task.attempt_id, sha256_hex(self.client.token.encode()))
+            )
+            reason = confirm(self.config, tag)
+            queries_ended = reason is None
+            if reason and ending.status == AttemptStatus.CANCELLED:
+                self.client.call(
+                    ActionName.AGENT_REPORT,
+                    AgentTask(
+                        version=__version__,
+                        attempt_id=task.attempt_id,
+                        operation=AgentReport.CANCEL,
+                        error_message=reason,
+                    ),
+                )
+                return False
+        ending = replace(ending, queries_ended=queries_ended)
         self.client.call(ActionName.AGENT_REPORT, ending)
+        return True
 
     def _forget(self, task: RunningTask) -> None:
         with self.lock:

@@ -9,6 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,7 +18,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.counts import Counts
 from etl_craft.core.enums import RunStatus
-from etl_craft.core.errors import EtlCraftError, LockTimeoutError
+from etl_craft.core.errors import EtlCraftError, LockTimeoutError, RunRefusedError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
 from etl_craft.engine import controls, locks, transitions
@@ -60,7 +61,10 @@ def check_event(
 ) -> EventCheck:
     """Check once; waiting never admits an attempt or holds an agent slot."""
     try:
-        with locks.event(task_id).hold(LocalLocker(engine, config), wait_seconds=0.1):
+        locker = LocalLocker(
+            engine, config, identity=f"e:{pipeline_run_id:x}:{task_id:x}:{uuid4().hex[:8]}"
+        )
+        with locks.event(task_id).hold(locker, wait_seconds=0.1):
             with engine.begin() as conn:
                 fences = controls.blocked(conn, pipeline_run_id)
                 if None in fences or task_id in fences:
@@ -70,6 +74,11 @@ def check_event(
                 engine, config, pipeline_run_id, task_id, decisions, cancel, force_check
             )
             return _check_event(wait, now)
+    except RunRefusedError as error:
+        from etl_craft.execution.control_flow import advance
+
+        advance(engine, pipeline_run_id, observed=True, config=config)
+        return EventCheck(now + timedelta(seconds=1), message=str(error))
     except LockTimeoutError:
         return EventCheck(now + timedelta(seconds=1))
 

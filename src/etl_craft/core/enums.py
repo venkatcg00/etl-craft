@@ -590,6 +590,7 @@ class AgentReport(StrEnum):
 
     START = "START"
     END = "END"
+    CANCEL = "CANCEL"
     STATE = "STATE"
     TARGET = "TARGET"
     PUBLISH = "PUBLISH"
@@ -600,3 +601,16 @@ class AgentReport(StrEnum):
     ALERT = "ALERT"
     LOCK = "LOCK"
     UNLOCK = "UNLOCK"
+
+
+class DatabricksQueryStatus(StrEnum):
+    """Databricks Query History states, including compilation before execution."""
+
+    QUEUED = "QUEUED"
+    STARTED = "STARTED"
+    COMPILING = "COMPILING"
+    COMPILED = "COMPILED"
+    RUNNING = "RUNNING"
+    CANCELED = "CANCELED"
+    FAILED = "FAILED"
+    FINISHED = "FINISHED"

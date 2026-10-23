@@ -712,7 +712,18 @@ def _start_and_record(
             cancel=stop,
             on_started=lambda pid: attempt_started(engine, spec.attempt_id, owner, pid),
         )
-    result = replace(result, queries_ended=control_flow.process_local_queries(config))
+    query_error = None
+    queries_ended = control_flow.process_local_queries(config)
+    if result.cancelled or result.timed_out or result.returncode < 0:
+        from etl_craft.core.ownership import attempt_holder
+        from etl_craft.engine.resource_locks import holder_tag
+        from etl_craft.execution.query_cancellation import confirm
+
+        query_error = confirm(config, holder_tag(attempt_holder(spec.attempt_id, owner)))
+        queries_ended = query_error is None
+        with log_path.open("a", encoding="utf-8") as output:
+            output.write((query_error or "warehouse queries confirmed stopped") + "\n")
+    result = replace(result, queries_ended=queries_ended)
     outcome = retrying(
         f"recording how {spec.task_code} ended",
         lambda: record_attempt(
@@ -727,7 +738,7 @@ def _start_and_record(
         ),
     )
 
-    control_flow.after_exit(engine, spec.pipeline_run_id)
+    control_flow.after_exit(engine, spec.pipeline_run_id, reason=query_error)
     return outcome
 
 

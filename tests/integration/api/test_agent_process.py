@@ -184,3 +184,60 @@ def test_a_lost_agent_stops_its_writer_before_a_second_holder(cluster, monkeypat
             ).scalar_one()
             == "LOST"
         )
+
+
+@pytest.mark.parametrize("lost_notification", [False, True])
+def test_agent_cancel_is_acknowledged_by_notification_or_renewal(
+    cluster, monkeypatch, lost_notification
+):
+    from etl_craft.core.enums import ControlAction
+    from etl_craft.engine import resource_locks
+    from etl_craft.services.operations.requests import ControlRequest
+    from fixtures.cancellation import wait_for
+
+    p, url, token, agent_dir = cluster
+    (agent_dir / "python_scripts" / "load.py").write_text(
+        "import threading\n"
+        "def run(task):\n"
+        "    (task.config.project_dir / 'ready').touch()\n"
+        "    threading.Event().wait(120)\n",
+        encoding="utf-8",
+    )
+    controller = p.start("controller", "--no-ui")
+    code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "cancel")
+    assert code == 0, output
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
+    agent = p.start("agent", "--api", url, "--project", str(agent_dir), "--drain-seconds", "0")
+    wait_for(lambda: (agent_dir / "ready").exists())
+    if lost_notification:
+        monkeypatch.setattr(resource_locks, "notify", lambda *args: None)
+    ctx = OperationContext(p.engine, p.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    started = time.monotonic()
+    pending = invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(
+            pipeline_code="P", action=ControlAction.ABORT, reason="cancel an agent attempt"
+        ),
+    )
+    try:
+        p.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="CANCELLED", timeout=15)
+        p.wait_for(
+            "SELECT STATUS FROM AUD_CONTROL_REQUESTS WHERE CONTROL_ID=" + str(pending.control_id),
+            expected="COMPLETED",
+            timeout=5,
+        )
+        assert time.monotonic() - started < (14 if lost_notification else 6)
+        with p.engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT CANCEL_REQUESTED_AT AS requested, "
+                    "CANCEL_ACKNOWLEDGED_AT AS acknowledged "
+                    "FROM AUD_TASK_ATTEMPTS"
+                )
+            ).one()
+        assert row.requested is not None and row.acknowledged is not None
+    except AssertionError as error:
+        raise AssertionError(
+            f"{error}\nagent:\n{agent.output}\ncontroller:\n{controller.output}"
+        ) from error

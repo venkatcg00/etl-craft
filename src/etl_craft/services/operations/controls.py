@@ -1,4 +1,4 @@
-"""Actor-scoped run/task holds, graceful stops, aborts and durable request inspection."""
+"""Actor-scoped run/task holds, stops, aborts and durable request inspection."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from etl_craft.core.errors import (
     RunStateError,
     UsageError,
 )
-from etl_craft.engine import controls, locks, run_scopes, runlog, transitions
+from etl_craft.engine import attempt_cancellation, controls, locks, run_scopes, runlog, transitions
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -91,8 +91,10 @@ def request_control(ctx: OperationContext, request: ControlRequest) -> ControlVi
             prepare_recovery(conn, ctx, selected, request, control_id)
     from etl_craft.services.operations.trigger_controls import cascade_children
 
+    if request.action in {ControlAction.STOP, ControlAction.ABORT}:
+        _stop_probes(ctx, run_id, task_id)
     cascade_children(ctx, run_id)
-    control_flow.advance(ctx.engine, run_id)
+    control_flow.advance(ctx.engine, run_id, config=ctx.config)
     with ctx.engine.connect() as conn:
         return controls.get(conn, control_id)
 
@@ -185,6 +187,11 @@ def _existing(
 def _check_query_control(
     ctx: OperationContext, request: ControlRequest, attempts: tuple[controls.ControlAttempt, ...]
 ) -> None:
+    if _query_adapter(ctx):
+        return
+    from etl_craft.warehouse.connection import warehouse_dialect
+
+    dialect = warehouse_dialect(ctx.config).spec.display_name
     if request.action == ControlAction.STOP and not control_flow.process_local_queries(ctx.config):
         unknown = [
             a.attempt_id
@@ -193,11 +200,12 @@ def _check_query_control(
         ]
         if unknown:
             raise RunRefusedError(
-                f"{request.pipeline_code}: Python attempts {unknown} cannot acknowledge all "
+                f"{request.pipeline_code}: {dialect} Python attempts {unknown} "
+                "cannot acknowledge all "
                 "server-side script queries; scoped STOP needs a query adapter. "
                 "Use definition pause to stop new dispatch while the script finishes."
             )
-    if request.action != ControlAction.ABORT:
+    if request.action not in {ControlAction.STOP, ControlAction.ABORT}:
         return
     unsafe = [
         a.attempt_id
@@ -207,9 +215,9 @@ def _check_query_control(
     if unsafe:
         raise RunRefusedError(
             f"{request.pipeline_code}: attempts {unsafe} belong to a server-side "
-            "warehouse deployment "
-            "without a cancellation acknowledgement adapter. ABORT is refused before any "
-            "signal or status change; use graceful STOP to let those queries finish."
+            f"{dialect} warehouse deployment "
+            f"without a cancellation acknowledgement adapter. {request.action} is refused "
+            "before any signal or status change; use definition pause while queries finish."
         )
 
 
@@ -248,6 +256,12 @@ def _insert(
         },
     ).scalar_one_or_none()
     if inserted is not None:
+        if request.action in {ControlAction.STOP, ControlAction.ABORT}:
+            for attempt in attempts:
+                if attempt.status in control_flow.ACTIVE_ATTEMPTS:
+                    attempt_cancellation.request_attempt_cancel(
+                        conn, attempt.attempt_id, attempt.owner_id
+                    )
         return int(inserted)
     existing = _existing(conn, request, run_id, task_id)
     if existing is not None:
@@ -266,7 +280,7 @@ def get_control(ctx: OperationContext, request: ControlId) -> ControlView:
 
 @contextmanager
 def control_scope(ctx: OperationContext, request: ControlRequest) -> Iterator[int]:
-    """Finish any active probe under its existing lock before fencing its scope."""
+    """Bind an exact run and refuse unidentified probes before fencing its scope."""
     with ctx.engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
         selected = runlog.select_run(conn, pipeline_id, request.selector)
@@ -286,13 +300,32 @@ def control_scope(ctx: OperationContext, request: ControlRequest) -> Iterator[in
                 request.action in {ControlAction.STOP, ControlAction.ABORT}
                 and fetch_task_parameters(conn, task_id).get("EVENT_SQL")
                 and not control_flow.process_local_queries(ctx.config)
+                and not _query_adapter(ctx)
             ):
+                from etl_craft.warehouse.connection import warehouse_dialect
+
                 raise RunRefusedError(
                     f"task_id={task_id}: EVENT_SQL uses server-side queries without a durable "
                     "query acknowledgement adapter; native scoped controls are unavailable. "
+                    f"Warehouse dialect: {warehouse_dialect(ctx.config).spec.display_name}. "
                     "Use definition pause to stop new dispatch, "
                     "or wait for a successful event check."
                 )
+    if request.action in {ControlAction.STOP, ControlAction.ABORT}:
+        with ctx.engine.connect() as conn:
+            for task_id in event_ids:
+                active = conn.execute(
+                    statement(conn, "resource_lock_read"), {"key": locks.event(task_id).key}
+                ).one_or_none()
+                expected = f"action:e:{selected.pipeline_run_id:x}:{task_id:x}:"
+                if active is not None and not active.holder_id.startswith(expected):
+                    raise RunRefusedError(
+                        f"task_id={task_id}: an event probe is active; no control was accepted. "
+                        f"holder={active.holder_id}, expected run-bound identity {expected}; "
+                        "wait for that probe to finish or reconcile its holder before retrying"
+                    )
+        yield selected.pipeline_run_id
+        return
     try:
         with ExitStack() as stack:
             for task_id in sorted(event_ids):
@@ -406,3 +439,22 @@ def request_bulk_controls(ctx: OperationContext, request: BulkControlRequest) ->
         f"{len(outcomes) - failures} accepted; {failures} refused; "
         "inspect each durable control for completion",
     )
+
+
+def _query_adapter(ctx: OperationContext) -> bool:
+    from etl_craft.warehouse.connection import warehouse_dialect
+
+    return ctx.config.warehouse is None or warehouse_dialect(ctx.config).session_fencing
+
+
+def _stop_probes(ctx: OperationContext, run_id: int, task_id: int | None) -> None:
+    """After the durable fence commits, stop only the selected run's tagged probes."""
+    from etl_craft.engine.resource_locks import holder_tag
+    from etl_craft.execution.query_cancellation import confirm
+
+    with ctx.engine.connect() as conn:
+        holders = controls.event_probes(conn, run_id, task_id)
+    for holder in holders:
+        reason = confirm(ctx.config, holder_tag(holder.holder_id))
+        if reason is not None:
+            control_flow.advance(ctx.engine, run_id, observed=True, reason=reason)

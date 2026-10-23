@@ -462,3 +462,116 @@ def test_claim_clears_the_previous_queued_reason(agent_scene):
         ).one()
     assert row.status == "CLAIMED"
     assert row.error_message is None
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_cancellation_needs_warehouse_confirmation_from_the_pinned_owner(agent_scene, confirmed):
+    from etl_craft.core.enums import AttemptStatus, ControlAction, ControlStatus
+    from etl_craft.services.operations.requests import ControlRequest
+
+    db, client, headers, _, _, config = agent_scene
+    attempt = claim(agent_scene)
+    ctx = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    pending = invoke(
+        ctx,
+        ActionName.CONTROL,
+        ControlRequest(pipeline_code="P", action=ControlAction.ABORT, reason="cancel owned work"),
+    )
+    response = client.post(
+        "/api/v1/agent/report",
+        headers=headers,
+        json={
+            "version": __version__,
+            "attempt_id": attempt,
+            "operation": "CANCEL",
+            "queries_ended": confirmed,
+            "error_message": "warehouse confirmation still pending",
+        },
+    )
+    assert response.status_code == 200, response.text
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, CANCEL_REQUESTED_AT AS requested, "
+                "CANCEL_ACKNOWLEDGED_AT AS acknowledged FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+        from etl_craft.engine.controls import get
+
+        view = get(conn, pending.control_id)
+    assert row.status == AttemptStatus.CLAIMED
+    assert row.requested is not None
+    assert (row.acknowledged is not None) == confirmed
+    assert view.status == ControlStatus.ACKNOWLEDGED
+    assert (view.attempts[0].queries_ended_at is not None) == confirmed
+    if not confirmed:
+        assert "warehouse confirmation still pending" in view.message
+    if confirmed:
+        ended = client.post(
+            "/api/v1/agent/report",
+            headers=headers,
+            json={
+                "version": __version__,
+                "attempt_id": attempt,
+                "operation": "END",
+                "status": "CANCELLED",
+                "queries_ended": True,
+            },
+        )
+        assert ended.status_code == 200, ended.text
+        from etl_craft.execution.control_flow import advance
+
+        advance(db.engine, pending.pipeline_run_id, observed=True)
+        with db.engine.connect() as conn:
+            assert get(conn, pending.control_id).status == ControlStatus.COMPLETED
+
+
+@pytest.mark.parametrize("invalid", ["expired", "unrequested"])
+def test_cancellation_acknowledgement_requires_a_live_pinned_attempt(agent_scene, invalid):
+    from etl_craft.core.enums import ControlAction
+    from etl_craft.services.operations.requests import ControlRequest
+
+    db, client, headers, _, _, config = agent_scene
+    attempt = claim(agent_scene)
+    if invalid == "expired":
+        ctx = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+        invoke(
+            ctx,
+            ActionName.CONTROL,
+            ControlRequest(
+                pipeline_code="P", action=ControlAction.ABORT, reason="cancel owned work"
+            ),
+        )
+        with db.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:past WHERE ATTEMPT_ID=:id"),
+                {"past": datetime.now(UTC) - timedelta(seconds=1), "id": attempt},
+            )
+    response = client.post(
+        "/api/v1/agent/report",
+        headers=headers,
+        json={
+            "version": __version__,
+            "attempt_id": attempt,
+            "operation": "CANCEL",
+            "queries_ended": True,
+        },
+    )
+    assert response.status_code == (409 if invalid == "expired" else 403), response.text
+    with db.engine.connect() as conn:
+        acknowledged = conn.execute(
+            text(
+                "SELECT CANCEL_ACKNOWLEDGED_AT AS acknowledged FROM AUD_TASK_ATTEMPTS "
+                "WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).scalar_one()
+        observations = conn.execute(
+            text(
+                "SELECT COUNT(*) AS observations FROM AUD_ATTEMPT_ACKNOWLEDGEMENTS "
+                "WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).scalar_one()
+    assert acknowledged is None and observations == 0

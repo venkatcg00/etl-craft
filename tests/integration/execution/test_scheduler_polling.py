@@ -10,7 +10,7 @@ from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.gates import Clock
 from etl_craft.execution.pools import Capacity, ExecutionHandle, HandleState, HandleStatus
 from etl_craft.execution.scheduler import ENGINE_POLL_SECONDS, Scheduler
-from fixtures.metadata import add_pipeline, add_task, start_run
+from fixtures.metadata import add_dependency, add_pipeline, add_task, start_run
 from fixtures.round_trips import count_round_trips
 
 pytestmark = pytest.mark.usefixtures("engine_actor")
@@ -84,3 +84,43 @@ def test_a_running_attempt_is_watched_without_reading_the_engine_db_every_tick(
             scheduler.step()
         assert task not in scheduler.jobs
         assert ended.result()["engine_statements"] > 0
+
+
+def test_a_lifted_stop_does_not_keep_an_event_probe_cancelled(engine_db):
+    import threading
+
+    engine = engine_db.engine
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "P")
+        slow = add_task(conn, pipeline, "slow", "PYTHON", SCRIPT_FILE="python_scripts/slow.py")
+        task = add_task(conn, pipeline, "event", "EVENT_WAIT", EVENT_SQL="SELECT 1 AS ready")
+        add_dependency(conn, pipeline, task, slow)
+        run = start_run(conn, pipeline)
+        data = fetch_pipeline_graph(conn, pipeline)
+    pool = RunningPool()
+    scheduler = Scheduler(
+        engine,
+        engine_db.config,
+        "P",
+        pipeline,
+        run,
+        {task: "event", slow: "slow"},
+        build_graph(data.tasks, data.same_pipeline_edges),
+        force=False,
+        clock=Clock(),
+        child=ChildOptions(),
+        pool=pool,
+        paused=lambda: False,
+        settle=lambda failures: [],
+    )
+    scheduler.attempted.add(slow)
+    scheduler.jobs[slow] = ExecutionHandle("local", 1)
+    stopped = threading.Event()
+    stopped.set()
+    scheduler.event_stops[task] = stopped
+    try:
+        assert not scheduler.step()
+        assert not stopped.is_set(), "a released control must allow the next event check"
+    finally:
+        pool.ended = True
+        scheduler.close()

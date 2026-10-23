@@ -183,7 +183,10 @@ def test_unknown_query_acknowledgement_stays_pending_after_lease_loss(ctx):
         ask(ctx, run, ControlAction.RELEASE)
 
 
-def test_server_query_abort_refuses_before_mutating_the_scope(ctx):
+def test_missing_query_adapter_refuses_abort_before_mutating_the_scope(ctx, monkeypatch):
+    from etl_craft.dialects.warehouse.postgres import PostgresWarehouse
+
+    monkeypatch.setattr(PostgresWarehouse, "session_fencing", False)
     _, run, first, _ = seed(ctx)
     attempt = queue(ctx, run, first)
     with ctx.engine.begin() as conn:
@@ -205,7 +208,8 @@ def test_server_query_abort_refuses_before_mutating_the_scope(ctx):
     with ctx.engine.connect() as conn:
         assert controls.blocked(conn, run) == {}
         assert controls.affected(conn, (attempt,))[0].status == AttemptStatus.CLAIMED
-    assert ask(server, run, ControlAction.STOP).status == ControlStatus.REQUESTED
+    with pytest.raises(RunRefusedError, match="STOP is refused"):
+        ask(server, run, ControlAction.STOP)
 
 
 def test_role_legacy_and_reason_refusals_are_explicit(ctx):
@@ -324,13 +328,8 @@ def test_task_control_observes_just_its_worker_and_preserves_other_work(ctx, tmp
             assert request.status in {ControlStatus.REQUESTED, ControlStatus.ACKNOWLEDGED}
             assert request.attempt_ids == (first_spec.attempt_id,)
             assert not other_future.done()
-            if action == ControlAction.STOP:
-                assert not first_future.done()
-                release.touch()
             first_result = first_future.result(timeout=20)
-            assert first_result.status == (
-                RunStatus.SUCCESS if action == ControlAction.STOP else RunStatus.CANCELLED
-            )
+            assert first_result.status == RunStatus.CANCELLED
             done = act(ctx, ActionName.CONTROL_REQUEST, control_id=request.control_id)
             assert done.status == ControlStatus.COMPLETED
             assert done.run_status == RunStatus.IN_PROGRESS
@@ -631,7 +630,10 @@ def test_reconcile_revisits_lost_workers_but_never_guesses_an_unreadable_identit
     assert done.attempts[0].status == AttemptStatus.LOST
 
 
-def test_server_python_stop_exposes_missing_query_capability_before_acceptance(ctx):
+def test_server_python_stop_exposes_missing_query_capability_before_acceptance(ctx, monkeypatch):
+    from etl_craft.dialects.warehouse.postgres import PostgresWarehouse
+
+    monkeypatch.setattr(PostgresWarehouse, "session_fencing", False)
     _, run, first, _ = seed(ctx)
     attempt = queue(ctx, run, first)
     claim_again(ctx, attempt)
@@ -695,3 +697,57 @@ def test_reconcile_observes_exited_terminal_worker_without_rewriting_its_outcome
             ).scalar_one()
             == 7
         )
+
+
+@pytest.mark.parametrize("handler", ["PYTHON", "SQL"])
+@pytest.mark.parametrize("action", [ControlAction.STOP, ControlAction.ABORT])
+def test_tagged_server_controls_request_cancellation_without_claiming_completion(
+    ctx, handler, action
+):
+    _, run, first, _ = seed(ctx)
+    attempt = queue(ctx, run, first)
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET HANDLER=:handler WHERE TASK_ID=:id"),
+            {"handler": handler, "id": first},
+        )
+    claim_again(ctx, attempt)
+    server = replace(
+        ctx,
+        config=replace(
+            ctx.config,
+            warehouse=ConnectionProfile(
+                "WAREHOUSE", "remote", "jdbc:postgresql://localhost/warehouse", "", "NONE"
+            ),
+        ),
+    )
+    pending = ask(server, run, action, "first")
+    assert pending.status == ControlStatus.REQUESTED
+    assert pending.completed_at is None
+    with ctx.engine.connect() as conn:
+        observed = conn.execute(
+            text(
+                "SELECT STATUS AS status, CANCEL_REQUESTED_AT AS requested, "
+                "CANCEL_ACKNOWLEDGED_AT AS acknowledged FROM AUD_TASK_ATTEMPTS "
+                "WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+    assert observed.status == AttemptStatus.CLAIMED
+    assert observed.requested is not None
+    assert observed.acknowledged is None
+
+
+def test_capability_inspection_never_cancels_an_event_probe(ctx, monkeypatch):
+    from etl_craft.services.operations import controls as operations
+
+    _, run, _, _ = seed(ctx)
+
+    def unexpected(*args):
+        pytest.fail("capability inspection must not cancel warehouse queries")
+
+    monkeypatch.setattr(operations, "_stop_probes", unexpected)
+    view = act(ctx, ActionName.CAPABILITIES, pipeline_code="P", run_id=run)
+    assert any(row.action == ControlAction.ABORT and row.available for row in view.actions)
+    with ctx.engine.connect() as conn:
+        assert controls.blocked(conn, run) == {}

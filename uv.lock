@@ -749,6 +749,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "boto3" },
+    { name = "databricks-sql-connector" },
     { name = "databricks-sqlalchemy" },
     { name = "fastapi" },
     { name = "jinja2" },
@@ -762,6 +763,7 @@ aws = [
     { name = "boto3" },
 ]
 databricks = [
+    { name = "databricks-sql-connector" },
     { name = "databricks-sqlalchemy" },
     { name = "sqlalchemy" },
 ]
@@ -812,6 +814,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.28" },
+    { name = "databricks-sql-connector", marker = "extra == 'databricks'", specifier = ">=4.5.0" },
     { name = "databricks-sqlalchemy", marker = "extra == 'databricks'", specifier = ">=2" },
     { name = "duckdb-engine", specifier = ">=0.13" },
     { name = "etl-craft", extras = ["ui", "aws", "databricks", "snowflake", "trino"], marker = "extra == 'all'", editable = "." },

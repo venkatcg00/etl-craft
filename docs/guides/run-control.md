@@ -151,7 +151,7 @@ A pipeline with a run in progress is refused: mark that run, or stop or abort it
 
 | Command | Running attempts | New attempts and retries | Stored outcome |
 |---|---|---|---|
-| `stop` | finish and keep their own outcome | blocked | the run ends `CANCELLED` once they have ended |
+| `stop` | stop their processes and tagged queries | blocked | the run ends `CANCELLED` after confirmation |
 | `abort` | their task processes are stopped now, ending `CANCELLED` | blocked | the run ends `CANCELLED` |
 | `hold` | finish and keep their own outcome | blocked until `release` | the run stays `IN-PROGRESS` |
 
@@ -176,22 +176,25 @@ the run active and retains that task's fence. `--request-key KEY` makes retries 
 original request. Repeating the same latest scoped action also returns its original identity.
 Inspect a completed request by id even after its run ends.
 
-Abort stops only the affected owned child processes, checking their PID birth identities before
-signalling. Embedded DuckDB queries end with those processes. Server-side warehouse queries
-currently have no durable cancellation adapter: abort refuses before signalling or changing the
-scope; use `stop` for supported handlers to let them finish. Python scripts on
-server-side warehouses cannot certify every script-owned query ending;
-scoped stop refuses while such a script is active, with definition pause as the dispatch-only
-alternative. Built-in synchronous handlers commit their query acknowledgement with its outcome; an abnormal server-side
-query failure without such evidence stays pending. A crashed owner, expired lease, terminal task
-summary or disconnected browser is never query-ending evidence. Unknown acknowledgements remain
-pending, with their attempt ids in the response. Reconcile records expired active owners as `LOST` before observing verified local exits;
-existing terminal outcomes are preserved. Server-side query status remains unknown without
-its own acknowledgement. Native controls
-in legacy external-orchestrator mode report the missing adapter and direct the operator to that
-orchestrator. Server-side `EVENT_SQL` stop/abort is unavailable without a query adapter; use a
-definition pause or wait for a successful check. An active event probe can refuse a scoped
-control until its current check finishes, rather than claiming its query has stopped.
+Stop and abort signal only the affected owned child processes, checking their PID birth
+identities first. Local supervisors signal their children immediately. Agents wake through the
+API's pool and agent notifications; lease renewal is the fallback if a notification is lost.
+Queued attempts become `CANCELLED` immediately. Running attempts acknowledge cancellation only
+after their processes and warehouse queries have ended.
+
+PostgreSQL, Snowflake, Trino and Databricks adapters cancel by the existing holder/session tag,
+then confirm that no tagged statement remains. Python scripts must use `task.warehouse()` and
+must not replace the session tag. SQL event probes carry their run-bound holder tag too.
+Embedded DuckDB queries end with the process. No per-statement Engine DB record is needed.
+A failed or unconfirmed cancellation stays pending with its reason; a cancel receipt, expired
+lease, terminal task summary or disconnected browser is never query-ending evidence.
+Reconciliation records expired active owners as `LOST` before observing verified local exits.
+
+The capability document reads the warehouse adapter. A dialect without cancellation support
+keeps the scoped server-query refusal; use definition pause to stop new dispatch while its
+queries finish. Legacy external-orchestrator deployments continue to direct controls to that
+orchestrator. An event probe with an unknown run identity must finish or be reconciled before
+a scoped control can be accepted.
 
 ## Hold or release dispatch in a selected run
 

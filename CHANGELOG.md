@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Scoped stop and abort cancel SQL, Python and event-probe queries by their existing warehouse
+  holder tags, with process and query acknowledgements kept separate. Agents wake through
+  notifications; unconfirmed cancellations remain pending with their reason. Databricks gains
+  tagged query cancellation through Query History and Statement Execution APIs; the optional
+  Databricks extra requires SQL connector 4.5.0 or newer for session query tags.
+
 - `Offset.partitions({...})` returns a `PARTITIONS` offset for streams: partition keys mapped to
   the next position to read, stored as sorted JSON. An attempt fails, storing nothing, when a
   partition moves backwards or a stored partition is missing; new partitions are logged.
@@ -36,6 +42,9 @@ All notable changes are recorded here. The format follows
   `0047_sql_script.sql` before using the handler. Prefer `RETRY_ON=NONE` for scripts.
 
 ### Fixed
+
+- Attempt logs suppress INFO request URLs from both generations of httpx/httpcore and the
+  other supported HTTP libraries, including scripts that configure INFO logging.
 
 - Waiting agent claims recheck token revocation, expiry and account activity before admitting
   queued work, including credentials changed while the long poll waits.

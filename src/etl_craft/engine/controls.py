@@ -185,3 +185,30 @@ def permits_paused(conn: Connection, run_id: int) -> bool:
     return bool(
         conn.execute(statement(conn, "control_permits_paused"), {"run_id": run_id}).scalar()
     )
+
+
+@dataclass(frozen=True)
+class EventProbe:
+    """The resource key and exact holder of one run's in-flight event check."""
+
+    holder_id: str
+    lock_key: int
+
+
+def event_probes(conn: Connection, run_id: int, task_id: int | None) -> tuple[EventProbe, ...]:
+    """Read run-bound holders by event resource key, never scan all resource reservations."""
+    from etl_craft.engine.locks import event
+
+    tasks = conn.execute(
+        statement(conn, "control_event_tasks"), {"run_id": run_id, "task_id": task_id}
+    ).scalars()
+    keys = tuple(event(int(task)).key for task in tasks)
+    if not keys:
+        return ()
+    prefix = f"action:e:{run_id:x}:" + (f"{task_id:x}:" if task_id is not None else "")
+    query = statement(conn, "control_event_probes").bindparams(bindparam("keys", expanding=True))
+    return tuple(
+        EventProbe(row.holder_id, row.lock_key)
+        for row in conn.execute(query, {"keys": keys})
+        if row.holder_id.startswith(prefix)
+    )

@@ -73,6 +73,7 @@ class AgentTask(AgentRequest):
     pid: int | None = None
     process_start: str | None = None
     failure: Failure | None = None
+    queries_ended: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)

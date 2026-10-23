@@ -153,6 +153,7 @@ def test_agent_checks_its_warehouse_fencing_before_registering(monkeypatch):
     from etl_craft.dialects.warehouse.databricks import DatabricksWarehouse
     from etl_craft.warehouse import fencing
 
+    monkeypatch.setattr(DatabricksWarehouse, "session_fencing", False)
     monkeypatch.setattr(fencing, "warehouse_dialect", lambda config: DatabricksWarehouse())
 
     def refuse_client(url):

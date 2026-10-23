@@ -6,11 +6,9 @@ import signal
 import subprocess
 import sys
 import textwrap
-import threading
 import time
 from dataclasses import replace
 from datetime import date
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 import yaml
@@ -22,6 +20,7 @@ from etl_craft.core.enums import RunStatus
 from etl_craft.core.errors import HandlerError, MetadataError
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository.offsets import fetch_task_offset
+from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.runner import run_task
 from etl_craft.handlers import python_scripts
@@ -513,47 +512,38 @@ def test_a_signal_to_run_stops_the_task_process_and_records_it(project, tmp_path
     assert sig.name in row.error or "interrupted" in row.error, row.error
 
 
-def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project):
+@pytest.mark.parametrize(
+    "library",
+    [
+        "urllib3",
+        "httpx",
+        "httpcore",
+        "httpx2",
+        "httpcore2",
+        "requests",
+        "botocore",
+        "boto3",
+        "s3transfer",
+    ],
+)
+def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project, library):
     engine, config, _, _ = project
-    requests = []
-
-    class Endpoint(BaseHTTPRequestHandler):
-        def do_GET(self):
-            requests.append(self.path)
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-
-        def log_message(self, format, *args):
-            pass
-
-    server = HTTPServer(("127.0.0.1", 0), Endpoint)
-    agent = threading.Thread(target=server.serve_forever, daemon=True)
-    agent.start()
-    url = f"http://127.0.0.1:{server.server_port}/?api_key=hidden-key"
     (config.python_scripts_dir / "load.py").write_text(
-        "import logging, requests\n"
+        "import logging\n"
         "from etl_craft.scripting import ScriptResult\n"
         "def run(task):\n"
-        f"    response = requests.get({url!r}, timeout=5)\n"
-        "    response.raise_for_status()\n"
-        "    logging.getLogger('httpx').info('GET %s', response.url)\n"
-        "    logging.getLogger('urllib3.connectionpool').info('GET %s', response.url)\n"
+        "    assert task.logger.getEffectiveLevel() == logging.INFO\n"
+        f"    logging.getLogger({library!r}).info('GET https://example.test/?api_key=hidden-key')\n"
         "    task.logger.info('finished request')\n"
         "    return ScriptResult(row_count=0)\n",
         encoding="utf-8",
     )
-    try:
-        outcome = run_task(engine, config, "P", "load")
-        assert outcome.status == RunStatus.SUCCESS, outcome.message
-        assert requests == ["/?api_key=hidden-key"]
-        contents = next(config.log_dir.glob("P/run-*/load.attempt-1.log")).read_text("utf-8")
-        assert "hidden-key" not in contents
-        assert "finished request" in contents
-    finally:
-        server.shutdown()
-        server.server_close()
-        agent.join(timeout=5)
+    outcome = run_task(engine, config, "P", "load", child=ChildOptions(log_level="INFO"))
+    assert outcome.status == RunStatus.SUCCESS, outcome.message
+    contents = next(config.log_dir.glob("P/run-*/load.attempt-1.log")).read_text("utf-8")
+    assert "hidden-key" not in contents
+    assert "GET https://example.test/" not in contents
+    assert "finished request" in contents
 
 
 def test_handler_returns_the_offset_without_persisting_it(project):

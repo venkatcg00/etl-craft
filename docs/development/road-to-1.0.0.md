@@ -148,7 +148,10 @@ item's text, or work done early under another item.
 | S5.AI Event waits on signal rows | Done | #233 | Keyed SQL waits consume each signal once with the wait's success, like files; bounded probes; always-true queries are refused |
 | S5.AH Partitioned offsets for streams | Done | #234 | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
 | S5.AJ Fewer warehouse round trips | Done | #235 | Task-scoped warehouse engines, DDL-aware metadata, combined queries and exact action/attempt budgets; parallel cloud suites under 15 minutes |
-| S5.D and later | Not started | | |
+| S5.D Cancellation across the cluster | Done | #236 | Prompt scoped cancellation, confirmed warehouse query endings and API-only agent acknowledgements |
+| S5.E Slots, limits and priorities | Planned | | Pools, priorities and resource-based placement without over-reservation |
+| S5.AK Item fan-out inside Python tasks | Planned | | Per-item recorded, retried and controlled work inside one Python task; one graph node with an item strip |
+| S5.F and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -630,7 +633,42 @@ S5.AH (#234) ran the scripting unit tests, the Python script tests on both Engin
 the task process and `mark --offset` on the CLI) and the released-schema upgrades on both.
 Warehouse SQL is unchanged; no cloud suite was needed.
 
+S5.D (#236) exercised long SQL, Python and event-probe cancellation on every local warehouse
+and both Engine DBs, with real agent notification and renewal fallback checks. Lock, lease,
+fencing and transition cases passed 20 rounds; API fencing and probe recovery passed another
+20 rounds. The S5.AJ action/attempt statement budgets are unchanged. Targeted cloud cancellation
+passed on Snowflake (two cases) and Databricks (one case); the first Databricks run exposed an
+empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
+
 **Choices that differ from the item text.**
+
+- S5.D reuses S5.C's session tags instead of `AUD_ATTEMPT_QUERIES` (owner, 23 October
+  2026): stop tagged statements, then confirm none remain. Existing cancellation columns need
+  no migration, and no per-statement Engine DB writes are added. Both scoped STOP and ABORT
+  signal live work; ordinary supervisor interruption retains its previous failure outcome.
+  Cancelled children have at most one second of signal grace before forced termination;
+  the supervisor independently confirms server queries afterwards. Unknown confirmations
+  remain pending and keep their reason, and active attempts cannot complete a control merely
+  by reporting a query acknowledgement.
+- S5.D's Databricks adapter uses session query tags, every active Query History page and the
+  Statement Execution cancel API with the connector's existing authentication. A cancel
+  receipt is not acknowledgement; incomplete history or missing permissions fail closed.
+  The optional extra requires SQL connector 4.5.0 or newer for its query-tag argument.
+  Tagged cancellation works without a Databricks-only identity table, so cluster execution
+  can use the adapter. SQL event probes carry short run/task-bound holder identities.
+- S5.D keeps all nine HTTP-library logger names, including both httpx/httpcore generations.
+  The regression checks suppression independently of URL redaction and was broken deliberately
+  for each library. Capability inspection remains read-only. The done criteria are derived
+  from the item: prompt local/agent cancellation, confirmed query endings, pending failures
+  and capability refusals only for unsupported adapters.
+
+
+- S5.D also carries the owner's plan-only S5.AK item fan-out addition (23 October 2026),
+  placed after S5.E. Its helper, item audit, controls and UI remain future work.
+
+- S5.D carries the owner's S5.E resource-based placement addition (23 October 2026): keep
+  agents, reserve CPU and memory atomically with claims, and expose measured or declared
+  capacity. This is plan text only; container launchers are excluded from 1.0.
 
 - S5.AJ uses the owner's targets (22 October 2026): warehouse statements at most CREATE 4,
   SETUP 3, OVERWRITE 5, APPEND 5, SCD1 5, SCD2 7, DELETE 5, VIEW 2 and DROP 2, and three
@@ -5238,6 +5276,137 @@ on SIGTERM.
 - `CFG_PIPELINES.PRIORITY INT DEFAULT 0` orders the queue; ties go to the oldest.
 - Fairness: when a project is at its limit, its queued attempts are skipped, not blocking others.
 - *Tests.* Limits hold under a burst of 1,000 ready tasks; a high-priority pipeline's tasks run first.
+
+- **Resource-based placement** (owner, 23 October 2026). Agents stay; placement uses resources,
+  not only slot counts. SQL tasks use little on the agent because the warehouse does the work;
+  Python tasks range from megabytes to tens of gigabytes. Container launchers are not built for
+  1.0.
+  - Agents advertise CPU and memory, measured as today (cgroup-aware), or declared with
+    `etl-craft agent --cpu N --memory-mb N`. A declared value is a ceiling and wins only where
+    it is below the measurement, unless the agent fronts capacity it cannot measure.
+  - An agent may front other capacity, such as a cluster the script's own runtime uses
+    (Spark, Ray, Dask). It declares that quota with `--declared-capacity`, and the registry
+    marks it "declared".
+  - etl-craft starts no cluster or container jobs itself. Scripts submit work to their own
+    runtime, as S5.C already allows.
+  - Optional task parameters `CPU_REQUEST` and `MEMORY_REQUEST_MB` are validated whole numbers.
+    Without them a task uses its kind's documented default (the current `TASK_COST` estimates).
+  - `validate` refuses a request above every active agent's capacity in the task's pool,
+    naming the task, the request, the largest agent and the remedy. Absent agents are not an
+    error: the attempt queues with a visible reason.
+  - An agent claims an attempt only when its requests fit the agent's free CPU and memory.
+    The reservation commits atomically with the claim, and `AUD_TASK_ATTEMPTS` records the
+    reserved amounts. It is released on every terminal outcome, reconciliation as `LOST` and
+    fenced lease expiry. Slot counts stay as an upper bound per kind.
+  - Capacity is never summed across agents. A task that fits no single agent waits with the
+    reason ("needs 40960 MB; the largest agent in pool heavy-python has 32768 MB free of
+    32768 MB"), and never runs on the controller.
+  - Pools (this item's `CFG_POOLS` and task `POOL`) group agents by shape, for example
+    `heavy-python` on large hosts and `sql` on small ones. `--python-slots 0` or
+    `--warehouse-slots 0` gives a single-kind agent. There are no separate agent types.
+  - The controller and API read advertised, reserved and free resources per agent and pool
+    from `AUD_AGENTS` and claims, never from per-kind assumptions. `doctor`, `status`, `agents`
+    and the S7.A agent page show them. Heartbeats refresh measured capacity; there is no second
+    polling loop.
+  - Local execution applies the same requests and defaults to the local pool's measured
+    allocation, so a task too large for the machine fails validation the same way.
+  - One migration in both Engine DB dialects adds advertised CPU and memory and the capacity
+    source to `AUD_AGENTS`, and reserved CPU and memory to `AUD_TASK_ATTEMPTS`, with matching
+    `schema.sql` files and the released-schema upgrade test.
+  - Tests cover several agents of different sizes in one pool; a large Python task placed
+    only where it fits; a task that fits nowhere queuing with its reason and refused by
+    `validate`; concurrent claims never over-reserving an agent (races fixture, 20 rounds);
+    reservations released on success, failure, `LOST` and lease expiry; a declaration below
+    the measurement winning; draining capacity withdrawn; default requests; the same rule
+    locally; and no growth in S5.AJ's claim-path statement budgets.
+  - Done when placement never over-reserves CPU or memory, tasks run only where they fit, and
+    anything that fits nowhere is visible with its reason before and during queuing.
+
+### S5.AK Item fan-out inside Python tasks
+
+Branch: `feat/scripting-item-fan-out`. After S5.E (it reads S5.E's resource requests).
+
+- *Problem.* A Python task often learns its work list only after reading the source: files in
+  a listing, pages of an API, partitions that changed. Today it loops inside the script, so a
+  failure reruns every item, and nobody can see which items ran. Fan-out exists for per-item
+  isolation, visibility and I/O width.
+  - SQL tasks need none. The warehouse parallelizes one statement, and managed writes to a
+    target are serialized by the target lock, because ROW_ID, merge hashes and SCD history
+    assume one writer.
+  - Fan-out across agents is out of scope. CPU-heavy per-item work uses the script's own
+    runtime (Spark, Ray, Dask) on an agent that declares that capacity (S5.E).
+- *Change.*
+  1. **The helper.** `task.fan_out(items, fn, *, max_items, max_parallel=None, retries=0)` in
+     `etl_craft.scripting`.
+     - Items run inside the task process. Threads are the default, for I/O-bound work.
+       `processes=True` uses a process pool where `fn` is importable.
+     - Items never take agent slots: the task holds one slot and its S5.E reservation, and
+       the items queue inside it.
+     - `max_parallel` defaults to a documented value. It is bounded by the reservation's
+       memory and by a thread ceiling, not by CPU count, for threads. A larger request fails
+       before any item starts, naming the request and the bound.
+     - `max_items` is required: a longer list fails before any item starts.
+     - Keys are text, unique and not NULL; otherwise the task fails before starting.
+     - An empty list returns at once.
+  2. **Items are recorded as they finish.**
+     - `AUD_TASK_ITEMS` holds the task run, attempt, item key, item attempt number, status,
+       started, ended, row count and error. It is append-only, with one migration in both
+       dialects and the released-schema upgrade test.
+     - Results stream to the table as items finish, so memory does not grow with the item
+       count.
+     - A task-attempt retry skips items already `SUCCESS` and runs only the rest.
+     - A task timeout or a lost attempt keeps finished items, and the retry continues.
+     - The task fails if any item still fails after its retries, naming each failed item and
+       its error.
+     - The task's offset commits only with the attempt's success.
+     - The attempt summary holds items done, failed, skipped and total.
+     - The attempt log shows progress and a projected finish time as items complete.
+  3. **Safe writes.**
+     - Items land rows tagged with the task run and the item key, written as
+       replace-the-item-batch or merge on that key, so a retried item rewrites only its own
+       rows.
+     - Single-writer warehouses serialize item writes through the existing lock.
+     - The guide shows the landing-then-one-managed-SQL-write pattern, reusing the streams
+       guide's landing rules, and how to set `max_parallel` to a rate-limited source's limit.
+  4. **Controls and audit.**
+     - S5.D cancel stops the remaining items, and running items end with the attempt.
+     - Operators can rerun, mark or cancel one item, or all failed items, with a reason. Each
+       is one operation in `services/operations` (CLI, API, S7.A), recorded in
+       `AUD_RUN_INTERVENTIONS` with the item key.
+     - Progress ("items 37 / 50, 2 failed") appears in `status`, `explain`, the run view and
+       the catalog, all read from the same rows.
+  5. **UI (S7.A).**
+     - Pipeline graph: a fan-out task stays one node. The node's lower 20-30% is an item strip
+       of small squares, one per item. Past about 100 items each square is a bucket showing its
+       worst status. The node shows the true total and counts, and hovering shows a square's
+       counts.
+     - Runs grid (rows are tasks, columns are runs): a fan-out task's cell is split into status
+       segments in proportion to its items.
+     - Clicking either opens the item list (key, status, attempts, rows, duration, error, log)
+       with the item actions.
+     - Items never appear as graph nodes or dependency edges.
+     - Status colours are fixed and identical across graph, grid, run view and catalog, for
+       SUCCESS, FAILED, RUNNING, QUEUED, RETRYING, SKIPPED and CANCELLED. Each also has a shape
+       or pattern, so status never depends on colour alone (checked with the
+       `fixing-accessibility` skill).
+- *Tests.* On both Engine DBs:
+  - partial failure, then a resume that runs only the failed items;
+  - per-item retries;
+  - a timeout or LOST attempt keeps finished items;
+  - max_items, a duplicate key, a NULL key and an oversized max_parallel refused before
+    starting;
+  - an empty list;
+  - 1,000 I/O-bound items at max_parallel 200 with memory bounded;
+  - cancel mid-fan-out;
+  - an item rerun or mark audited with actor and reason;
+  - item rows rewritten idempotently on retry;
+  - the offset not committed on failure;
+  - progress identical across log, status, API and UI;
+  - the bucketed strip above 100 items;
+  - an accessibility check of the strip and grid.
+- *Done when.* A Python task fans out over a list it discovers, with each item recorded,
+  retried and controlled on its own. Retries resume. Writes are safe to repeat. The graph and
+  runs grid show item status inside one task, read from the same audit rows.
 
 ### S5.F Pinned project bundles
 

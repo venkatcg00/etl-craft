@@ -7,13 +7,32 @@ then may the lock pass. Asking is not enough: a cancel can race the statement's 
 
 from __future__ import annotations
 
+import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.errors import LockTimeoutError
+from etl_craft.core.errors import EtlCraftError, LockTimeoutError
 from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Cancellation:
+    """A signal remains cancellation even if a driver replaces the interrupt with its error."""
+
+    config: ConnectorConfig
+    tag: str
+    requested: bool = False
+
+
+_cancellation: ContextVar[Cancellation | None] = ContextVar("query_cancellation", default=None)
 
 STOP_WAIT_SECONDS = 30
 POLL_SECONDS = 0.5
@@ -67,3 +86,41 @@ def confirm_stopped(config: ConnectorConfig, tag: str) -> None:
         ) from error
     finally:
         engine.dispose()
+
+
+@contextmanager
+def cancellation_scope(config: ConnectorConfig, tag: str) -> Iterator[None]:
+    """Bind the session identity a task or probe's SIGTERM handler must cancel."""
+    state = Cancellation(config, tag)
+    token = _cancellation.set(state)
+    try:
+        try:
+            yield
+        except Exception as error:
+            if state.requested:
+                raise KeyboardInterrupt("warehouse task cancelled") from error
+            raise
+        if state.requested:
+            raise KeyboardInterrupt("warehouse task cancelled")
+    finally:
+        _cancellation.reset(token)
+
+
+def stop_current_queries() -> None:
+    """Cancel before exiting on SIGTERM; the supervisor independently confirms after exit."""
+    scope = _cancellation.get()
+    if scope is None:
+        return
+    scope.requested = True
+    config, tag = scope.config, scope.tag
+    if config.warehouse is None or warehouse_dialect(config).process_local_queries:
+        logger.info("%s: stopping the embedded warehouse process ends its query", tag)
+        return
+    if not warehouse_dialect(config).session_fencing:
+        logger.warning("%s: only the process is stopping; warehouse queries are unconfirmed", tag)
+        return
+    try:
+        confirm_stopped(config, tag)
+        logger.info("%s: warehouse queries confirmed stopped", tag)
+    except EtlCraftError as error:
+        logger.error("%s: warehouse cancellation remains unconfirmed: %s", tag, error)
