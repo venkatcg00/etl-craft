@@ -44,6 +44,8 @@ SLOW["duckdb_iceberg"] = SLOW["duckdb"]
 
 
 @pytest.mark.parametrize("kind", ["SQL", "PYTHON", "EVENT_WAIT"])
+# Warehouse suites own this matrix; Engine DB cases must not also select it for engine jobs.
+@pytest.mark.parametrize("empty_engine_db", ["sqlite", "postgresql"], indirect=True)
 def test_operator_cancel_confirms_long_query_ended(
     sql_world, engine_db, tmp_path, monkeypatch, kind
 ):
