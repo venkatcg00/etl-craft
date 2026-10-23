@@ -59,8 +59,8 @@ from etl_craft.handlers.business_rules import check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql import task_dialect
-from etl_craft.handlers.sql.actions import writer_action
 from etl_craft.handlers.sql.analysis import output_columns, read_query
+from etl_craft.handlers.sql.creation import writer_action
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS

@@ -137,5 +137,5 @@ def task_store(context: TaskContext, backend: Engine | TaskStore) -> TaskStore:
             context.attempt_id,
             context.owner,
         ),
-        LocalLocker(backend, context.config),
+        LocalLocker(backend, context.config, with_warehouse=True),
     )

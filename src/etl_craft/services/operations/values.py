@@ -22,7 +22,8 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.handlers.registry import TaskContext, task_store
 from etl_craft.handlers.resources import LocalLocker
-from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
+from etl_craft.handlers.sql.actions import ACTIONS
+from etl_craft.handlers.sql.context import ActionContext
 from etl_craft.handlers.sql.protection import MERGES, Protection, ProtectionRequest, exists
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import read_sql_task

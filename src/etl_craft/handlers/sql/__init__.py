@@ -25,15 +25,17 @@ from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
 from etl_craft.engine.task_store import TargetPublication, TaskStore
 from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
-from etl_craft.handlers.sql.actions import ACTIONS, ActionContext
+from etl_craft.handlers.sql.actions import ACTIONS
+from etl_craft.handlers.sql.context import ActionContext
 from etl_craft.handlers.sql.protection import (
     ProtectionRequest,
+    evidence_names,
     for_task,
     refuse_evidence_target,
 )
 from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.spec import read_sql_task
-from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect
+from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_task
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +65,20 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     # Hold through warehouse commit: a computed ROW_ID base must include the previous insert.
     # Generated keys still share mutation ordering with replacement and hash upgrades.
     lock = locks.target(task.target_object, catalog)
-    with store.hold(lock.key, lock.name, 30):
-        state = store.state(task.action)
+    with (
+        store.hold(lock.key, lock.name, 30),
+        warehouse_task(),
+        open_warehouse(config, store) as warehouse,
+    ):
+        needs_state = task.watermark is not None or task.action in {
+            SqlAction.SETUP_TABLE,
+            SqlAction.DROP_TABLE,
+            SqlAction.SCD1_MERGE,
+            SqlAction.SCD2_MERGE,
+        }
+        state = store.state(task.action) if needs_state else None
         if task.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
+            assert state is not None
             other = state.merge_conflict
             if other is not None:
                 raise SqlGuardError(
@@ -73,12 +86,10 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                     "give the target one merge action before running"
                 )
         if task.watermark is not None:
+            assert state is not None
             stored = None if context.backfill else state.offset
             task = read_sql_task(context, stored)
-        with (
-            open_warehouse(config, store) as warehouse,
-            warehouse.begin() as conn,
-        ):
+        with warehouse.begin() as conn:
             session = Session(
                 conn,
                 dialect,
@@ -94,6 +105,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                 store=store,
                 user=context.writer,
                 now=datetime.now(UTC),
+                state=state,
             )
             outcome = _apply(session, action)
         if task.action == SqlAction.SCD1_MERGE:
@@ -102,6 +114,17 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
             fault_point("sql.scd2.after_commit")
         if isinstance(outcome, SqlGuardError):
             raise outcome
+        _publish(session, store)
+    return replace(outcome, offset=session.watermark_to) if task.watermark is not None else outcome
+
+
+def _publish(session: Session, store: TaskStore) -> None:
+    """Publish changed contracts only after the warehouse commit."""
+    if (
+        session.publish_hash_version is not None
+        or session.clear_hash_version
+        or session.publish_view_statement is not None
+    ):
         store.publish(
             TargetPublication(
                 session.target,
@@ -110,7 +133,6 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                 session.publish_view_statement,
             )
         )
-    return replace(outcome, offset=session.watermark_to) if task.watermark is not None else outcome
 
 
 def task_dialect(context: TaskContext) -> WarehouseDialect:
@@ -128,6 +150,7 @@ def _apply(session: Session, action: ActionContext) -> HandlerResult | SqlGuardE
     task = action.task
     refuse_evidence_target(session)
     try:
+        session.prime_target(evidence_names(session))
         if (
             task.action
             in {

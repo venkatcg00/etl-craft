@@ -55,11 +55,11 @@ def test_concurrent_appends_keep_row_ids_unique_across_processes(sql_world, requ
     ]
     try:
         processes[0].start()
-        assert allocated[0].wait(20), "first append never read its ROW_ID base"
+        assert allocated[0].wait(20), "first append never reached its allocating INSERT"
         processes[1].start()
         assert attempted[1].wait(20), "second append never attempted the target lock"
         assert not allocated[1].wait(0.3), (
-            "second append read MAX(ROW_ID) before the first committed"
+            "second append reached its allocating INSERT before the first committed"
         )
         release.set()
         for process in processes:
@@ -84,13 +84,12 @@ def test_concurrent_appends_keep_row_ids_unique_across_processes(sql_world, requ
 def test_failed_computed_allocation_releases_the_target_lock(sql_world, monkeypatch):
     w = sql_world
     w.setup("events", "SELECT 1 AS id", "APPEND_TABLE")
-    original = Session.count
+    original = Session.row_id_insert_parts
 
-    def fail_after_max(session, statement, *, step):
-        result = original(session, statement, step=step)
-        if step == "largest ROW_ID":
-            raise HandlerError("allocation interrupted before insert")
-        return result
+    def invalid_allocation(session):
+        columns, _values = original(session)
+        assert columns
+        return columns, ", CAST('invalid ROW_ID allocation' AS BIGINT)"
 
     params = {
         "SQL_ACTION": "APPEND_TABLE",
@@ -98,8 +97,8 @@ def test_failed_computed_allocation_releases_the_target_lock(sql_world, monkeypa
         "SELECT_QUERY": "SELECT 1 AS id",
     }
     with monkeypatch.context() as patch:
-        patch.setattr(Session, "count", fail_after_max)
-        with pytest.raises(HandlerError, match="allocation interrupted"):
+        patch.setattr(Session, "row_id_insert_parts", invalid_allocation)
+        with pytest.raises(HandlerError, match="append the SELECT's rows"):
             w.run("load", **params)
     assert not w.rows(f"SELECT id FROM {w.name('events')}")
     assert w.run("load", **params).insert_count == 1

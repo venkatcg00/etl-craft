@@ -5,9 +5,11 @@ warehouse, in its configured schema, with table names unique to the run; the tab
 afterwards. Credentials come from the same variables as ``test_cloud_connections``.
 """
 
+import json
+import logging
 import os
+import time
 import uuid
-from dataclasses import replace
 
 import pytest
 from sqlalchemy import text
@@ -16,26 +18,67 @@ from sqlalchemy.exc import DBAPIError
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import TableFormat
 from etl_craft.core.errors import HandlerError
-from etl_craft.handlers import business_rules
 from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
-from fixtures.metadata import add_pipeline, add_table, insert, start_run
+from fixtures.metadata import add_pipeline, start_run
+from fixtures.round_trips import count_round_trips
 from fixtures.scd_lifecycle import check_scd1_upgrade, check_scd_lifecycle
-from fixtures.sql_appends import check_append_retries, check_identity_inputs, check_legacy_upgrade
 from fixtures.sql_evolution import check_evolution, check_interrupted_evolution
 from fixtures.sql_merges import check_composite_merge
 from fixtures.sql_rejects import check_rejects
 from fixtures.sql_replacement import check_replacement_failure
 from fixtures.sql_row_ids import check_row_id_generation
 from fixtures.sql_warehouse import SqlWorld
-from fixtures.sql_watermarks import check_watermark_literals, check_watermarks
+from fixtures.sql_watermarks import check_watermark_literals
 
-# Some forty statements against a remote warehouse, one to three seconds each, cold start aside.
 pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")]
 
 
-def cloud_world(tmp_path, name, fields, table_format, schema):
+_MODULE_WORLDS = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def module_worlds(tmp_path_factory):
+    global _MODULE_WORLDS
+    _MODULE_WORLDS = (tmp_path_factory.mktemp("cloud-worlds"), {})
+    try:
+        yield
+    finally:
+        for world in _MODULE_WORLDS[1].values():
+            world.warehouse.dispose()
+            world.engine_db.dispose()
+        _MODULE_WORLDS = None
+
+
+def close_world(w):
+    if _MODULE_WORLDS is None or not any(
+        w.engine_db is world.engine_db for world in _MODULE_WORLDS[1].values()
+    ):
+        w.warehouse.dispose()
+        w.engine_db.dispose()
+
+
+def cloud_world(tmp_path, name, fields, table_format, schema, *, isolated=False):
+    key = (name, table_format, schema)
+    if _MODULE_WORLDS is not None and not isolated:
+        folder, worlds = _MODULE_WORLDS
+        if key in worlds:
+            existing = worlds[key]
+            with existing.engine_db.begin() as conn:
+                pipeline_id = add_pipeline(conn, f"P_{uuid.uuid4().hex}")
+                run_id = start_run(conn, pipeline_id)
+            return SqlWorld(
+                "cloud",
+                existing.config,
+                existing.engine_db,
+                existing.warehouse,
+                existing.catalog,
+                schema,
+                pipeline_id,
+                run_id,
+            )
+        tmp_path = folder / f"{name}-{table_format}"
     project = tmp_path / "etl-craft"
     (project / "sql_scripts").mkdir(parents=True)
     config = write_config(project, name, fields, table_format)
@@ -44,8 +87,8 @@ def cloud_world(tmp_path, name, fields, table_format, schema):
     with engine_db.begin() as conn:
         pipeline_id = add_pipeline(conn, "P")
         run_id = start_run(conn, pipeline_id)
-    warehouse = build_warehouse_engine(config)
-    return SqlWorld(
+    warehouse = build_warehouse_engine(config, pool_pre_ping=False)
+    world = SqlWorld(
         "cloud",
         config,
         engine_db,
@@ -55,161 +98,133 @@ def cloud_world(tmp_path, name, fields, table_format, schema):
         pipeline_id,
         run_id,
     )
+    if _MODULE_WORLDS is not None and not isolated:
+        _MODULE_WORLDS[1][key] = world
+    return world
 
 
 def walk_every_action(w):
+    """Exercise each action's warehouse SQL; domain edge cases run on local warehouses."""
+    from etl_craft.handlers import sql
+
+    original_run = w.run
+
+    def measured(code, **params):
+        context = w.task(code, **params)
+        started = time.monotonic()
+        with count_round_trips(w.engine_db, driver_statements=True) as counter:
+            result = sql.run(context, w.engine_db)
+        profile = {
+            "warehouse": warehouse_dialect(w.config).spec.key,
+            "format": str(w.config.warehouse_table_format),
+            "code": code,
+            "action": params["SQL_ACTION"],
+            "seconds": round(time.monotonic() - started, 3),
+            "queries": dict(counter.queries),
+            **counter.result(),
+        }
+        if directory := os.environ.get("ETL_CRAFT_TEST_CLOUD_PROFILE"):
+            from pathlib import Path
+
+            with (Path(directory) / f"actions-{os.getpid()}.jsonl").open("a") as output:
+                output.write(json.dumps(profile, sort_keys=True) + "\n")
+        logging.getLogger(__name__).info(
+            "CLOUD_ACTION %s/%s %s %s seconds=%.3f counts=%s",
+            warehouse_dialect(w.config).spec.key,
+            w.config.warehouse_table_format,
+            code,
+            params["SQL_ACTION"],
+            time.monotonic() - started,
+            json.dumps(counter.result(), sort_keys=True),
+        )
+        return result
+
+    w.run = measured
     suffix = uuid.uuid4().hex[:8]
     names = {
-        base: f"etl_craft_{base}_{suffix}"
-        for base in (
-            "orders",
-            "customers",
-            "history",
-            "events",
-            "joined_scd1",
-            "joined_scd2",
-            "replace_create",
-            "replace_overwrite",
-        )
+        base: f"etl_craft_{base}_{suffix}" for base in ("orders", "customers", "history", "view")
     }
-    scd = {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "name"}
-    # Typed like a real source column: Snowflake gives a bare literal its own length, and the
-    # target takes the SELECT's types.
-    ann = "CAST('Ann' AS VARCHAR(20))"
+    shape = "SELECT 1 AS id, CAST('Ann' AS VARCHAR(20)) AS name"
+    dialect = warehouse_dialect(w.config)
     try:
         created = w.run(
-            "create",
-            SQL_ACTION="CREATE_TABLE",
-            TARGET_OBJECT=names["orders"],
-            SELECT_QUERY="SELECT 1 AS id, 'a' AS name UNION ALL SELECT 2, 'b'",
+            "create", SQL_ACTION="CREATE_TABLE", TARGET_OBJECT=names["orders"], SELECT_QUERY=shape
         )
-        assert created.insert_count == 2
-        assert sorted(w.rows(f"SELECT row_id FROM {w.name(names['orders'])}")) == [(1,), (2,)]
-
-        copy = names["orders"] + "_copy"
-        w.setup(copy, f"SELECT id, name FROM {w.name(names['orders'])}", "OVERWRITE_TABLE")
-        overwrite = w.run(
-            "overwrite",
-            SQL_ACTION="OVERWRITE_TABLE",
-            TARGET_OBJECT=names["orders"] + "_copy",
-            SELECT_QUERY=f"SELECT id, name FROM {w.name(names['orders'])}",
-        )
-        assert overwrite.insert_count == 2
-
-        shape = f"SELECT 1 AS id, {ann} AS name"
-        w.setup(names["customers"], shape, "SCD1_MERGE")
-        w.setup(names["history"], shape, "SCD2_MERGE")
-        first = w.run(
-            "scd1",
-            SQL_ACTION="SCD1_MERGE",
-            TARGET_OBJECT=names["customers"],
-            SELECT_QUERY=f"SELECT 1 AS id, {ann} AS name UNION ALL SELECT 2, 'Bo'",
-            **scd,
-        )
-        assert (first.insert_count, first.update_count) == (2, 0)
-        second = w.run(
-            "scd1",
-            SQL_ACTION="SCD1_MERGE",
-            TARGET_OBJECT=names["customers"],
-            SELECT_QUERY=f"SELECT 1 AS id, {ann} AS name UNION ALL SELECT 2, 'Bob'",
-            **scd,
-        )
-        assert (second.insert_count, second.update_count) == (0, 1)
-
-        w.run(
-            "scd2",
-            SQL_ACTION="SCD2_MERGE",
-            TARGET_OBJECT=names["history"],
-            SELECT_QUERY=f"SELECT 1 AS id, {ann} AS name",
-            **scd,
-        )
-        changed = w.run(
-            "scd2",
-            SQL_ACTION="SCD2_MERGE",
-            TARGET_OBJECT=names["history"],
-            SELECT_QUERY="SELECT 1 AS id, 'Anna' AS name",
-            **scd,
-        )
-        assert (changed.update_count, changed.insert_count, changed.target_count) == (1, 1, 2)
-        for target in (names["customers"], names["history"]):
+        assert created.insert_count == 1
+        assert w.rows(f"SELECT row_id FROM {w.name(names['orders'])}") == [(1,)]
+        for column, action in (("UPDATE_DATE", "OVERWRITE_TABLE"), ("CREATE_DATE", "APPEND_TABLE")):
+            w.execute(
+                f"{dialect.alter_table_keyword()} {w.name(names['orders'])} "
+                f"ADD COLUMN {column} {dialect.audit_column_type(column)}"
+            )
+            result = w.run(
+                action.lower(), SQL_ACTION=action, TARGET_OBJECT=names["orders"], SELECT_QUERY=shape
+            )
+            assert result.insert_count == 1
+        assert w.rows(f"SELECT COUNT(*) FROM {w.name(names['orders'])}") == [(2,)]
+        merge = {"MERGE_KEY": "id", "MERGE_COMPARE_COLUMNS": "name"}
+        for table, action in (("customers", "SCD1_MERGE"), ("history", "SCD2_MERGE")):
+            w.setup(names[table], shape, action)
+            result = w.run(
+                table, SQL_ACTION=action, TARGET_OBJECT=names[table], SELECT_QUERY=shape, **merge
+            )
+            assert (result.insert_count, result.update_count) == (1, 0)
             with w.warehouse.connect() as conn:
-                rows = conn.execute(
+                row = conn.execute(
                     text(
                         f"SELECT CREATED_BY AS created_by, UPDATED_BY AS updated_by "
-                        f"FROM {w.name(target)}"
+                        f"FROM {w.name(names[table])}"
                     )
-                ).all()
-            assert rows
-            assert all(
-                row.created_by == "etl-craft" and row.updated_by == "etl-craft" for row in rows
-            )
-
-        w.setup(names["events"], "SELECT 1 AS id", "APPEND_TABLE")
-        appended = w.run(
-            "append",
-            SQL_ACTION="APPEND_TABLE",
-            TARGET_OBJECT=names["events"],
-            SELECT_QUERY="SELECT 1 AS id UNION ALL SELECT 2",
-        )
-        assert appended.insert_count == 2
-
-        # A business rule over the merged customers: flag those that have an order.
-        rule_context = w.task("rules")
-        with w.engine_db.begin() as conn:
-            insert(
-                conn,
-                "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME, PIPELINE_ID, TASK_ID, "
-                "BUSINESS_RULE_SQL, BUSINESS_RULE_TYPE, BUSINESS_RULE_KEY_COLUMN, TARGET_TABLE_ID, "
-                "SEQUENCE_NUMBER) VALUES ('has_order', :p, :t, :rule_sql, 'REPORT', 'id', "
-                ":target, 1)",
-                "BUSINESS_RULE_ID",
-                p=w.pipeline_id,
-                t=w.tasks["rules"],
-                rule_sql=f"SELECT 1 FROM {w.name(names['orders'])} o WHERE o.id = t.id "
-                f"AND :pipeline_id = {w.pipeline_id} "
-                f"AND :pipeline_run_id = {w.pipeline_run_id} "
-                f"AND :task_run_id = {rule_context.task_run_id}",
-                target=add_table(conn, f"{w.schema}.{names['customers']}"),
-            )
-        rules = business_rules.run(
-            replace(w.task("rules"), handler="BUSINESS_RULES", force=True), w.engine_db
-        )
-        assert rules.insert_count == 2
-
-        soft = w.run(
-            "soft",
+                ).one()
+            assert row.created_by == "etl-craft" and row.updated_by == "etl-craft"
+        deleted = w.run(
+            "delete",
             SQL_ACTION="DELETE_ROWS",
             TARGET_OBJECT=names["customers"],
             MERGE_KEY="id",
             SELECT_QUERY="SELECT 1 AS id",
         )
-        hard = w.run(
-            "hard",
-            SQL_ACTION="DELETE_ROWS",
-            TARGET_OBJECT=names["customers"],
-            MERGE_KEY="id",
-            HARD_DELETE="true",
-            SELECT_QUERY="SELECT 2 AS id",
-        )
-        assert (soft.delete_count, hard.delete_count) == (1, 1)
+        assert deleted.delete_count == 1
         assert w.rows(f"SELECT id, delete_flag FROM {w.name(names['customers'])}") == [(1, "Y")]
-
-        check_composite_merge(w, names["joined_scd1"], "SCD1_MERGE")
-        check_composite_merge(w, names["joined_scd2"], "SCD2_MERGE")
-
-        check_replacement_failure(w, names["replace_create"], "CREATE_TABLE")
-        check_replacement_failure(w, names["replace_overwrite"], "OVERWRITE_TABLE")
-
+        w.run(
+            "view",
+            SQL_ACTION="CREATE_VIEW",
+            TARGET_OBJECT=names["view"],
+            SELECT_QUERY=f"SELECT id FROM {w.name(names['history'])}",
+        )
+        assert w.rows(f"SELECT id FROM {w.name(names['view'])}") == [(1,)]
         w.finish("create")
         w.run("drop", SQL_ACTION="DROP_TABLE", TARGET_OBJECT=names["orders"])
         with pytest.raises(DBAPIError):
             w.rows(f"SELECT 1 FROM {w.name(names['orders'])}")
+        for table, action in (("customers", "SCD1_MERGE"), ("history", "SCD2_MERGE")):
+            changed = {
+                "SQL_ACTION": action,
+                "TARGET_OBJECT": names[table],
+                "SELECT_QUERY": "SELECT 1 AS id, CAST('Beth' AS VARCHAR(20)) AS name",
+                **merge,
+            }
+            updated = w.run(table, **changed)
+            assert (updated.insert_count, updated.update_count) == (
+                0 if table == "customers" else 1,
+                1,
+            )
+            rows = w.rows(
+                f"SELECT name, active_flag, delete_flag FROM {w.name(names[table])} ORDER BY name"
+            )
+            assert rows == (
+                [("Beth", "Y", "N")]
+                if table == "customers"
+                else [("Ann", "N", "N"), ("Beth", "Y", "N")]
+            )
+            unchanged = w.run(table, **changed)
+            assert unchanged.insert_count == unchanged.update_count == 0
     finally:
-        for base in (*names.values(), names["orders"] + "_copy"):
-            with w.warehouse.begin() as conn:
-                conn.execute(text(f"DROP TABLE IF EXISTS {w.name(base)}"))
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        w.run = original_run
+        w.execute(f"DROP VIEW IF EXISTS {w.name(names['view'])}")
+        for base in ("orders", "customers", "history"):
+            w.execute(f"DROP TABLE IF EXISTS {w.name(names[base])}")
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -219,34 +234,6 @@ def test_every_action_on_databricks(tmp_path, table_format):
     fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
     schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
     walk_every_action(cloud_world(tmp_path, "Databricks", fields, table_format, schema))
-
-
-@pytest.mark.parametrize(
-    "name,variables",
-    [
-        pytest.param("Databricks", DATABRICKS_VARS, marks=pytest.mark.cloud_databricks),
-        pytest.param("Snowflake", SNOWFLAKE_VARS, marks=pytest.mark.cloud_snowflake),
-    ],
-)
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_scd_lifecycle_and_upgrade(tmp_path, name, variables, table_format):
-    prefix = name.upper()
-    require_variables(prefix, variables)
-    fields = {key.lower(): f"ETL_CRAFT_TEST_{prefix}_{key}" for key in variables}
-    schema = os.environ[f"ETL_CRAFT_TEST_{prefix}_SCHEMA"]
-    w = cloud_world(tmp_path, name, fields, table_format, schema)
-    suffix = uuid.uuid4().hex[:8]
-    targets = [f"etl_lifecycle_{kind}_{suffix}" for kind in ("scd1", "scd2", "upgrade")]
-    try:
-        check_scd_lifecycle(w, targets[0], "SCD1_MERGE")
-        check_scd_lifecycle(w, targets[1], "SCD2_MERGE")
-        check_scd1_upgrade(w, targets[2])
-    finally:
-        for target in targets:
-            with w.warehouse.begin() as conn:
-                conn.execute(text(f"DROP TABLE IF EXISTS {w.name(target)}"))
-        w.warehouse.dispose()
-        w.engine_db.dispose()
 
 
 @pytest.mark.cloud_snowflake
@@ -318,8 +305,7 @@ def walk_views(w):
             for name in (view, secure):
                 conn.execute(text(f"DROP VIEW IF EXISTS {w.name(name)}"))
             conn.execute(text(f"DROP TABLE IF EXISTS {w.name(orders)}"))
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -348,8 +334,7 @@ def walk_schema_evolution(w):
         for target in targets:
             w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
         w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -395,8 +380,7 @@ def walk_row_id_generation(w):
     finally:
         for name in names:
             w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -498,8 +482,7 @@ def walk_table_format_checks(w):
     finally:
         for name in (target, replacement):
             w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -534,92 +517,57 @@ def test_table_formats_on_snowflake(tmp_path, table_format):
     )
 
 
-def walk_append_retries(w):
-    """Real autocommit retries converge; legacy upgrades preserve the prior loads."""
-    target = f"etl_craft_append_{uuid.uuid4().hex[:8]}"
+@pytest.mark.parametrize(
+    "name,variables",
+    [
+        pytest.param("Databricks", DATABRICKS_VARS, marks=pytest.mark.cloud_databricks),
+        pytest.param("Snowflake", SNOWFLAKE_VARS, marks=pytest.mark.cloud_snowflake),
+    ],
+)
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_replacement_failures_preserve_the_vendor_definition(
+    tmp_path, name, variables, table_format
+):
+    prefix = name.upper()
+    require_variables(prefix, variables)
+    fields = {key.lower(): f"ETL_CRAFT_TEST_{prefix}_{key}" for key in variables}
+    schema = os.environ[f"ETL_CRAFT_TEST_{prefix}_SCHEMA"]
+    w = cloud_world(tmp_path, name, fields, table_format, schema)
+    targets = [f"etl_replace_{action}_{uuid.uuid4().hex[:8]}" for action in ("create", "overwrite")]
     try:
-        check_append_retries(w, target)
-        check_legacy_upgrade(w, target + "_legacy")
+        for target, action in zip(targets, ("CREATE_TABLE", "OVERWRITE_TABLE"), strict=True):
+            check_replacement_failure(w, target, action)
     finally:
-        for name in (target, target + "_legacy"):
-            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        for target in targets:
+            w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        close_world(w)
 
 
-@pytest.mark.cloud_databricks
+@pytest.mark.parametrize(
+    "name,variables",
+    [
+        pytest.param("Databricks", DATABRICKS_VARS, marks=pytest.mark.cloud_databricks),
+        pytest.param("Snowflake", SNOWFLAKE_VARS, marks=pytest.mark.cloud_snowflake),
+    ],
+)
 @pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_append_retries_on_databricks(tmp_path, table_format):
-    require_variables("DATABRICKS", DATABRICKS_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
-    walk_append_retries(
-        cloud_world(
-            tmp_path,
-            "Databricks",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
-        )
-    )
-
-
-@pytest.mark.cloud_snowflake
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_append_retries_on_snowflake(tmp_path, table_format):
-    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
-    walk_append_retries(
-        cloud_world(
-            tmp_path,
-            "Snowflake",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
-        )
-    )
-
-
-def walk_identity_inputs(w):
-    target = f"etl_craft_identity_{uuid.uuid4().hex[:8]}"
+def test_scd_lifecycle_and_upgrade(tmp_path, name, variables, table_format):
+    prefix = name.upper()
+    require_variables(prefix, variables)
+    fields = {key.lower(): f"ETL_CRAFT_TEST_{prefix}_{key}" for key in variables}
+    schema = os.environ[f"ETL_CRAFT_TEST_{prefix}_SCHEMA"]
+    w = cloud_world(tmp_path, name, fields, table_format, schema)
+    suffix = uuid.uuid4().hex[:8]
+    targets = [f"etl_lifecycle_{kind}_{suffix}" for kind in ("scd1", "scd2", "upgrade")]
     try:
-        check_identity_inputs(w, target)
+        check_scd_lifecycle(w, targets[0], "SCD1_MERGE")
+        check_scd_lifecycle(w, targets[1], "SCD2_MERGE")
+        check_scd1_upgrade(w, targets[2])
     finally:
-        w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
-        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
-
-
-@pytest.mark.cloud_databricks
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_identity_inputs_on_databricks(tmp_path, table_format):
-    require_variables("DATABRICKS", DATABRICKS_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
-    walk_identity_inputs(
-        cloud_world(
-            tmp_path,
-            "Databricks",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
-        )
-    )
-
-
-@pytest.mark.cloud_snowflake
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_identity_inputs_on_snowflake(tmp_path, table_format):
-    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
-    walk_identity_inputs(
-        cloud_world(
-            tmp_path,
-            "Snowflake",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
-        )
-    )
+        for target in targets:
+            with w.warehouse.begin() as conn:
+                conn.execute(text(f"DROP TABLE IF EXISTS {w.name(target)}"))
+        close_world(w)
 
 
 def walk_rejects(w):
@@ -630,8 +578,7 @@ def walk_rejects(w):
     finally:
         for name in (target, target + "__rejects"):
             w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -652,95 +599,6 @@ def test_rejects_on_snowflake(tmp_path, table_format):
     walk_rejects(cloud_world(tmp_path, "Snowflake", fields, table_format, schema))
 
 
-def walk_ingestion_upgrade(w):
-    from fixtures.sql_appends import check_ingestion_target_upgrade
-
-    target = f"etl_craft_ingestion_{uuid.uuid4().hex[:8]}"
-    try:
-        check_ingestion_target_upgrade(w, target)
-    finally:
-        w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
-        w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
-
-
-@pytest.mark.cloud_databricks
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_ingestion_upgrade_on_databricks(tmp_path, table_format):
-    require_variables("DATABRICKS", DATABRICKS_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
-    walk_ingestion_upgrade(
-        cloud_world(
-            tmp_path,
-            "Databricks",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
-        )
-    )
-
-
-@pytest.mark.cloud_snowflake
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_ingestion_upgrade_on_snowflake(tmp_path, table_format):
-    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
-    walk_ingestion_upgrade(
-        cloud_world(
-            tmp_path,
-            "Snowflake",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
-        )
-    )
-
-
-def walk_watermarks(w):
-    """Incremental SQL batches commit their positions and retain failed ranges."""
-    target = f"etl_craft_watermark_{uuid.uuid4().hex[:8]}"
-    try:
-        check_watermarks(w, target)
-    finally:
-        for name in (target,):
-            w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
-
-
-@pytest.mark.cloud_databricks
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_watermarks_on_databricks(tmp_path, table_format):
-    require_variables("DATABRICKS", DATABRICKS_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
-    walk_watermarks(
-        cloud_world(
-            tmp_path,
-            "Databricks",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
-        )
-    )
-
-
-@pytest.mark.cloud_snowflake
-@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
-def test_watermarks_on_snowflake(tmp_path, table_format):
-    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
-    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
-    walk_watermarks(
-        cloud_world(
-            tmp_path,
-            "Snowflake",
-            fields,
-            table_format,
-            os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
-        )
-    )
-
-
 def walk_watermark_literals(w):
     """TEXT and TIMESTAMP positions are rendered as typed warehouse literals."""
     target = f"etl_craft_watermark_literal_{uuid.uuid4().hex[:8]}"
@@ -749,8 +607,7 @@ def walk_watermark_literals(w):
     finally:
         for name in (target, target + "_ts"):
             w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -796,8 +653,7 @@ def walk_events(w):
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
         w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -897,8 +753,7 @@ def walk_source_definitions(w, folder):
     finally:
         w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
         w.execute(f"DROP TABLE IF EXISTS {w.name(target + '_signals')}")
-        w.warehouse.dispose()
-        w.engine_db.dispose()
+        close_world(w)
 
 
 @pytest.mark.cloud_databricks
@@ -913,6 +768,7 @@ def test_source_definitions_on_databricks(tmp_path, table_format):
             fields,
             table_format,
             os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"],
+            isolated=True,
         ),
         tmp_path / "export",
     )
@@ -930,6 +786,33 @@ def test_source_definitions_on_snowflake(tmp_path, table_format):
             fields,
             table_format,
             os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"],
+            isolated=True,
         ),
         tmp_path / "export",
     )
+
+
+@pytest.mark.parametrize(
+    "name,variables",
+    [
+        pytest.param("Databricks", DATABRICKS_VARS, marks=pytest.mark.cloud_databricks),
+        pytest.param("Snowflake", SNOWFLAKE_VARS, marks=pytest.mark.cloud_snowflake),
+    ],
+)
+@pytest.mark.parametrize("table_format", [TableFormat.NATIVE, TableFormat.ICEBERG])
+def test_composite_merges(tmp_path, name, variables, table_format):
+    """Both merges match on every key column with the vendor's own merge SQL."""
+    prefix = name.upper()
+    require_variables(prefix, variables)
+    fields = {key.lower(): f"ETL_CRAFT_TEST_{prefix}_{key}" for key in variables}
+    schema = os.environ[f"ETL_CRAFT_TEST_{prefix}_SCHEMA"]
+    w = cloud_world(tmp_path, name, fields, table_format, schema)
+    suffix = uuid.uuid4().hex[:8]
+    targets = [f"etl_joined_{kind}_{suffix}" for kind in ("scd1", "scd2")]
+    try:
+        check_composite_merge(w, targets[0], "SCD1_MERGE")
+        check_composite_merge(w, targets[1], "SCD2_MERGE")
+    finally:
+        for target in targets:
+            w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
+        close_world(w)

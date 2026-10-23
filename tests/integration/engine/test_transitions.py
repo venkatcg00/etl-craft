@@ -11,8 +11,9 @@ from sqlalchemy.exc import DBAPIError
 from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.counts import Counts
 from etl_craft.core.errors import StaleTransitionError
-from etl_craft.engine import runlog
+from etl_craft.engine import attempt_starts, runlog
 from etl_craft.engine import transitions as tr
+from etl_craft.engine.attempt_starts import StartedProcess as Started
 from fixtures.metadata import add_pipeline, add_task
 
 ACTOR = Actor("scheduler:test", ActorKind.SERVICE)
@@ -331,16 +332,37 @@ def test_parent_and_child_acknowledge_one_process_and_cannot_execute_twice(engin
     with engine_db.engine.begin() as conn:
         _, _, _, task = scene(conn)
         attempt = seed_attempt(conn, task, "CLAIMED")
-        tr.ensure_attempt_started(conn, attempt, ACTOR, owner=OWNER, host="host", pid=123)
-        tr.ensure_attempt_started(conn, attempt, ACTOR, owner=OWNER, host="host", pid=123)
-        with pytest.raises(StaleTransitionError):
-            tr.ensure_attempt_started(conn, attempt, ACTOR, owner=OWNER, host="host", pid=456)
-        apply(conn, "finish_attempt", attempt)
-        tr.ensure_attempt_started(
-            conn, attempt, ACTOR, owner=OWNER, host="host", pid=123, completed=True
+        attempt_starts.ensure_attempt_started(
+            conn, attempt, ACTOR, owner=OWNER, process=Started("host", 123)
+        )
+        attempt_starts.ensure_attempt_started(
+            conn, attempt, ACTOR, owner=OWNER, process=Started("host", 123)
         )
         with pytest.raises(StaleTransitionError):
-            tr.ensure_attempt_started(conn, attempt, ACTOR, owner=OWNER, host="host", pid=123)
+            attempt_starts.ensure_attempt_started(
+                conn,
+                attempt,
+                ACTOR,
+                owner=OWNER,
+                process=Started("host", 456),
+            )
+        apply(conn, "finish_attempt", attempt)
+        attempt_starts.ensure_attempt_started(
+            conn,
+            attempt,
+            ACTOR,
+            owner=OWNER,
+            process=Started("host", 123),
+            completed=True,
+        )
+        with pytest.raises(StaleTransitionError):
+            attempt_starts.ensure_attempt_started(
+                conn,
+                attempt,
+                ACTOR,
+                owner=OWNER,
+                process=Started("host", 123),
+            )
 
 
 def test_old_parent_cannot_append_logs_to_a_new_attempt(engine_db):

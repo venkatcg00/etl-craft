@@ -32,10 +32,8 @@ def evidence_names(session: Session) -> tuple[str, str]:
 
 def exists(session: Session) -> bool:
     """Refuse partial evidence instead of treating its target as unprotected."""
-    present = []
-    for name in evidence_names(session):
-        query, params = session.dialect.relation_type_query(name)
-        present.append(session.run(query, params, step=f"check protection evidence {name}").first())
+    found = session.relation_types(evidence_names(session))
+    present = [0 in found, 1 in found]
     if bool(present[0]) != bool(present[1]):
         raise SqlGuardError(
             f"{session.target}: incomplete protection evidence; expected both journal and "

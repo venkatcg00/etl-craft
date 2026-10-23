@@ -7,8 +7,8 @@ The credentials are read from ``--env-file`` (default ``.env.acceptance``, gitig
 whole. The wheel is built unless ``--wheel`` names one. Each suite (default: every suite marked
 ``where = "local"``) runs through ``run_suite.py`` and writes its evidence, test ids and
 outcomes only, never a value from the file. A suite whose credentials are missing fails rather
-than skipping. The suites run at the same time: each uses its own warehouse and evidence file,
-and writes its pytest output to ``dist/acceptance/<suite>.log``.
+than skipping. The suites run together, with six pytest workers per cloud. Each uses its own
+warehouse and evidence file, and writes pytest output to ``dist/acceptance/<suite>.log``.
 """
 
 from __future__ import annotations

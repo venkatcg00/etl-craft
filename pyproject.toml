@@ -70,13 +70,14 @@ etl-craft = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
+    "httpx2==2.13.1",
     "etl-craft[aws,databricks,ui,snowflake,trino]",
     "import-linter>=2.1",
     "mypy>=1.11",
     "pre-commit>=4",
     "psycopg[binary]>=3.2",
     "pytest>=8.3",
+    "pytest-xdist==3.8.0",
     "pytest-cov>=6",
     "pytest-timeout>=2.3",
     "ruff>=0.16.8",

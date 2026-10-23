@@ -37,12 +37,22 @@ make services-up                               # Mailpit, for the demo's alerts
 make acceptance-cloud                          # or: make acceptance-cloud ENV_FILE=path/to/file
 ```
 
-`acceptance-cloud` reads the file with etl-craft's own parser, builds the wheel, and runs
-`cloud-databricks` and `cloud-snowflake` against it: connections, every SQL action, cloning,
-and the demo's warehouse work, on Databricks with Delta and UniForm and on Snowflake with its own
-tables and Iceberg tables. A missing credential fails the suite instead of skipping it. The demo
-creates schemas named `ec_<run>_*` in the configured catalog or database and drops them when it
-ends; it touches no other schema. The evidence is written the same way as every other suite's.
+`acceptance-cloud` reads the file with etl-craft's parser, builds the wheel, and runs both
+cloud suites concurrently. Each uses `-n 6 --dist loadgroup` by default, including when called
+through `scripts/run_suite.py`. Required PR CI keeps its existing marker shards.
+The suites cover vendor SQL on Databricks Delta and UniForm and Snowflake native and Iceberg.
+Tables have unique names; fencing cases share an xdist group. Missing credentials fail.
+Only the pytest controller writes evidence, merging worker collections and outcomes under the
+original test IDs, including grouped tests.
+
+Keep `-n` at or below warehouse query concurrency: Snowflake XS normally permits eight
+concurrent queries (`MAX_CONCURRENCY_LEVEL`); a small Databricks SQL warehouse permits about ten.
+In Snowflake Query History inspect `QUEUED_OVERLOAD_TIME` and `QUEUED_PROVISIONING_TIME`;
+in Databricks Query History inspect waiting-for-compute and waiting-at-capacity durations.
+For recent Databricks runs, the Query History API can be fresher than the system table;
+`overloading_queue_start_timestamp` marks a wait at capacity.
+Increasing workers while these grow is queueing, not faster execution. Measure wall time and
+queueing before increasing the default. Do not change warehouse or account settings in tests.
 
 ## Chaos stability
 

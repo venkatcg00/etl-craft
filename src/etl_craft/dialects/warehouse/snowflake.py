@@ -5,27 +5,32 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy import text
+from sqlalchemy.dialects import registry
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config.auth import warehouse_by_key
 from etl_craft.core.enums import AuthMode, FailureClass, TableFormat
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.failures import Failure
-from etl_craft.dialects.failure_evidence import driver_error
+from etl_craft.dialects.failure_evidence import driver_error, sqlstate
 from etl_craft.dialects.warehouse.base import (
     Presented,
     ReplaceStrategy,
     SurrogateKey,
     WarehouseDialect,
 )
+from etl_craft.dialects.warehouse.metadata import TableMetadata, describe_result
 from etl_craft.dialects.warehouse.replacement import identity_replacement, replacement_ddl
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile
     from etl_craft.config.targets import WarehouseUrl
+
+registry.register("snowflake.etl_craft", "etl_craft.dialects.warehouse.snowflake_driver", "dialect")
 
 
 class SnowflakeWarehouse(WarehouseDialect):
@@ -61,6 +66,107 @@ class SnowflakeWarehouse(WarehouseDialect):
         return failure
 
     spec = warehouse_by_key("snowflake")
+    sqlalchemy_driver = "snowflake+etl_craft"
+    catalog_columns = False
+    metadata_types_complete = True
+    dml_rowcounts = True
+
+    def describe_select(self, conn: Connection, sql: str) -> list[tuple[str, str]] | None:
+        """Read scalar source types from a zero-row result without creating a stage."""
+        if self.surrogate_key == "computed":
+            return None
+        return describe_result(conn, self.event_probe_sql(sql, 0), self.result_type)
+
+    def result_type(self, column: object) -> str | None:
+        """Keep driver-declared sizes and scales; structured types need materialized metadata."""
+        if getattr(column, "fields", None):
+            return None
+        code = getattr(column, "type_code", None)
+        if code == 0:
+            precision, scale = getattr(column, "precision", None), getattr(column, "scale", None)
+            return (
+                f"NUMBER({precision},{scale})"
+                if precision is not None and scale is not None
+                else None
+            )
+        if code == 2:
+            size = getattr(column, "internal_size", None)
+            return f"VARCHAR({size})" if size is not None else None
+        if not isinstance(code, int):
+            return None
+        return {
+            1: "FLOAT",
+            3: "DATE",
+            4: "TIMESTAMP",
+            5: "VARIANT",
+            6: "TIMESTAMP_LTZ",
+            7: "TIMESTAMP_TZ",
+            8: "TIMESTAMP_NTZ",
+            9: "OBJECT",
+            10: "ARRAY",
+            11: "BINARY",
+            12: "TIME",
+            13: "BOOLEAN",
+            14: "GEOGRAPHY",
+            15: "GEOMETRY",
+        }.get(code)
+
+    def relation_types_query(self, tables: tuple[str, ...]) -> tuple[str, dict[str, str | None]]:
+        """Read relations sharing one schema in a single information_schema scan.
+
+        Snowflake narrows its metadata lookup for ``ILIKE`` filters but not for ``lower()``
+        comparisons; escaped patterns keep the case-insensitive exact match of the base query.
+        """
+        split = [table.split(".") for table in tables]
+        if len(split[0]) < 2 or len({tuple(parts[:-1]) for parts in split}) != 1:
+            return super().relation_types_query(tables)
+        namespace = split[0]
+        parameters: dict[str, str | None] = {"schema": _like_literal(namespace[-2])}
+        where = "table_schema ILIKE :schema ESCAPE '!'"
+        if len(namespace) == 3:
+            parameters["catalog"] = _like_literal(namespace[0])
+            where += " AND table_catalog ILIKE :catalog ESCAPE '!'"
+        matches, positions = [], []
+        for index, parts in enumerate(split):
+            parameters[f"table_{index}"] = _like_literal(parts[-1])
+            parameters[f"exact_{index}"] = parts[-1]
+            matches.append(f"table_name ILIKE :table_{index} ESCAPE '!'")
+            positions.append(f"WHEN lower(table_name) = lower(:exact_{index}) THEN {index}")
+        query = (
+            f"SELECT position, table_type, CASE WHEN is_iceberg='YES' THEN 'ICEBERG' "
+            f"WHEN is_iceberg='NO' THEN 'NATIVE' END AS table_format "
+            f"FROM (SELECT CASE {' '.join(positions)} END AS position, "
+            f"table_type, is_iceberg FROM information_schema.tables WHERE {where} "
+            f"AND ({' OR '.join(matches)})) relation WHERE position IS NOT NULL"
+        )
+        return query, parameters
+
+    def read_metadata(self, conn: Connection, table: str) -> TableMetadata:
+        """DESCRIBE supplies complete types, nullability and identity defaults together."""
+        try:
+            rows = conn.execute(text(f"DESCRIBE TABLE {table}")).mappings().all()
+        except SQLAlchemyError as error:
+            if sqlstate(driver_error(error)) == "42S02":
+                return TableMetadata(())
+            raise
+        return TableMetadata(
+            tuple(
+                (
+                    str(row["name"]),
+                    str(row["type"]),
+                    None,
+                    None,
+                    "NO" if row["null?"] == "N" else "YES",
+                )
+                for row in rows
+            ),
+            generated=any(
+                str(row["name"]).lower() == "row_id"
+                and bool(re.search(r"AUTOINCREMENT|IDENTITY", str(row["default"]), re.I))
+                for row in rows
+            ),
+        )
+
     sqlglot_dialect = "snowflake"
     replace_strategy: ReplaceStrategy = "create_or_replace"
     identifier_case = "upper"
@@ -188,10 +294,10 @@ class SnowflakeWarehouse(WarehouseDialect):
             model += "." + "0" * scale
         return f"TO_CHAR(CAST({value} AS {kind}), '{model}')"
 
-    session_sql = (
-        "ALTER SESSION SET TIMEZONE = 'UTC', "
-        "TIMESTAMP_OUTPUT_FORMAT = 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6'"
-    )
+    session_connect_args: ClassVar[Mapping[str, Any]] = {
+        "timezone": "UTC",
+        "session_parameters": {"TIMESTAMP_OUTPUT_FORMAT": 'YYYY-MM-DD"T"HH24:MI:SS.FF6'},
+    }
 
     def replacement_ddl(
         self,
@@ -215,3 +321,8 @@ class SnowflakeWarehouse(WarehouseDialect):
     def overwrite_statement(self, target: str, columns: str, select_sql: str) -> str:
         """Commit deletion and insertion together, retaining the table definition."""
         return f"INSERT OVERWRITE INTO {target} ({columns}) {select_sql}"
+
+
+def _like_literal(name: str) -> str:
+    """Escape ``name`` for ``ILIKE ... ESCAPE '!'`` so it matches only itself."""
+    return re.sub(r"([!%_])", r"!\1", name)

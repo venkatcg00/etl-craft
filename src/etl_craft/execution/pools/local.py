@@ -37,6 +37,7 @@ class LocalPool:
     """
 
     name = "local"
+    status_reads_engine = False
 
     def __init__(
         self, engine: Engine, config: ConnectorConfig, *, child: ChildOptions | None = None

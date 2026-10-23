@@ -153,7 +153,7 @@ def test_log_context_is_added_to_text_and_json_records():
 
 
 @pytest.mark.parametrize(
-    "name", ["urllib3", "httpx", "httpcore", "requests", "botocore", "boto3", "s3transfer"]
+    "name", ["urllib3", "httpx2", "httpcore2", "requests", "botocore", "boto3", "s3transfer"]
 )
 @pytest.mark.parametrize("level", ["INFO", "DEBUG"])
 def test_http_library_capture_uses_warning_unless_debug(name, level):

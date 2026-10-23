@@ -78,11 +78,18 @@ def check_task(
     run_id: int,
     task_id: int,
     *,
-    detail: TaskExecutionDetail | None = None,
-    params: Mapping[str, str] | None = None,
+    definition: tuple[TaskExecutionDetail, Mapping[str, str]] | None = None,
+    selection: tuple[TaskSelection | None, str] | None = None,
 ) -> None:
     """Refuse execution outside the selected scope or after an unsafe metadata edit."""
-    scope = fetch_selection(conn, run_id)
+    if selection is None:
+        row = conn.execute(statement(conn, "run_task_selection"), {"pipeline_run_id": run_id}).one()
+        scope = (
+            None if row.task_selection is None else TaskSelection.deserialize(row.task_selection)
+        )
+        exclusive_run = row.exclusive_run
+    else:
+        scope, exclusive_run = selection
     if scope is None:
         return
     if task_id not in scope.task_ids:
@@ -90,13 +97,8 @@ def check_task(
             f"pipeline_run_id={run_id}: task_id={task_id} is outside selected tasks "
             f"{scope.task_ids}; select a run containing this task or start a new manual run"
         )
-    row = conn.execute(statement(conn, "run_task_selection"), {"pipeline_run_id": run_id}).one()
-    exclusive = (
-        scope.exclusive(conn)
-        if detail is None or params is None
-        else task_exclusive(detail, params)
-    )
-    if exclusive and row.exclusive_run == YesNo.NO:
+    exclusive = scope.exclusive(conn) if definition is None else task_exclusive(*definition)
+    if exclusive and exclusive_run == YesNo.NO:
         raise RunRefusedError(
             f"pipeline_run_id={run_id}: selected task metadata now needs exclusive admission; "
             "cancel this manual run and start a new one with the current definition"

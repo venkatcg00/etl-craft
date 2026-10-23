@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
+from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -84,6 +86,12 @@ def session_tag(identity: str) -> str:
     return holder_tag(scope.holder.holder_id if scope is not None else f"action:{identity}")
 
 
+def currently_holds(key: int) -> bool:
+    """Whether the current writer still owns this scope's renewable reservation."""
+    scope = _scope.get()
+    return scope is not None and key in scope.held
+
+
 def notify(conn: Connection, channel: str = "etl_craft_events") -> None:
     """Wake resource waiters after the enclosing transaction commits."""
     if for_engine(conn).supports_api_replicas:
@@ -109,40 +117,65 @@ def acquire(
     A live lock is never taken. A stale one passes in one statement, and only while it still
     names the holder whose warehouse statements the caller confirmed stopped.
     """
-    if holder.attempt_id is not None:
-        fence(conn, holder.attempt_id, holder.owner)
-    row = conn.execute(
-        statement(conn, "resource_lock_acquire"),
-        {**holder.parameters(), "key": key, "name": name, "confirmed": confirmed},
-    ).one_or_none()
-    if row is not None:
-        return Acquisition((as_utc(row.lease_expires_at) - as_utc(row.db_now)).total_seconds())
+    rows = reserve(conn, ((key, name),), holder, {key: confirmed} if confirmed else {})
+    if key in rows:
+        return Acquisition(rows[key])
     current = conn.execute(statement(conn, "resource_lock_read"), {"key": key}).one_or_none()
     if current is not None and current.stale and current.holder_id != holder.holder_id:
         return Acquisition(stale_holder=current.holder_id)
     return Acquisition()
 
 
-def release(conn: Connection, key: int, holder: Holder) -> None:
+def reserve(
+    conn: Connection,
+    resources: tuple[tuple[int, str], ...],
+    holder: Holder,
+    confirmed: Mapping[int, str],
+) -> dict[int, float]:
+    """Try a sorted resource set; the caller rolls back unless every row was acquired."""
+    rows = conn.execute(
+        statement(conn, "resource_lock_acquire"),
+        {
+            **holder.parameters(),
+            "resources": json.dumps(
+                [
+                    {"lock_key": key, "resource_name": name, "confirmed": confirmed.get(key)}
+                    for key, name in sorted(resources)
+                ]
+            ),
+        },
+    ).all()
+    if not rows and holder.attempt_id is not None:
+        fence(conn, holder.attempt_id, holder.owner)
+    return {
+        row.lock_key: (as_utc(row.lease_expires_at) - as_utc(row.db_now)).total_seconds()
+        for row in rows
+    }
+
+
+def release(conn: Connection, key: int | tuple[int, ...], holder: Holder) -> None:
     """Release only this holder's reservation, leaving a successor untouched."""
     result = conn.execute(
-        statement(conn, "resource_lock_release"), {**holder.parameters(), "key": key}
+        statement(conn, "resource_lock_release").bindparams(bindparam("keys", expanding=True)),
+        {**holder.parameters(), "keys": (key,) if isinstance(key, int) else key},
     )
     if result.rowcount:
         notify(conn)
 
 
-def renew(conn: Connection, key: int, holder: Holder) -> float:
+def renew(conn: Connection, key: int | tuple[int, ...], holder: Holder) -> float:
     """Return the database's remaining lease budget; refuse an expired owner."""
-    row = conn.execute(
-        statement(conn, "resource_lock_renew"), {**holder.parameters(), "key": key}
-    ).one_or_none()
-    if row is None:
+    keys = (key,) if isinstance(key, int) else key
+    rows = conn.execute(
+        statement(conn, "resource_lock_renew").bindparams(bindparam("keys", expanding=True)),
+        {**holder.parameters(), "keys": keys},
+    ).all()
+    if len(rows) != len(keys):
         raise StaleTransitionError(
             f"resource lock {key}, holder={holder.holder_id}: ownership ended or expired; "
             "stop the writer and retry through its supervisor"
         )
-    return (as_utc(row.lease_expires_at) - as_utc(row.db_now)).total_seconds()
+    return min((as_utc(row.lease_expires_at) - as_utc(row.db_now)).total_seconds() for row in rows)
 
 
 def _fence(name: str) -> None:
@@ -153,7 +186,12 @@ def _fence(name: str) -> None:
 
 @contextmanager
 def _heartbeat(
-    engine: Engine, key: int, name: str, holder: Holder, started: float, budget: float
+    engine: Engine,
+    key: int | tuple[int, ...],
+    name: str,
+    holder: Holder,
+    started: float,
+    budget: float,
 ) -> Iterator[None]:
     stop = threading.Event()
     deadline = started + budget - FENCE_MARGIN_SECONDS
@@ -227,54 +265,76 @@ class Owner:
     identity: str
 
 
-@contextmanager
-def hold(owner: Owner, key: int, name: str, wait_seconds: float) -> Iterator[None]:
-    """Wait a bounded time for one resource, renewing ownership through the whole write."""
+def _wait_resources(
+    owner: Owner, resources: tuple[tuple[int, str], ...], holder: Holder, limit: float
+) -> tuple[float, float]:
+    """Acquire the whole set or roll back it all before waiting and confirming stale holders."""
     from etl_craft.engine.notifications import notification_hub
 
-    engine, config, confirm, identity = owner.engine, owner.config, owner.confirm, owner.identity
+    deadline = time.monotonic() + limit
+    hub = notification_hub(owner.config, owner.engine)
+    confirmed: dict[int, str] = {}
+    while True:
+        generation = hub.generation
+        started = time.monotonic()
+        with owner.engine.begin() as conn:
+            budgets = reserve(conn, resources, holder, confirmed)
+            if len(budgets) != len(resources):
+                conn.rollback()
+        if len(budgets) == len(resources):
+            return started, min(budgets.values())
+        key, name = next(resource for resource in resources if resource[0] not in budgets)
+        with owner.engine.connect() as conn:
+            current = conn.execute(
+                statement(conn, "resource_lock_read"), {"key": key}
+            ).one_or_none()
+        if current is not None and current.stale and current.holder_id != confirmed.get(key):
+            confirm_stale(owner.confirm, name, current.holder_id)
+            confirmed[key] = current.holder_id
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _busy(owner.engine, key, name, limit)
+        hub.wait(generation, min(remaining, 1))
 
+
+@contextmanager
+def hold(
+    owner: Owner,
+    key: int,
+    name: str,
+    wait_seconds: float,
+    extra: tuple[tuple[int, str], ...] = (),
+) -> Iterator[None]:
+    """Keep a complete resource set in one acquisition transaction and one fenced release."""
     scope = _scope.get()
     token = None
     if scope is None:
-        scope = Scope(Holder(f"action:{identity}", identity, current_actor()))
+        scope = Scope(Holder(f"action:{owner.identity}", owner.identity, current_actor()))
         token = _scope.set(scope)
+    resources = tuple(
+        resource for resource in ((key, name), *extra) if resource[0] not in scope.held
+    )
     try:
-        if key in scope.held:
+        if not resources:
             yield
             return
-        limit = wait_seconds if wait_seconds > 0 else WAIT_SECONDS
-        deadline = time.monotonic() + limit
-        hub = notification_hub(config, engine)
-        confirmed: str | None = None
-        while True:
-            generation = hub.generation
-            started = time.monotonic()
-            with engine.begin() as conn:
-                attempt = acquire(conn, key, name, scope.holder, confirmed)
-            if attempt.budget is not None:
-                acquired = attempt.budget
-                break
-            if attempt.stale_holder is not None and attempt.stale_holder != confirmed:
-                confirm_stale(confirm, name, attempt.stale_holder)
-                confirmed = attempt.stale_holder
-                continue
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise _busy(engine, key, name, limit)
-            hub.wait(generation, min(remaining, 1))
-        scope.held.add(key)
+        started, budget = _wait_resources(
+            owner, resources, scope.holder, wait_seconds if wait_seconds > 0 else WAIT_SECONDS
+        )
+        keys = tuple(key for key, _ in resources)
+        scope.held.update(keys)
         completed = False
         try:
-            with _heartbeat(engine, key, name, scope.holder, started, acquired):
+            with _heartbeat(owner.engine, keys, name, scope.holder, started, budget):
                 yield
             completed = True
         finally:
-            scope.held.remove(key)
+            scope.held.difference_update(keys)
             if not completed:
-                confirm_stale(confirm, name, scope.holder.holder_id)
-            with engine.begin() as conn:
-                release(conn, key, scope.holder)
+                confirm_stale(owner.confirm, name, scope.holder.holder_id)
+            with owner.engine.begin() as conn:
+                release(conn, keys, scope.holder)
     finally:
         if token is not None:
             _scope.reset(token)

@@ -19,7 +19,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import PermissionDeniedError, RunRefusedError, RunStateError, UsageError
-from etl_craft.engine import controls, runlog, transitions
+from etl_craft.engine import attempt_starts, controls, runlog, transitions
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import control_flow
 from etl_craft.execution.attempt_types import ChildOptions
@@ -414,14 +414,12 @@ def test_query_unknown_after_process_exit_is_still_affected_by_a_new_stop(ctx):
     attempt = queue(ctx, run, first)
     claim_again(ctx, attempt)
     with ctx.engine.begin() as conn:
-        transitions.ensure_attempt_started(
+        attempt_starts.ensure_attempt_started(
             conn,
             attempt,
             current_actor(),
             owner="other",
-            host="missing-host",
-            pid=12345,
-            process_start="old-birth",
+            process=attempt_starts.StartedProcess("missing-host", 12345, "old-birth"),
         )
         transitions.finish_attempt(
             conn, attempt, AttemptStatus.FAILED, current_actor(), owner="other"
@@ -599,14 +597,12 @@ def test_reconcile_revisits_lost_workers_but_never_guesses_an_unreadable_identit
     attempt = queue(ctx, run, first)
     claim_again(ctx, attempt)
     with ctx.engine.begin() as conn:
-        transitions.ensure_attempt_started(
+        attempt_starts.ensure_attempt_started(
             conn,
             attempt,
             current_actor(),
             owner="other",
-            host=socket.gethostname(),
-            pid=12345,
-            process_start="old-birth",
+            process=attempt_starts.StartedProcess(socket.gethostname(), 12345, "old-birth"),
         )
         conn.execute(
             text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:expired WHERE ATTEMPT_ID=:id"),
@@ -669,14 +665,12 @@ def test_reconcile_observes_exited_terminal_worker_without_rewriting_its_outcome
     attempt = queue(ctx, run, first)
     claim_again(ctx, attempt)
     with ctx.engine.begin() as conn:
-        transitions.ensure_attempt_started(
+        attempt_starts.ensure_attempt_started(
             conn,
             attempt,
             current_actor(),
             owner="other",
-            host=socket.gethostname(),
-            pid=12345,
-            process_start="old-birth",
+            process=attempt_starts.StartedProcess(socket.gethostname(), 12345, "old-birth"),
         )
         transitions.finish_attempt(
             conn, attempt, outcome, current_actor(), owner="other", counts=Counts(target_count=7)

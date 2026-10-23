@@ -32,10 +32,10 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig, load_config
 from etl_craft.core import log
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
-from etl_craft.core.enums import ControlAcknowledgement, Handler, RunStatus
+from etl_craft.core.enums import AttemptStatus, ControlAcknowledgement, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
-from etl_craft.engine import controls, transitions
+from etl_craft.engine import attempt_starts, controls, transitions
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.resource_locks import attempt_scope
 from etl_craft.engine.transitions import finish_task_run
@@ -101,16 +101,25 @@ def _run_bound(
         if identity is not None:
             try:
                 with engine.begin() as conn:
-                    transitions.assert_attempt(conn, identity[0], args.task_run_id, identity[1])
-                    transitions.ensure_attempt_started(
-                        conn,
-                        identity[0],
-                        current_actor(),
-                        owner=identity[1],
-                        host=socket.gethostname(),
-                        pid=os.getpid(),
-                        process_start=process_start(os.getpid()),
+                    row = transitions.assert_attempt(
+                        conn, identity[0], args.task_run_id, identity[1]
                     )
+                    started = process_start(os.getpid())
+                    if row.status != AttemptStatus.CLAIMED:
+                        # The supervisor acknowledged this process's start first.
+                        attempt_starts.assert_started(
+                            conn, row, owner=identity[1], pid=os.getpid(), process_start=started
+                        )
+                    else:
+                        attempt_starts.ensure_attempt_started(
+                            conn,
+                            identity[0],
+                            current_actor(),
+                            owner=identity[1],
+                            process=attempt_starts.StartedProcess(
+                                socket.gethostname(), os.getpid(), started
+                            ),
+                        )
             except EtlCraftError as error:
                 logger.error("could not start the attempt: %s", error)
                 return error.exit_code

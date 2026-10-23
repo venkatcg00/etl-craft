@@ -171,3 +171,61 @@ def test_failed_local_warehouse_work_confirms_before_unlocking(engine_db, confir
     with engine_db.engine.connect() as conn:
         remaining = conn.execute(text("SELECT COUNT(*) AS remaining FROM AUD_RESOURCE_LOCKS")).one()
         assert remaining.remaining == 0
+
+
+def test_grouped_resources_use_one_statement_for_each_lifecycle_step(engine_db):
+    from fixtures.round_trips import count_round_trips
+
+    who = holder("group")
+    resources = ((42, "target"), (43, "warehouse"))
+    with count_round_trips(engine_db.engine) as counter:
+        with engine_db.engine.begin() as conn:
+            budgets = resource_locks.reserve(conn, resources, who, {})
+        with engine_db.engine.begin() as conn:
+            assert resource_locks.renew(conn, (42, 43), who) > 0
+        with engine_db.engine.begin() as conn:
+            resource_locks.release(conn, (42, 43), who)
+    assert set(budgets) == {42, 43}
+    from etl_craft.dialects.engine import for_engine
+
+    # PostgreSQL also sets the actor per transaction and notifies waiters on release.
+    overhead = 4 if for_engine(engine_db.engine).supports_api_replicas else 0
+    assert counter.result()["engine_statements"] == 3 + overhead
+    assert counter.result()["engine_transactions"] == 3
+
+
+def test_a_busy_resource_rolls_back_the_other_reservations(engine_db):
+    assert take(engine_db, holder("old"), key=43).budget is not None
+    owner = resource_locks.Owner(engine_db.engine, engine_db.config, lambda _: None, "new")
+    with (
+        pytest.raises(LockTimeoutError, match="holder=old"),
+        resource_locks.hold(owner, 42, "target", 0.01, ((43, "warehouse"),)),
+    ):
+        pytest.fail("the whole resource set was not acquired")
+    with engine_db.engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT LOCK_KEY AS lock_key, HOLDER_ID AS holder_id FROM AUD_RESOURCE_LOCKS")
+        ).all()
+    assert {row.lock_key: row.holder_id for row in rows} == {43: "old"}
+
+
+def test_two_holders_cannot_split_a_group_of_resources(engine_db):
+    def reserve_all(who):
+        with engine_db.engine.begin() as conn:
+            budgets = resource_locks.reserve(conn, ((42, "target"), (43, "warehouse")), who, {})
+            if len(budgets) != 2:
+                conn.rollback()
+                return False
+        return True
+
+    a, b = holder("a"), holder("b")
+    wins = two_at_once(
+        lambda: reserve_all(a), lambda: reserve_all(b), at=(engine_db.engine, "begin")
+    )
+    assert sum(wins) == 1
+    with engine_db.engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT LOCK_KEY AS lock_key, HOLDER_ID AS holder_id FROM AUD_RESOURCE_LOCKS")
+        ).all()
+    assert {row.lock_key for row in rows} == {42, 43}
+    assert {row.holder_id for row in rows} == {"a" if wins[0] else "b"}

@@ -1,3 +1,3 @@
 UPDATE AUD_TASK_ATTEMPTS SET HEARTBEAT_AT=HEARTBEAT_AT
-WHERE ATTEMPT_ID=:attempt_id AND OWNER_ID=:owner AND STATUS=:expected AND LEASE_EXPIRES_AT>(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
+WHERE ATTEMPT_ID=:attempt_id AND OWNER_ID=:owner AND STATUS IN ('CLAIMED','RUNNING') AND (CAST(:expected AS varchar) IS NULL OR STATUS=:expected) AND LEASE_EXPIRES_AT>(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000+00:00')
 RETURNING TASK_RUN_ID AS task_run_id

@@ -42,6 +42,8 @@ def pytest_command(
         f"--evidence={evidence}",
         f"--evidence-suite={suite.name}",
     ]
+    if suite.name in {"cloud-snowflake", "cloud-databricks"}:
+        command.extend(["-n", "6", "--dist", "loadgroup"])
     if wheel is not None:
         command.append(f"--evidence-wheel={wheel}")
     command.extend(suite.selection(sys.platform))

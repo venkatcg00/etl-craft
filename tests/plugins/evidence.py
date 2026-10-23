@@ -35,8 +35,20 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     path = config.getoption("--evidence")
-    if path:
+    if path and not hasattr(config, "workerinput"):
         config.pluginmanager.register(EvidenceRecorder(config, Path(path)), "evidence-recorder")
+
+
+def pytest_itemcollected(item: pytest.Item) -> None:
+    if item.config.getoption("--evidence") and hasattr(item.config, "workerinput"):
+        item.user_properties.append(("evidence_nodeid", item.nodeid))
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    if session.config.getoption("--evidence") and hasattr(session.config, "workerinput"):
+        session.config.workeroutput["evidence_collected"] = sorted(
+            dict(item.user_properties)["evidence_nodeid"] for item in session.items
+        )
 
 
 def git_state(root: Path) -> tuple[str | None, bool | None]:
@@ -99,11 +111,22 @@ class EvidenceRecorder:
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         self.collected = sorted(item.nodeid for item in session.items)
 
-    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        if report.when == "call" or report.failed or report.skipped:
-            self.record(report.nodeid, classify(report), report.duration)
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node, error) -> None:
+        collected = node.workeroutput.get("evidence_collected")
+        if error or not isinstance(collected, list):
+            self.record(f"<worker:{node.gateway.id}>", "error")
+        elif self.collected and self.collected != collected:
+            self.record("<worker-collection-mismatch>", "error")
         else:
-            self.durations[report.nodeid] = self.durations.get(report.nodeid, 0.0) + report.duration
+            self.collected = collected
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        nodeid = dict(report.user_properties).get("evidence_nodeid", report.nodeid)
+        if report.when == "call" or report.failed or report.skipped:
+            self.record(nodeid, classify(report), report.duration)
+        else:
+            self.durations[nodeid] = self.durations.get(nodeid, 0.0) + report.duration
 
     def pytest_collectreport(self, report: pytest.CollectReport) -> None:
         if report.failed:

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
@@ -38,6 +40,22 @@ WAREHOUSE_LOCK_KEY = 0x657463_7761
 """The Engine DB lock that queues writers of a single-writer warehouse."""
 
 ICEBERG_CONNECTORS = frozenset({"iceberg"})
+
+
+_TASK_ENGINES: ContextVar[tuple[ExitStack, dict[tuple[int, str | None], Engine]] | None] = (
+    ContextVar("warehouse_task_engines", default=None)
+)
+
+
+@contextmanager
+def warehouse_task() -> Iterator[None]:
+    """Dispose task connections before releasing their single-writer reservations."""
+    with ExitStack() as stack:
+        token = _TASK_ENGINES.set((stack, {}))
+        try:
+            yield
+        finally:
+            _TASK_ENGINES.reset(token)
 
 
 def _active_profile(config: ConnectorConfig) -> ConnectionProfile:
@@ -105,11 +123,12 @@ def build_warehouse_engine(
             raise
         return dbapi_connection
 
-    engine_kwargs.setdefault("pool_pre_ping", True)
+    engine_kwargs.setdefault("isolation_level", None)
+    engine_kwargs.setdefault("pool_pre_ping", _TASK_ENGINES.get() is None)
     if profile.auth_mode in credentials.MINTED_AUTH_MODES:
         engine_kwargs.setdefault("pool_recycle", credentials.MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS)
     logged_url = URL.create(
-        url.dialect,
+        dialect.sqlalchemy_driver or url.dialect,
         username=profile.user or None,
         host=url.host,
         port=url.port,
@@ -146,7 +165,13 @@ def warehouse_creator(
                 database=url.database,
                 query={**url.query, **presented.query},
             )
-        return dbapi_connect(connection_url, {**presented.connect_args, **(tag_args or {})})
+        options = {**presented.connect_args, **deepcopy(dialect.session_connect_args)}
+        for key, value in (tag_args or {}).items():
+            if isinstance(value, dict) and isinstance(options.get(key), dict):
+                options[key] = {**options[key], **value}
+            else:
+                options[key] = value
+        return dbapi_connect(connection_url, options)
 
     return connect
 
@@ -231,12 +256,22 @@ def open_warehouse(
     """Open the warehouse for one unit of work, queued behind other writers where needed.
 
     This is how the engine reaches the warehouse. For a warehouse that accepts concurrent
-    writers it takes no lock, so waves stay fully parallel. The engine is disposed afterwards.
+    writers it takes no lock, so waves stay fully parallel. Within a task the engine is
+    reused, and disposed before the task releases its warehouse reservation.
     """
+    scope = _TASK_ENGINES.get()
+    tag = locks.session_tag if locks is not None else None
+    if scope is not None:
+        stack, engines = scope
+        key = (id(config), tag)
+        if key not in engines:
+            stack.enter_context(single_writer_lock(config, locks, wait_seconds=wait_seconds))
+            engines[key] = build_warehouse_engine(config, session_tag=tag, **engine_kwargs)
+            stack.callback(engines[key].dispose)
+        yield engines[key]
+        return
     with single_writer_lock(config, locks, wait_seconds=wait_seconds):
-        warehouse_engine = build_warehouse_engine(
-            config, session_tag=locks.session_tag if locks is not None else None, **engine_kwargs
-        )
+        warehouse_engine = build_warehouse_engine(config, session_tag=tag, **engine_kwargs)
         try:
             yield warehouse_engine
         finally:

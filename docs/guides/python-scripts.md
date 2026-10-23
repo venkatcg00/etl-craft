@@ -69,6 +69,12 @@ def run(task: ScriptTask) -> ScriptResult:
 `task.warehouse()` remains available locally and on agents, including its shared single-writer
 queue. On agents, `task.config` contains no Engine DB connection or credentials.
 
+Repeated `task.warehouse()` calls reuse the task's engine and pooled session, including its
+session setup and attempt tag. The engine closes when the task ends; on a single-writer
+warehouse the task retains its reservation until those connections close. A new task gets a
+new engine. Pooled connections using minted credentials are recycled and authenticate afresh;
+do not use temporary tables to carry durable state between tasks or across credential refreshes.
+
 `ScriptResult` holds `row_count`, the rows the script wrote, a required whole number that the
 engine records as the task's source, target and insert counts; `offset`, the new offset, or `None`
 to keep the stored one; and `variables`, a mapping of names to any values of your own, listed

@@ -75,7 +75,7 @@ from etl_craft.engine.repository.validation import (
     fetch_task_dependency_edges,
 )
 from etl_craft.handlers.resources import LocalLocker
-from etl_craft.handlers.sql.actions import writer_action
+from etl_craft.handlers.sql.creation import writer_action
 from etl_craft.handlers.sql.spec import read_action, read_setup_for
 from etl_craft.handlers.sql.tables import AUDIT_COLUMNS
 from etl_craft.services.catalog.gaps import infers_output_columns, table_records

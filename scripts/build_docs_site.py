@@ -26,6 +26,8 @@ import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_BRANCH = "docs-site-build"
 RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
@@ -87,6 +89,39 @@ def _branch_exists(repo: Path) -> bool:
     return probe.returncode == 0
 
 
+def _deploy(
+    repo: Path, command: Sequence[str], version: str, *, latest: bool, env: Mapping[str, str]
+) -> None:
+    """Let mike render once, with strict validation and the original YAML tags preserved."""
+    try:
+        config = yaml.compose((repo / "mkdocs.yml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise subprocess.CalledProcessError(1, command, stderr=str(error)) from error
+    if not isinstance(config, yaml.MappingNode):
+        raise subprocess.CalledProcessError(
+            1, command, stderr=f"{repo / 'mkdocs.yml'}: expected a YAML mapping"
+        )
+    config.value = [(key, value) for key, value in config.value if key.value != "strict"]
+    config.value.append(
+        (
+            yaml.ScalarNode("tag:yaml.org,2002:str", "strict"),
+            yaml.ScalarNode("tag:yaml.org,2002:bool", "true"),
+        )
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=repo, suffix=".yml", encoding="utf-8", delete=False
+    ) as file:
+        file.write(yaml.serialize(config))
+    try:
+        _run(
+            [*command, *deploy_args(version, latest=latest), "--config-file", file.name],
+            cwd=repo,
+            env=env,
+        )
+    finally:
+        Path(file.name).unlink()
+
+
 def _build_release(
     repo: Path, version: str, tag: str, *, latest: bool, env: Mapping[str, str]
 ) -> None:
@@ -100,8 +135,7 @@ def _build_release(
                 if (tree / "docs" / name).exists():
                     shutil.copy2(repo / "docs" / RENDERERS[0], tree / "docs" / name)
             uv_mike = ["uv", "run", "--locked", "--no-default-groups", "--group", "docs", "mike"]
-            _run([*uv_mike[:-1], "mkdocs", "build", "--strict"], cwd=tree, env=env)
-            _run([*uv_mike, *deploy_args(version, latest=latest)], cwd=tree, env=env)
+            _deploy(tree, uv_mike, version, latest=latest, env=env)
         finally:
             subprocess.run(
                 ["git", "worktree", "remove", "--force", str(tree)],
@@ -134,8 +168,7 @@ def build(repo: Path, out: Path, mike: str) -> list[str]:
     try:
         for index, (version, tag) in enumerate(lines):
             _build_release(repo, version, tag, latest=index == len(lines) - 1, env=env)
-        _run(["mkdocs", "build", "--strict"], cwd=repo, env=env)
-        _run([mike, *deploy_args("dev", latest=False)], cwd=repo, env=env)
+        _deploy(repo, [mike], "dev", latest=False, env=env)
         default = "latest" if lines else "dev"
         _run([mike, "set-default", "--branch", BUILD_BRANCH, default], cwd=repo, env=env)
         _export(repo, out)

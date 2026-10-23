@@ -196,7 +196,12 @@ def test_connections_pin_utc_and_close_the_setup_cursor(key):
     from unittest.mock import Mock
 
     conn = Mock()
-    for_key(key).on_connect(conn, None, "")
+    dialect = for_key(key)
+    dialect.on_connect(conn, None, "")
+    if dialect.session_connect_args:
+        conn.cursor.assert_not_called()
+        assert "UTC" in str(dialect.session_connect_args)
+        return
     assert "UTC" in conn.cursor.return_value.execute.call_args.args[0]
     conn.cursor.return_value.close.assert_called_once()
     if key == "postgres":
@@ -406,7 +411,11 @@ def test_databricks_oauth_uses_the_workspace_token_endpoint_by_default(captured,
 
 def test_databricks_sso_asks_the_connector_for_its_browser_login(captured):
     connect("SSO", DATABRICKS, user="", client_id="app")
-    assert captured["args"] == {"auth_type": "databricks-oauth", "oauth_client_id": "app"}
+    assert captured["args"] == {
+        "auth_type": "databricks-oauth",
+        "oauth_client_id": "app",
+        **for_key("databricks").session_connect_args,
+    }
     assert captured["url"].password is None
 
 
@@ -420,26 +429,35 @@ def test_snowflake_oauth_is_the_connectors_own_flow(captured, minted):
         "oauth_client_secret": "csecret",
         "oauth_token_request_url": "https://idp/token",
         "oauth_scope": "r",
+        **for_key("snowflake").session_connect_args,
     }
     assert minted == []
 
 
 def test_snowflake_sso_sts_and_key_pair(captured):
     connect("SSO", SNOWFLAKE)
-    assert captured["args"] == {"authenticator": "externalbrowser"}
+    assert captured["args"] == {
+        "authenticator": "externalbrowser",
+        **for_key("snowflake").session_connect_args,
+    }
     connect("STS", SNOWFLAKE)
     assert captured["args"] == {
         "authenticator": "WORKLOAD_IDENTITY",
         "workload_identity_provider": "AWS",
+        **for_key("snowflake").session_connect_args,
     }
     connect("KEY_FILE", SNOWFLAKE, "passphrase", key_file="/keys/rsa_key.p8")
     assert captured["args"] == {
         "private_key_file": "/keys/rsa_key.p8",
         "private_key_file_pwd": "passphrase",
+        **for_key("snowflake").session_connect_args,
     }
     assert captured["url"].password is None
     connect("KEY_FILE", SNOWFLAKE, key_file="/keys/rsa_key.p8")
-    assert captured["args"] == {"private_key_file": "/keys/rsa_key.p8"}
+    assert captured["args"] == {
+        "private_key_file": "/keys/rsa_key.p8",
+        **for_key("snowflake").session_connect_args,
+    }
 
 
 def test_the_snowflake_connector_accepts_every_argument_the_dialect_sends():
@@ -546,7 +564,10 @@ def test_dialect_names_and_defaults():
 
 def test_databricks_sso_without_a_client_and_token_through_the_base(captured):
     connect("SSO", DATABRICKS, user="")
-    assert captured["args"] == {"auth_type": "databricks-oauth"}
+    assert captured["args"] == {
+        "auth_type": "databricks-oauth",
+        **for_key("databricks").session_connect_args,
+    }
     connect("PASSWORD", "jdbc:snowflake://a.snowflakecomputing.com/?db=D", "pw")
     assert captured["url"].password == "pw"
 
@@ -759,7 +780,7 @@ def test_task_run_id_accepts_signed_bigint_representations(key, data_type, expec
     assert for_key(key).is_bigint_type(data_type) is expected
 
 
-@pytest.mark.parametrize("key", ["postgres", "duckdb", "snowflake", "databricks", "trino_iceberg"])
+@pytest.mark.parametrize("key", ["postgres", "duckdb"])
 def test_failed_session_setup_closes_the_cursor_without_committing(key):
     from unittest.mock import Mock
 
@@ -810,3 +831,61 @@ def test_a_view_is_replaced_with_its_grants_kept(key, secure, exists, statement)
 def test_a_view_the_warehouse_cannot_create_is_refused(key, secure, refusal):
     with pytest.raises(HandlerError, match=refusal):
         for_key(key).view_ddl("s.v", "SELECT 1", secure=secure, exists=False)
+
+
+@pytest.mark.parametrize(
+    "key,jdbc,auth,expected",
+    [
+        ("databricks", DATABRICKS, "TOKEN", {"session_configuration": {"timezone": "UTC"}}),
+        (
+            "snowflake",
+            SNOWFLAKE,
+            "TOKEN",
+            {
+                "timezone": "UTC",
+                "session_parameters": {
+                    "TIMESTAMP_OUTPUT_FORMAT": 'YYYY-MM-DD"T"HH24:MI:SS.FF6',
+                    "QUERY_TAG": "attempt-tag",
+                },
+            },
+        ),
+        ("trino_iceberg", TRINO, "PASSWORD", {"timezone": "UTC", "source": "attempt-tag"}),
+    ],
+)
+def test_session_options_and_fencing_tags_are_negotiated_at_login(
+    captured, key, jdbc, auth, expected, monkeypatch
+):
+    from copy import deepcopy
+
+    dialect = for_key(key)
+    defaults = deepcopy(dialect.session_connect_args)
+    monkeypatch.setattr(dialect, "session_connect_args", deepcopy(defaults))
+    warehouse = profile(auth, jdbc)
+    tag = dialect.session_tag_args("attempt-tag")
+    connection.warehouse_creator(
+        dialect, warehouse, "test-credential", parse_warehouse_url(jdbc), tag
+    )()
+    assert dialect.session_sql is None
+    assert {name: captured["args"][name] for name in expected} == expected
+    for value in captured["args"].values():
+        if isinstance(value, dict):
+            value.clear()
+    assert dialect.session_connect_args == defaults
+
+
+def test_task_engines_skip_checkout_pings():
+    warehouse = profile("NONE", "jdbc:duckdb:warehouse.duckdb")
+    with connection.warehouse_task():
+        engine = connection.build_warehouse_engine(config_for(warehouse))
+        try:
+            assert engine.pool._pre_ping is False
+        finally:
+            engine.dispose()
+
+
+def test_snowflake_keeps_login_isolation_without_a_setup_statement():
+    engine = connection.build_warehouse_engine(config_for(profile("TOKEN", SNOWFLAKE)))
+    try:
+        assert engine.dialect._on_connect_isolation_level is None
+    finally:
+        engine.dispose()

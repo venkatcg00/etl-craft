@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -30,19 +31,15 @@ from etl_craft.engine.repository.business_rules import (
 )
 from etl_craft.engine.repository.hash_versions import (
     clear_hash_version,
-    fetch_hash_version,
-    fetch_view_statement,
+    fetch_target_contract,
     save_hash_version,
     save_view_statement,
 )
 from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
 from etl_craft.engine.repository.tasks import (
     TargetTask,
-    conflicting_merge_action,
-    fetch_target_tasks,
 )
-from etl_craft.engine.resource_locks import holder_tag
-from etl_craft.engine.runlog import fetch_task_run_status
+from etl_craft.engine.resource_locks import currently_holds, holder_tag
 
 
 @dataclass(frozen=True)
@@ -73,6 +70,8 @@ class TaskState:
     peers: tuple[TargetTask, ...]
     peer_statuses: dict[str, str | None]
     merge_conflict: str | None
+    target: str | None = None
+    contract: TargetState | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +147,7 @@ class LocalTaskStore:
     config: ConnectorConfig
     identity: TaskIdentity
     locks: ResourceLocker
+    _contracts: dict[str, TargetState] = field(default_factory=dict, compare=False)
 
     @property
     def session_tag(self) -> str:
@@ -166,9 +166,15 @@ class LocalTaskStore:
                     f"from admitted {task_run_id}; use its admitted identity"
                 )
 
-    def hold(self, key: int, name: str, wait_seconds: float) -> AbstractContextManager[None]:
+    @contextmanager
+    def hold(self, key: int, name: str, wait_seconds: float) -> Iterator[None]:
         """Use the common target, event and warehouse ownership service."""
-        return self.locks.hold(key, name, wait_seconds)
+        with self.locks.hold(key, name, wait_seconds):
+            self._contracts.clear()
+            try:
+                yield
+            finally:
+                self._contracts.clear()
 
     def alert(self, pipelines: str | None) -> AlertState:
         """Read the exact run's report, using the deployment's SLA policy."""
@@ -189,35 +195,77 @@ class LocalTaskStore:
         identity = self.identity
         with self.engine.connect() as conn:
             self._assert(conn)
-            peers = (
-                tuple(fetch_target_tasks(conn, identity.pipeline_id, identity.task_id))
-                if sql_action in {SqlAction.SETUP_TABLE, SqlAction.DROP_TABLE}
-                else ()
-            )
+            if sql_action is not None:
+                return self._sql_state(conn, sql_action)
             return TaskState(
                 fetch_task_offset(conn, identity.task_id),
                 tuple(fetch_business_rules_for_task(conn, identity.task_id)),
-                peers,
-                {
-                    str(peer.task_id): fetch_task_run_status(
-                        conn, peer.task_id, identity.pipeline_run_id
-                    )
-                    for peer in peers
-                    if sql_action == SqlAction.DROP_TABLE
-                },
-                conflicting_merge_action(conn, identity.task_id, sql_action)
-                if sql_action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}
-                else None,
+                (),
+                {},
+                None,
             )
+
+    def _sql_state(self, conn: Connection, sql_action: str) -> TaskState:
+        """Read checkpoint, peer outcomes and target contract from one database snapshot."""
+        identity = self.identity
+        rows = conn.execute(
+            statement(conn, "sql_task_state"),
+            {
+                "task_id": identity.task_id,
+                "pipeline_id": identity.pipeline_id,
+                "pipeline_run_id": identity.pipeline_run_id
+                if sql_action == SqlAction.DROP_TABLE
+                else None,
+                "sql_action": sql_action,
+                "catalog": active_catalog(self.config)
+                if self.config.warehouse is not None
+                else None,
+            },
+        ).all()
+        row = rows[0]
+        target = f"{row.catalog_name}.{row.schema_name}.{row.table_name}"
+        contract = TargetState(row.hash_version, row.statement_sha256)
+        if currently_holds(locks.target(target, row.catalog_name).key):
+            self._contracts[target] = contract
+        return TaskState(
+            StoredOffset(row.offset_type, row.offset_value)
+            if row.offset_type is not None
+            else None,
+            (),
+            tuple(
+                TargetTask(peer.task_id, peer.task_code, peer.sql_action)
+                for peer in rows
+                if peer.task_id is not None
+            ),
+            {str(peer.task_id): peer.status for peer in rows if peer.task_id is not None}
+            if sql_action == SqlAction.DROP_TABLE
+            else {},
+            row.merge_conflict
+            if sql_action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}
+            else None,
+            target,
+            contract,
+        )
 
     def target(self, target: str) -> TargetState:
         """Read the published contract; warehouse state is never guessed."""
+        if target.lower() in self._contracts:
+            return self._contracts[target.lower()]
         with self.engine.connect() as conn:
             self._assert(conn)
-            return TargetState(fetch_hash_version(conn, target), fetch_view_statement(conn, target))
+            return TargetState(*fetch_target_contract(conn, target))
 
     def publish(self, publication: TargetPublication) -> None:
         """Publish only after the caller's warehouse commit."""
+        known = self._contracts.get(publication.target.lower())
+        if (
+            publication.clear_hash
+            and known is not None
+            and known.hash_version is None
+            and publication.hash_version is None
+            and publication.view_statement is None
+        ):
+            return
         with self.engine.begin() as conn:
             self._assert(conn)
             if self.identity.attempt_id is not None:
@@ -241,6 +289,7 @@ class LocalTaskStore:
                 save_hash_version(conn, publication.target, publication.hash_version)
             if publication.view_statement is not None:
                 save_view_statement(conn, publication.target, publication.view_statement)
+        self._contracts.pop(publication.target.lower(), None)
 
     def watermark(self, start: str, end: str) -> None:
         """Fence the staged range to the current attempt without moving the offset."""

@@ -147,7 +147,7 @@ item's text, or work done early under another item.
 | S5.C The PostgreSQL queue and the agent | Done | #231 | API-only agents with claims, renewals, fenced reports, shared log chunks and durable drain/resume/stop; durable resource locks that pass only after the expired holder's warehouse statements are confirmed stopped |
 | S5.AI Event waits on signal rows | Done | #233 | Keyed SQL waits consume each signal once with the wait's success, like files; bounded probes; always-true queries are refused |
 | S5.AH Partitioned offsets for streams | Done | #234 | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
-| S5.AJ Fewer warehouse round trips | Planned | | One warehouse connection per task, cached table metadata, combined checks and a statement budget in CI; cloud suites under 15 minutes |
+| S5.AJ Fewer warehouse round trips | Done | #235 | Task-scoped warehouse engines, DDL-aware metadata, combined queries and exact action/attempt budgets; parallel cloud suites under 15 minutes |
 | S5.D and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -157,6 +157,7 @@ item's text, or work done early under another item.
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
 | S7.U Personal-data erasure | Planned | | A standing erasure register and ERASURE tasks remove subjects after loads, outside managed writes |
 | S7.V Empty replacements | Planned | | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
+| S7.W Docs toolchain after MkDocs 1.x | Planned | | Evaluate Zensical against the API pages, navigation and published versions; migrate only when every requirement works |
 | S7.O Package and demo repositories | Planned | | A very small demo stays in package CI; Support Insights holds its project and supplies release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
 | S7.Q A generic ANSI SQL warehouse | Planned | | A `generic` dialect over SQLAlchemy for rare databases: ANSI SQL only, NULL-safe column comparison for merges, refusals for anything without an ANSI form |
@@ -306,6 +307,21 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AJ (#235) ran the unit, action, merge, crash, released-schema upgrade and API checks on
+both Engine DBs where applicable and all four local warehouses. Lock, lease, fencing,
+transition and ROW_ID checks passed twenty rounds. Both clouds were available: six-worker
+Snowflake passed 33 tests in 12m25.92s, and Databricks passed 32 in 7m50.98s; the Snowflake
+native every-action test took 2m35.893s. Earlier serial observations were 61m16s and 44m06s
+respectively; their failing/incomplete runs and the scope comparison are detailed in the PR.
+A paired serial/parallel Databricks run retained identical evidence apart from times.
+After tightening the Databricks capability-refusal guard, its rerun passed 25 tests and failed
+seven because Unity Catalog refused new tables (559 against a limit of 500). A subsequent
+quota query and allocation probe still refused creation at 552/500; this is a failed acceptance
+run, not an unavailable-cloud waiver. The owner accepted the prior passing run plus the new
+refusal-path regressions (23 October 2026): comparing every runtime file with that wheel showed
+only the stricter temporary-table capability-error classifier changed. The source review found
+no security issue, and all 2,698 unit tests pass.
 
 S5.X (#230) exercises ordered unmanaged statements, bind inputs, partial failures and attempt
 logs on all four local warehouses. Dependency chains, retry policies and process loss are
@@ -615,6 +631,46 @@ the task process and `mark --offset` on the CLI) and the released-schema upgrade
 Warehouse SQL is unchanged; no cloud suite was needed.
 
 **Choices that differ from the item text.**
+
+- S5.AJ uses the owner's targets (22 October 2026): warehouse statements at most CREATE 4,
+  SETUP 3, OVERWRITE 5, APPEND 5, SCD1 5, SCD2 7, DELETE 5, VIEW 2 and DROP 2, and three
+  Engine DB statements inside the handler. Exact budgets cover all local warehouses and
+  record statements, transactions and connections. Remaining dialect costs are explained in
+  the PR: sequences, stage indexes/statistics, Iceberg hydration, persistent mutable stages,
+  protection/generator evidence and atomic publication stay. SETUP retains a fourth Engine DB
+  statement to publish its hash version after the warehouse commit; fences are never cached.
+- S5.AJ's whole-attempt budget includes the supervisor and fresh child: 85 Engine DB statements
+  in 22 transactions, one new Engine DB connection, five warehouse statements and one warehouse
+  connection. The scheduler polls active runs at most once per second while acting immediately
+  on local completions and completed event checks. SQL actions already opened one engine per
+  invocation; repeated Python warehouse calls now share their task engine too. Parallel
+  business-rule waves retain their concurrent connections.
+- S5.AJ keeps exact driver descriptions only where they retain source properties; inherited
+  collations and unsupported types retain CTAS. Trino computes ROW_ID in its allocating
+  statement under the target lock. The process tests pause at that statement, and an actual
+  invalid allocation tests cleanup; a deliberately constant allocation breaks both tests.
+- S5.AJ uses dev-only pytest-xdist 3.8.0 (owner-approved, 22 October 2026), six workers per
+  cloud, module worlds where isolation permits, and controller-only evidence aggregation.
+  Dev-only httpx2 2.13.1 replaces the deprecated TestClient dependency. Snowflake reads the
+  authenticated session schema while retaining its version probe and rollback cleanup.
+  Databricks immutable stages use session tables; documented capability refusals retain
+  persistent stages. Its JSON omits identity definitions, so generator checks still use DDL.
+- S5.AJ removes cloud append retry, input-identity, Python upgrade, repeated-watermark and
+  business-rule identity cases: their local equivalents are respectively
+  `test_append_retries_replace_only_their_task_run`, `test_sql_input_identities_match_target_provenance`,
+  `test_upgrade_includes_ingestion_targets_without_a_sql_row_id`, `test_watermark_batches_and_retry`
+  and `test_rules_receive_pipeline_and_task_run_identities`. The removed cloud demo is covered
+  by installed-wheel `test_the_demo_runs_locally`; its removal is flagged in the PR. Vendor
+  composite merges, lifecycle/upgrades, rejects, literals, event waits and source checks remain.
+- S5.AJ acceptance uses the previous full Databricks pass plus the stricter capability-error
+  classifier regressions (owner-approved, 23 October 2026). A later run failed on the provider's
+  table quota, still confirmed by an allocation probe. The successful SQL paths match the
+  passing wheel; the failed run is retained in the PR rather than treated as unavailable.
+- S5.AJ's CI follow-up renders each documentation version once through mike with a temporary
+  strict configuration. Release-specific dependencies, YAML tags and exported-content checks
+  remain; the 120-second test timeout is unchanged.
+- S5.AJ also carries the owner's S7.W plan addition (22 October 2026): evaluate the complete
+  documentation toolchain after MkDocs 1.x. The existing pin and warning remain unchanged.
 
 - S5.AH builds a partition offset with `Offset.partitions({...})` (or
   `Offset(mapping, "PARTITIONS")`), with no `PartitionOffsets` type. Positions are whole numbers
@@ -5942,6 +5998,18 @@ After S6.A and S7.C.
   remedy: fix the source or set `ALLOW_EMPTY=Y`. Record the failure in audit and the attempt log.
 - *Tests.* On every local warehouse, `N` with no rows fails and leaves the target unchanged;
   `Y` replaces it with no rows; `N` with rows replaces it as usual.
+
+### S7.W Docs toolchain after MkDocs 1.x
+
+Branch: `docs/docs-toolchain`. The documentation remains on `mkdocs>=1.6.1,<2` until a
+replacement supports the complete site; do not suppress the MkDocs 2.0 warning.
+
+- *Change.* Evaluate Zensical, the Material team's successor that reads `mkdocs.yml`, against
+  mkdocstrings API pages, mkdocs-gen-files reference pages, literate-nav, section-index, mike
+  versioning and `mkdocs build --strict`. Migrate when every requirement works; otherwise
+  remain on MkDocs 1.6.x.
+- *Done when.* The strict documentation build and published versions work on the chosen
+  toolchain.
 
 ### S7.B Users, roles and identities (W10)
 

@@ -24,8 +24,7 @@ inserted, updated or deleted.
 
 A row counts as changed when its ``HASH_KEY``, an MD5 over ``MERGE_COMPARE_COLUMNS``, differs.
 Merge updates join the deduplicated stage using the warehouse's UPDATE FROM or matched MERGE
-strategy. SCD2 materializes changed keys before closing active versions so its insert phase can
-still find those keys afterwards.
+strategy. SCD2 closes changed active versions, then inserts stage keys without an active version.
 """
 
 from __future__ import annotations
@@ -33,230 +32,49 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
 
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import sha256_hex
-from etl_craft.engine.repository.tasks import TargetTask
-from etl_craft.engine.task_store import TaskStore
-from etl_craft.handlers.registry import HandlerResult, TaskContext
+from etl_craft.dialects.warehouse.metadata import projection_names
+from etl_craft.handlers.registry import HandlerResult
+from etl_craft.handlers.sql.context import ActionContext
+from etl_craft.handlers.sql.creation import create_table, setup_table
 from etl_craft.handlers.sql.rejects import screen
-from etl_craft.handlers.sql.replacement import cleanup, promote, recover_overwrite
+from etl_craft.handlers.sql.replacement import cleanup, recover_overwrite
 from etl_craft.handlers.sql.session import Session
-from etl_craft.handlers.sql.spec import SqlTask
 from etl_craft.handlers.sql.tables import (
-    AUDIT_COLUMNS,
     IDENTITY_COLUMNS,
     add_hash_key,
-    add_row_id,
-    build_stage,
     check_identity_types,
     check_or_evolve,
+    check_stage_columns,
     check_target_audit,
-    create_target_shape,
     dedupe,
     refuse_null_keys,
     require_target,
 )
-from etl_craft.handlers.sql.watermarks import record_range
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ActionContext:
-    """What every action needs besides the warehouse session."""
-
-    task: SqlTask
-    context: TaskContext
-    store: TaskStore
-    user: str
-    now: datetime
-    staged: str | None = None
-    respect_protection: bool = True
-
-    @property
-    def select_sql(self) -> str:
-        """The task's SELECT; every action but ``DROP_TABLE`` has one."""
-        assert self.task.select_sql is not None
-        return self.task.select_sql
-
-    def build_stage(self, session: Session, *, empty: bool = False) -> str:
-        """Stage the SELECT once and record its watermark before any target mutation."""
-        if self.staged is not None:
-            return self.staged
-        stage = build_stage(session, self.select_sql, empty=empty)
-        if self.task.watermark is not None:
-            record_range(session, stage, self.task.watermark, self.context, self.store)
-        return stage
-
-    @property
-    def stamp(self) -> dict[str, object]:
-        """The values the audit columns are stamped with."""
-        return {
-            "pipeline_run_id": None if self.staged else self.context.pipeline_run_id,
-            "pipeline_id": None if self.staged else self.context.pipeline_id,
-            "task_run_id": None if self.staged else self.context.task_run_id,
-            "now": self.now,
-            "updated_by": self.user,
-        }
 
 
 Action = Callable[[Session, ActionContext], HandlerResult]
 
 
-def create_table(session: Session, action: ActionContext) -> HandlerResult:
-    """Replace the target with the SELECT's rows, stamped with the run id."""
-    stage = action.build_stage(session)
-    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    existing = bool(session.target_columns())
-    strategy = session.dialect.replace_strategy
-    computed = session.dialect.surrogate_key == "computed"
-    row_id = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID" if computed else ""
-    select_sql = (
-        f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID"
-        f", CAST({int(action.context.pipeline_id)} AS BIGINT) AS PIPELINE_ID"
-        f", CAST({int(action.context.task_run_id)} AS BIGINT) AS TASK_RUN_ID"
-        f"{row_id} FROM {stage} s"
-    )
-    if session.dialect.identity_in_create:
-        candidate = session.scratch("replace", persistent=True)
-        types = session.column_types(stage)
-        names = [name for name, _ in session.columns(stage)]
-        columns = ", ".join(
-            [f"{name} {types[name.lower()]}" for name in names]
-            + ["PIPELINE_RUN_ID BIGINT", "PIPELINE_ID BIGINT", "TASK_RUN_ID BIGINT"]
-        )
-        create_ddl, publish_ddl = session.dialect.identity_replacement_ddl(
-            session.conn,
-            session.target,
-            candidate,
-            columns,
-            session.params,
-            existing=existing,
-        )
-        session.run(create_ddl, step="create the identity replacement")
-        session.run(
-            f"INSERT INTO {candidate} "
-            f"({', '.join(names)}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID) {select_sql}",
-            step="populate the identity replacement",
-        )
-        fault_point("sql.replace.before_publish")
-        session.run(publish_ddl, step="atomically replace the target")
-        cleanup(session, candidate)
-    elif strategy == "create_or_replace":
-        ddl = session.dialect.replacement_ddl(
-            session.conn, session.target, select_sql, session.params, existing=existing
-        )
-        fault_point("sql.replace.before_publish")
-        session.run(ddl, step="atomically replace the target")
-    elif strategy == "copy_and_restore":
-        if existing and any(session.params.get(k) for k in ("EXTERNAL_LOCATION", "BASE_LOCATION")):
-            raise SqlGuardError(
-                f"{session.target}: cannot safely stage replacement at its existing storage path; "
-                "use OVERWRITE_TABLE to keep the table definition"
-            )
-        candidate = session.scratch("replace", persistent=True)
-        session.create_table_as(candidate, select_sql, step="prepare the complete replacement")
-        if not computed:
-            raise SqlGuardError(
-                f"{session.target}: safe replacement requires a declared ROW_ID strategy"
-            )
-        if existing:
-            session.dialect.preserve_replacement_properties(session.conn, session.target, candidate)
-        promote(session, candidate, existing=existing)
-    else:
-        comment = (
-            session.dialect.replacement_comment(session.conn, session.target) if existing else None
-        )
-        fault_point("sql.replace.before_publish")
-        session.run(f"DROP TABLE IF EXISTS {session.target}", step="drop the old target")
-        fault_point("sql.replace.after_clear")
-        session.create_table_as(
-            session.target, select_sql, step="create the target from the SELECT"
-        )
-        if not computed:
-            add_row_id(session)
-        if comment is not None:
-            escaped = comment.replace("'", "''")
-            session.run(
-                f"COMMENT ON TABLE {session.target} IS '{escaped}'",
-                step="preserve the table comment",
-            )
-        fault_point("sql.replace.after_publish")
-    session.clear_hash_version = True
-    cleanup(session, stage)
-    return HandlerResult(source_count=source, target_count=source, insert_count=source)
-
-
-def setup_table(session: Session, action: ActionContext) -> HandlerResult:
-    """Create the target, empty, when it does not exist; leave an existing one alone.
-
-    Its columns are the SELECT's, then ``PIPELINE_RUN_ID``, the audit columns of the action
-    that writes it and ``ROW_ID``. That action is ``SETUP_FOR`` when set, else the one the
-    pipeline's other tasks on the target write with.
-    """
-    if session.target_columns():
-        logger.info("%s exists; SETUP_TABLE leaves it as it is", session.target)
-        return HandlerResult(source_count=0, target_count=0, insert_count=0)
-    others = list(action.store.state(SqlAction.SETUP_TABLE).peers)
-    writer = writer_action(action.task.setup_for, others, action.task.target_object)
-    stage = action.build_stage(session, empty=True)
-    create_target_shape(session, stage, AUDIT_COLUMNS[writer])
-    session.drop(stage)
-    if writer in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
-        session.publish_hash_version = 2
-    logger.info("created %s with the audit columns of %s", session.target, writer)
-    return HandlerResult(source_count=0, target_count=0, insert_count=0)
-
-
-def writer_action(setup_for: str | None, others: list[TargetTask], target: str) -> str:
-    """Return the writer whose audit columns a SETUP_TABLE target gets.
-
-    ``others`` are the pipeline's other tasks on the target.
-    """
-    writers = [task for task in others if task.sql_action in AUDIT_COLUMNS]
-    found = sorted({task.sql_action for task in writers})
-    listed = ", ".join(f"{task.task_code} ({task.sql_action})" for task in writers)
-    merges = {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}
-    if merges.issubset(set(found) | {setup_for}):
-        raise SqlGuardError(
-            f"{target}: SCD1_MERGE and SCD2_MERGE have different row lifecycles; "
-            "give the target one merge action"
-        )
-    if setup_for is not None:
-        clashing = [a for a in found if AUDIT_COLUMNS[a] != AUDIT_COLUMNS[setup_for]]
-        if clashing:
-            raise SqlGuardError(
-                f"SETUP_FOR={setup_for}, but tasks in this pipeline write {target} as {listed}, "
-                "which need other audit columns"
-            )
-        return setup_for
-    audit_sets = {AUDIT_COLUMNS[a] for a in found}
-    if len(audit_sets) > 1:
-        raise SqlGuardError(
-            f"tasks in this pipeline write {target} with actions that need different audit "
-            f"columns ({listed}); a table has one set, so give it one writing action, or set "
-            "SETUP_FOR to the one it is for"
-        )
-    if not found:
-        raise SqlGuardError(
-            f"no task in this pipeline writes {target}, so SETUP_TABLE cannot tell which audit "
-            "columns it needs; set SETUP_FOR to the action that writes it: "
-            f"{', '.join(AUDIT_COLUMNS)}"
-        )
-    return found[0]
-
-
 def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     """Empty the target and insert the SELECT's rows."""
     stage = action.build_stage(session)
-    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    stage, rejected = screen(session, stage, action.task, source, action.stamp)
-    written = source - (rejected or 0)
+    source = (
+        session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+        if action.task.reject_limit is not None or not session.dialect.dml_rowcounts
+        else None
+    )
+    stage, rejected = (
+        screen(session, stage, action.task, source, action.stamp)
+        if source is not None
+        else (stage, None)
+    )
     strategy = session.dialect.replace_strategy
     check_or_evolve(
         session, stage, SqlAction.OVERWRITE_TABLE, schema_evolution=action.task.schema_evolution
@@ -297,7 +115,9 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
         else:
             ddl = session.dialect.overwrite_statement(session.target, written_columns, select_sql)
         fault_point("sql.replace.before_publish")
-        session.run(ddl, action.stamp, step="atomically overwrite the target")
+        result = session.run(ddl, action.stamp, step="atomically overwrite the target")
+        if source is None:
+            source = session.dialect.affected_rows(result)
     else:
         guard = (
             recover_overwrite(session)
@@ -308,12 +128,15 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
             fault_point("sql.replace.before_publish")
             session.run(f"TRUNCATE TABLE {session.target}", step="empty the target")
             fault_point("sql.replace.after_clear")
-            session.run(
+            result = session.run(
                 f"INSERT INTO {session.target} ({written_columns}) {select_sql}",
                 action.stamp,
                 step="insert the SELECT's rows",
             )
+            if source is None:
+                source = session.dialect.affected_rows(result)
             fault_point("sql.replace.after_publish")
+    written = source - (rejected or 0)
     cleanup(session, stage)
     return HandlerResult(
         source_count=source, target_count=written, insert_count=written, reject_count=rejected
@@ -335,8 +158,16 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
         )
     check_identity_types(session, tuple(c for c in IDENTITY_COLUMNS if c.lower() in present))
     stage = action.build_stage(session)
-    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    stage, rejected = screen(session, stage, action.task, source, action.stamp)
+    source = (
+        session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+        if action.task.reject_limit is not None or not session.dialect.dml_rowcounts
+        else None
+    )
+    stage, rejected = (
+        screen(session, stage, action.task, source, action.stamp)
+        if source is not None
+        else (stage, None)
+    )
     session.run(
         f"DELETE FROM {session.target} WHERE TASK_RUN_ID = :task_run_id",
         {"task_run_id": action.context.task_run_id},
@@ -347,7 +178,7 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
     row_id_columns, row_id_values = session.row_id_insert_parts()
     pipeline_column = ", PIPELINE_ID" if "pipeline_id" in present else ""
     pipeline_value = ", :pipeline_id" if pipeline_column else ""
-    session.run(
+    result = session.run(
         f"INSERT INTO {session.target} "
         f"({columns}, PIPELINE_RUN_ID, CREATE_DATE, TASK_RUN_ID{pipeline_column}{row_id_columns}) "
         f"SELECT {columns}, :pipeline_run_id, :now, :task_run_id{pipeline_value}{row_id_values} "
@@ -355,6 +186,8 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
         action.stamp,
         step="append the SELECT's rows",
     )
+    if source is None:
+        source = session.dialect.affected_rows(result)
     fault_point("sql.append.after_insert")
     session.drop(stage)
     target_count = session.count(f"SELECT COUNT(*) FROM {session.target}", step="target rows")
@@ -368,7 +201,7 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
 
 def _merge_stage(
     session: Session, action: ActionContext, kind: SqlAction
-) -> tuple[str, int, int | None]:
+) -> tuple[str, int, int | None, int | None]:
     """Stage, screen, de-duplicate, check and hash the SELECT for a merge.
 
     Return the stage, the source rows and the rows set aside.
@@ -381,35 +214,50 @@ def _merge_stage(
             f"{session.target} has hash version {version or 'unknown'}; "
             f"run `etl-craft rehash --target {session.target_object}` before merging"
         )
-    stage = action.build_stage(session)
-    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-    stage, rejected = screen(session, stage, task, source, action.stamp)
-    refuse_null_keys(session, stage, task.merge_key)
-    stage = dedupe(session, stage, task.merge_key, task.dedupe_order)
+    hashed = not (
+        action.staged
+        or task.reject_limit is not None
+        or task.schema_evolution
+        or task.watermark is not None
+        or task.dedupe_order
+        or session.protection is not None
+    )
+    hashed = (
+        hashed
+        and projection_names(
+            action.select_sql, session.dialect.sqlglot_dialect, session.dialect.identifier_case
+        )
+        is not None
+    )
+    if hashed:
+        stage = session.scratch("stage")
+        session.select_columns(stage, action.select_sql)
+        check_stage_columns(session, stage)
+        check_or_evolve(session, stage, kind, schema_evolution=False)
+        stage = session.create_hashed_stage(stage, action.select_sql, task.merge_compare_columns)
+    else:
+        stage = action.build_stage(session)
+    count_target = session.target if hashed and kind == SqlAction.SCD1_MERGE else None
+    if task.reject_limit is None:
+        counts = session.run(
+            session.dialect.key_counts(stage, task.merge_key, count_target), step="NULL merge keys"
+        ).one()
+        source, rejected = int(counts.source_rows), None
+    else:
+        source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+        stage, rejected = screen(session, stage, task, source, action.stamp)
+        counts = session.run(
+            session.dialect.key_counts(stage, task.merge_key), step="NULL merge keys"
+        ).one()
+    refuse_null_keys(session, stage, task.merge_key, int(counts.null_keys))
+    stage = dedupe(session, stage, task.merge_key, task.dedupe_order, int(counts.duplicate_keys))
     check_or_evolve(session, stage, kind, schema_evolution=task.schema_evolution)
     if session.protection is not None and action.respect_protection:
         stage = session.protection.stage(stage)
-    add_hash_key(session, stage, task.merge_compare_columns)
+    if not hashed:
+        add_hash_key(session, stage, task.merge_compare_columns)
     session.prepare_update_stage(stage, task.merge_key)
-    return stage, source, rejected
-
-
-def _changed_keys(session: Session, stage: str, merge_key: tuple[str, ...], condition: str) -> str:
-    """Materialize the merge keys whose target row meets ``condition``; return the table.
-
-    Keep changed keys available after SCD2 closes their old active versions, and count each
-    key once even when its target has history.
-    """
-    changed = session.scratch("changed_keys")
-    key_match = _key_match(merge_key)
-    keys = ", ".join(f"s.{k}" for k in merge_key)
-    session.create_scratch(
-        changed,
-        f"SELECT DISTINCT {keys} FROM {stage} s JOIN {session.target} t ON {key_match} "
-        f"WHERE {condition}",
-        step="find changed keys",
-    )
-    return changed
+    return stage, source, rejected, int(counts.new_keys) if count_target else None
 
 
 def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
@@ -419,12 +267,74 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     taken over the values actually kept.
     """
     task = action.task
-    stage, source, rejected = _merge_stage(session, action, SqlAction.SCD1_MERGE)
+    stage, source, rejected, new = _merge_stage(session, action, SqlAction.SCD1_MERGE)
     stage_columns = [name for name, _ in session.columns(stage)]
-    keys = {key.lower() for key in task.merge_key}
-    non_key = [column for column in stage_columns if column.lower() not in keys]
+    assignments, condition = _scd1_update(session, action, stage_columns)
     target = session.target
     key_match = _key_match(task.merge_key)
+    generated = session.row_id_generated()
+    merge_source = (
+        stage if generated else session.dialect.merge_source(target, stage, task.merge_key)
+    )
+    if session.dialect.supports_insert_merge(session.conn) and merge_source is not None:
+        if new is None:
+            new = session.count(
+                f"SELECT COUNT(*) FROM {stage} s WHERE NOT EXISTS "
+                f"(SELECT 1 FROM {target} t WHERE {key_match})",
+                step="new rows",
+            )
+        insert = _merge_insert_parts(
+            session, stage_columns, None if generated else (", ROW_ID", ", s.ROW_ID")
+        )
+        result = session.run(
+            session.dialect.update_from_stage(
+                target, merge_source, task.merge_key, assignments, condition, insert
+            ),
+            action.stamp,
+            step="merge changed and new rows",
+        )
+        insert_count = new
+        update_count = session.dialect.affected_rows(result) - new
+        fault_point("sql.scd1.after_update")
+    else:
+        update_count = session.mutate(
+            session.dialect.update_from_stage(
+                target, stage, task.merge_key, assignments, condition
+            ),
+            action.stamp,
+            count_sql=f"SELECT COUNT(*) FROM {target} t JOIN {stage} s ON {key_match} "
+            f"WHERE {condition}",
+            step="update changed rows",
+        )
+        fault_point("sql.scd1.after_update")
+
+        new_keys = f"NOT EXISTS (SELECT 1 FROM {target} t WHERE {key_match})"
+        insert_count = _insert_merge_rows(
+            session,
+            action,
+            stage_columns,
+            f"FROM {stage} s WHERE {new_keys}",
+            step="insert new rows",
+        )
+    fault_point("sql.scd1.after_insert")
+    session.drop(stage)
+    target_count = session.count(f"SELECT COUNT(*) FROM {target}", step="target rows")
+    return HandlerResult(
+        source_count=source,
+        target_count=target_count,
+        insert_count=insert_count,
+        update_count=update_count,
+        reject_count=rejected,
+    )
+
+
+def _scd1_update(
+    session: Session, action: ActionContext, stage_columns: list[str]
+) -> tuple[dict[str, str], str]:
+    """Compare and stamp changed rows, including restored and preserved target values."""
+    task = action.task
+    keys = {key.lower() for key in task.merge_key}
+    non_key = [column for column in stage_columns if column.lower() not in keys]
 
     def kept_hash(alias: str) -> str:
         return session.hash(
@@ -435,10 +345,6 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
     compared = kept_hash("t") if task.preserve_target else "s.HASH_KEY"
     condition = f"(t.HASH_KEY IS DISTINCT FROM {compared} OR t.DELETE_FLAG = 'Y')"
     condition = edit_condition(action, tuple(non_key), condition)
-    # A soft-deleted key the SELECT returns again comes back, changed or not.
-    changed = _changed_keys(session, stage, task.merge_key, condition)
-    update_count = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed rows")
-
     assignments = {}
     for column in non_key:
         value = f"s.{column}"
@@ -456,31 +362,7 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
         DELETE_FLAG="'N'",
         ACTIVE_FLAG="'Y'",
     )
-    session.run(
-        session.dialect.update_from_stage(target, stage, task.merge_key, assignments, condition),
-        action.stamp,
-        step="update changed rows",
-    )
-    fault_point("sql.scd1.after_update")
-
-    new_keys = f"NOT EXISTS (SELECT 1 FROM {target} t WHERE {key_match})"
-    insert_count = session.count(
-        f"SELECT COUNT(*) FROM {stage} s WHERE {new_keys}", step="new rows"
-    )
-    _insert_merge_rows(
-        session, action, stage_columns, f"FROM {stage} s WHERE {new_keys}", step="insert new rows"
-    )
-    fault_point("sql.scd1.after_insert")
-    session.drop(changed)
-    session.drop(stage)
-    target_count = session.count(f"SELECT COUNT(*) FROM {target}", step="target rows")
-    return HandlerResult(
-        source_count=source,
-        target_count=target_count,
-        insert_count=insert_count,
-        update_count=update_count,
-        reject_count=rejected,
-    )
+    return assignments, condition
 
 
 def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
@@ -490,22 +372,17 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
     one inserted, so a rerun converges.
     """
     task = action.task
-    stage, source, rejected = _merge_stage(session, action, SqlAction.SCD2_MERGE)
+    stage, source, rejected, _ = _merge_stage(session, action, SqlAction.SCD2_MERGE)
     stage_columns = [name for name, _ in session.columns(stage)]
     target = session.target
     key_match = _key_match(task.merge_key)
 
     condition = "t.HASH_KEY IS DISTINCT FROM s.HASH_KEY OR t.DELETE_FLAG = 'Y'"
     condition = edit_condition(action, tuple(stage_columns), condition)
-    changed = _changed_keys(
-        session, stage, task.merge_key, f"t.ACTIVE_FLAG = 'Y' AND ({condition})"
-    )
-    closed = session.count(f"SELECT COUNT(*) FROM {changed}", step="changed keys")
-    session.prepare_update_stage(changed, task.merge_key)
-    session.run(
+    closed = session.mutate(
         session.dialect.update_from_stage(
             target,
-            changed,
+            stage,
             task.merge_key,
             {
                 "ACTIVE_FLAG": "'N'",
@@ -515,35 +392,27 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
                 "TASK_RUN_ID": ":task_run_id",
                 "PIPELINE_ID": ":pipeline_id",
             },
-            "t.ACTIVE_FLAG = 'Y'",
+            f"t.ACTIVE_FLAG = 'Y' AND ({condition})",
         ),
         action.stamp,
+        count_sql=f"SELECT COUNT(*) FROM {target} t JOIN {stage} s ON {key_match} "
+        f"WHERE t.ACTIVE_FLAG = 'Y' AND ({condition})",
         step="close the active version of changed keys",
     )
     fault_point("sql.scd2.after_close")
 
-    stage_changed = _key_match(task.merge_key, "s", "ck")
-    _insert_merge_rows(
-        session,
-        action,
-        stage_columns,
-        f"FROM {stage} s WHERE EXISTS (SELECT 1 FROM {changed} ck WHERE {stage_changed})",
-        step="insert new versions of changed keys",
-    )
-    fault_point("sql.scd2.after_versions")
     no_active = f"NOT EXISTS (SELECT 1 FROM {target} t WHERE {key_match} AND t.ACTIVE_FLAG = 'Y')"
-    new = session.count(f"SELECT COUNT(*) FROM {stage} s WHERE {no_active}", step="new keys")
-    _insert_merge_rows(
+    inserted = _insert_merge_rows(
         session, action, stage_columns, f"FROM {stage} s WHERE {no_active}", step="insert new keys"
     )
+    fault_point("sql.scd2.after_versions")
     fault_point("sql.scd2.after_insert")
-    session.drop(changed)
     session.drop(stage)
     target_count = session.count(f"SELECT COUNT(*) FROM {target}", step="target rows")
     return HandlerResult(
         source_count=source,
         target_count=target_count,
-        insert_count=closed + new,
+        insert_count=inserted,
         update_count=closed,
         reject_count=rejected,
     )
@@ -551,17 +420,27 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
 
 def _insert_merge_rows(
     session: Session, action: ActionContext, columns: list[str], body: str, *, step: str
-) -> None:
-    names = ", ".join(columns)
-    row_id_columns, row_id_values = session.row_id_insert_parts()
-    session.run(
-        f"INSERT INTO {session.target} ({names}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
-        "CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, "
-        f"ACTIVE_FLAG{row_id_columns}) "
-        f"SELECT {names}, :pipeline_run_id, :pipeline_id, :task_run_id, "
-        f":now, :updated_by, :now, :updated_by, 'N', 'Y'{row_id_values} {body}",
+) -> int:
+    names, values = _merge_insert_parts(session, columns)
+    return session.mutate(
+        f"INSERT INTO {session.target} ({names}) SELECT {values} {body}",
         action.stamp,
+        count_sql=f"SELECT COUNT(*) {body}",
         step=step,
+    )
+
+
+def _merge_insert_parts(
+    session: Session, columns: list[str], row_ids: tuple[str, str] | None = None
+) -> tuple[str, str]:
+    """Share inserted business and audit values between INSERT and MERGE."""
+    row_id_columns, row_id_values = session.row_id_insert_parts() if row_ids is None else row_ids
+    return (
+        f"{', '.join(columns)}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
+        "CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, "
+        f"ACTIVE_FLAG{row_id_columns}",
+        f"{', '.join(f's.{column}' for column in columns)}, :pipeline_run_id, :pipeline_id, "
+        f":task_run_id, :now, :updated_by, :now, :updated_by, 'N', 'Y'{row_id_values}",
     )
 
 
@@ -572,7 +451,8 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
     """
     context = action.context
     target_object = action.task.target_object
-    state = action.store.state(SqlAction.DROP_TABLE)
+    assert action.state is not None
+    state = action.state
     creator = next(
         (task for task in state.peers if task.sql_action == SqlAction.CREATE_TABLE), None
     )
@@ -589,7 +469,7 @@ def drop_table(session: Session, action: ActionContext) -> HandlerResult:
             f"({creator.task_code}) is {status or 'not run'} under pipeline_run_id="
             f"{context.pipeline_run_id}, not SUCCESS; make the drop depend on it"
         )
-    if not session.target_columns():
+    if session.target_relation_type() is None:
         logger.info("%s does not exist; nothing to drop", session.target)
         return HandlerResult()
     session.clear_hash_version = True
@@ -601,10 +481,13 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     """Hard delete matching keys, or deactivate and flag their current live rows."""
     task = action.task
     stage = action.build_stage(session)
-    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    counts = session.run(
+        session.dialect.key_counts(stage, task.merge_key), step="NULL merge keys"
+    ).one()
+    source = int(counts.source_rows)
     target = session.target
     require_target(session)
-    refuse_null_keys(session, stage, task.merge_key)
+    refuse_null_keys(session, stage, task.merge_key, int(counts.null_keys))
     if not task.hard_delete:
         have = {name.lower() for name, _ in session.target_columns()}
         missing = [
@@ -631,26 +514,28 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
     key_match = _key_match(task.merge_key)
     # A soft delete leaves rows already flagged as they were, with their first UPDATE_DATE.
     live = "" if task.hard_delete else " AND t.ACTIVE_FLAG = 'Y' AND t.DELETE_FLAG = 'N'"
-    delete_count = session.count(
+    count_sql = (
         f"SELECT COUNT(*) FROM {target} t WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {key_match})"
-        f"{live}",
-        step="rows to delete",
+        f"{live}"
     )
     mutation, q = session.mutation_target()
     match = _key_match(task.merge_key, q)
     if task.hard_delete:
-        session.run(
+        delete_count = session.mutate(
             f"DELETE FROM {mutation} WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match})",
+            {},
+            count_sql=count_sql,
             step="delete the rows",
         )
     else:
-        session.run(
+        delete_count = session.mutate(
             f"UPDATE {mutation} SET DELETE_FLAG = 'Y', ACTIVE_FLAG = 'N', UPDATE_DATE = :now, "
             f"PIPELINE_RUN_ID = :pipeline_run_id, PIPELINE_ID = :pipeline_id, "
             f"TASK_RUN_ID = :task_run_id, "
             f"UPDATED_BY = :updated_by WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match}) "
             f"AND {q}.ACTIVE_FLAG = 'Y' AND {q}.DELETE_FLAG = 'N'",
             action.stamp,
+            count_sql=count_sql,
             step="flag the rows deleted",
         )
     session.drop(stage)

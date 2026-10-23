@@ -93,27 +93,30 @@ def heartbeat(
     def renew_once() -> bool:
         """Renew the live lease; false once the row has ended. An expired lease is refused."""
         with acting_as(actor), engine.begin() as conn:
-            query = "run_lease" if kind == "run" else "transition_row_attempt"
-            row = conn.execute(statement(conn, query), {"row_id": row_id}).one_or_none()
-            active = (
-                {RunStatus.IN_PROGRESS}
-                if kind == "run"
-                else {AttemptStatus.CLAIMED, AttemptStatus.RUNNING}
-            )
-            if row is not None and row.status == AttemptStatus.LOST:
-                raise StaleTransitionError(
-                    f"attempt {row_id}: owner {owner} was reconciled LOST; stop its child"
-                )
-            if row is not None and row.status not in active:
-                return False
             renewal = transitions.renew_run_lease if kind == "run" else transitions.renew_lease
-            renewal(
-                conn,
-                row_id,
-                actor,
-                owner=owner,
-                lease_expires_at=datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS),
-            )
+            try:
+                renewal(
+                    conn,
+                    row_id,
+                    actor,
+                    owner=owner,
+                    lease_expires_at=datetime.now(UTC) + timedelta(seconds=LEASE_SECONDS),
+                )
+            except StaleTransitionError:
+                query = "run_lease" if kind == "run" else "transition_row_attempt"
+                row = conn.execute(statement(conn, query), {"row_id": row_id}).one_or_none()
+                active = (
+                    {RunStatus.IN_PROGRESS}
+                    if kind == "run"
+                    else {AttemptStatus.CLAIMED, AttemptStatus.RUNNING}
+                )
+                if row is not None and row.status == AttemptStatus.LOST:
+                    raise StaleTransitionError(
+                        f"attempt {row_id}: owner {owner} was reconciled LOST; stop its child"
+                    ) from None
+                if row is not None and row.status not in active:
+                    return False
+                raise
             return True
 
     def renew() -> None:
