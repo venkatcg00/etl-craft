@@ -8,6 +8,7 @@ from etl_craft import __version__
 from etl_craft.agent.client import AgentClient
 from etl_craft.core.enums import ActionName, AgentReport
 from etl_craft.core.errors import ServerError
+from etl_craft.core.items import ItemRecord, ItemState
 from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.alerts import AlertState
@@ -74,6 +75,26 @@ class RemoteTaskStore:
         """Report a staged range; only the successful ending advances the checkpoint."""
         self.call(
             replace(self.request(AgentReport.WATERMARK), watermark_from=start, watermark_to=end)
+        )
+
+    def items(self) -> ItemState:
+        """Read item evidence through the API tier, including previous task attempts."""
+        return from_json(ItemState, self.call(self.request(AgentReport.ITEMS)))
+
+    def prepare_items(self, keys: tuple[str, ...]) -> None:
+        """Send one bounded registration batch instead of one API call per queued key."""
+        self.call(replace(self.request(AgentReport.ITEM_PREPARE), item_keys=keys))
+
+    def item_event(self, event: ItemRecord) -> ItemRecord:
+        """Retry the same report identity without duplicating immutable evidence."""
+        return from_json(
+            ItemRecord,
+            self.call(
+                replace(
+                    self.request(AgentReport.ITEM_EVENT),
+                    item=event,
+                )
+            ),
         )
 
     def begin_rule(self, rule_id: int) -> RuleRunBinding:

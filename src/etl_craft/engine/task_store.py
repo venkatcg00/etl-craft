@@ -14,6 +14,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import StaleTransitionError
+from etl_craft.core.items import ItemRecord, ItemState, ItemStore
 from etl_craft.core.ownership import ResourceLocker, attempt_holder
 from etl_craft.engine import locks, transitions
 from etl_craft.engine.agent_state import fence
@@ -103,7 +104,7 @@ class RuleEnding:
     passing_keys: tuple[str, ...] = ()
 
 
-class TaskStore(ResourceLocker, Protocol):
+class TaskStore(ResourceLocker, ItemStore, Protocol):
     """The local and HTTP task backends expose the same bounded operations."""
 
     def alert(self, pipelines: str | None) -> AlertState:
@@ -304,6 +305,46 @@ class LocalTaskStore:
                 attempt_id=identity.attempt_id,
                 owner=identity.owner,
             )
+
+    def items(self) -> ItemState:
+        """Read durable items and this attempt's actual admitted memory."""
+        from etl_craft.engine import items
+
+        with self.engine.begin() as conn:
+            self._assert(conn)
+            reservation = conn.execute(
+                statement(conn, "item_reservation"),
+                {
+                    "attempt_id": self.identity.attempt_id,
+                },
+            ).one()
+            return ItemState(
+                items.latest(conn, self.identity.task_run_id),
+                int(reservation.memory_mb),
+                float(reservation.cpu),
+            )
+
+    def prepare_items(self, keys: tuple[str, ...]) -> None:
+        """Register keys and retain successes in one serialized, owned transaction."""
+        from etl_craft.core.items import bounded_keys
+        from etl_craft.engine import controls, items
+
+        checked = bounded_keys(keys, 1000)
+        with self.engine.begin() as conn:
+            controls.lock_run(conn, self.identity.pipeline_run_id)
+            self._assert(conn)
+            assert self.identity.attempt_id is not None
+            items.prepare(conn, self.identity.task_run_id, self.identity.attempt_id, checked)
+
+    def item_event(self, event: ItemRecord) -> ItemRecord:
+        """Serialize item results with operator decisions and reject an expired owner."""
+        from etl_craft.engine import controls, items
+
+        with self.engine.begin() as conn:
+            controls.lock_run(conn, self.identity.pipeline_run_id)
+            self._assert(conn)
+            assert self.identity.attempt_id is not None
+            return items.record(conn, self.identity.task_run_id, self.identity.attempt_id, event)
 
     def _rule(self, conn: Connection, rule_id: int) -> BusinessRule:
         from etl_craft.core.errors import PermissionDeniedError

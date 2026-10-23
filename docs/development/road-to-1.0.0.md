@@ -150,7 +150,7 @@ item's text, or work done early under another item.
 | S5.AJ Fewer warehouse round trips | Done | #235 | Task-scoped warehouse engines, DDL-aware metadata, combined queries and exact action/attempt budgets; parallel cloud suites under 15 minutes |
 | S5.D Cancellation across the cluster | Done | #236 | Prompt scoped cancellation, confirmed warehouse query endings and API-only agent acknowledgements |
 | S5.E Slots, limits and priorities | Done | #237 | Active pools, priority and fair atomic claims, pipeline/warehouse limits and resource placement without over-reservation |
-| S5.AK Item fan-out inside Python tasks | Planned | | Per-item recorded, retried and controlled work inside one Python task; one graph node with an item strip |
+| S5.AK Item fan-out inside Python tasks | Done | #238 | Durable item execution, retries, controls and shared progress; interactive graph/grid visuals follow in S7.A |
 | S5.F and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -310,6 +310,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.AK (#238) validates bounded thread/process execution, durable item retries and operator
+controls on both Engine DBs. Released-schema upgrades, actor/append-only guards, catalog query
+plans, shared reporting and unchanged S5.AJ budgets pass; concurrency checks pass twenty rounds.
+Old-source and deliberate-guard-break runs fail as expected. Cloud acceptance is not required:
+warehouse SQL generation and dialect behavior are unchanged. The owner deferred the interactive
+item strip and runs grid to S7.A; this item supplies their recorded data and operations.
 
 S5.E (#237) validates pool configuration and history, individual resource placement,
 local process ceilings, pipeline/warehouse limits, priority and fairness on both Engine DBs
@@ -647,6 +654,23 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S5.AK uses the owner-approved cancellation boundary: a queued item never starts after
+  cancellation; a running thread stays CANCEL_REQUESTED until its function ends. Whole-task
+  cancellation retains S5.D's process/query acknowledgement. Unknown cancellation on a LOST
+  owner remains pending, and an override cannot pretend that live item work has ended.
+- S5.AK's interactive node strip, bucketed display, proportional runs-grid cells, item-action
+  UI and their accessibility/browser checks move to S7.A with the owner's approval. The
+  execution, audit, API/CLI controls, run/status/explain and catalog reporting ship here.
+- S5.AK keeps item execution under `run --rerun --item-key` or `--all-failed`; `items` only
+  inspects, marks or requests cancellation. Item reruns reuse the task-rerun operation and
+  an exact run id, preserving unselected outcomes. New discovery keys during an item-scoped
+  rerun are refused rather than silently changing its work or advancing an incomplete offset.
+- S5.AK uses stable text keys and the existing ScriptResult contract. Default thread width is
+  the smaller of 16 and the admitted memory bound (2 MB per worker, ceiling 256); spawned
+  processes use 64 MB per worker and are also bounded by admitted CPU. Registration/retained
+  successes are batched, item results are fenced and appended as they finish, and catalog
+  progress is read in one bounded batch. These fixed allowances add no setting or dependency.
 
 - S5.E keeps the existing `python` / `warehouse` SlotKind names and attempt PRIORITY/index;
   pipeline priority is copied when queuing. The deployment default remains the seeded

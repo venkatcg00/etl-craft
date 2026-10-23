@@ -6,7 +6,7 @@ import asyncio
 import json
 import math
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TypeVar
@@ -208,15 +208,28 @@ def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[
         return _wait_lock(ctx, request)
     task = _context(ctx, request)
     store = _store(ctx, task)
+    if (
+        request.operation in {AgentReport.ITEMS, AgentReport.ITEM_EVENT, AgentReport.ITEM_PREPARE}
+        and task.handler != Handler.PYTHON
+    ):
+        raise PermissionDeniedError(
+            f"attempt {task.attempt_id}: handler={task.handler}; expected PYTHON for item reports; "
+            "report only this task's admitted work"
+        )
+    progress: dict[AgentReport, Callable[[], object]] = {
+        AgentReport.STATE: lambda: store.state(task.task_params.get("SQL_ACTION")),
+        AgentReport.ALERT: lambda: store.alert(task.task_params.get("EMAIL_PIPELINES")),
+        AgentReport.ITEMS: store.items,
+        AgentReport.ITEM_PREPARE: lambda: store.prepare_items(request.item_keys),
+        AgentReport.ITEM_EVENT: lambda: store.item_event(required(request.item, "item")),
+    }
+    if request.operation in progress:
+        return AgentReply(progress[request.operation]())
     match request.operation:
         case AgentReport.LOCK | AgentReport.UNLOCK:
             return _lock(ctx, task, request)
         case AgentReport.START:
             return _start(ctx, task, request)
-        case AgentReport.STATE:
-            return AgentReply(store.state(task.task_params.get("SQL_ACTION")))
-        case AgentReport.ALERT:
-            return AgentReply(store.alert(task.task_params.get("EMAIL_PIPELINES")))
         case AgentReport.TARGET:
             target = required(request.target, "target")
             _target(ctx, task, target)

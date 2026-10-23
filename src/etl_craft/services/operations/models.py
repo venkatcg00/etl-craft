@@ -38,6 +38,7 @@ class RunView:
     triggered_by_task_run_id: int | None = None
     parent_run_id: int | None = None
     child_run_ids: tuple[int, ...] = ()
+    item_progress: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class AttemptView:
     failure_code: str | None = None
     retry_on: str | None = None
     retry_reason: str | None = None
+    item_progress: str | None = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ class TaskRunView:
     error_message: str | None
     attempts: tuple[AttemptView, ...]
     child_run_ids: tuple[int, ...] = ()
+    item_progress: str | None = None
 
 
 @dataclass(frozen=True)

@@ -162,6 +162,7 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
         state, action = "run ended", "Explicitly reopen or rerun the selected ended run."
     else:
         state, action = "not run", "An available supervisor can start this ready task."
+    action = item_action(task, action)
     return Explanation(
         snapshot.pipeline,
         snapshot.run,
@@ -544,3 +545,8 @@ def explain_task(ctx: OperationContext, request: TaskSelection) -> Explanation:
         resolve_task_id(conn, pipeline_id, task_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates, task_code)
     return explain(snapshots[0])
+
+
+def item_action(task: TaskRunView | None, action: str) -> str:
+    """Prefix controls advice with the same persisted item counts as the other views."""
+    return f"{task.item_progress}. {action}" if task is not None and task.item_progress else action

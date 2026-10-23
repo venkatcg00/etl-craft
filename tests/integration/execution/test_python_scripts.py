@@ -696,3 +696,196 @@ def run(task):
 """)
     outcome = run_task(engine, config, "P", "load")
     assert outcome.status == RunStatus.SUCCESS, outcome.message
+
+
+def test_fan_out_retry_keeps_item_rows_and_commits_the_offset_only_on_success(project):
+    engine, config, _, task_id = project
+    script = """
+from pathlib import Path
+from sqlalchemy import text
+from etl_craft.scripting import ScriptResult, Offset
+
+def run(task):
+    failed_once = task.config.project_dir / "failed-once"
+    def item(key):
+        if key == "second" and not failed_once.exists():
+            failed_once.touch()
+            raise Exception("page second unavailable; expected source data; retry the task")
+        with task.warehouse() as engine, engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE IF NOT EXISTS item_landing "
+                                 "(task_run BIGINT, item_key VARCHAR, value INTEGER)")
+            conn.execute(text("DELETE FROM item_landing "
+                              "WHERE task_run=:run AND item_key=:key"),
+                         {"run": task.task_run_id, "key": key})
+            conn.execute(text("INSERT INTO item_landing VALUES (:run, :key, :value)"),
+                         {"run": task.task_run_id, "key": key,
+                          "value": 1 if key == "first" else 2})
+        print("wrote item", key)
+        return ScriptResult(1)
+    result = task.fan_out(["first", "second"], item, max_items=2, max_parallel=2)
+    return ScriptResult(result.row_count, offset=Offset.number(2))
+"""
+    (config.python_scripts_dir / "load.py").write_text(script)
+    first = run_task(engine, config, "P", "load")
+    assert first.status == RunStatus.FAILED
+    with engine.connect() as conn:
+        assert fetch_task_offset(conn, task_id) is None
+        rows = conn.execute(
+            text(
+                "SELECT ITEM_KEY AS key, STATUS AS status FROM AUD_TASK_ITEMS WHERE "
+                "STATUS IN ('SUCCESS','FAILED') ORDER BY ITEM_KEY"
+            )
+        ).all()
+        assert [(r.key, r.status) for r in rows] == [("first", "SUCCESS"), ("second", "FAILED")]
+    second = run_task(engine, config, "P", "load")
+    assert second.status == RunStatus.SUCCESS
+    assert second.task_run_id == first.task_run_id
+    with engine.connect() as conn:
+        assert fetch_task_offset(conn, task_id).offset_value == "2"
+        assert (
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM AUD_TASK_ITEMS WHERE ITEM_KEY='first' "
+                    "AND STATUS='RUNNING'"
+                )
+            ).scalar_one()
+            == 1
+        )
+    with build_warehouse_engine(config).connect() as conn:
+        landed = conn.execute(
+            text(
+                "SELECT task_run AS run, item_key AS key, value AS value FROM "
+                "item_landing ORDER BY item_key"
+            )
+        ).all()
+        assert [(r.run, r.key, r.value) for r in landed] == [
+            (first.task_run_id, "first", 1),
+            (first.task_run_id, "second", 2),
+        ]
+
+
+@pytest.mark.chaos
+@pytest.mark.parametrize("point", ["item.before_result", "item.after_result"])
+def test_item_commit_crash_replays_the_batch_without_doubling_rows(project, monkeypatch, point):
+    engine, config, _, _ = project
+    (config.python_scripts_dir / "load.py").write_text("""
+from sqlalchemy import text
+from etl_craft.scripting import ScriptResult
+
+def run(task):
+    def item(key):
+        with task.warehouse() as engine,engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE IF NOT EXISTS crash_items "
+                                 "(task_run BIGINT, item_key VARCHAR)")
+            conn.execute(text("DELETE FROM crash_items "
+                              "WHERE task_run=:run AND item_key=:key"),
+                         {"run":task.task_run_id,"key":key})
+            conn.execute(text("INSERT INTO crash_items VALUES (:run,:key)"),
+                         {"run":task.task_run_id,"key":key})
+        return ScriptResult(1)
+    return task.fan_out(["one"],item,max_items=1)
+""")
+    monkeypatch.setenv("ETL_CRAFT_FAULT", point + ":kill")
+    first = run_task(engine, config, "P", "load")
+    assert first.status == RunStatus.FAILED
+    monkeypatch.delenv("ETL_CRAFT_FAULT")
+    second = run_task(engine, config, "P", "load")
+    assert second.status == RunStatus.SUCCESS
+    assert first.task_run_id == second.task_run_id
+    with build_warehouse_engine(config).connect() as conn:
+        rows = conn.execute(text("SELECT task_run AS run,item_key AS key FROM crash_items")).all()
+        assert [(r.run, r.key) for r in rows] == [(first.task_run_id, "one")]
+    with engine.connect() as conn:
+        starts = conn.execute(
+            text("SELECT COUNT(*) AS n FROM AUD_TASK_ITEMS WHERE STATUS='RUNNING'")
+        ).scalar_one()
+        assert starts == (2 if point == "item.before_result" else 1)
+
+
+def test_whole_task_cancel_stops_fan_out_and_recovery_retains_finished_items(project):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+
+    from etl_craft.core.enums import ItemStatus
+    from etl_craft.engine.items import latest
+    from fixtures.cancellation import wait_for
+
+    engine, config, _, _ = project
+    (config.python_scripts_dir / "load.py").write_text("""
+from pathlib import Path
+import threading
+from etl_craft.scripting import ScriptResult
+
+def run(task):
+    def item(key):
+        if key == "hold" and not (task.config.project_dir / "release-items").exists():
+            (task.config.project_dir / "item-ready").touch()
+            threading.Event().wait(300)
+        return ScriptResult(1)
+    return task.fan_out(["quick","hold"],item,max_items=2,max_parallel=1)
+""")
+    from etl_craft.core.actor import SYSTEM_ACTOR
+    from etl_craft.core.enums import ControlAction
+    from etl_craft.services.operations.context import OperationContext
+    from etl_craft.services.operations.controls import request_control
+    from etl_craft.services.operations.requests import ControlRequest
+
+    ctx = OperationContext(engine, config, SYSTEM_ACTOR)
+    with engine.connect() as conn:
+        run_id = conn.execute(
+            text(
+                "SELECT PIPELINE_RUN_ID AS run_id FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_ID=:id"
+            ),
+            {"id": project[2]},
+        ).scalar_one()
+    with ThreadPoolExecutor(1) as parent:
+        future = parent.submit(
+            copy_context().run,
+            run_task,
+            engine,
+            config,
+            "P",
+            "load",
+            child=ChildOptions(kill_grace_seconds=1, cancel_poll_seconds=0.1),
+        )
+        wait_for(lambda: (config.project_dir / "item-ready").exists())
+        request_control(
+            ctx,
+            ControlRequest(
+                action=ControlAction.STOP,
+                pipeline_code="P",
+                task_code="load",
+                run_id=run_id,
+                reason="stop item work",
+            ),
+        )
+        first = future.result(20)
+    assert first.status == RunStatus.CANCELLED
+    with engine.connect() as conn:
+        records = {r.key: r for r in latest(conn, first.task_run_id)}
+        assert records["quick"].status == ItemStatus.SUCCESS
+        assert records["hold"].status == ItemStatus.CANCELLED
+    (config.project_dir / "release-items").touch()
+    request_control(
+        ctx,
+        ControlRequest(
+            action=ControlAction.RECOVER,
+            pipeline_code="P",
+            task_code="load",
+            run_id=run_id,
+            reason="resume unfinished items",
+        ),
+    )
+    second = run_task(engine, config, "P", "load")
+    assert second.status == RunStatus.SUCCESS
+    assert second.task_run_id == first.task_run_id
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM AUD_TASK_ITEMS "
+                    "WHERE ITEM_KEY='quick' AND STATUS='RUNNING'"
+                )
+            ).scalar_one()
+            == 1
+        )

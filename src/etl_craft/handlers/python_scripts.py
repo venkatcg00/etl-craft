@@ -70,26 +70,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
         else None
     )
     entry = load_script(path, name)
-    task = ScriptTask(
-        pipeline_code=context.pipeline_code,
-        task_code=context.task_code,
-        pipeline_run_id=context.pipeline_run_id,
-        pipeline_id=context.pipeline_id,
-        task_run_id=context.task_run_id,
-        refresh_type=context.refresh_type,
-        offset=offset,
-        input_params=input_params,
-        task_params=params,
-        force=context.force,
-        config=context.config,
-        _locks=store,
-        logger=logging.getLogger(f"{SCRIPT_LOGGER}.{context.task_code}"),
-        run_date=context.run_date,
-        backfill=context.backfill,
-        event_files=context.event_files,
-        event_keys=context.event_keys,
-        event_rows=context.event_rows,
-    )
+    task = script_task(context, store, offset, input_params)
     logger.info(
         "running %s from offset %s with input params %s",
         name,
@@ -344,3 +325,34 @@ def event_input_params(context: TaskContext) -> dict[str, Any]:
         name: list(tokens[value]) if isinstance(value, str) and value in tokens else value
         for name, value in parse_input_params(context.task_params.get("INPUT_PARAMS")).items()
     }
+
+
+def script_task(
+    context: TaskContext,
+    store: TaskStore,
+    offset: Offset | None,
+    input_params: Mapping[str, Any],
+) -> ScriptTask:
+    """Bind the script helper to the exact admitted attempt and shared store."""
+    params = context.task_params
+    return ScriptTask(
+        pipeline_code=context.pipeline_code,
+        task_code=context.task_code,
+        pipeline_run_id=context.pipeline_run_id,
+        pipeline_id=context.pipeline_id,
+        task_run_id=context.task_run_id,
+        refresh_type=context.refresh_type,
+        offset=offset,
+        input_params=input_params,
+        task_params=params,
+        force=context.force,
+        config=context.config,
+        _locks=store,
+        _items=store,
+        logger=logging.getLogger(f"{SCRIPT_LOGGER}.{context.task_code}"),
+        run_date=context.run_date,
+        backfill=context.backfill,
+        event_files=context.event_files,
+        event_keys=context.event_keys,
+        event_rows=context.event_rows,
+    )

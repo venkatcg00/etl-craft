@@ -32,6 +32,7 @@ class Intervention:
     reason: str
     requested_by: str
     requested_at: datetime
+    item_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,17 @@ class TaskRow:
     has_attempts: bool = False
 
 
+@dataclass(frozen=True)
+class InterventionDetails:
+    """Optional prior evidence and item scope of an operator's decision."""
+
+    previous_message: str | None = None
+    item_key: str | None = None
+
+
+NO_DETAILS = InterventionDetails()
+
+
 def record_intervention(
     conn: Connection,
     *,
@@ -61,12 +73,13 @@ def record_intervention(
     from_status: str | None = None,
     to_status: str | None = None,
     target_count: int | None = None,
-    previous_message: str | None = None,
+    details: InterventionDetails = NO_DETAILS,
 ) -> None:
     """Record one change an operator made to a run, or to a task under it."""
     conn.execute(
         statement(conn, "insert_intervention"),
         {
+            "item_key": details.item_key,
             "pipeline_id": pipeline_id,
             "pipeline_run_id": pipeline_run_id,
             "task_id": task_id,
@@ -74,7 +87,7 @@ def record_intervention(
             "from_status": from_status,
             "to_status": to_status,
             "target_count": target_count,
-            "previous_message": previous_message,
+            "previous_message": details.previous_message,
             "reason": reason,
             "requested_by": requested_by,
             "requested_by_kind": current_actor().kind.value,

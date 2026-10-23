@@ -6,7 +6,7 @@ import argparse
 import signal
 from datetime import date
 
-from etl_craft.cli.commands import control_requests
+from etl_craft.cli.commands import control_requests, item_requests
 from etl_craft.cli.commands.common import (
     Command,
     call,
@@ -81,12 +81,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         help="Run the pipeline once for each date from FROM to TO (YYYY-MM-DD), as backfill "
         "runs; with --reason.",
     )
-    parser.add_argument(
-        "--reason", help="Why an override, rerun, skip or backfill is needed; recorded."
-    )
+    item_requests.configure(parser)
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
+    if item_requests.selected(args):
+        return item_requests.execute(args, out)
     if control_requests.selected(args):
         return control_requests.execute(args, out)
     if args.pipeline_code is None:
@@ -139,5 +139,5 @@ COMMAND = Command(
     help="Run a pipeline in dependency waves, one task of it, or initialize its run.",
     configure=_configure,
     run=_run,
-    actions=(ActionName.RUN, ActionName.CONTROL, ActionName.CONTROL_BULK),
+    actions=(ActionName.RUN, ActionName.CONTROL, ActionName.CONTROL_BULK, ActionName.ITEM_CONTROL),
 )

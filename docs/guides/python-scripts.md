@@ -194,3 +194,96 @@ from etl_craft.scripting import PermanentError, TransientError
 The [retry policy](running-tasks.md#retries-and-force) still controls whether that class is
 eligible and how many additional attempts are allowed. The attempt retains the original
 exception class even when the script handler adds its script-name diagnostic.
+
+## Work items inside a task
+
+Use `task.fan_out(keys, fn, *, max_items, max_parallel=None, retries=0,
+processes=False)` when a script discovers independent files, pages or partitions. `keys` is
+an iterable of unique, nonempty text identifiers (at most 512 characters each). The function
+receives one key and returns a `ScriptResult` with its row count and no offset. The helper
+returns a `ScriptResult` containing the total rows, including successful items retained from
+previous attempts. Return the task's offset only after the helper succeeds.
+
+```python
+from etl_craft.scripting import ScriptResult
+
+
+def run(task):
+    def load(key):
+        rows = read_page(key)  # Your source client, using the key as its stable identity.
+        replace_landing_batch(task, key, rows)
+        return ScriptResult(len(rows))
+
+    return task.fan_out(discover_page_keys(), load, max_items=1000, max_parallel=16, retries=2)
+```
+
+`max_items` is required. Discovery reads at most one key beyond that bound, and refuses an
+oversized list, duplicate key or NULL key before recording or executing any items. An empty
+list returns zero rows immediately. The bound also covers keys retained from earlier attempts:
+unfinished keys remain work even if a fresh listing omits them.
+
+Threads are the default. The default width is the smaller of 16 and the memory bound. Each
+worker requires 2 MB of the task's admitted `MEMORY_REQUEST_MB`, with a ceiling of 256 threads;
+CPU count does not reduce I/O width. Requesting more fails before any work starts. This is a
+scheduling allowance, not a limit on memory an arbitrary Python function can allocate. Size the
+task's reservation for its actual workload and set `max_parallel` at or below the source's
+rate limit. Items share the task's one slot and reservation.
+
+`processes=True` uses spawned processes, requires an importable top-level function and allows
+64 MB per worker, bounded also by admitted CPU. Put that function in an importable project
+module; a nested function, lambda or captured `task` is refused. Use this mode for independent
+processing with its own explicitly passed inputs. Threads can close over `task` and use
+`task.warehouse()`. The helper serializes those warehouse contexts within the task, retains
+the existing warehouse reservation, and preserves the attempt's session tag. Open warehouse
+contexts inside the item function, never around `fan_out` itself.
+
+Every item start and ending is append-only evidence in `AUD_TASK_ITEMS`, attributed to the
+requesting actor. Agents read and write it through the API; they open no Engine DB connection.
+Completed items are recorded as they finish, with at most `max_parallel` submitted futures.
+Retries skip committed successes and retry only unfinished items. A timeout, lost attempt or
+controller restart keeps finished evidence. Explicit `PermanentError` failures are not retried, and retain that class on the task.
+Every item failure remaining after its retries
+fails the task, naming its key and error. The attempt's offset is not committed on failure.
+
+### Repeatable landing batches
+
+The write and the item result are separate commits. A process can stop between them, so a
+retried item must replace its own batch or merge by a stable key. Tag landing rows with
+`task.task_run_id` and the item key; delete and replace that pair in one warehouse transaction.
+Do not append the same batch on retry. Use bound SQL parameters for keys. The
+[stream landing rules](streams.md) apply here too: one downstream
+managed SQL task performs the final target write. See the
+[executable example](../examples/python_scripts/fan_out.py).
+
+### Inspecting and controlling items
+
+```bash
+etl-craft items list --pipeline-code P --task-code load --run-id 42
+etl-craft run --pipeline-code P --task-code load --run-id 42 --rerun \
+  --item-key page-17 --reason 'Source repaired'
+etl-craft items mark --pipeline-code P --task-code load --run-id 42 \
+  --all-failed --status SKIPPED --reason 'Pages deliberately excluded'
+etl-craft items cancel --pipeline-code P --task-code load --run-id 42 \
+  --item-key page-18 --reason 'Withdrawn by the source owner'
+```
+
+All controls require an operator grant and a reason. Each decision records its item key in
+`AUD_RUN_INTERVENTIONS`. Select exactly one key or `--all-failed`. A rerun requires the task to
+have ended, reuses the existing task-rerun path and executes only the selected items; other
+failed items remain failed. New discovery keys are refused during an item-scoped rerun;
+use a full-task retry or a new run to admit them. Marking changes item evidence; retry the task to settle its
+summary after all required items are successful or skipped.
+
+Cancelling a queued item prevents it from starting. Cancelling a running thread records
+`CANCEL_REQUESTED`: it remains pending until the function returns, then becomes `CANCELLED`.
+It does not pretend to interrupt a thread or roll back a write. Cancelling the whole task
+uses the existing process and query cancellation; it stops all its workers. A pending
+cancellation on a lost owner stays unknown until its ending can be established.
+
+The attempt log reports progress and a projected finish time. The failed count includes
+cancelled items; they need a rerun or an explicit skip before the task can succeed. `status`, `explain`, the run
+API and catalog show counts from the same item rows. `items list` returns each key's current
+status, item attempt number, row count, timestamps, error and task attempt id; that id links to
+the existing attempt log API. The item API routes and their exact requests are in the
+[operations reference](../reference/actions.md). Interactive graph strips and runs-grid
+segments are delivered with the S7.A web UI.

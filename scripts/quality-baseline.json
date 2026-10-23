@@ -88,7 +88,6 @@
       "src/etl_craft/execution/interventions.py": 11,
       "src/etl_craft/execution/pipeline.py": 13,
       "src/etl_craft/execution/scheduler.py": 37,
-      "src/etl_craft/handlers/python_scripts.py": 2,
       "src/etl_craft/handlers/sql/spec.py": 1,
       "src/etl_craft/services/catalog/collect.py": 31,
       "src/etl_craft/services/config_files.py": 27,
@@ -107,7 +106,7 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 84
+      "src/etl_craft/engine/transitions.py": 80
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

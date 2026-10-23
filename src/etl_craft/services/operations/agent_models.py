@@ -8,6 +8,7 @@ from etl_craft.core.counts import Counts
 from etl_craft.core.enums import AgentCommand, AgentReport, AgentStatus, AttemptStatus, SlotKind
 from etl_craft.core.errors import UsageError
 from etl_craft.core.failures import Failure
+from etl_craft.core.items import ItemRecord
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import RuleEnding, TargetPublication
 from etl_craft.services.operations.requests import Request, require_text
@@ -55,6 +56,8 @@ class AgentTask(AgentRequest):
 
     attempt_id: int
     operation: AgentReport
+    item: ItemRecord | None = None
+    item_keys: tuple[str, ...] = ()
     target: str | None = None
     publication: TargetPublication | None = None
     watermark_from: str | None = None

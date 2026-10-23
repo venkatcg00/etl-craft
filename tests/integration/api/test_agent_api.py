@@ -1005,3 +1005,49 @@ def test_slot_ceiling_reason_names_free_and_advertised_slots(agent_scene):
         ).scalar_one()
     assert "warehouse slots 0 free of 0" in reason
     assert "adjust task requests or agent slots" in reason
+
+
+def test_agent_item_reports_are_fenced_and_shared_between_api_copies(agent_scene):
+    from uuid import uuid4
+
+    db, client, headers, _, _owner, config = agent_scene
+    attempt = claim(agent_scene)
+    with db.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_TASKS SET HANDLER='PYTHON'"))
+    prepared = {
+        "version": __version__,
+        "attempt_id": attempt,
+        "operation": "ITEM_PREPARE",
+        "item_keys": ["page-1", "page-2"],
+    }
+    assert client.post("/api/v1/agent/report", headers=headers, json=prepared).status_code == 200
+    assert client.post("/api/v1/agent/report", headers=headers, json=prepared).status_code == 200
+    report = {
+        "version": __version__,
+        "attempt_id": attempt,
+        "operation": "ITEM_EVENT",
+        "item": {"key": "page-1", "number": 1, "status": "RUNNING", "report_id": str(uuid4())},
+    }
+    first = client.post("/api/v1/agent/report", headers=headers, json=report)
+    assert first.status_code == 200, first.text
+    assert client.post("/api/v1/agent/report", headers=headers, json=report).status_code == 200
+    ctx = OperationContext(db.engine, config, SYSTEM_ACTOR)
+    with TestClient(create_app(ctx)) as other:
+        read = other.post(
+            "/api/v1/agent/report",
+            headers=headers,
+            json={"version": __version__, "attempt_id": attempt, "operation": "ITEMS"},
+        )
+        assert read.status_code == 200, read.text
+        assert read.json()["data"]["records"][0]["key"] == "page-1"
+    with db.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:expired WHERE ATTEMPT_ID=:id"),
+            {"expired": datetime.now(UTC) - timedelta(seconds=1), "id": attempt},
+        )
+    report["item"] |= {"status": "SUCCESS", "report_id": str(uuid4())}
+    assert client.post("/api/v1/agent/report", headers=headers, json=report).status_code != 200
+    prepared["item_keys"] = ["expired-owner-key"]
+    assert client.post("/api/v1/agent/report", headers=headers, json=prepared).status_code != 200
+    with db.engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) AS n FROM AUD_TASK_ITEMS")).scalar_one() == 3

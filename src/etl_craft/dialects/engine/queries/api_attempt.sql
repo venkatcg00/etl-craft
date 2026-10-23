@@ -13,7 +13,8 @@ SELECT p.PIPELINE_ID AS pipeline_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
        a.REQUESTED_BY AS requested_by, a.REQUESTED_BY_KIND AS requested_by_kind,
        a.NOT_BEFORE AS not_before, a.RETRYABLE AS retryable,
        a.FAILURE_CLASS AS failure_class, a.FAILURE_SOURCE AS failure_source,
-       a.FAILURE_CODE AS failure_code, a.RETRY_ON AS retry_on
+       a.FAILURE_CODE AS failure_code, a.RETRY_ON AS retry_on,
+       (SELECT 1 AS has_item FROM AUD_TASK_ITEMS item WHERE item.ATTEMPT_ID=a.ATTEMPT_ID LIMIT 1) AS has_items
 FROM AUD_TASK_ATTEMPTS a
 JOIN AUD_TASK_RUN_LOG r ON r.TASK_RUN_ID = a.TASK_RUN_ID
 JOIN AUD_PIPELINES_RUN_LOG p ON p.PIPELINE_RUN_ID = r.PIPELINE_RUN_ID

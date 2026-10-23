@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Python `task.fan_out` runs bounded work items inside one task, retaining committed successes
+  across retries, timeouts and lost attempts. `etl-craft items list|mark|cancel` and the
+  matching API expose and control them with actor/reason audit; `run --rerun` selects
+  `--item-key` or `--all-failed` for item reruns. Running-item cancellation
+  remains pending until its function returns. Apply `0052_task_items.sql` before using it.
+
 - Named execution pools (`pools.csv`, task `POOL`), pipeline `MAX_PARALLEL_TASKS` / `PRIORITY`,
   `Warehouse.Max_warehouse_queries`, and atomic `CPU_REQUEST` / `MEMORY_REQUEST_MB`
   reservations on individual agents, with the same measured rule locally. Agents accept

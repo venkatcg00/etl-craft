@@ -7,7 +7,8 @@ SELECT p.PIPELINE_ID AS pipeline_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
        r.UPDATE_COUNT AS update_count, r.DELETE_COUNT AS delete_count,
        r.ROWS_WRITTEN AS rows_written, r.REJECT_COUNT AS reject_count,
        r.WATERMARK_FROM AS watermark_from, r.WATERMARK_TO AS watermark_to,
-       r.ERROR_MESSAGE AS error_message
+       r.ERROR_MESSAGE AS error_message,
+       (SELECT 1 AS has_item FROM AUD_TASK_ITEMS i WHERE i.TASK_RUN_ID=r.TASK_RUN_ID LIMIT 1) AS has_items
 FROM AUD_TASK_RUN_LOG r
 JOIN AUD_PIPELINES_RUN_LOG p ON p.PIPELINE_RUN_ID = r.PIPELINE_RUN_ID
 JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID

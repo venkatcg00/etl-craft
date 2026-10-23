@@ -198,6 +198,7 @@ class TaskRunSummary:
     watermark_to: str | None = None
     run_kind: CatalogRunKind = CatalogRunKind.OTHER
     failure_reasons: tuple[str, ...] = ()
+    item_progress: str | None = None
 
     @property
     def seconds(self) -> float | None:
@@ -248,10 +249,16 @@ def fetch_task_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[int, lis
             failures.setdefault(attempt.task_run_id, []).append(
                 f"Attempt {attempt.attempt_number}: {reason}; retry eligible={attempt.retryable}"
             )
+    from etl_craft.engine.items import summaries
+
+    item_progress = summaries(conn, [r.task_run_id for r in rows if r.has_items])
     for row in rows:
         values = dict(row._mapping)
         task_id = values.pop("task_id")
-        values["failure_reasons"] = tuple(failures.get(values.pop("task_run_id"), []))
+        task_run_id = values.pop("task_run_id")
+        if values.pop("has_items", False):
+            values["item_progress"] = str(item_progress[task_run_id])
+        values["failure_reasons"] = tuple(failures.get(task_run_id, []))
         values["run_kind"] = CatalogRunKind(row.run_kind)
         runs.setdefault(task_id, []).append(TaskRunSummary(**values))
     return runs

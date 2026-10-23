@@ -147,6 +147,14 @@ ROWS = {
     "AUD_TASK_EVENTS": [{"EVIDENCE": "{}"}],
     "AUD_EVENT_FILES": [{"FILE_PATH": "/kept/file.csv"}],
     "AUD_EVENT_KEYS": [{"EVENT_KEY": "kept-signal"}],
+    "AUD_TASK_ITEMS": [
+        {
+            "ITEM_KEY": "kept-item",
+            "REPORT_ID": "kept-item-report",
+            "ITEM_ATTEMPT_NUMBER": 3,
+            "ROW_COUNT": 17,
+        }
+    ],
     "AUD_TASK_ATTEMPTS": [
         {"ATTEMPT_ID": 1701, "RETRYABLE": False},
         {"ATTEMPT_ID": 1702, "ATTEMPT_NUMBER": 2, "RETRYABLE": True},
