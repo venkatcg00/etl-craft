@@ -90,6 +90,21 @@ def settings_by_section() -> dict[str, frozenset[str]]:
     }
 
 
+def parse_warehouse_limit(
+    raw: dict[str, object], profile: str | None, path: Path, resolver: Resolver
+) -> int | None:
+    """Read the deployment warehouse's concurrent-attempt ceiling."""
+    if not raw.get("Warehouse"):
+        return None
+    return whole_number(
+        profiled_settings("Warehouse", raw, profile, path, resolver),
+        "Max_warehouse_queries",
+        None,
+        path,
+        minimum=1,
+    )
+
+
 class _StrictLoader(yaml.SafeLoader):
     """Refuse duplicate mapping keys, with their section paths and source lines."""
 
@@ -167,9 +182,9 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
     global_profile = resolver.text(secrets.get("Profile"), "Secrets.Profile")
 
     orchestration = profiled_settings("Orchestration", raw, global_profile, path, resolver)
+    limits = parse_limits(orchestration, path)
     reject_unknown(orchestration.settings, ORCHESTRATION_KEYS, "Orchestration", path)
     dependency_gates = parse_dependency_gates(orchestration, path)
-    limits = parse_limits(orchestration, path)
     project_timezone = orchestration.text("Timezone")
     project_timezone = "UTC" if project_timezone is None else project_timezone
     from etl_craft.core.cron import timezone
@@ -209,6 +224,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         docs_site=docs_site,
         warehouse=warehouse,
         warehouse_table_format=table_format,
+        max_warehouse_queries=parse_warehouse_limit(raw, global_profile, path, resolver),
         retries=whole_number(orchestration, "Retries", None, path),
         email_recipients=string_list(orchestration, "Email_recipients", path),
         allow_schedule=flag(orchestration, "Allow_schedule", True, path),

@@ -47,8 +47,9 @@ choose `CONTROLLER` for a dedicated host.
 
    The task slots are what SQL tasks fit; Python slots are what Python scripts fit, never
    more than the task slots.
-4. **Cap.** `Max_parallel_tasks`, `Local_python_slots` and `Local_warehouse_slots`, when
-   written, are ceilings: a derived size never exceeds them, and they never raise it.
+4. **Cap.** `Local_python_slots` and `Local_warehouse_slots`, when written, are ceilings:
+   a measured size never exceeds them. `CFG_PIPELINES.MAX_PARALLEL_TASKS` separately caps
+   each pipeline; raising it never raises the machine's measured capacity.
 5. **Pool.** The process's Engine DB pool holds 2 connections, one more per 8 task slots, and
    one per server thread. Task processes open one connection each.
 

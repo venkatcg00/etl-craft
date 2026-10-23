@@ -9,6 +9,7 @@ tables by key: change a file, review the change, and the deployment applies it.
 etl-craft/
 ├── craft-connector.yml
 ├── config/
+│   ├── pools.csv                  CFG_POOLS
 │   ├── pipelines.csv              CFG_PIPELINES
 │   ├── tasks.csv                  CFG_TASKS
 │   ├── task_parameters.csv        CFG_TASK_PARAMETERS
@@ -66,6 +67,7 @@ development, test and production.
 | File | Key |
 |---|---|
 | `grants.csv` | `GROUP_NAME`, `PIPELINE_CODE`, `TAG` (exactly one pipeline or tag) |
+| `pools.csv` | `POOL_NAME` |
 | `pipelines.csv` | `PIPELINE_CODE` |
 | `tasks.csv` | `PIPELINE_CODE`, `TASK_CODE` |
 | `task_parameters.csv` | `PIPELINE_CODE`, `TASK_CODE`, `PARAMETER_NAME` |
@@ -74,6 +76,11 @@ development, test and production.
 | `business_rules.csv` | `PIPELINE_CODE`, `TASK_CODE`, `BUSINESS_RULE_NAME` |
 | `tables.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME` |
 | `columns.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME`, `COLUMN_NAME` |
+
+`pools.csv` holds `POOL_NAME`, `DESCRIPTION` and `ACTIVE_FLAG`. Keep the seeded `default`
+pool active for tasks without `POOL`. Pipelines also have `MAX_PARALLEL_TASKS` (default 8)
+and `PRIORITY` (default 0). [Placement](../deploying/agents.md#pools-limits-and-resource-placement)
+explains resource requests, priorities and the shared warehouse limit.
 
 For each row of a file, `apply`:
 

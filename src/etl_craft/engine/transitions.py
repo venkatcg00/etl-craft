@@ -550,13 +550,14 @@ def queue_attempt(
                 conn.execute(statement(conn, "transition_queue_attempt"), params).scalar_one()
             )
             dispatch.inherit_dispatch(conn, attempt_id, task_run_id)
-            _sync_summary(conn, attempt_id)
+            sync_attempt_summary(conn, attempt_id)
             return attempt_id
     except IntegrityError as error:
         raise _stale(conn, "task", task_run_id, "no active attempt", None) from error
 
 
-def _sync_summary(conn: Connection, attempt_id: int) -> None:
+def sync_attempt_summary(conn: Connection, attempt_id: int) -> None:
+    """Apply the current attempt outcome to its task summary under lifecycle guards."""
     _guard(conn, "sync_attempt_summary", "attempt", attempt_id, "latest attempt", None, {})
 
 
@@ -569,19 +570,12 @@ def claim_attempt(
     lease_expires_at: datetime,
     host: str | None = None,
 ) -> None:
-    """Claim a queued attempt for one owner."""
-    controls.guard_attempt(conn, attempt_id)
-    with conn.begin_nested():
-        _guard(
-            conn,
-            "claim_attempt",
-            "attempt",
-            attempt_id,
-            "QUEUED (unowned)",
-            None,
-            {**_actor_params(actor), "owner": owner, "lease": lease_expires_at, "host": host},
-        )
-        _sync_summary(conn, attempt_id)
+    """Claim a queued attempt for one owner, refusing an invalid transition."""
+    from etl_craft.engine.agent_transitions import claim_with_capacity
+
+    claim_with_capacity(
+        conn, attempt_id, actor, {"owner": owner, "lease": lease_expires_at, "host": host}
+    )
 
 
 def start_attempt(
@@ -605,7 +599,7 @@ def start_attempt(
             owner,
             {**_actor_params(actor), "host": host, "pid": pid, "process_start": process_start},
         )
-        _sync_summary(conn, attempt_id)
+        sync_attempt_summary(conn, attempt_id)
 
 
 def _end_attempt(
@@ -641,7 +635,7 @@ def _end_attempt(
             raise _stale(conn, "attempt", attempt_id, expected, owner)
         if query == "finish_attempt" and status == AttemptStatus.SUCCESS:
             fault_point("attempt.before_summary")
-        _sync_summary(conn, attempt_id)
+        sync_attempt_summary(conn, attempt_id)
 
 
 def finish_attempt(
@@ -882,7 +876,7 @@ def record_watermark_range(
         if changed.rowcount != 1:
             raise _stale(conn, "task", task_run_id, "live owned attempt for watermark range", owner)
         if attempt_id is not None:
-            _sync_summary(conn, attempt_id)
+            sync_attempt_summary(conn, attempt_id)
 
 
 def update_control(conn: Connection, parameters: dict[str, object]) -> None:

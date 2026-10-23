@@ -388,7 +388,7 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
         key = quote(primary)
         parts.append(
             "SELECT CHANGE_ID, VALID_FROM AS CHANGED_AT, ACTOR, ACTOR_KIND, "
-            f"'{table.upper()}' AS TABLE_NAME, CAST({key} AS TEXT) AS ROW_KEY, OPERATION, "
+            f"'{table.upper()}' AS TABLE_NAME, json_quote({key}) AS ROW_KEY, OPERATION, "
             f"CASE OPERATION WHEN 'INSERT' THEN NULL WHEN 'DELETE' THEN {values} "
             f"ELSE LAG({values}) OVER (PARTITION BY {key} ORDER BY CHANGE_ID) END AS BEFORE_JSON, "
             f"CASE OPERATION WHEN 'DELETE' THEN NULL ELSE {values} END AS AFTER_JSON, MIGRATION "

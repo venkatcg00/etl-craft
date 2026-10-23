@@ -231,10 +231,12 @@ def test_identity_migration_preserves_rows_and_their_history(legacy_identity_db)
         pipeline = add_pipeline(conn, "P")
         conn.execute(text("UPDATE CFG_PIPELINES SET ACTIVE_FLAG='N'"))
     with db.engine.connect() as conn:
-        before = conn.execute(
-            text("SELECT * FROM AUD_CFG_PIPELINES_HISTORY ORDER BY CHANGE_ID")
-        ).all()
-        row = conn.execute(text("SELECT * FROM CFG_PIPELINES")).one()
+        before = (
+            conn.execute(text("SELECT * FROM AUD_CFG_PIPELINES_HISTORY ORDER BY CHANGE_ID"))
+            .mappings()
+            .all()
+        )
+        row = conn.execute(text("SELECT * FROM CFG_PIPELINES")).mappings().one()
     applied = apply_pending_migrations(db.engine)
     assert {
         "0027_config_identities.sql",
@@ -244,11 +246,16 @@ def test_identity_migration_preserves_rows_and_their_history(legacy_identity_db)
     } <= set(applied)
     assert applied == sorted(applied)
     with db.engine.connect() as conn:
-        assert conn.execute(text("SELECT * FROM CFG_PIPELINES")).one() == row
-        assert (
-            conn.execute(text("SELECT * FROM AUD_CFG_PIPELINES_HISTORY ORDER BY CHANGE_ID")).all()
-            == before
+        after = conn.execute(text("SELECT * FROM CFG_PIPELINES")).mappings().one()
+        assert {name: after[name] for name in row} == dict(row)
+        history = (
+            conn.execute(text("SELECT * FROM AUD_CFG_PIPELINES_HISTORY ORDER BY CHANGE_ID"))
+            .mappings()
+            .all()
         )
+        assert len(history) == len(before)
+        for previous, current in zip(before, history, strict=True):
+            assert {name: current[name] for name in previous} == dict(previous)
     with db.engine.begin() as conn:
         conn.execute(
             text("UPDATE CFG_PIPELINES SET ACTIVE_FLAG='Y' WHERE PIPELINE_ID=:id"),

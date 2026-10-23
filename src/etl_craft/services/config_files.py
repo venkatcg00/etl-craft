@@ -23,12 +23,11 @@ import hashlib
 import io
 import json
 import logging
-import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar, Literal
 
@@ -38,7 +37,6 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import EngineDbError, MetadataFileError, PermissionDeniedError
-from etl_craft.core.text import is_metadata_code
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.repository.config_history import config_as_of
@@ -49,12 +47,12 @@ from etl_craft.engine.repository.config_rows import (
     PIPELINE_DEPENDENCIES,
     PIPELINE_GRANTS,
     PIPELINES,
+    POOLS,
     SOURCE_COLUMNS,
     TABLES,
     TASK_DEPENDENCIES,
     TASK_PARAMETERS,
     TASKS,
-    Column,
     ConfigTable,
     Key,
     StoredRow,
@@ -64,7 +62,7 @@ from etl_craft.engine.repository.config_rows import (
     retire_row,
     update_row,
 )
-from etl_craft.services.config_validation import row_problem
+from etl_craft.services.config_validation import parse_cell, row_problem
 from etl_craft.services.doctor import Status
 from etl_craft.services.source_columns import seed_sources
 from etl_craft.services.validate import Finding, validate_on
@@ -210,8 +208,7 @@ def _read_table(
         problems.append(f"{path} is not UTF-8 text: {error}")
         return {}
     reader = csv.reader(io.StringIO(content, newline=""))
-    header = next(reader, None)
-    columns = ", ".join(column.name for column in table.columns)
+    header, columns = next(reader, None), ", ".join(column.name for column in table.columns)
     if header is None:
         problems.append(f"{path} is empty: write its header row ({columns})")
         return {}
@@ -248,7 +245,7 @@ def _read_table(
         values: dict[str, Value] = {}
         for column in table.columns:
             try:
-                values[column.name] = _parse(column, given.get(column.name, ""))
+                values[column.name] = parse_cell(column, given.get(column.name, ""))
             except MetadataFileError as error:
                 problems.append(f"{path} line {line}, column {column.name}: {error}")
         if len(values) != len(table.columns):
@@ -284,56 +281,6 @@ def _read_table(
     return rows
 
 
-def _parse(column: Column, cell: str) -> Value:
-    """Return a cell's value in its column's type; ``MetadataFileError`` says what was expected."""
-    if cell == "":
-        if column.required:
-            raise MetadataFileError("is empty; this column needs a value")
-        return column.default
-    if column.kind == "code":
-        if not is_metadata_code(cell):
-            raise MetadataFileError(
-                f"{cell!r} is not a code: start with an ASCII letter, then use letters, digits "
-                "or _, at most 128 characters"
-            )
-        return cell
-    if column.kind == "choice":
-        if cell not in column.choices:
-            raise MetadataFileError(f"{cell!r} is not one of {', '.join(column.choices)}")
-        return cell
-    if column.kind == "int":
-        if not re.fullmatch(r"-?[0-9]+", cell):
-            raise MetadataFileError(f"{cell!r} is not a whole number")
-        number = int(cell)
-        if column.minimum is not None and number < column.minimum:
-            raise MetadataFileError(f"{number} is less than {column.minimum}")
-        return number
-    if column.kind == "float":
-        try:
-            decimal = Decimal(cell)
-        except InvalidOperation:
-            raise MetadataFileError(f"{cell!r} is not a number") from None
-        if not decimal.is_finite():
-            raise MetadataFileError(f"{cell!r} is not a finite number")
-        return float(decimal)
-    if column.kind == "date":
-        try:
-            if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", cell):
-                return date.fromisoformat(cell)
-        except ValueError:
-            pass
-        raise MetadataFileError(f"{cell!r} is not a date written YYYY-MM-DD")
-    if column.kind == "json":
-        try:
-            parsed = json.loads(cell)
-        except ValueError as error:
-            raise MetadataFileError(f"is not JSON: {error}") from None
-        if not isinstance(parsed, dict):
-            raise MetadataFileError("is not a JSON object; write it as {...}")
-        return parsed
-    return cell
-
-
 def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) -> None:
     """Report every row that names a pipeline or task the files do not hold."""
     pipelines = set(rows[PIPELINES.file])
@@ -364,7 +311,7 @@ def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) 
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
     """Return the pipelines and tasks a row names, by code."""
-    if table in (PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
+    if table in (POOLS, PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
         return []
     if table is SOURCE_COLUMNS:
         return [("table", tuple(values[name] for name in OBJECT_TABLES.key))]
@@ -401,7 +348,7 @@ def cell(value: Value) -> str:
 
 
 def _current(
-    table: ConfigTable, rows: list[StoredRow], current_ids: Mapping[str, set[int]]
+    table: ConfigTable, rows: list[StoredRow], current_ids: Mapping[str, set[int | str]]
 ) -> tuple[dict[Key, StoredRow], list[StoredRow]]:
     """Return each key's current row, and the active rows whose ids disagree with each other.
 
@@ -458,30 +405,30 @@ def _links(
                 f"set the {kind}'s ACTIVE_FLAG to Y, or this row's to N"
             )
         found.append(parent)
-    if table in (PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
+    if table in (POOLS, PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
         return {}
     if table is SOURCE_COLUMNS:
-        return {"TABLE_ID": found[0].row_id}
+        return {"TABLE_ID": int(found[0].row_id)}
     if table is TASKS:
         return {
-            "PIPELINE_ID": found[0].row_id,
-            "TARGET_TABLE_ID": found[1].row_id if len(found) > 1 else None,
+            "PIPELINE_ID": int(found[0].row_id),
+            "TARGET_TABLE_ID": int(found[1].row_id) if len(found) > 1 else None,
         }
     if table is TASK_PARAMETERS:
-        return {"TASK_ID": found[0].row_id}
+        return {"TASK_ID": int(found[0].row_id)}
     if table is PIPELINE_DEPENDENCIES:
-        return {"PIPELINE_ID": found[0].row_id, "DEPENDS_ON_PIPELINE_ID": found[1].row_id}
+        return {"PIPELINE_ID": int(found[0].row_id), "DEPENDS_ON_PIPELINE_ID": int(found[1].row_id)}
     if table is TASK_DEPENDENCIES:
         return {
             "PIPELINE_ID": found[0].parents[0],
-            "TASK_ID": found[0].row_id,
+            "TASK_ID": int(found[0].row_id),
             "DEPENDS_ON_PIPELINE_ID": found[1].parents[0],
-            "DEPENDS_ON_TASK_ID": found[1].row_id,
+            "DEPENDS_ON_TASK_ID": int(found[1].row_id),
         }
     return {
         "PIPELINE_ID": found[0].parents[0],
-        "TASK_ID": found[0].row_id,
-        "TARGET_TABLE_ID": found[1].row_id,
+        "TASK_ID": int(found[0].row_id),
+        "TARGET_TABLE_ID": int(found[1].row_id),
     }
 
 
@@ -514,7 +461,7 @@ def _merge(conn: Connection, files: ConfigFiles) -> list[Change]:
     """Write the changes that make the current rows match ``files``, parents first."""
     changes: list[Change] = []
     current: dict[str, dict[Key, StoredRow]] = {}
-    current_ids: dict[str, set[int]] = {}
+    current_ids: dict[str, set[int | str]] = {}
     for table in TABLES:
         if table.file not in files.rows:
             if table is OBJECT_TABLES:
@@ -713,7 +660,7 @@ def export_config(
             "`force` to overwrite them with the Engine DB's rows"
         )
     current: dict[str, dict[Key, StoredRow]] = {}
-    current_ids: dict[str, set[int]] = {}
+    current_ids: dict[str, set[int | str]] = {}
     source = engine
     if as_of is not None:
         with engine.connect() as conn:
@@ -725,7 +672,8 @@ def export_config(
     if config is not None and as_of is None:
         metadata_rows = {
             table.file: {
-                key: FileRow(row.row_id, row.values) for key, row in current[table.file].items()
+                key: FileRow(int(row.row_id), row.values)
+                for key, row in current[table.file].items()
             }
             for table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS)
         }
@@ -778,7 +726,7 @@ def export_config(
                 or (previous.values["IS_NULLABLE"] if previous else None),
             }
             current[SOURCE_COLUMNS.file][key] = StoredRow(
-                index, True, (parent.row_id,), True, values
+                index, True, (int(parent.row_id),), True, values
             )
     directory.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}

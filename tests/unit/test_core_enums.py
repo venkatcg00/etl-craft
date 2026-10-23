@@ -8,6 +8,7 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.CapacitySource: {"MEASURED", "DECLARED"},
     enums.TriggerMode: {"WAIT", "DETACH"},
     enums.TaskType: {"INGESTION", "ETL"},
     enums.FailureClass: {"TRANSIENT", "PERMANENT", "UNKNOWN"},

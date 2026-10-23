@@ -49,7 +49,6 @@ Orchestration:
   Engine_db_outage_seconds: 120       # value — how long a process that reached a PostgreSQL
                                        # Engine DB waits for it after a restart or failover;
                                        # 0: fail at the first refused connection
-  Max_parallel_tasks: 8                # value
   # Local_python_slots: 2             # value — optional: at most this many Python script
   #                                    # tasks at once; unset, they may use every slot
   # Local_warehouse_slots: 6           # value — optional: the same for SQL, rule and alert tasks
@@ -154,6 +153,7 @@ Engine:
     Key_file: ENGINE_KEY_FILE          # variable
 
 Warehouse:
+  Max_warehouse_queries: 8           # value: shared upper bound on claimed/running warehouse tasks
   # Name: Postgres | DuckDB | Trino | Databricks | Snowflake — checked against
   # the connection. Table_format: NATIVE (the default) | ICEBERG; a task's
   # TABLE_FORMAT parameter overrides it. Both may sit here, for every profile,

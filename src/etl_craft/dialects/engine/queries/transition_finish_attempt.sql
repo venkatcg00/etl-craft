@@ -1,4 +1,4 @@
-UPDATE AUD_TASK_ATTEMPTS SET STATUS = :status, ENDED_AT = :now,
+UPDATE AUD_TASK_ATTEMPTS SET RESERVED_CPU=0, RESERVED_MEMORY_MB=0, STATUS = :status, ENDED_AT = :now,
 SOURCE_COUNT = :source_count, TARGET_COUNT = :target_count, INSERT_COUNT = :insert_count,
 UPDATE_COUNT = :update_count, DELETE_COUNT = :delete_count, ROWS_WRITTEN = :rows_written,
 REJECT_COUNT = :reject_count, ERROR_MESSAGE = :error_message, TASK_LOG = :task_log, EXIT_CODE = :exit_code

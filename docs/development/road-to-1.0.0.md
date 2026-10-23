@@ -149,7 +149,7 @@ item's text, or work done early under another item.
 | S5.AH Partitioned offsets for streams | Done | #234 | Per-partition script offsets that never move backwards, an audited offset reset and the bounded micro-batch pattern for Kafka, Kinesis and Event Hubs |
 | S5.AJ Fewer warehouse round trips | Done | #235 | Task-scoped warehouse engines, DDL-aware metadata, combined queries and exact action/attempt budgets; parallel cloud suites under 15 minutes |
 | S5.D Cancellation across the cluster | Done | #236 | Prompt scoped cancellation, confirmed warehouse query endings and API-only agent acknowledgements |
-| S5.E Slots, limits and priorities | Planned | | Pools, priorities and resource-based placement without over-reservation |
+| S5.E Slots, limits and priorities | Done | #237 | Active pools, priority and fair atomic claims, pipeline/warehouse limits and resource placement without over-reservation |
 | S5.AK Item fan-out inside Python tasks | Planned | | Per-item recorded, retried and controlled work inside one Python task; one graph node with an item strip |
 | S5.F and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
@@ -310,6 +310,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.E (#237) validates pool configuration and history, individual resource placement,
+local process ceilings, pipeline/warehouse limits, priority and fairness on both Engine DBs
+where applicable; agent claims use PostgreSQL. Released-schema upgrades and the unchanged
+S5.AJ action/attempt budgets pass. Lock, lease, fencing, claim and transition checks pass twenty
+rounds. Cloud acceptance is not required because warehouse SQL is unchanged.
 
 S5.AJ (#235) ran the unit, action, merge, crash, released-schema upgrade and API checks on
 both Engine DBs where applicable and all four local warehouses. Lock, lease, fencing,
@@ -641,6 +647,22 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S5.E keeps the existing `python` / `warehouse` SlotKind names and attempt PRIORITY/index;
+  pipeline priority is copied when queuing. The deployment default remains the seeded
+  `default` pool. `CFG_PROJECTS` does not exist: project MAX_RUNNING_TASKS and project
+  DEFAULT_POOL stay in S5.G, with no unused fields or new default-pool setting here.
+- S5.E enforces limits and reservations atomically at claim, across owners, instead of only
+  checking controller memory when queuing. Ineligible pipelines are skipped. Pool totals are
+  visibility only; placement always fits one advertised allocation. The derived done criteria
+  also cover the 1,000-attempt burst, priority/oldest ordering, fairness and unchanged budgets.
+- S5.E uses the owner-approved explicit move (23 October 2026) for the YAML-only
+  Max_parallel_tasks value: copy it to pipelines.csv MAX_PARALLEL_TASKS where needed, then
+  remove the old key. Loading, validate, doctor, migrate and upgrade-targets refuse that key
+  with its file, value and remedy. The migration cannot read a team's YAML; upgraded pipelines
+  default to 8, checked against DEFAULT_MAX_PARALLEL_TASKS. Local execution retains its
+  measured machine-wide process bound and configured per-kind slot ceilings independently
+  of pipeline limits; no new machine-wide setting or migration marker is introduced.
 
 - S5.D reuses S5.C's session tags instead of `AUD_ATTEMPT_QUERIES` (owner, 23 October
   2026): stop tagged statements, then confirm none remain. Existing cancellation columns need

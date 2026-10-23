@@ -228,7 +228,7 @@ def test_every_value_is_a_variable_when_one_is_set_and_the_text_otherwise(tmp_pa
     raw = _minimal(
         Orchestration={
             "Task_timeout_seconds": "TASK_TIMEOUT",
-            "Max_parallel_tasks": 4,
+            "Local_python_slots": 4,
             "dev": {"Retries": "2"},
         }
     )
@@ -241,7 +241,7 @@ def test_every_value_is_a_variable_when_one_is_set_and_the_text_otherwise(tmp_pa
     # Variables' values, typed as their setting needs.
     assert config.limits.task_timeout_seconds == 3600
     # Values as written, whether YAML typed them or not.
-    assert config.limits.max_parallel_tasks == 4
+    assert config.limits.local_python_slots == 4
     assert config.retries == 2
     sources = {source.where: source for source in config.settings}
     assert sources["Orchestration.dev.Retries"].variable is None
@@ -1035,3 +1035,16 @@ def test_the_old_ingestion_slot_setting_is_not_an_alias(tmp_path):
     raw["Orchestration"]["Local_ingestion_slots"] = 1
     with pytest.raises(ConfigurationError, match="Local_ingestion_slots"):
         load_config(_write(tmp_path, raw))
+
+
+@pytest.mark.parametrize("profiled", [False, True])
+@pytest.mark.parametrize("limit", [8, None])
+def test_warehouse_query_limit_is_selected_with_the_warehouse_profile(tmp_path, profiled, limit):
+    settings = {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"}
+    warehouse = {"dev": settings}
+    if profiled:
+        settings["Max_warehouse_queries"] = limit
+    else:
+        warehouse["Max_warehouse_queries"] = limit
+    path = _write(tmp_path, _minimal(Warehouse=warehouse))
+    assert load_config(path).max_warehouse_queries == limit

@@ -13,6 +13,7 @@ from typing import TextIO
 
 from etl_craft.engine.controls import ControlView
 from etl_craft.services.operations import to_json
+from etl_craft.services.operations.agents import AgentsView
 from etl_craft.services.operations.models import BackfillView, OperationResult, ReconciliationView
 
 
@@ -73,6 +74,75 @@ class Output:
         """Write one tab-separated line per row; ``None`` becomes an empty field."""
         for row in rows:
             self.line("\t".join("" if value is None else str(value) for value in row))
+
+    def agents(self, view: AgentsView | None) -> None:
+        """Render the shared registry's advertised, reserved and free resources."""
+        if view is None:
+            return
+        self.rows(
+            [
+                (
+                    "AGENT",
+                    "POOL",
+                    "HOST",
+                    "STATUS",
+                    "USED_SLOTS",
+                    "FREE_SLOTS",
+                    "CPU",
+                    "CPU_RESERVED",
+                    "CPU_FREE",
+                    "MEMORY_MB",
+                    "MEMORY_RESERVED_MB",
+                    "MEMORY_FREE_MB",
+                    "HEARTBEAT",
+                )
+            ]
+        )
+        self.rows(
+            (
+                a.agent_id,
+                a.pool,
+                a.host,
+                a.status,
+                a.used,
+                a.free,
+                a.advertised_cpu,
+                a.reserved_cpu,
+                a.free_cpu,
+                a.advertised_memory_mb,
+                a.reserved_memory_mb,
+                a.free_memory_mb,
+                a.heartbeat_at,
+            )
+            for a in view.agents
+        )
+        self.rows(
+            [
+                (
+                    "POOL",
+                    "AGENTS",
+                    "CPU",
+                    "CPU_RESERVED",
+                    "CPU_FREE",
+                    "MEMORY_MB",
+                    "MEMORY_RESERVED_MB",
+                    "MEMORY_FREE_MB",
+                )
+            ]
+        )
+        self.rows(
+            (
+                p.pool,
+                p.agents,
+                p.advertised_cpu,
+                p.reserved_cpu,
+                p.free_cpu,
+                p.advertised_memory_mb,
+                p.reserved_memory_mb,
+                p.free_memory_mb,
+            )
+            for p in view.pools
+        )
 
     def empty(self, what: str) -> None:
         """Report a result with nothing in it, such as ``(no active pipelines)``."""

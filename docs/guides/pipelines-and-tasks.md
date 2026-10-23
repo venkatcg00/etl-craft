@@ -167,3 +167,12 @@ SALES_DAILY` runs it.
 Use an ETL task with `HANDLER=RUN_PIPELINE` to launch another pipeline. `WAIT` frees the
 agent while the controller waits for the child's ending; `DETACH` ends after admission.
 See [Pipeline trigger tasks](pipeline-triggers.md) for parameters, rerun identities and controls.
+
+## Placement parameters
+
+Every task may name an active `POOL` from `config/pools.csv`; without it the pool is `default`.
+`CPU_REQUEST` and `MEMORY_REQUEST_MB` are positive whole numbers. An omitted request uses the
+handler kind's measured-sizing estimate: Python 1 CPU / 512 MB; warehouse 0.25 CPU / 128 MB.
+One agent must fit the whole request. Local execution checks the measured local allocation.
+The [agent guide](../deploying/agents.md#pools-limits-and-resource-placement) describes limits,
+priority, reservations and queue reasons. EVENT_WAIT probes hold no agent slot.

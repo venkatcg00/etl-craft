@@ -49,7 +49,7 @@
       "src/etl_craft/engine/repository/source_contracts.py": 2,
       "src/etl_craft/execution/scheduler.py": 7,
       "src/etl_craft/handlers/sql/spec.py": 2,
-      "src/etl_craft/services/config_files.py": 12
+      "src/etl_craft/services/config_files.py": 6
     },
     "broad-except": {
       "src/etl_craft/api/serve.py": 1,
@@ -79,7 +79,7 @@
     },
     "complexity": {
       "src/etl_craft/execution/scheduler.py": 5,
-      "src/etl_craft/services/config_files.py": 7
+      "src/etl_craft/services/config_files.py": 3
     },
     "function-lines": {
       "src/etl_craft/core/text.py": 17,
@@ -107,7 +107,7 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 90
+      "src/etl_craft/engine/transitions.py": 84
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

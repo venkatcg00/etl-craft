@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
+from etl_craft.execution.placement import local_capacity
 from etl_craft.execution.pools import (
     SLOT_KINDS,
     AttemptSpec,
@@ -25,11 +26,11 @@ from etl_craft.execution.pools import (
     HandleState,
     HandleStatus,
 )
-from etl_craft.execution.runner import execute_attempt
+from etl_craft.execution.runner import try_execute_attempt
 
 
 class LocalPool:
-    """Run admitted attempts on this host: at most ``Max_parallel_tasks``, split by kind.
+    """Run admitted attempts on this host: at most the measured process capacity, split by kind.
 
     A pool that never ran an attempt knows nothing of it: after a restart, attempts an earlier
     process started are found by their expired leases (``execution.reconcile``), not here.
@@ -43,17 +44,19 @@ class LocalPool:
         self, engine: Engine, config: ConnectorConfig, *, child: ChildOptions | None = None
     ) -> None:
         """Size the slots from the configuration; no thread starts until an attempt arrives."""
-        limits = config.limits
         self.engine, self.config = engine, config
         self.child = child or ChildOptions()
-        self.total = limits.max_parallel_tasks
+        measured = local_capacity(config)
         self.slots = {
-            "python": limits.local_python_slots or self.total,
-            "warehouse": limits.local_warehouse_slots or self.total,
+            "python": measured.sizing.python_slots.value,
+            "warehouse": measured.sizing.warehouse_slots.value,
         }
+        self.total = min(measured.sizing.task_slots.value, sum(self.slots.values()))
         # A sized server may have no task slots: capacity stays zero and runs stay queued.
         self._executor = ThreadPoolExecutor(max(self.total, 1), thread_name_prefix="etl-craft-task")
-        self._attempts: dict[int, tuple[AttemptSpec, Future[TaskOutcome], threading.Event]] = {}
+        self._attempts: dict[
+            int, tuple[AttemptSpec, Future[TaskOutcome | None], threading.Event]
+        ] = {}
         self._lock = threading.Lock()
 
     def capacity(self) -> Capacity:
@@ -71,16 +74,21 @@ class LocalPool:
         with self._lock:
             if spec.attempt_id not in self._attempts:
                 stop = threading.Event()
-                future = self._executor.submit(
-                    contextvars.copy_context().run,
-                    execute_attempt,
-                    self.engine,
-                    self.config,
-                    spec,
-                    replace(self.child, cancel=stop),
-                )
+                future = self._launch(spec, stop)
                 self._attempts[spec.attempt_id] = (spec, future, stop)
         return ExecutionHandle(self.name, spec.attempt_id)
+
+    def _launch(self, spec: AttemptSpec, stop: threading.Event) -> Future[TaskOutcome | None]:
+        """Keep the cancellation signal when a capacity-blocked attempt tries its claim again."""
+        return self._executor.submit(
+            contextvars.copy_context().run,
+            try_execute_attempt,
+            self.engine,
+            self.config,
+            spec,
+            replace(self.child, cancel=stop),
+            tuple({*self._attempts, spec.attempt_id}),
+        )
 
     def status(self, handle: ExecutionHandle) -> HandleStatus:
         """Return ``handle``'s state; an ended attempt is reported once, then forgotten."""
@@ -90,6 +98,31 @@ class LocalPool:
                 return HandleStatus(handle, HandleState.UNKNOWN)
             _, future, _ = entry
             if not future.done():
+                return HandleStatus(handle, HandleState.RUNNING)
+            if future.exception() is None and future.result() is None:
+                spec, _, stop = entry
+                if stop.is_set():
+                    from etl_craft.core.actor import current_actor
+                    from etl_craft.core.enums import RunStatus
+                    from etl_craft.engine import transitions
+
+                    with self.engine.begin() as conn:
+                        transitions.cancel_attempt(
+                            conn,
+                            spec.attempt_id,
+                            current_actor(),
+                            error_message="cancelled while queued",
+                        )
+                    del self._attempts[handle.attempt_id]
+                    return HandleStatus(
+                        handle,
+                        HandleState.ENDED,
+                        TaskOutcome(
+                            RunStatus.CANCELLED, "cancelled while queued", spec.task_run_id
+                        ),
+                    )
+                del self._attempts[handle.attempt_id]
+                self._attempts[spec.attempt_id] = (spec, self._launch(spec, stop), stop)
                 return HandleStatus(handle, HandleState.RUNNING)
             del self._attempts[handle.attempt_id]
         error = future.exception()

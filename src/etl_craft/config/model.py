@@ -184,9 +184,9 @@ class ExecutionLimits:
 
     ``task_timeout_seconds`` of 0 means no limit. ``gate_wait_minutes`` is how long a
     cross-pipeline gate waits for a running upstream, 0 for not at all. The local pool runs at
-    most ``max_parallel_tasks`` task processes, of which at most ``local_python_slots`` run
-    Python scripts and ``local_warehouse_slots`` run everything else; unset, each kind
-    may use all of ``max_parallel_tasks``.
+    most its measured number of task processes, further bounded by ``local_python_slots``
+    and ``local_warehouse_slots``. ``max_parallel_tasks`` is the internal sized process count,
+    independent of each pipeline's database limit; it is not a YAML setting.
 
     A process that has reached the Engine DB waits up to ``engine_db_outage_seconds`` for it to
     answer again after a restart or failover; 0 fails at the first refused connection.
@@ -204,8 +204,6 @@ class ExecutionLimits:
     engine_db_outage_seconds: int = 120
     local_python_slots: int | None = None
     local_warehouse_slots: int | None = None
-    max_parallel_tasks_written: bool = False
-    """Whether the team wrote ``Max_parallel_tasks``: then it is a deployment profile's ceiling."""
 
 
 @dataclass(frozen=True)
@@ -240,6 +238,7 @@ class ConnectorConfig:
     docs_site: DocsSiteConfig = field(default_factory=DocsSiteConfig)
     warehouse: ConnectionProfile | None = None
     warehouse_table_format: TableFormat = TableFormat.NATIVE
+    max_warehouse_queries: int | None = None
     retries: int | None = None
     email_recipients: list[str] | None = None
     allow_schedule: bool = True

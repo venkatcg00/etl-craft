@@ -1,8 +1,14 @@
 """Config-row validation shared by file loading and Engine DB application."""
 
+import json
+import re
+from datetime import date
+from decimal import Decimal, InvalidOperation
+
 from etl_craft.core.enums import RunCondition
+from etl_craft.core.errors import MetadataFileError
 from etl_craft.core.tags import valid_tag
-from etl_craft.core.text import is_safe_identifier
+from etl_craft.core.text import is_metadata_code, is_safe_identifier
 from etl_craft.engine.repository.config_rows import (
     BUSINESS_RULES,
     OBJECT_TABLES,
@@ -12,6 +18,7 @@ from etl_craft.engine.repository.config_rows import (
     TASK_DEPENDENCIES,
     TASK_PARAMETERS,
     TASKS,
+    Column,
     ConfigTable,
     Value,
 )
@@ -74,3 +81,68 @@ def _grant_problem(values: dict[str, Value]) -> str | None:
     if values["TAG"] is not None and not valid_tag(values["TAG"]):
         return f"TAG={values['TAG']!r}: expected a valid pipeline tag"
     return None
+
+
+def parse_cell(column: Column, cell: str) -> Value:
+    """Return a cell's value in its column's type; ``MetadataFileError`` says what was expected."""
+    if cell == "":
+        if column.required:
+            raise MetadataFileError("is empty; this column needs a value")
+        return column.default
+    if column.kind == "code":
+        if not is_metadata_code(cell):
+            raise MetadataFileError(
+                f"{cell!r} is not a code: start with an ASCII letter, then use letters, digits "
+                "or _, at most 128 characters"
+            )
+        return cell
+    if column.kind == "choice":
+        if cell not in column.choices:
+            raise MetadataFileError(f"{cell!r} is not one of {', '.join(column.choices)}")
+        return cell
+    if column.kind == "int":
+        if not re.fullmatch(r"-?[0-9]+", cell):
+            raise MetadataFileError(f"{cell!r} is not a whole number")
+        number = int(cell)
+        if column.minimum is not None and number < column.minimum:
+            raise MetadataFileError(f"{number} is less than {column.minimum}")
+        return number
+    if column.kind == "float":
+        return parse_decimal(cell)
+    if column.kind == "date":
+        return parse_date(cell)
+    if column.kind == "json":
+        return parse_object(cell)
+    return cell
+
+
+def parse_decimal(cell: str) -> float:
+    """Read a finite numeric config cell."""
+    try:
+        decimal = Decimal(cell)
+    except InvalidOperation:
+        raise MetadataFileError(f"{cell!r} is not a number") from None
+    if not decimal.is_finite():
+        raise MetadataFileError(f"{cell!r} is not a finite number")
+    return float(decimal)
+
+
+def parse_date(cell: str) -> date:
+    """Read a date with the config file's exact ISO representation."""
+    try:
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", cell):
+            return date.fromisoformat(cell)
+    except ValueError:
+        pass
+    raise MetadataFileError(f"{cell!r} is not a date written YYYY-MM-DD")
+
+
+def parse_object(cell: str) -> dict[str, object]:
+    """Read a JSON object rather than another JSON value."""
+    try:
+        parsed = json.loads(cell)
+    except ValueError as error:
+        raise MetadataFileError(f"is not JSON: {error}") from None
+    if not isinstance(parsed, dict):
+        raise MetadataFileError("is not a JSON object; write it as {...}")
+    return parsed

@@ -35,6 +35,28 @@ INTEGER_NAMES = frozenset(
 )
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
+    **dict.fromkeys(
+        (
+            "warehouse_limit",
+            "local_cpu",
+            "local_memory_mb",
+            "local_slots",
+            "python_slots",
+            "warehouse_slots",
+            "python_cpu",
+            "warehouse_cpu",
+            "python_memory_mb",
+            "warehouse_memory_mb",
+            "cpu_free",
+            "memory_free_mb",
+            "cpu_capacity",
+            "memory_capacity_mb",
+            "cpu",
+            "memory_mb",
+        ),
+        1,
+    ),
+    "capacity_source": "MEASURED",
     "seconds": 60,
     "python_free": True,
     "warehouse_free": True,
@@ -199,9 +221,34 @@ def full_scans(plan, partial_indexes=frozenset(), limited=False):
 
 REGISTRY = "Reads the agent registry: one row per agent token, bounded by the tokens issued."
 FULL_READS = {
+    (
+        "config_rows_pipelines",
+        "cfg_pipelines",
+    ): "Enumerates all configuration rows for plan, apply and export.",
+    (
+        "config_rows_tasks",
+        "cfg_pipelines",
+    ): "Enumerates all configuration rows for plan, apply and export.",
+    (
+        "config_rows_task_parameters",
+        "cfg_pipelines",
+    ): "Enumerates all configuration rows for plan, apply and export.",
+    (
+        "config_rows_task_dependency",
+        "cfg_pipelines",
+    ): "Enumerates all configuration rows for plan, apply and export.",
+    (
+        "config_rows_pipeline_dependency",
+        "cfg_pipelines",
+    ): "Enumerates all configuration rows for plan, apply and export.",
+    (
+        "config_rows_business_rules",
+        "cfg_pipelines",
+    ): "Enumerates all configuration rows for plan, apply and export.",
     ("agent_host_lock", "aud_agents"): REGISTRY,
     ("agent_list", "aud_agents"): REGISTRY,
     ("agent_usage", "aud_agents"): REGISTRY,
+    ("placement_agents", "aud_agents"): REGISTRY,
     ("reconcile_attempts", "aud_agents"): REGISTRY,
     ("transition_expire_agents", "aud_agents"): REGISTRY,
     ("active_pipeline_codes", "cfg_pipelines"): "Enumerates every active pipeline definition.",

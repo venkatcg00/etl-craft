@@ -1,8 +1,10 @@
 -- PostgreSQL only: cluster execution refuses any other Engine DB before this runs.
 INSERT INTO AUD_AGENTS
-(AGENT_ID, POOL, HOST, VERSION, PYTHON_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS, RESOURCE_REPORT)
-VALUES (:agent_id,:pool,:host,:version,:python_slots,:warehouse_slots,clock_timestamp(),clock_timestamp(),'ACTIVE',:report)
+(AGENT_ID, POOL, HOST, VERSION, PYTHON_SLOTS, WAREHOUSE_SLOTS, STARTED_AT, HEARTBEAT_AT, STATUS, RESOURCE_REPORT, CPU_CAPACITY, MEMORY_CAPACITY_MB, CAPACITY_SOURCE)
+VALUES (:agent_id,:pool,:host,:version,:python_slots,:warehouse_slots,clock_timestamp(),clock_timestamp(),'ACTIVE',:report,:cpu_capacity,:memory_capacity_mb,:capacity_source)
 ON CONFLICT (AGENT_ID) DO UPDATE SET POOL=excluded.POOL, HOST=excluded.HOST, VERSION=excluded.VERSION,
 PYTHON_SLOTS=excluded.PYTHON_SLOTS, WAREHOUSE_SLOTS=excluded.WAREHOUSE_SLOTS,
 STARTED_AT=excluded.STARTED_AT, HEARTBEAT_AT=excluded.HEARTBEAT_AT, STATUS='ACTIVE', RESOURCE_REPORT=excluded.RESOURCE_REPORT
+ ,CPU_CAPACITY=excluded.CPU_CAPACITY, MEMORY_CAPACITY_MB=excluded.MEMORY_CAPACITY_MB,
+CAPACITY_SOURCE=excluded.CAPACITY_SOURCE
 WHERE AUD_AGENTS.STATUS='GONE' RETURNING AGENT_ID AS agent_id

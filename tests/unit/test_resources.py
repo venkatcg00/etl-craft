@@ -127,7 +127,7 @@ def test_written_settings_are_ceilings_never_requests():
     sizing = size(allocation, DeploymentProfile.CONTROLLER, Ceilings(4, 1, 2))
     assert (sizing.task_slots.value, sizing.python_slots.value) == (4, 1)
     assert sizing.warehouse_slots.value == 2
-    assert sizing.task_slots.reason == "Orchestration.Max_parallel_tasks ceiling"
+    assert sizing.task_slots.reason == "total task slots ceiling"
     roomy = size(allocation, DeploymentProfile.CONTROLLER, Ceilings(500))
     assert roomy.task_slots.value == 26
 
@@ -146,7 +146,7 @@ def write_config(tmp_path: Path, deployment: dict | None = None, **orchestration
 
 
 def test_no_profile_keeps_the_configuration_and_only_logs_the_measurement(tmp_path, caplog):
-    config = load_config(write_config(tmp_path, Max_parallel_tasks=3))
+    config = load_config(write_config(tmp_path, Local_python_slots=3))
     caplog.set_level(logging.INFO, "etl_craft.config.sizing")
     assert start_role(config, server=True, host=machine(8, 16 * GIB)) is config
     assert "CPUs 8 CPUs from CPU affinity" in caplog.text
@@ -160,9 +160,9 @@ def test_a_profile_sizes_the_role_within_written_ceilings(tmp_path):
     assert config.limits.max_parallel_tasks == 26
     assert config.limits.local_python_slots == 2
     assert path.read_bytes() == before
-    capped = write_config(tmp_path, {"Profile": "CONTROLLER"}, Max_parallel_tasks=4)
+    capped = write_config(tmp_path, {"Profile": "CONTROLLER"}, Local_warehouse_slots=4)
     sized = start_role(load_config(capped), server=False, host=machine(8, 16 * GIB))
-    assert sized.limits.max_parallel_tasks == 4
+    assert sized.limits.local_warehouse_slots == 4
 
 
 def test_controller_agents_reserves_no_local_execution_slots(tmp_path):

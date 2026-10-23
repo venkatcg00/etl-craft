@@ -28,7 +28,7 @@ def ceilings(config: ConnectorConfig) -> Ceilings:
     """Return the slot settings the team wrote explicitly; defaults are not ceilings."""
     limits = config.limits
     return Ceilings(
-        limits.max_parallel_tasks if limits.max_parallel_tasks_written else None,
+        None,
         limits.local_python_slots,
         limits.local_warehouse_slots,
     )

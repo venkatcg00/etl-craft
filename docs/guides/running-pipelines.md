@@ -8,7 +8,7 @@ etl-craft run --pipeline-code SALES_DAILY
 
 This runs every active task under one pipeline run. Each completion releases any
 newly ready tasks immediately; a slow independent task does not hold back another branch.
-At most `Orchestration.Max_parallel_tasks` tasks run at once (8 unless set), each in its own
+At most `CFG_PIPELINES.MAX_PARALLEL_TASKS` tasks run at once (8 unless set), each in its own
 process with the same logs, time limits and outcomes as [`run --task-code`](running-tasks.md).
 `Orchestration.Local_python_slots` caps how many of them run Python tasks, and
 `Orchestration.Local_warehouse_slots` how many run SQL, business-rule and alert tasks; unset,

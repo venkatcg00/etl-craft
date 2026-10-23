@@ -8,6 +8,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Named execution pools (`pools.csv`, task `POOL`), pipeline `MAX_PARALLEL_TASKS` / `PRIORITY`,
+  `Warehouse.Max_warehouse_queries`, and atomic `CPU_REQUEST` / `MEMORY_REQUEST_MB`
+  reservations on individual agents, with the same measured rule locally. Agents accept
+  `--cpu`, `--memory-mb` and `--declared-capacity`; status, doctor and agents show advertised,
+  reserved and free resources. Apply `0051_resource_placement.sql`.
+
 - Scoped stop and abort cancel SQL, Python and event-probe queries by their existing warehouse
   holder tags, with process and query acknowledgements kept separate. Agents wake through
   notifications; unconfirmed cancellations remain pending with their reason. Databricks gains
@@ -63,6 +69,11 @@ All notable changes are recorded here. The format follows
   context, extra fields and exceptions; audit CLI JSON and API responses retain that redaction.
 
 ### Changed
+
+- Move `Orchestration.Max_parallel_tasks` to `MAX_PARALLEL_TASKS` in `config/pipelines.csv`
+  for each pipeline that needs its value, then remove the YAML key. Config loading, validate,
+  doctor and upgrade refuse the old key with its file, value and remedy. Migrations cannot
+  recover this YAML-only value; upgraded pipelines start at the existing default of 8.
 
 - Versioned documentation renders each version once in strict mode, retaining its content
   checks while avoiding duplicate rendering during publication.

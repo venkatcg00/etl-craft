@@ -474,7 +474,7 @@ def test_the_example_folder_loads_into_a_new_engine_db(metadata_project):
 
 
 def test_an_engine_db_without_tables_is_refused_with_the_remedy(empty_engine_db, tmp_path):
-    with pytest.raises(EngineDbError, match=r"no CFG_PIPELINES, .* run `etl-craft setup`"):
+    with pytest.raises(EngineDbError, match=r"no .*CFG_PIPELINES, .* run `etl-craft setup`"):
         export_config(empty_engine_db.engine, tmp_path / "config")
 
 
@@ -604,3 +604,46 @@ def test_config_apply_refuses_invalid_tags_with_no_history_changes(exported, tag
         for f in done.findings
     )
     assert changes_logged(exported) == before
+
+
+def test_pool_files_apply_history_and_retire_by_name(exported):
+    from sqlalchemy import text
+
+    path = exported.config_dir / "pools.csv"
+    edit(
+        path,
+        lambda rows: (
+            [*rows, {"POOL_NAME": "heavy-python", "DESCRIPTION": "large", "ACTIVE_FLAG": "Y"}]
+        ),
+    )
+    assert not sync(exported).failed
+    edit(
+        path,
+        lambda rows: [
+            dict(row, DESCRIPTION="larger") if row["POOL_NAME"] == "heavy-python" else row
+            for row in rows
+        ],
+    )
+    assert not sync(exported).failed
+    edit(path, lambda rows: [row for row in rows if row["POOL_NAME"] != "heavy-python"])
+    assert not sync(exported).failed
+    with exported.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT ACTIVE_FLAG AS active_flag, DESCRIPTION AS description "
+                "FROM CFG_POOLS WHERE POOL_NAME='heavy-python'"
+            )
+        ).one()
+        assert row.active_flag == "N"
+        assert row.description == "larger"
+        history = (
+            conn.execute(
+                text(
+                    "SELECT DESCRIPTION AS description FROM AUD_CFG_POOLS_HISTORY "
+                    "WHERE POOL_NAME='heavy-python'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "large" in history and "larger" in history

@@ -129,3 +129,34 @@ Target writes, target maintenance and the single-writer warehouse queue use one 
 resource lock. Its database key is unique; expired or ended holders are replaced atomically.
 A wait is bounded and names the target, holder and held duration on timeout. Inspect the holder
 before retrying a blocked action.
+
+## Pools, limits and resource placement
+
+Define active pools in `config/pools.csv` (`POOL_NAME,DESCRIPTION,ACTIVE_FLAG`), including
+`default` for tasks without `POOL`. Apply the file with `etl-craft config apply`. Agents must
+register in an existing active pool. Set task parameters `POOL`, `CPU_REQUEST` and
+`MEMORY_REQUEST_MB`; resource requests are positive whole numbers. Defaults are one CPU and
+512 MB for Python, and 0.25 CPU and 128 MB for warehouse work. Gates take no task slots.
+
+`MAX_PARALLEL_TASKS` in `pipelines.csv` limits each pipeline, across its runs and owners.
+`PRIORITY` defaults to zero; higher numbers are claimed first and equal priorities use the
+oldest queued attempt. A pipeline at its limit is skipped so another can run. Set
+`Warehouse.Max_warehouse_queries` to cap warehouse-kind attempts across pipelines and pools.
+Only claimed and running attempts count. Limited work stays QUEUED with its reason in
+status, explain, the API and its attempt record.
+
+Claims reserve CPU and memory atomically and never combine different agents' capacities.
+`validate` rejects requests that fit no active agent in the pool; absent agents leave work
+queued. The same check uses measured local allocation when no agents are selected. Local
+process and per-kind slot ceilings remain independent of the pipeline limits.
+
+Agent measurements are cgroup-aware and refresh on the existing heartbeat. `--cpu N` and
+`--memory-mb N` only lower measured capacity. `--declared-capacity`, with both declarations,
+fronts an external quota (for example a script's own runtime); the registry labels it DECLARED.
+etl-craft itself launches no external jobs. `--python-slots 0` or `--warehouse-slots 0` makes
+an agent single-kind. Slots remain upper bounds alongside CPU and memory.
+
+`agents`, `status`, `doctor` and the API share advertised, reserved and free resources. Draining
+withdraws free capacity. Endings, LOST reconciliation and fenced lease expiry release active
+reservations. Keep measured-host agents' scopes accurate: overlapping host allocations share
+one resource budget.

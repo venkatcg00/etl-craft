@@ -1,0 +1,1 @@
+SELECT TABLE_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, CATALOG_NAME AS catalog_name, SCHEMA_NAME AS schema_name, TABLE_NAME AS table_name, OBJECT_KIND AS object_kind FROM CFG_TABLES ORDER BY 1

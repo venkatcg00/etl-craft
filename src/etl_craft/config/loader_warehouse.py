@@ -29,7 +29,7 @@ from etl_craft.config.targets import parse_warehouse_url, preferred_connection_u
 from etl_craft.core.enums import AuthMode, TableFormat, enum_value
 from etl_craft.core.errors import ConfigurationError
 
-WAREHOUSE_SECTION_KEYS = frozenset({"Name", "Table_format"})
+WAREHOUSE_SECTION_KEYS = frozenset({"Name", "Table_format", "Max_warehouse_queries"})
 
 _PREFERRED_SHAPE_MARKER = {"databricks": "catalog", "snowflake": "account"}
 
@@ -53,7 +53,7 @@ def parse_warehouse(
     where = f"Warehouse.{profiled.profile}"
     # Name and Table_format may sit on the section or on one profile (a dev DuckDB beside a
     # prod Postgres); the profile's own value wins.
-    for key in ("Name", "Table_format"):
+    for key in WAREHOUSE_SECTION_KEYS:
         block.pop(key, None)
     settings = {
         k: v for k, v in profiled.settings.items() if k in WAREHOUSE_SECTION_KEYS or k not in block

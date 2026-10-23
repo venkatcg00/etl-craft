@@ -29,6 +29,7 @@ from etl_craft.core.cron import parse, timezone
 from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph, cycles
+from etl_craft.core.placement import ResourceRequest, resource_request
 from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
@@ -70,6 +71,7 @@ from etl_craft.services.lineage import (
     script_lineage,
     table_name,
 )
+from etl_craft.services.placement import Placement, placement
 from etl_craft.services.source_columns import definition_problem, drift, warehouse_columns
 from etl_craft.services.trigger_validation import trigger_definition, trigger_graph_problems
 from etl_craft.warehouse.connection import open_warehouse
@@ -133,6 +135,7 @@ class _Metadata:
     pipeline_edges: list[PipelineEdge]
     pipeline_parameters: list[tuple[str, object]]
     pipeline_codes: list[str]
+    placement: Placement
 
 
 def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None = None) -> Report:
@@ -173,6 +176,7 @@ def validate_on(
     pipeline_parameters = fetch_pipeline_parameters(conn)
     data = _Metadata(
         tasks=tasks,
+        placement=placement(conn, config) if tasks else Placement({}, {}, None),
         params={task.task_id: fetch_task_parameters(conn, task.task_id) for task in tasks},
         edges=fetch_task_dependency_edges(conn),
         pipeline_edges=fetch_pipeline_edges(conn),
@@ -382,6 +386,12 @@ def _task(
     if not is_metadata_code(task.task_code):
         report.fail(where, _code_problem("TASK_CODE", task.task_code))
     try:
+        request = resource_request(task.handler, params, where)
+        data.placement.check(
+            where,
+            ResourceRequest(0, 0) if task.handler == Handler.EVENT_WAIT else request,
+            params.get("POOL", "default"),
+        )
         task_timeout_seconds(params, config)
         task_retry_policy(params, config)
     except EtlCraftError as error:
