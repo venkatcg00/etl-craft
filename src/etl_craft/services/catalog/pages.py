@@ -187,7 +187,7 @@ class Pages:
                         _status(c.to_status) if c.to_status else "reset",
                         _e(c.requested_by),
                         _e(_when(c.requested_at)),
-                        _e(c.reason),
+                        _e(c.reason) + (f" (item {_e(c.item_key)})" if c.item_key else ""),
                     ]
                     for c in p.interventions
                 ),
@@ -367,7 +367,7 @@ class Pages:
                         _status(c.to_status) if c.to_status else "reset",
                         _e(c.requested_by),
                         _e(_when(c.requested_at)),
-                        _e(c.reason),
+                        _e(c.reason) + (f" (item {_e(c.item_key)})" if c.item_key else ""),
                     ]
                     for c in changes
                 ),
@@ -430,7 +430,7 @@ class Pages:
                     _status(r.status),
                     str(r.attempts),
                     _e(_duration(r.seconds)),
-                    _e(_counts(r)),
+                    _e(_counts(r)) + (f"<br>{_e(r.item_progress)}" if r.item_progress else ""),
                     _e(
                         f"{r.watermark_from} → {r.watermark_to}"
                         if r.watermark_from is not None

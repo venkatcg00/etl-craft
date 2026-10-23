@@ -127,6 +127,14 @@ def task_run_view(
 def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
     """Convert a task summary and its attempts into one public document."""
     values = dict(row)
+    has_items = values.pop("has_items", False)
+    item_progress = None
+    by_attempt = {}
+    if has_items:
+        from etl_craft.engine.items import attempt_summaries, summaries
+
+        item_progress = str(summaries(conn, [values["task_run_id"]])[values["task_run_id"]])
+        by_attempt = attempt_summaries(conn, values["task_run_id"])
     values["start_date"] = timestamp(values["start_date"])
     values["end_date"] = timestamp(values["end_date"])
     values["status"] = RunStatus(values["status"])
@@ -136,9 +144,14 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
         {"task_run_id": values["task_run_id"]},
     ):
         attempts.append(attempt_document(attempt._mapping))
+    attempts = [
+        replace(a, item_progress=str(by_attempt[a.attempt_id])) if a.attempt_id in by_attempt else a
+        for a in attempts
+    ]
     return TaskRunView(
         **values,
         attempts=tuple(attempts),
+        item_progress=item_progress,
         child_run_ids=tuple(
             link.child_run_id
             for link in fetch_trigger_links(conn, [row.pipeline_run_id])
@@ -150,6 +163,7 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
 def attempt_document(row: RowMapping) -> AttemptView:
     """Normalize the same attempt document for task inspection and direct API reads."""
     captured = dict(row)
+    captured.pop("has_items", None)
     for key in (
         "lease_expires_at",
         "heartbeat_at",

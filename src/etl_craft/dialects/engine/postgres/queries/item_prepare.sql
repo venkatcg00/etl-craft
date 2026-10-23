@@ -1,0 +1,16 @@
+INSERT INTO AUD_TASK_ITEMS
+(REPORT_ID,TASK_RUN_ID,ATTEMPT_ID,ITEM_KEY,ITEM_ATTEMPT_NUMBER,STATUS,
+STARTED_AT,ENDED_AT,ROW_COUNT,ERROR_MESSAGE,CREATED_BY,CREATED_AT)
+SELECT e.report_id AS report_id,:task_run_id AS task_run_id,:attempt_id AS attempt_id,
+e.key AS key,COALESCE(old.ITEM_ATTEMPT_NUMBER,0) AS number,
+CASE WHEN old.ITEM_RECORD_ID IS NULL THEN 'QUEUED' ELSE 'SKIPPED' END AS status,
+old.STARTED_AT AS started,CASE WHEN old.ITEM_RECORD_ID IS NULL THEN NULL ELSE CAST(:now AS timestamptz) END AS ended,
+COALESCE(old.ROW_COUNT,0) AS row_count,old.ERROR_MESSAGE AS error,:actor AS actor,:now AS now
+FROM (SELECT value->>'key' AS key,value->>'report_id' AS report_id
+      FROM jsonb_array_elements(CAST(:entries AS jsonb))) e
+LEFT JOIN LATERAL (
+ SELECT i.* FROM AUD_TASK_ITEMS i WHERE i.TASK_RUN_ID=:task_run_id AND i.ITEM_KEY=e.key
+ ORDER BY i.ITEM_RECORD_ID DESC LIMIT 1
+) old ON TRUE
+WHERE old.ITEM_RECORD_ID IS NULL OR
+(old.STATUS IN ('SUCCESS','SKIPPED') AND (old.ATTEMPT_ID<>:attempt_id OR old.STATUS<>'SKIPPED'))

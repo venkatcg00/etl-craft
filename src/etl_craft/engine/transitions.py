@@ -11,7 +11,7 @@ from uuid import uuid4
 from sqlalchemy.engine import Connection, Row
 from sqlalchemy.exc import IntegrityError
 
-from etl_craft.core.actor import SYSTEM_ACTOR, Actor, current_actor, sso_groups
+from etl_craft.core.actor import SYSTEM_ACTOR, Actor, acting_as, current_actor, sso_groups
 from etl_craft.core.counts import NO_COUNTS, Counts
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
@@ -477,23 +477,19 @@ def reopen_run(
                 owner,
                 {**_actor_params(actor), "from_status": row.status},
             )
-            conn.execute(
-                statement(conn, "insert_intervention"),
-                {
-                    "pipeline_id": row.pipeline_id,
-                    "pipeline_run_id": pipeline_run_id,
-                    "task_id": None,
-                    "action": InterventionAction.REOPEN,
-                    "from_status": row.status,
-                    "to_status": RunStatus.IN_PROGRESS,
-                    "target_count": None,
-                    "previous_message": None,
-                    "reason": reason,
-                    "requested_by": actor.name,
-                    "requested_by_kind": actor.kind.value,
-                    "now": datetime.now(UTC),
-                },
-            )
+            from etl_craft.engine.repository.intervention_rows import record_intervention
+
+            with acting_as(actor):
+                record_intervention(
+                    conn,
+                    pipeline_id=row.pipeline_id,
+                    pipeline_run_id=pipeline_run_id,
+                    action=InterventionAction.REOPEN,
+                    from_status=row.status,
+                    to_status=RunStatus.IN_PROGRESS,
+                    reason=reason,
+                    requested_by=actor.name,
+                )
     except IntegrityError as error:
         raise _stale(
             conn, "run", pipeline_run_id, "terminal; no other active run", owner

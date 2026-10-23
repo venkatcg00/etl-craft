@@ -8,6 +8,16 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.ItemAction: {"MARK", "RERUN", "CANCEL"},
+    enums.ItemStatus: {
+        "QUEUED",
+        "RUNNING",
+        "SUCCESS",
+        "FAILED",
+        "SKIPPED",
+        "CANCEL_REQUESTED",
+        "CANCELLED",
+    },
     enums.CapacitySource: {"MEASURED", "DECLARED"},
     enums.TriggerMode: {"WAIT", "DETACH"},
     enums.TaskType: {"INGESTION", "ETL"},
@@ -136,6 +146,9 @@ EXPECTED = {
         "FINISHED",
     },
     enums.AgentReport: {
+        "ITEMS",
+        "ITEM_EVENT",
+        "ITEM_PREPARE",
         "CANCEL",
         "START",
         "END",

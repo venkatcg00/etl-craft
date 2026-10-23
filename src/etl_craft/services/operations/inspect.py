@@ -296,9 +296,16 @@ def get_attempt(ctx: OperationContext, request: AttemptId) -> AttemptView:
             statement(conn, "api_attempt").columns(retryable=Boolean),
             {"attempt_id": request.attempt_id},
         ).one_or_none()
-    if row is None:
-        raise ResourceNotFoundError(f"attempt_id={request.attempt_id}: attempt does not exist")
-    return attempt_document(row._mapping)
+        if row is None:
+            raise ResourceNotFoundError(f"attempt_id={request.attempt_id}: attempt does not exist")
+        view = attempt_document(row._mapping)
+        if row.has_items:
+            from etl_craft.engine.items import attempt_summaries
+
+            return replace(
+                view, item_progress=str(attempt_summaries(conn, row.task_run_id)[row.attempt_id])
+            )
+        return view
 
 
 def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:

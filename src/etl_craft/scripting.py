@@ -32,11 +32,12 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
+from threading import RLock
 from types import MappingProxyType
 from typing import Any
 
@@ -54,6 +55,7 @@ from etl_craft.core.errors import (
 from etl_craft.core.errors import (
     TransientError as TransientError,
 )
+from etl_craft.core.items import ItemStore
 from etl_craft.core.ownership import ResourceLocker
 from etl_craft.core.text import qualify
 from etl_craft.warehouse.connection import open_warehouse
@@ -227,6 +229,37 @@ class ScriptTask:
     event_rows: tuple[Mapping[str, Any], ...] = ()
     _locks: ResourceLocker | None = field(default=None, repr=False)
 
+    _items: ItemStore | None = field(default=None, repr=False, compare=False)
+    _warehouse_mutex: RLock = field(default_factory=RLock, repr=False, compare=False)
+
+    def fan_out(
+        self,
+        items: Iterable[str],
+        fn: Callable[[str], ScriptResult],
+        *,
+        max_items: int,
+        max_parallel: int | None = None,
+        retries: int = 0,
+        processes: bool = False,
+    ) -> ScriptResult:
+        """Run stable text keys with bounded concurrency and durable per-item retries."""
+        from etl_craft.fan_out import FanOutOptions, execute
+
+        try:
+            return execute(
+                self,
+                items,
+                fn,
+                FanOutOptions(
+                    max_items,
+                    max_parallel,
+                    retries,
+                    processes,
+                ),
+            )
+        except HandlerError as error:
+            raise HandlerError(f"{self.pipeline_code}.{self.task_code}: {error}") from error
+
     def table(self, name: str) -> str:
         """Return ``schema.table`` as its full name in the active warehouse database.
 
@@ -238,7 +271,7 @@ class ScriptTask:
     @contextmanager
     def warehouse(self) -> Iterator[Engine]:
         """Open the warehouse, queued behind other writers where it allows only one."""
-        with open_warehouse(self.config, self._locks) as engine:
+        with self._warehouse_mutex, open_warehouse(self.config, self._locks) as engine:
             yield engine
 
 

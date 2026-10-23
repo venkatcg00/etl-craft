@@ -200,6 +200,8 @@ class ActionName(StrEnum):
     AGENT_LOG = "agent log"
     AGENT_CONTROL = "agent control"
     AGENTS = "agents"
+    ITEMS = "items"
+    ITEM_CONTROL = "item control"
 
     LOGIN = "login"
     LOGIN_METHODS = "login methods"
@@ -595,6 +597,9 @@ class AgentReport(StrEnum):
     TARGET = "TARGET"
     PUBLISH = "PUBLISH"
     WATERMARK = "WATERMARK"
+    ITEMS = "ITEMS"
+    ITEM_EVENT = "ITEM_EVENT"
+    ITEM_PREPARE = "ITEM_PREPARE"
     RULE_BEGIN = "RULE_BEGIN"
     RULE_KEYS = "RULE_KEYS"
     RULE_END = "RULE_END"
@@ -621,3 +626,23 @@ class CapacitySource(StrEnum):
 
     MEASURED = "MEASURED"
     DECLARED = "DECLARED"
+
+
+class ItemStatus(StrEnum):
+    """Recorded item progress; cancellation is acknowledged only when execution ends."""
+
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
+    CANCELLED = "CANCELLED"
+
+
+class ItemAction(StrEnum):
+    """Operator actions on one item or the failed items of one exact task run."""
+
+    CANCEL = "CANCEL"
+    RERUN = "RERUN"
+    MARK = "MARK"

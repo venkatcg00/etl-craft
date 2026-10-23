@@ -137,7 +137,7 @@ def mark_task(
             from_status=before,
             to_status=status,
             target_count=rows,
-            previous_message=previous,
+            details=record.InterventionDetails(previous_message=previous),
             reason=reason,
             requested_by=who,
         )
@@ -527,7 +527,7 @@ def _reset_skipped(
             task_id=row.task_id,
             action=InterventionAction.RESET,
             from_status=RunStatus.SKIPPED,
-            previous_message=row.error_message,
+            details=record.InterventionDetails(previous_message=row.error_message),
             reason=reason,
             requested_by=who,
         )
@@ -599,7 +599,7 @@ def reset_offset(
             pipeline_run_id=selected.pipeline_run_id,
             task_id=task_id,
             action=InterventionAction.MARK,
-            previous_message=message,
+            details=record.InterventionDetails(previous_message=message),
             reason=reason,
             requested_by=current_actor().name,
         )
@@ -721,7 +721,7 @@ def reset_watermark(
             pipeline_run_id=selected.pipeline_run_id,
             task_id=task_id,
             action=InterventionAction.MARK,
-            previous_message=message,
+            details=record.InterventionDetails(previous_message=message),
             reason=reason,
             requested_by=current_actor().name,
         )

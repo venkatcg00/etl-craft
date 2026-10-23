@@ -72,8 +72,17 @@ def cluster(cli_project, monkeypatch, tmp_path):
     yield p, url, token, agent_dir
 
 
-def test_agent_runs_from_its_own_project_without_engine_credentials(cluster, monkeypatch):
+@pytest.mark.parametrize("fan_out", [False, True], ids=["plain", "fan-out"])
+def test_agent_runs_from_its_own_project_without_engine_credentials(cluster, monkeypatch, fan_out):
     p, url, token, agent_dir = cluster
+    if fan_out:
+        (agent_dir / "python_scripts" / "load.py").write_text(
+            "from etl_craft.scripting import ScriptResult\n"
+            "def run(task):\n"
+            "    print('project copy ran')\n"
+            "    return task.fan_out(['first','second'], "
+            "lambda key: ScriptResult(4 if key == 'first' else 3), max_items=2)\n"
+        )
     controller = p.start("controller", "--no-ui")
     code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "agent-test")
     assert code == 0, output
@@ -90,6 +99,15 @@ def test_agent_runs_from_its_own_project_without_engine_credentials(cluster, mon
                 )
             ).one()
             logs = conn.execute(text("SELECT CONTENT AS content FROM AUD_ATTEMPT_LOG_CHUNKS")).all()
+        if fan_out:
+            with p.engine.connect() as conn:
+                items = conn.execute(
+                    text(
+                        "SELECT ITEM_KEY AS key, ROW_COUNT AS rows FROM AUD_TASK_ITEMS "
+                        "WHERE STATUS='SUCCESS' ORDER BY ITEM_KEY"
+                    )
+                ).all()
+                assert [(r.key, r.rows) for r in items] == [("first", 4), ("second", 3)]
         assert row.owner_id == str(token.metadata.token_id)
         assert row.target_count == 7
         assert "project copy ran" in "".join(r.content for r in logs)

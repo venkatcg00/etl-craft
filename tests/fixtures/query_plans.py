@@ -90,6 +90,7 @@ VALUES = {
     "updated_date": MOMENT,
     "arguments": "{}",
     "evidence": "{}",
+    "entries": '[{"key":"one","report_id":"11111111-1111-1111-8111-111111111111"}]',
     "observations": "{}",
     "resources": '[{"lock_key": 1, "resource_name": "plan", "confirmed": null}]',
     "task_run_ids": "[1,2]",
@@ -119,6 +120,9 @@ def bindings(sql, name=""):
         "lineage_cache_edges": {"confirmed_keys": [(1, "plan")]},
         "clear_rule_results": {"keys": ["key_1"]},
         "control_event_probes": {"keys": [1, 2]},
+        "item_report": {"report_id": "plan-report"},
+        "item_latest": {"key": "one"},
+        "item_insert": {"key": "one", "number": 1, "report_id": "plan-report"},
         "event_consumed_keys": {"keys": ["key_1", "key_2"]},
     }.get(name, {})
     parameters = text(sql).compile().params
