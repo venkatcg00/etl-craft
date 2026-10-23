@@ -666,6 +666,9 @@ Warehouse SQL is unchanged; no cloud suite was needed.
   classifier regressions (owner-approved, 23 October 2026). A later run failed on the provider's
   table quota, still confirmed by an allocation probe. The successful SQL paths match the
   passing wheel; the failed run is retained in the PR rather than treated as unavailable.
+- S5.AJ's CI follow-up renders each documentation version once through mike with a temporary
+  strict configuration. Release-specific dependencies, YAML tags and exported-content checks
+  remain; the 120-second test timeout is unchanged.
 - S5.AJ also carries the owner's S7.W plan addition (22 October 2026): evaluate the complete
   documentation toolchain after MkDocs 1.x. The existing pin and warning remain unchanged.
 

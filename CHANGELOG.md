@@ -55,6 +55,9 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Versioned documentation renders each version once in strict mode, retaining its content
+  checks while avoiding duplicate rendering during publication.
+
 - Fewer warehouse and Engine DB round trips. Tasks reuse their warehouse engine across
   steps, including repeated `task.warehouse()` calls, keeping single-writer reservations and
   attempt tags. Managed SQL actions read each table's shape once until their own DDL, fold
