@@ -35,15 +35,17 @@ from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import AttemptStatus, ControlAcknowledgement, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
+from etl_craft.core.ownership import attempt_holder
 from etl_craft.engine import attempt_starts, controls, transitions
 from etl_craft.engine.connection import engine_db
-from etl_craft.engine.resource_locks import attempt_scope
+from etl_craft.engine.resource_locks import attempt_scope, holder_tag
 from etl_craft.engine.transitions import finish_task_run
 from etl_craft.execution.classify import classify_failure
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.control_flow import process_local_queries
 from etl_craft.execution.leases import process_start
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
+from etl_craft.warehouse.fencing import cancellation_scope, stop_current_queries
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +163,10 @@ def run_handler(
         if identity is None:
             result = resolve_handler(context.handler)(context, engine)
         else:
-            with attempt_scope(*identity):
+            with (
+                attempt_scope(*identity),
+                cancellation_scope(context.config, holder_tag(attempt_holder(*identity))),
+            ):
                 result = resolve_handler(context.handler)(context, engine)
     except EtlCraftError as error:
         logger.error("task failed: %s", error)
@@ -278,6 +283,7 @@ def exit_now(code: int) -> NoReturn:
 
 
 def _interrupt(signum: int, frame: FrameType | None) -> None:
+    stop_current_queries()
     _flush()
     raise KeyboardInterrupt(f"stopped by {signal.Signals(signum).name}")
 

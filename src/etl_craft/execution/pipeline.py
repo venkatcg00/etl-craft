@@ -14,7 +14,8 @@ without that check, and its finished tasks are not run again. Before either, the
 run uses are tested (see ``connections``).
 
 An operator may abort a local run (``etl-craft abort``): its running tasks are stopped, no
-other task starts, and the run ends ``CANCELLED``. ``etl-craft stop`` lets them finish first.
+other task starts, and the run ends ``CANCELLED``. ``etl-craft stop`` also waits for confirmed
+process and query endings.
 
 Every run of a pipeline with ``SLA_IN_HOURS`` is marked ``MET`` or ``BREACHED``. While a local run
 is going, a watcher marks it ``BREACHED`` as soon as the SLA passes; otherwise the finalize step

@@ -42,3 +42,47 @@ def test_snowflake_next_holder_cancels_the_expired_holders_query(tmp_path):
         w.execute(f"DROP TABLE IF EXISTS {table}")
         engine.dispose()
         w.warehouse.dispose()
+
+
+@pytest.mark.parametrize(
+    "vendor,variables,slow",
+    [
+        pytest.param(
+            "Snowflake",
+            SNOWFLAKE_VARS,
+            "SELECT SYSTEM$WAIT(120) AS cancel_slow",
+            marks=pytest.mark.cloud_snowflake,
+        ),
+        pytest.param(
+            "Databricks",
+            None,
+            "SELECT MAX(sha2(CAST(id AS STRING),256)) AS cancel_slow FROM range(10000000000)",
+            marks=pytest.mark.cloud_databricks,
+        ),
+    ],
+)
+def test_tagged_cloud_query_cancellation_confirms_the_statement_ended(
+    tmp_path, vendor, variables, slow
+):
+    from etl_craft.engine.resource_locks import holder_tag
+    from etl_craft.execution.query_cancellation import confirm
+    from etl_craft.warehouse.connection import warehouse_dialect
+    from fixtures.cloud import DATABRICKS_VARS
+
+    variables = variables or DATABRICKS_VARS
+    prefix = vendor.upper()
+    require_variables(prefix, variables)
+    fields = {key.capitalize(): f"ETL_CRAFT_TEST_{prefix}_{key}" for key in variables}
+    schema = os.environ[f"ETL_CRAFT_TEST_{prefix}_SCHEMA"]
+    w = cloud_world(tmp_path, vendor, fields, TableFormat.NATIVE, schema)
+    engine, thread, errors = start_old_write(w, slow, wait_seconds=90)
+    try:
+        assert confirm(w.config, holder_tag(OLD)) is None
+        thread.join(5)
+        assert not thread.is_alive()
+        assert errors, "cancel was acknowledged while the original statement still ran"
+        with w.warehouse.begin() as conn:
+            assert warehouse_dialect(w.config).running_tagged(conn, holder_tag(OLD)) == 0
+    finally:
+        engine.dispose()
+        w.warehouse.dispose()

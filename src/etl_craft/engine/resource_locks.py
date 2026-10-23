@@ -64,15 +64,32 @@ class Scope:
 _scope: ContextVar[Scope | None] = ContextVar("resource_lock_scope", default=None)
 
 
+def current_holder(identity: str) -> Holder:
+    """Carry a resource identity into a fresh process without changing its namespace."""
+    scope = _scope.get()
+    return (
+        scope.holder
+        if scope is not None
+        else Holder(f"action:{identity}", identity, current_actor())
+    )
+
+
 @contextmanager
-def attempt_scope(attempt_id: int, owner: str) -> Iterator[None]:
-    """Bind all locks taken by a task process to its exact attempt owner."""
-    holder = Holder(attempt_holder(attempt_id, owner), owner, current_actor(), attempt_id)
+def holder_scope(holder: Holder) -> Iterator[None]:
+    """Bind a known holder; each process tracks its own resources under that identity."""
     token = _scope.set(Scope(holder))
     try:
         yield
     finally:
         _scope.reset(token)
+
+
+@contextmanager
+def attempt_scope(attempt_id: int, owner: str) -> Iterator[None]:
+    """Bind all locks taken by a task process to its exact attempt owner."""
+    holder = Holder(attempt_holder(attempt_id, owner), owner, current_actor(), attempt_id)
+    with holder_scope(holder):
+        yield
 
 
 def holder_tag(holder_id: str) -> str:

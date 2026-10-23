@@ -39,9 +39,18 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
             )
         resources = from_json(AgentResources, json.loads(agent.resource_report))
         commands = conn.execute(statement(conn, "agent_commands"), {"agent_id": agent_id}).first()
-        attempts = conn.execute(statement(conn, "agent_attempts"), {"owner": str(agent_id)}).all()
-        if commands is not None or any(a.cancel_requested_at is not None for a in attempts):
-            return AgentReply({"controls_pending": True})
+        attempts = conn.execute(
+            statement(conn, "agent_control_work"), {"owner": str(agent_id)}
+        ).all()
+        if commands is not None or any(
+            a.cancel_requested_at is not None or a.cleanup for a in attempts
+        ):
+            return AgentReply(
+                {
+                    "controls_pending": True,
+                    "cleanup": [int(a.attempt_id) for a in attempts if a.cleanup],
+                }
+            )
         if agent.status != AgentStatus.ACTIVE:
             return None
         free = free_slots(conn, agent_id, resources)

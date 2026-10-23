@@ -27,12 +27,13 @@ from etl_craft.execution.leases import process_start
 from etl_craft.handlers.registry import TaskContext, format_task_log, resolve_handler
 from etl_craft.services.operations.agent_models import AgentTask
 from etl_craft.services.operations.serialization import encode, from_json
-from etl_craft.warehouse.fencing import confirm_stopped
+from etl_craft.warehouse.fencing import cancellation_scope, confirm_stopped, stop_current_queries
 
 logger = logging.getLogger(__name__)
 
 
 def _interrupt(signum: int, frame: FrameType | None) -> None:
+    stop_current_queries()
     raise KeyboardInterrupt(signal.Signals(signum).name)
 
 
@@ -90,7 +91,8 @@ def main() -> int:
         exit_code=ExitCode.UNEXPECTED,
     )
     try:
-        counts = resolve_handler(context.handler)(context, store)
+        with cancellation_scope(config, store.session_tag):
+            counts = resolve_handler(context.handler)(context, store)
         result = replace(
             result,
             status=AttemptStatus.SUCCESS,

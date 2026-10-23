@@ -1,0 +1,2 @@
+SELECT w.TASK_ID AS task_id FROM AUD_GATE_WAITS w
+WHERE w.WAIT_KIND='EVENT' AND w.PIPELINE_RUN_ID=:run_id AND (CAST(:task_id AS bigint) IS NULL OR w.TASK_ID=:task_id)

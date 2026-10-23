@@ -18,7 +18,7 @@ from etl_craft.core.enums import (
     ControlAction,
     RunStatus,
 )
-from etl_craft.engine import attempt_starts, controls, runlog, transitions
+from etl_craft.engine import attempt_cancellation, attempt_starts, controls, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
@@ -27,6 +27,7 @@ from etl_craft.execution.processes import (
 )
 
 logger = logging.getLogger(__name__)
+STOP_ACTIONS = frozenset({ControlAction.STOP, ControlAction.ABORT})
 
 
 def attempt_log_path(
@@ -151,7 +152,7 @@ def record_attempt(
             statement(conn, "control_task_context"), {"task_run_id": task_run_id}
         ).one()
         fences = controls.blocked(conn, pipeline_run_id)
-        aborted = ControlAction.ABORT in (fences.get(None), fences.get(row.task_id))
+        aborted = any(fences.get(key) in STOP_ACTIONS for key in (None, row.task_id))
         cancelled = (
             aborted
             or runlog.fetch_pipeline_run_status(conn, pipeline_run_id) == RunStatus.CANCELLED
@@ -159,6 +160,8 @@ def record_attempt(
         if status == RunStatus.IN_PROGRESS and cancelled:
             status = RunStatus.CANCELLED
             message = f"an abort was requested, so the task process {result.describe()}"
+            if result.queries_ended:
+                attempt_cancellation.acknowledge_cancellation(conn, attempt_id, owner)
             transitions.cancel_attempt(conn, attempt_id, current_actor(), error_message=message)
         elif status == RunStatus.IN_PROGRESS:
             status = RunStatus.FAILED

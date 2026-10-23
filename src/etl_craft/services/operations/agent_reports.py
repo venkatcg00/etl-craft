@@ -31,7 +31,14 @@ from etl_craft.core.errors import (
 from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.text import qualify, sha256_hex
 from etl_craft.core.time import as_utc
-from etl_craft.engine import attempt_starts, locks, resource_locks, transitions
+from etl_craft.engine import (
+    attempt_cancellation,
+    attempt_starts,
+    controls,
+    locks,
+    resource_locks,
+    transitions,
+)
 from etl_craft.engine.agent_state import fence
 from etl_craft.engine.audit import ActionRequest
 from etl_craft.engine.notifications import notification_hub
@@ -195,8 +202,8 @@ async def _wait_lock(ctx: OperationContext, request: AgentTask) -> AgentReply:
 def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[AgentReply]:
     """Apply this token's bounded task operation; no route accepts SQL or another task's ids."""
     check_agent(ctx, request)
-    if request.operation == AgentReport.END:
-        return _end(ctx, request)
+    if request.operation in {AgentReport.END, AgentReport.CANCEL}:
+        return {AgentReport.END: _end, AgentReport.CANCEL: _cancel}[request.operation](ctx, request)
     if request.operation == AgentReport.LOCK:
         return _wait_lock(ctx, request)
     task = _context(ctx, request)
@@ -284,11 +291,8 @@ def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
         fence(conn, request.attempt_id, owner)
         if request.failure is not None:
             transitions.record_attempt_failure(conn, request.attempt_id, request.failure)
-        if status == AttemptStatus.CANCELLED:
-            conn.execute(
-                statement(conn, "agent_cancel_ack"),
-                {"attempt_id": request.attempt_id, "owner": owner},
-            )
+        if status == AttemptStatus.CANCELLED and request.queries_ended:
+            attempt_cancellation.acknowledge_cancellation(conn, request.attempt_id, owner)
         transitions.finish_attempt(
             conn,
             request.attempt_id,
@@ -301,6 +305,8 @@ def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
             exit_code=request.exit_code,
             offset=request.offset,
         )
+        if status == AttemptStatus.CANCELLED:
+            controls.observe_exit(conn, request.attempt_id, queries_ended=request.queries_ended)
         ActionRequest(
             ActionName.AGENT_REPORT,
             {
@@ -313,4 +319,31 @@ def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
             outcome=ActionOutcome.SUCCESS,
             exit_code=request.exit_code,
         ).write(conn)
+    return AgentReply()
+
+
+def _cancel(ctx: OperationContext, request: AgentTask) -> AgentReply:
+    """Accept physical observations only from the pinned attempt's authenticated owner."""
+    owner = str(ctx.credential_token_id)
+    with ctx.engine.begin() as conn:
+        row = conn.execute(
+            statement(conn, "agent_control_owner"),
+            {
+                "attempt_id": request.attempt_id,
+                "owner": owner,
+            },
+        ).one_or_none()
+        if row is None:
+            raise PermissionDeniedError(
+                f"attempt {request.attempt_id}: no pending control owned by agent {owner}; "
+                "expected this token's pinned attempt; refresh the control request"
+            )
+        if row.status in {AttemptStatus.CLAIMED, AttemptStatus.RUNNING}:
+            fence(conn, request.attempt_id, owner)
+            if request.queries_ended:
+                attempt_cancellation.acknowledge_cancellation(conn, request.attempt_id, owner)
+        controls.observe_exit(conn, request.attempt_id, queries_ended=request.queries_ended)
+    from etl_craft.execution.control_flow import advance
+
+    advance(ctx.engine, row.pipeline_run_id, observed=True, reason=request.error_message)
     return AgentReply()

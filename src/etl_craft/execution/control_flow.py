@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 
 import psutil
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
@@ -15,6 +16,8 @@ from etl_craft.engine import controls, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.execution.leases import process_start
 from etl_craft.warehouse.connection import warehouse_dialect
+
+logger = logging.getLogger(__name__)
 
 ACTIVE_ATTEMPTS = frozenset({AttemptStatus.QUEUED, AttemptStatus.CLAIMED, AttemptStatus.RUNNING})
 
@@ -43,15 +46,27 @@ def abort_requested(engine: Engine, run_id: int, task_id: int) -> bool:
     """Whether an agent must terminate this task, never another task's process."""
     with engine.connect() as conn:
         fences = controls.blocked(conn, run_id)
-    return ControlAction.ABORT in (fences.get(None), fences.get(task_id))
+    return any(
+        action in {ControlAction.STOP, ControlAction.ABORT}
+        for action in (fences.get(None), fences.get(task_id))
+    )
 
 
 @acting_as(SYSTEM_ACTOR)
-def advance(engine: Engine, run_id: int | None = None, *, observed: bool = False) -> None:
+def advance(
+    engine: Engine,
+    run_id: int | None = None,
+    *,
+    observed: bool = False,
+    reason: str | None = None,
+    config: ConnectorConfig | None = None,
+) -> None:
     """Observe pinned work and finish controls only when actual exit/query evidence exists."""
     with engine.connect() as conn:
         rows = conn.execute(statement(conn, "control_pending"), {"run_id": run_id}).all()
     for row in rows:
+        if config is not None:
+            _clear_stale_probes(engine, config, row.pipeline_run_id, row.task_id)
         with engine.begin() as conn:
             controls.lock_run(conn, row.pipeline_run_id)
             current = controls.get(conn, row.control_id)
@@ -68,11 +83,22 @@ def advance(engine: Engine, run_id: int | None = None, *, observed: bool = False
                     )
                     controls.observe_exit(conn, attempt.attempt_id, queries_ended=True)
             attempts = controls.affected(conn, current.attempt_ids)
-            waiting = [
-                a.attempt_id
-                for a in attempts
-                if a.process_ended_at is None or a.queries_ended_at is None
-            ]
+            probes = controls.event_probes(conn, row.pipeline_run_id, row.task_id)
+            if probes:
+                controls.update(
+                    conn,
+                    row.control_id,
+                    ControlStatus.ACKNOWLEDGED,
+                    reason
+                    or (
+                        current.message
+                        if current.status == ControlStatus.ACKNOWLEDGED
+                        else f"waiting for probe process/query endings {probes}; "
+                        "inspect the warehouse before retrying"
+                    ),
+                )
+                continue
+            waiting = [a.attempt_id for a in attempts if _awaiting_endings(a)]
             if waiting and not observed:
                 continue
             if waiting:
@@ -80,10 +106,16 @@ def advance(engine: Engine, run_id: int | None = None, *, observed: bool = False
                     conn,
                     row.control_id,
                     ControlStatus.ACKNOWLEDGED,
-                    f"waiting for process/query endings of attempts {waiting}; "
-                    "a request or expired lease is not completion evidence",
+                    reason
+                    or (
+                        current.message
+                        if current.status == ControlStatus.ACKNOWLEDGED
+                        else f"waiting for process/query endings of attempts {waiting}; "
+                        "a request or expired lease is not completion evidence"
+                    ),
                 )
                 continue
+            _cancel_event_tasks(conn, row.pipeline_run_id, row.task_id)
             if row.task_id is None:
                 lease = conn.execute(
                     statement(conn, "run_lease"), {"row_id": row.pipeline_run_id}
@@ -100,9 +132,9 @@ def advance(engine: Engine, run_id: int | None = None, *, observed: bool = False
             )
 
 
-def after_exit(engine: Engine, run_id: int) -> None:
+def after_exit(engine: Engine, run_id: int, *, reason: str | None = None) -> None:
     """Let an independently started task acknowledge controls without a pipeline scheduler."""
-    advance(engine, run_id, observed=True)
+    advance(engine, run_id, observed=True, reason=reason)
 
 
 @acting_as(SYSTEM_ACTOR)
@@ -131,4 +163,48 @@ def reconcile_endings(
                 controls.observe_exit(
                     conn, attempt.attempt_id, queries_ended=process_local_queries(config)
                 )
-    advance(engine, observed=True)
+    advance(engine, observed=True, config=config)
+
+
+def _cancel_event_tasks(conn: Connection, run_id: int, task_id: int | None) -> None:
+    for row in conn.execute(
+        statement(conn, "control_event_tasks"), {"run_id": run_id, "task_id": task_id}
+    ):
+        binding = transitions.find_or_create_task_run(conn, row.task_id, run_id)
+        if binding.status == RunStatus.IN_PROGRESS:
+            transitions.finish_task_run(
+                conn,
+                binding.task_run_id,
+                status=RunStatus.CANCELLED,
+                error_message="event wait cancelled after probe queries ended",
+            )
+
+
+def _clear_stale_probes(
+    engine: Engine, config: ConnectorConfig, run_id: int, task_id: int | None
+) -> None:
+    """Recover dead probe holders only through the same confirmed resource takeover."""
+    from etl_craft.core.errors import LockTimeoutError
+    from etl_craft.handlers.resources import LocalLocker
+
+    with engine.connect() as conn:
+        probes = controls.event_probes(conn, run_id, task_id)
+    for probe in probes:
+        with engine.connect() as conn:
+            current = conn.execute(
+                statement(conn, "resource_lock_read"), {"key": probe.lock_key}
+            ).one_or_none()
+        if current is not None and current.stale and current.holder_id == probe.holder_id:
+            try:
+                with LocalLocker(engine, config).hold(probe.lock_key, current.resource_name, 0.1):
+                    pass
+            except LockTimeoutError:
+                logger.exception("run %s: probe cancellation remains pending", run_id)
+
+
+def _awaiting_endings(attempt: controls.ControlAttempt) -> bool:
+    return (
+        attempt.status in ACTIVE_ATTEMPTS
+        or attempt.process_ended_at is None
+        or attempt.queries_ended_at is None
+    )

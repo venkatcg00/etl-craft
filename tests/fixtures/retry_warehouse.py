@@ -23,7 +23,11 @@ def save_project(world):
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {"Task_timeout_seconds": 60},
-        "Engine": {"dev": profile_block(config.engine, "main")},
+        "Engine": {
+            "dev": profile_block(
+                config.engine, config.engine.schema or world.engine_db.dialect.default_schema_name
+            )
+        },
         "Warehouse": {
             "Table_format": str(config.warehouse_table_format),
             "dev": profile_block(config.warehouse, world.schema),

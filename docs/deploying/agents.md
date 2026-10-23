@@ -86,10 +86,17 @@ credentials. Embedded DuckDB needs no stop: a statement ends with its process. T
 login needs the right to stop its own sessions (PostgreSQL `pg_terminate_backend`, Trino
 `kill_query`, Snowflake `SYSTEM$CANCEL_QUERY`).
 
-Databricks cannot yet list and stop another session's statements this way, so
-`CONTROLLER_AGENTS` refuses a Databricks warehouse at controller startup and in `doctor`. Use
-local execution with Databricks. Local execution there does not yet confirm server-side
-termination after a client dies.
+Databricks requires SQL connector 4.5.0 or newer (installed by the `databricks` extra).
+Sessions carry an `etl_craft_holder` query tag. The adapter reads every active
+Query History page, cancels matching statement IDs through the Statement Execution API and
+confirms that no tagged query remains. The SQL connector's existing authentication is reused;
+the warehouse identity needs query-history access and permission to cancel those statements.
+Missing permissions, incomplete history or an unconfirmed stop leave the control pending.
+Agents never open an Engine DB connection for cancellation.
+
+Operator stop and abort requests wake waiting agent claims through pool and agent notifications.
+Renewal remains the fallback when a notification is lost. The agent stops the child and confirms
+its tagged warehouse statements ended before reporting a cancellation acknowledgement.
 
 ## Connection pooling and shared logs
 

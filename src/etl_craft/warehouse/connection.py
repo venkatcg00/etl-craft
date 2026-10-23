@@ -251,6 +251,7 @@ def open_warehouse(
     locks: ResourceLocker | None = None,
     *,
     wait_seconds: float = 0,
+    session_tag: str | None = None,
     **engine_kwargs: Any,
 ) -> Iterator[Engine]:
     """Open the warehouse for one unit of work, queued behind other writers where needed.
@@ -260,7 +261,7 @@ def open_warehouse(
     reused, and disposed before the task releases its warehouse reservation.
     """
     scope = _TASK_ENGINES.get()
-    tag = locks.session_tag if locks is not None else None
+    tag = locks.session_tag if locks is not None else session_tag
     if scope is not None:
         stack, engines = scope
         key = (id(config), tag)

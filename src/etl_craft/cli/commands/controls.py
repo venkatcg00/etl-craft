@@ -19,7 +19,7 @@ from etl_craft.services.operations.requests import ControlRequest
 
 HELP = {
     ControlAction.STOP: (
-        "Stop the selected run or task gracefully: running attempts finish, nothing new starts.",
+        "Stop the selected run or task: stop its processes and queries; nothing new starts.",
         "the run or task to stop",
     ),
     ControlAction.ABORT: (

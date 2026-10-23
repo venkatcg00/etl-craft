@@ -14,7 +14,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import SETTLED_STATUSES, DeploymentProfile, Handler, RunStatus
+from etl_craft.core.enums import (
+    SETTLED_STATUSES,
+    ControlAction,
+    DeploymentProfile,
+    Handler,
+    RunStatus,
+)
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.outage import OutageBudget
@@ -86,7 +92,7 @@ class Scheduler:
             if config.deployment == DeploymentProfile.CONTROLLER_AGENTS
             else {}
         )
-        self.event_stop = threading.Event()
+        self.event_stops: dict[int, threading.Event] = {}
         self.sql_events: dict[int, bool] = {}
         self.event_due: dict[int, EventCheck] = {}
         self.file_events = FileEvents()
@@ -123,9 +129,7 @@ class Scheduler:
 
     def _step(self) -> bool:
         self._harvest()
-        control_flow.advance(self.engine, self.pipeline_run_id, observed=True)
-        with self.engine.connect() as conn:
-            fences = controls.blocked(conn, self.pipeline_run_id)
+        fences = self._observe_controls()
         if self.cancel.is_set():
             self._stop_running()
         if (
@@ -336,7 +340,7 @@ class Scheduler:
                 task_id,
                 self.clock.now(),
                 decisions=decisions,
-                cancel=self.event_stop,
+                cancel=self.event_stops.setdefault(task_id, threading.Event()),
             )
         return EventCheck(self.clock.now() + timedelta(seconds=0.1))
 
@@ -410,8 +414,23 @@ class Scheduler:
                 raise status.error
         return ended
 
+    def _observe_controls(self) -> dict[int | None, ControlAction]:
+        control_flow.advance(self.engine, self.pipeline_run_id, observed=True, config=self.config)
+        with self.engine.connect() as conn:
+            fences = controls.blocked(conn, self.pipeline_run_id)
+        for task_id, stopped in self.event_stops.items():
+            if any(
+                fences.get(key) in {ControlAction.STOP, ControlAction.ABORT}
+                for key in (None, task_id)
+            ):
+                stopped.set()
+            else:
+                stopped.clear()
+        return fences
+
     def _stop_running(self) -> None:
-        self.event_stop.set()
+        for stopped in self.event_stops.values():
+            stopped.set()
         for handle in self.jobs.values():
             self.pool.cancel(handle, self.grace_seconds)
 
@@ -428,7 +447,8 @@ class Scheduler:
         self.jobs.clear()
         self.file_events.close()
         if self.event_executor is not None:
-            self.event_stop.set()
+            for stopped in self.event_stops.values():
+                stopped.set()
             self.event_executor.shutdown(wait=True, cancel_futures=True)
         if self.own_pool is not None:
             self.own_pool.close()

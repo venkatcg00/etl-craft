@@ -127,7 +127,7 @@ def run_child(
             cancelled = _wait(process, spec.timeout_seconds or None, cancel)
             if cancelled:
                 logger.warning("stopping pid %s: cancellation was requested", process.pid)
-                _stop_group(process, birth, kill_grace_seconds)
+                _stop_group(process, birth, min(kill_grace_seconds, 1))
         except subprocess.TimeoutExpired:
             timed_out = True
             logger.warning(

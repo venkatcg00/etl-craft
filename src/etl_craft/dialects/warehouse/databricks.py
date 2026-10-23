@@ -50,6 +50,25 @@ _TEMPORARY_TABLE_UNAVAILABLE = frozenset(
 class DatabricksWarehouse(WarehouseDialect):
     """Databricks, Delta tables. A session has no default schema, so scratch tables are named."""
 
+    session_fencing = True
+
+    def session_tag_args(self, tag: str) -> Mapping[str, Any]:
+        """Apply one holder identity to every statement in the session."""
+        return {"query_tags": {"etl_craft_holder": tag}}
+
+    def stop_tagged(self, conn: Connection, tag: str) -> None:
+        """Request cancellation of every unfinished query belonging to this holder."""
+        from etl_craft.dialects.warehouse.databricks_queries import active, request
+
+        for identity in active(conn, tag):
+            request(conn, f"statements/{identity}/cancel", method="POST")
+
+    def running_tagged(self, conn: Connection, tag: str) -> int:
+        """Count unfinished tagged statements; a cancel response alone is no acknowledgement."""
+        from etl_craft.dialects.warehouse.databricks_queries import active
+
+        return len(active(conn, tag))
+
     def script_autocommit(self, engine: Engine, driver: DBAPIConnection) -> None:
         """Keep the native driver's autocommit outside explicit file transactions."""
         return None

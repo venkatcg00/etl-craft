@@ -124,7 +124,18 @@ EXPECTED = {
     enums.AgentStatus: {"ACTIVE", "DRAINING", "GONE"},
     enums.AgentCommand: {"DRAIN", "RESUME", "STOP"},
     enums.SlotKind: {"python", "warehouse"},
+    enums.DatabricksQueryStatus: {
+        "QUEUED",
+        "STARTED",
+        "COMPILING",
+        "COMPILED",
+        "RUNNING",
+        "CANCELED",
+        "FAILED",
+        "FINISHED",
+    },
     enums.AgentReport: {
+        "CANCEL",
         "START",
         "END",
         "STATE",

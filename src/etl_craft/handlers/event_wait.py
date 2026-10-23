@@ -47,6 +47,7 @@ class Event:
     key_column: str | None = None
     max_rows: int = 10000
     task_id: int = 0
+    session_tag: str | None = None
 
 
 def read_event(config: ConnectorConfig, params: Mapping[str, str]) -> Event:
@@ -136,6 +137,7 @@ def probe(
                 config,
                 LocalLocker(engine, config) if engine is not None else None,
                 wait_seconds=0.1,
+                session_tag=event.session_tag,
             ) as warehouse,
             warehouse.connect() as conn,
         ):
