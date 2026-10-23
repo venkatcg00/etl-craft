@@ -137,10 +137,13 @@ def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
     with db.engine.begin() as conn:
         from etl_craft.engine.queries import run_script
 
-        run_script(
-            conn,
-            db.dialect.split_statements((project / "metadata/support_insights.sql").read_text()),
+        statements = db.dialect.split_statements(
+            (project / "metadata/support_insights.sql").read_text()
         )
+        # The graph fixture predates placement columns; keep its graph SQL unchanged.
+        placement = [sql for sql in statements if "MAX_PARALLEL_TASKS" in sql]
+        assert len(placement) == 1
+        run_script(conn, [sql for sql in statements if sql not in placement])
     before = collect(db.engine, config, refresh=True, record=False)
     assert before and not [item.error for item in before if item.error]
     migrations.apply_pending_migrations(db.engine)

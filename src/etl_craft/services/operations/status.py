@@ -130,20 +130,9 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
         action = f"The supervisor can claim the retry at {retry_at.isoformat()}."
         if retry_at <= snapshot.now:
             action = "The retry is due; an available supervisor can claim it."
+        action = _queued_reason(task) or action
     elif task is not None and task.status == RunStatus.IN_PROGRESS:
-        state, action = (
-            (
-                "waiting on child",
-                f"Wait for child pipeline_run_id(s)={task.child_run_ids}; "
-                "the controller owns this wait.",
-            )
-            if task.child_run_ids
-            and any(
-                w.wait_kind == WaitKind.PIPELINE_RUN and w.next_check_at
-                for w in snapshot.gate_waits
-            )
-            else ("running", "Wait for the current attempt to finish.")
-        )
+        state, action = _active_state(snapshot)
     elif snapshot.unsatisfiable:
         state, action = (
             "unsatisfiable",
@@ -188,6 +177,29 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
         state,
         action,
     )
+
+
+def _queued_reason(task: TaskRunView | None) -> str | None:
+    if task is not None and task.attempts:
+        last = task.attempts[-1]
+        if last.status == AttemptStatus.QUEUED:
+            return last.error_message
+    return None
+
+
+def _active_state(snapshot: TaskSnapshot) -> tuple[str, str]:
+    task = snapshot.task
+    assert task is not None
+    if task.attempts and task.attempts[-1].status == AttemptStatus.QUEUED:
+        return "queued", _queued_reason(task) or "Wait for capacity to claim this queued attempt."
+    if task.child_run_ids and any(
+        w.wait_kind == WaitKind.PIPELINE_RUN and w.next_check_at for w in snapshot.gate_waits
+    ):
+        return "waiting on child", (
+            f"Wait for child pipeline_run_id(s)={task.child_run_ids}; "
+            "the controller owns this wait."
+        )
+    return "running", "Wait for the current attempt to finish."
 
 
 @dataclass(frozen=True)
@@ -498,6 +510,7 @@ def _pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView
     for snapshot in snapshots:
         task = snapshot.task
         why = explain(snapshot)
+        message = _queued_reason(task) or (task.error_message if task is not None else None)
         tasks.append(
             TaskStatusView(
                 snapshot.task_id,
@@ -509,9 +522,7 @@ def _pipeline_status(ctx: OperationContext, request: RunSelection) -> StatusView
                 elapsed_seconds(task.start_date, task.end_date or now)
                 if task is not None
                 else None,
-                task.error_message.splitlines()[0]
-                if task is not None and task.error_message
-                else None,
+                message.splitlines()[0] if message else None,
                 why,
             )
         )

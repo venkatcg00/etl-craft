@@ -31,7 +31,6 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     Handler,
     RunStatus,
-    YesNo,
 )
 from etl_craft.core.errors import (
     ConfigurationError,
@@ -528,7 +527,11 @@ def admit_attempt(
         raise ConfigurationError("a task process needs the craft-connector.yml it was loaded from")
     with engine.connect() as conn:
         params = fetch_task_parameters(conn, task_id)
-        handler = fetch_task_execution_detail(conn, task_id).handler
+        detail = fetch_task_execution_detail(conn, task_id)
+        handler = detail.handler
+    from etl_craft.execution.placement import check_admission
+
+    reason = check_admission(config, detail, params)
     timeout = task_timeout_seconds(params, config)
     policy = task_retry_policy(params, config)
     fault_point("runner.after_timeout")
@@ -550,23 +553,15 @@ def admit_attempt(
             attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
             transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on)
         if active is None or active.status != AttemptStatus.QUEUED:
+            from etl_craft.engine.dispatch import dispatch_options
             from etl_craft.engine.resource_locks import notify
-            from etl_craft.execution.pools import slot_kind
 
-            conn.execute(
-                statement(conn, "agent_queue"),
-                {
-                    "attempt_id": attempt_id,
-                    "kind": slot_kind(handler),
-                    "force": YesNo.YES if force else YesNo.NO,
-                    "rerun": YesNo.YES if rerun else YesNo.NO,
-                    "reason": (
-                        f"QUEUED in pool default: waiting for free {slot_kind(handler)} capacity; "
-                        "the controller does not execute cluster attempts"
-                        if config.deployment == DeploymentProfile.CONTROLLER_AGENTS
-                        else None
-                    ),
-                },
+            dispatch_options(
+                conn,
+                attempt_id,
+                handler,
+                reason,
+                options={"force": force, "rerun": rerun},
             )
             notify(conn)
         trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
@@ -584,34 +579,59 @@ def admit_attempt(
         lease_seconds=leases.LEASE_SECONDS,
         force=force,
         rerun=rerun,
+        pool=detail.pool,
     )
 
 
 def execute_attempt(
     engine: Engine, config: ConnectorConfig, spec: AttemptSpec, child: ChildOptions
 ) -> TaskOutcome:
-    """Claim an admitted attempt, run it in its own process, and record how it ended.
+    """Wait for shared claim limits without failing capacity-blocked work."""
+    from etl_craft.execution.placement import wait_for_attempt
 
-    This is the one way a task process starts on this host: in the foreground for
-    ``run --task-code``, and on the local pool's threads for everything else. Anything that fails
-    after the claim (the log folder, starting the process, an interrupt) records the attempt
-    ``FAILED`` with the cause, unless the task process recorded an outcome first, and is then
-    raised.
-    """
+    return wait_for_attempt(engine, config, spec, child)
+
+
+def try_execute_attempt(
+    engine: Engine,
+    config: ConnectorConfig,
+    spec: AttemptSpec,
+    child: ChildOptions,
+    candidates: tuple[int, ...] | None = None,
+) -> TaskOutcome | None:
+    """Claim if capacity fits, then supervise; a refused capacity check leaves work queued."""
     if config.deployment == DeploymentProfile.CONTROLLER_AGENTS:
         from etl_craft.execution.pools.queue import wait_attempt
 
         return wait_attempt(engine, config, spec, child)
     owner = leases.owner_id()
     with engine.begin() as conn:
-        transitions.claim_attempt(
+        from etl_craft.engine.agent_transitions import claim_with_capacity
+        from etl_craft.execution.placement import local_capacity, local_headroom
+
+        claimed = claim_with_capacity(
             conn,
             spec.attempt_id,
             current_actor(),
-            owner=owner,
-            lease_expires_at=datetime.now(UTC) + timedelta(seconds=spec.lease_seconds),
-            host=socket.gethostname(),
+            {
+                "owner": owner,
+                "lease": datetime.now(UTC) + timedelta(seconds=spec.lease_seconds),
+                "host": socket.gethostname(),
+                "candidate_ids": candidates or (spec.attempt_id,),
+                **local_capacity(config).parameters(config),
+            },
+            wait=True,
         )
+        if not claimed:
+            from etl_craft.engine.placement import record_wait_reasons
+
+            record_wait_reasons(
+                conn,
+                config.max_warehouse_queries,
+                attempt_id=spec.attempt_id,
+                resources=local_headroom(conn, config),
+            )
+            return None
         conn.execute(
             statement(conn, "attempt_log_path"),
             {

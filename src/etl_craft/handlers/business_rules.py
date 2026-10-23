@@ -17,7 +17,7 @@ The scope is the rows the current run wrote (``t.PIPELINE_RUN_ID = <run>``), or 
 the task is forced; on a table with ``ACTIVE_FLAG`` (an ``SCD2_MERGE`` target) only active
 versions are judged. A forced run judges the whole table, so every flag it does not find again
 is cleared. Rules run in waves by ``SEQUENCE_NUMBER``: the rules of a wave run in
-parallel, at most ``Orchestration.Max_parallel_tasks`` at once, and the next wave starts once
+parallel, at most the measured local task capacity at once, and the next wave starts once
 every rule of this one has finished. A rule that fails is recorded ``FAILED`` and the rest of
 its wave still runs; then the task fails, naming every rule that failed. A rule that already
 succeeded under the task run is not run again, unless the task itself is run again after it

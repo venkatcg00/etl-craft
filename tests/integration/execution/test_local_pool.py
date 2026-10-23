@@ -2,6 +2,7 @@
 
 import time
 
+import pytest
 import yaml
 from sqlalchemy import text
 
@@ -87,7 +88,8 @@ def test_cancel_stops_the_task_process_and_records_the_attempt(cli_project):
     assert "interrupted" in row.error or "SIGTERM" in row.error, row.error
 
 
-def test_python_slots_keep_python_tasks_from_overlapping(cli_project):
+@pytest.mark.parametrize("pipeline_limit", [1, 1000])
+def test_python_slots_keep_python_tasks_from_overlapping(cli_project, pipeline_limit):
     project = cli_project
     raw = yaml.safe_load(project.config.config_path.read_text())
     raw["Orchestration"]["Local_python_slots"] = 1
@@ -99,6 +101,10 @@ def test_python_slots_keep_python_tasks_from_overlapping(cli_project):
     (project.config.python_scripts_dir / "load.py").write_text(script)
     (project.config.python_scripts_dir / "second.py").write_text(script)
     with project.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_PIPELINES SET MAX_PARALLEL_TASKS=:limit WHERE PIPELINE_ID=:id"),
+            {"limit": pipeline_limit, "id": project.pipeline_id},
+        )
         add_task(
             conn, project.pipeline_id, "second", "PYTHON", SCRIPT_FILE="python_scripts/second.py"
         )

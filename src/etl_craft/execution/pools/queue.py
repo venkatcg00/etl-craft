@@ -46,17 +46,9 @@ class QueuePool:
         return Capacity(slots, slots)
 
     def submit(self, spec: AttemptSpec) -> ExecutionHandle:
-        """Capture exactly the options a claim needs; a duplicate never resets a live attempt."""
+        """Notify the admitted pool without changing the attempt's recorded state."""
         with self.engine.begin() as conn:
-            conn.execute(
-                statement(conn, "queue_wait_reason"),
-                {
-                    "attempt_id": spec.attempt_id,
-                    "reason": "QUEUED in pool default: waiting for an eligible "
-                    f"{spec.slot_kind} agent; no controller fallback",
-                },
-            )
-            notify(conn, pool_channel("default"))
+            notify(conn, pool_channel(spec.pool))
         return ExecutionHandle(self.name, spec.attempt_id)
 
     def status(self, handle: ExecutionHandle) -> HandleStatus:

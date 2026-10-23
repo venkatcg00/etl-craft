@@ -44,6 +44,8 @@ class TaskExecutionDetail:
     pipeline_id: int
     pipeline_code: str
     refresh_type: str
+    pool: str = "default"
+    pool_active: str | None = YesNo.YES
 
 
 def fetch_task_execution_detail(conn: Connection, task_id: int) -> TaskExecutionDetail:

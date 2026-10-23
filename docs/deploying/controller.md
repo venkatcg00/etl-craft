@@ -40,9 +40,9 @@ agent pool. Ready tasks are dispatched after each completion.
 Another scheduler can [submit a run over HTTP](http-api.md#starting-runs-from-another-scheduler).
 
 With a [deployment profile](sizing.md), the controller sizes its pool, threads and Engine DB pool
-from the measured allocation, and the settings below are ceilings. `Max_parallel_tasks` bounds
-the controller's local pool, which every run it supervises shares;
-`Local_python_slots` and `Local_warehouse_slots` split it by kind (see
+from the measured allocation. `CFG_PIPELINES.MAX_PARALLEL_TASKS` bounds each pipeline across
+its runs. The shared local pool keeps its measured machine-wide process cap;
+`Local_python_slots` and `Local_warehouse_slots` add ceilings by kind (see
 [running pipelines](../guides/running-pipelines.md)). Cooperative pipeline supervision and
 pending gate checks do not use those slots. Runs still owned by another foreground process are left with that
 process. Paused or inactive pipelines receive no dispatch; resuming a pipeline allows its
@@ -174,7 +174,6 @@ For example:
 
 ```yaml
 Orchestration:
-  Max_parallel_tasks: 8
   Shutdown_grace_seconds: 60
 ```
 

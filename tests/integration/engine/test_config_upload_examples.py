@@ -112,7 +112,7 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
     ]
     changes = metadata_project.rows(
         "SELECT MIGRATION AS migration, COUNT(*) AS changes FROM AUD_METADATA_CHANGES "
-        "GROUP BY MIGRATION ORDER BY 1",
+        "WHERE MIGRATION NOT LIKE 'engine/%' GROUP BY MIGRATION ORDER BY 1",
     )
     assert [name for name, _ in changes] == [path.name for path in examples]
 

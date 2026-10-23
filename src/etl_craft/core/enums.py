@@ -614,3 +614,10 @@ class DatabricksQueryStatus(StrEnum):
     CANCELED = "CANCELED"
     FAILED = "FAILED"
     FINISHED = "FINISHED"
+
+
+class CapacitySource(StrEnum):
+    """Whether an agent measures its own host or fronts an explicitly declared quota."""
+
+    MEASURED = "MEASURED"
+    DECLARED = "DECLARED"

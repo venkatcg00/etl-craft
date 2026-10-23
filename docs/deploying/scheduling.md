@@ -2,7 +2,7 @@
 
 etl-craft is the orchestrator. `etl-craft run
 --pipeline-code X` runs the whole pipeline by dispatching ready tasks, each task in a process of its
-own, at most `Orchestration.Max_parallel_tasks` at once, and checks every rule itself: run
+own, at most `CFG_PIPELINES.MAX_PARALLEL_TASKS` at once, and checks every rule itself: run
 conditions, dependency types, and dependencies on other pipelines. Nothing else is needed but a
 way to start runs on a schedule.
 

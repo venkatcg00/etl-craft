@@ -1,6 +1,7 @@
 -- PostgreSQL only: cluster execution refuses any other Engine DB before this runs.
 SELECT g.AGENT_ID AS agent_id, g.HOST AS host, g.RESOURCE_REPORT AS resource_report,
-a.SLOT_KIND AS slot_kind, COUNT(a.ATTEMPT_ID) AS used
+a.SLOT_KIND AS slot_kind, COUNT(a.ATTEMPT_ID) AS used, COALESCE(SUM(a.RESERVED_CPU),0) AS cpu_used,
+COALESCE(SUM(a.RESERVED_MEMORY_MB),0) AS memory_used_mb
 FROM AUD_AGENTS g LEFT JOIN AUD_TASK_ATTEMPTS a
 ON a.OWNER_ID=CAST(g.AGENT_ID AS varchar) AND a.STATUS IN ('CLAIMED','RUNNING')
 AND a.LEASE_EXPIRES_AT>clock_timestamp()

@@ -45,6 +45,7 @@ class AttemptSpec:
     lease_seconds: int
     force: bool = False
     rerun: bool = False
+    pool: str = "default"
 
     @property
     def slot_kind(self) -> str:

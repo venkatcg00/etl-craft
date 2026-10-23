@@ -40,6 +40,7 @@ def _render(args: argparse.Namespace, out: Output, done: StatusView | StatusList
                 _text_status(out, run)
         else:
             _text_status(out, done)
+        out.agents(done.agents)
 
     out.result(done, args.output_format, text=render)
     return 0

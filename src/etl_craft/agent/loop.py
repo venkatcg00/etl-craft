@@ -18,7 +18,7 @@ from pathlib import Path
 from etl_craft import __version__
 from etl_craft.agent.client import AgentClient
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.agent_resources import report
+from etl_craft.core.agent_resources import NO_DECLARATION, DeclaredCapacity, report
 from etl_craft.core.enums import (
     ActionName,
     AgentCommand,
@@ -60,6 +60,7 @@ class AgentOptions:
     pool: str
     ceilings: Ceilings
     drain_seconds: float = 300
+    declared: DeclaredCapacity = NO_DECLARATION
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,7 @@ class AgentLoop:
                 "agent process birth identity is unavailable; run on a supported process host"
             )
         self.commands: tuple[int, ...] = ()
-        measured = report(options.ceilings)
+        measured = report(options.ceilings, options.declared)
         self.resources = measured
         self.executor = ThreadPoolExecutor(
             max(1, measured.sizing.task_slots.value), thread_name_prefix="agent-task"
@@ -312,7 +313,7 @@ class AgentLoop:
             self.status = AgentStatus.DRAINING
         tasks = self.snapshot()
         started = time.monotonic()
-        measured = report(self.options.ceilings)
+        measured = report(self.options.ceilings, self.options.declared)
         reply = self.client.call(
             ActionName.AGENT_RENEW,
             AgentRenew(

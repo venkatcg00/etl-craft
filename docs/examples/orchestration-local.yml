@@ -2,7 +2,7 @@
 #
 # `etl-craft run --pipeline-code X` resolves each ready wave from
 # CFG_TASK_DEPENDENCY and runs one subprocess per task, at most
-# Max_parallel_tasks limits how many task subprocesses run at once.
+# Local_python_slots and Local_warehouse_slots cap measured process capacity.
 #
 # Each setting is marked `# variable` or `# value`. A variable is looked up in
 # the secrets source (here: the process environment); when it is not set, the
@@ -20,7 +20,6 @@ Secrets:
 Orchestration:
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed
   Task_timeout_seconds: 21600          # value — 0 disables; a task's TASK_TIMEOUT_SECONDS overrides
-  Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value — true: email when a run misses its SLA_IN_HOURS
   dev:
     Dependency_gates: WARN             # value — ENFORCE (default) | WARN | OFF: whether a run waits

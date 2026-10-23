@@ -72,7 +72,7 @@ again.
 ## Waves, retries and failures
 
 Rules with the same `SEQUENCE_NUMBER` form a wave and run in parallel, at most
-`Orchestration.Max_parallel_tasks` at once; the next wave starts when every rule of the current one
+the measured local task capacity at once; the next wave starts when every rule of the current one
 has finished.
 
 Each rule records its own row in `AUD_BUSINESS_RULES_RUN_LOG` and commits its flags separately.

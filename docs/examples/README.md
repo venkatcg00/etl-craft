@@ -41,7 +41,7 @@ which is how a missing variable shows up.
 Secrets files use UTF-8, with or without a byte-order mark, and accept `export KEY=VALUE`.
 All project paths start beside the config, including when it is a symbolic link. Duplicate
 YAML keys are errors, with both source lines named. Numeric settings accept whole numbers or
-ASCII decimal digits: `Max_parallel_tasks` is at least 1, TCP ports are 1 to 65535, and timeouts,
+ASCII decimal digits: `MAX_PARALLEL_TASKS` is at least 1, TCP ports are 1 to 65535, and timeouts,
 retry counts and delays are at least 0.
 
 ## Start here

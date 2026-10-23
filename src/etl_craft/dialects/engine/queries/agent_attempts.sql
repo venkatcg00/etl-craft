@@ -1,4 +1,4 @@
-SELECT a.ATTEMPT_ID AS attempt_id, a.STATUS AS status, a.SLOT_KIND AS slot_kind,
+SELECT RESERVED_CPU AS reserved_cpu, RESERVED_MEMORY_MB AS reserved_memory_mb, a.ATTEMPT_ID AS attempt_id, a.STATUS AS status, a.SLOT_KIND AS slot_kind,
 a.OWNER_ID AS owner_id, a.CANCEL_REQUESTED_AT AS cancel_requested_at,
 a.LEASE_EXPIRES_AT AS lease_expires_at, t.TASK_RUN_ID AS task_run_id
 FROM AUD_TASK_ATTEMPTS a JOIN AUD_TASK_RUN_LOG t ON t.TASK_RUN_ID=a.TASK_RUN_ID

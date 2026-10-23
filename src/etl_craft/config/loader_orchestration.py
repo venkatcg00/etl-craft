@@ -14,7 +14,6 @@ ORCHESTRATION_KEYS = frozenset(
         "Api_address",
         "Log_dir",
         "Task_timeout_seconds",
-        "Max_parallel_tasks",
         "Shutdown_grace_seconds",
         "Engine_db_outage_seconds",
         "Local_python_slots",
@@ -56,9 +55,15 @@ def parse_limits(settings: Profiled, path: Path) -> ExecutionLimits:
         """``Orchestration.<key>``, defaulting to the limit field of the same lowercase name."""
         return int(whole_number(settings, key, getattr(defaults, key.lower()), path, minimum=low))
 
+    if "Max_parallel_tasks" in settings.settings:
+        raise ConfigurationError(
+            f"{path}: Orchestration.Max_parallel_tasks={settings.value('Max_parallel_tasks')!r}; "
+            "expected per-pipeline limits in config/pipelines.csv. Copy this value to "
+            "MAX_PARALLEL_TASKS for each pipeline that needs it, then remove "
+            "Orchestration.Max_parallel_tasks from craft-connector.yml"
+        )
     return ExecutionLimits(
         task_timeout_seconds=number("Task_timeout_seconds"),
-        max_parallel_tasks=number("Max_parallel_tasks", low=1),
         shutdown_grace_seconds=number("Shutdown_grace_seconds"),
         engine_db_outage_seconds=number("Engine_db_outage_seconds"),
         enforce_sla=flag(settings, "Enforce_sla", False, path),
@@ -67,7 +72,6 @@ def parse_limits(settings: Profiled, path: Path) -> ExecutionLimits:
         local_warehouse_slots=whole_number(
             settings, "Local_warehouse_slots", None, path, minimum=1
         ),
-        max_parallel_tasks_written=settings.value("Max_parallel_tasks") is not None,
     )
 
 

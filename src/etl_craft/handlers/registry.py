@@ -101,6 +101,9 @@ HANDLERS: dict[str, str] = {
 
 COMMON_PARAMETERS = frozenset(
     {
+        "POOL",
+        "CPU_REQUEST",
+        "MEMORY_REQUEST_MB",
         "TASK_TIMEOUT_SECONDS",
         "DOCUMENTATION",
         "RETRIES",

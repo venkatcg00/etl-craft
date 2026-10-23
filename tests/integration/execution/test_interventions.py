@@ -85,7 +85,7 @@ def config(engine_db, tmp_path):
         }
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {"Task_timeout_seconds": 60, "Max_parallel_tasks": 2},
+        "Orchestration": {"Task_timeout_seconds": 60, "Local_warehouse_slots": 2},
         "Engine": {"dev": block},
     }
     path = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent / (

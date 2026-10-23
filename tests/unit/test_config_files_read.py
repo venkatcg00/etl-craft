@@ -12,6 +12,7 @@ from etl_craft.services.config_files import cell, read_config_files
 pytestmark = pytest.mark.unit
 
 GOOD = {
+    "pools.csv": "POOL_NAME,DESCRIPTION,ACTIVE_FLAG\ndefault,Deployment default pool,Y\n",
     "grants.csv": "GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG\n",
     "tables.csv": "CATALOG_NAME,SCHEMA_NAME,TABLE_NAME\n,sales,orders\n",
     "pipelines.csv": "PIPELINE_CODE,PIPELINE_NAME,REFRESH_TYPE,SLA_IN_HOURS,PIPELINE_PARAMETERS\n"

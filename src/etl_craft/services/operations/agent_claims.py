@@ -14,7 +14,7 @@ from etl_craft.engine.notifications import agent_channel, notification_hub, pool
 from etl_craft.engine.queries import statement
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.limits import task_timeout_seconds
-from etl_craft.services.operations.agent_capacity import free_slots
+from etl_craft.services.operations.agent_capacity import available, pool_headroom
 from etl_craft.services.operations.agent_models import AgentClaim, AgentReply
 from etl_craft.services.operations.agents import check_agent
 from etl_craft.services.operations.context import OperationContext
@@ -53,7 +53,7 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
             )
         if agent.status != AgentStatus.ACTIVE:
             return None
-        free = free_slots(conn, agent_id, resources)
+        free, cpu, memory = available(conn, agent_id, resources)
         claimed = agent_transitions.claim_queued_attempt(
             conn,
             agent_id,
@@ -61,9 +61,22 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
             {
                 f"{kind}_free": free[kind] > 0 and kind in request.free_kinds
                 for kind in (SlotKind.PYTHON, SlotKind.WAREHOUSE)
+            }
+            | {
+                "cpu_free": cpu,
+                "memory_free_mb": memory,
+                "warehouse_limit": ctx.config.max_warehouse_queries,
             },
         )
         if claimed is None:
+            from etl_craft.engine.placement import record_wait_reasons
+
+            record_wait_reasons(
+                conn,
+                ctx.config.max_warehouse_queries,
+                pool=agent.pool,
+                resources=pool_headroom(conn, agent.pool),
+            )
             return None
         work = conn.execute(statement(conn, "agent_work"), {"attempt_id": claimed.attempt_id}).one()
         task_run_id = int(work.task_run_id)

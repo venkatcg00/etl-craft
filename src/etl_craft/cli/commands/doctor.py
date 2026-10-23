@@ -31,6 +31,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
     def render() -> None:
         report(out, done.checks)
+        out.agents(done.agents)
 
     out.result(done, args.output_format, text=render)
     return ExitCode.FAILURE if done.failed else ExitCode.SUCCESS

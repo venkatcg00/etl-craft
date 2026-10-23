@@ -134,7 +134,7 @@ class Demo:
             "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {
                 "Task_timeout_seconds": 600,
-                "Max_parallel_tasks": 4,
+                "Local_warehouse_slots": 4,
                 "Enforce_sla": True,
                 "Email": {
                     "Host": smtp.host,

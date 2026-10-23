@@ -177,7 +177,8 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
         )
         parts.append(
             "SELECT change_id, valid_from AS changed_at, actor, actor_kind, "
-            f"CAST('{table.upper()}' AS VARCHAR) AS table_name, CAST({key} AS VARCHAR) AS row_key, "
+            f"CAST('{table.upper()}' AS VARCHAR) AS table_name, "
+            f"CAST(to_json({key}) AS VARCHAR) AS row_key, "
             "operation, CASE operation WHEN 'INSERT' THEN NULL WHEN 'DELETE' THEN v "
             f"ELSE LAG(v) OVER (PARTITION BY {key} ORDER BY change_id) END AS before_json, "
             "CASE WHEN operation = 'DELETE' THEN NULL ELSE v END AS after_json, migration "

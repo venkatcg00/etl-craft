@@ -330,9 +330,9 @@ def _slots(
             )
         else:
             fits[kind] = Size(by_cpu, f"CPU: {max(free_cpus, 0):g} free at {cpu_cost:g} each")
-    total = _ceiling(fits["warehouse"], ceilings.max_parallel_tasks, "Max_parallel_tasks")
-    python = _ceiling(fits["python"], ceilings.python_slots, "Local_python_slots")
-    warehouse = _ceiling(total, ceilings.warehouse_slots, "Local_warehouse_slots")
+    total = _ceiling(fits["warehouse"], ceilings.max_parallel_tasks, "total task slots")
+    python = _ceiling(fits["python"], ceilings.python_slots, "Orchestration.Local_python_slots")
+    warehouse = _ceiling(total, ceilings.warehouse_slots, "Orchestration.Local_warehouse_slots")
     if python.value > total.value:
         python = Size(total.value, "no more than the task slots")
     return total, python, warehouse
@@ -340,7 +340,7 @@ def _slots(
 
 def _ceiling(derived: Size, ceiling: int | None, setting: str) -> Size:
     if ceiling is not None and ceiling < derived.value:
-        return Size(ceiling, f"Orchestration.{setting} ceiling")
+        return Size(ceiling, f"{setting} ceiling")
     return derived
 
 

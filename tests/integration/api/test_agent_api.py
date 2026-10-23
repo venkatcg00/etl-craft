@@ -100,18 +100,27 @@ def test_every_agent_request_refuses_a_different_package_version(agent_scene):
 
 
 def test_a_queued_attempt_is_claimed_by_its_token_identity(agent_scene):
+    from fixtures.round_trips import count_round_trips
+
     db, _, _, _, owner, _ = agent_scene
-    attempt = claim(agent_scene)
+    attempt = queue(db)
+    with count_round_trips(db.engine) as counter:
+        reply = claim_available(agent_scene)
+    assert reply.data["task"]["attempt_id"] == attempt
+    assert counter.counts["engine_statements"] == 13, counter.queries
+    assert counter.counts["engine_transactions"] == 2
+    assert counter.counts["engine_connections"] == 0
     with db.engine.connect() as conn:
         row = conn.execute(
             text(
-                "SELECT OWNER_ID AS owner_id, STATUS AS status "
-                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+                "SELECT OWNER_ID AS owner_id, STATUS AS status, RESERVED_CPU AS cpu, "
+                "RESERVED_MEMORY_MB AS memory FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
             ),
             {"id": attempt},
         ).one()
     assert row.owner_id == str(owner)
     assert row.status == "CLAIMED"
+    assert row.cpu == 0.25 and row.memory == 128
 
 
 def test_log_chunks_are_ordered_shared_and_idempotent(agent_scene):
@@ -244,7 +253,7 @@ def test_expired_agent_cannot_refresh_capacity_without_registering_again(agent_s
     assert "expired" in response.text
 
 
-def second_agent(scene, *, measured=None):
+def second_agent(scene, *, measured=None, pool="default"):
     from etl_craft.services.operations.identity import authenticated_context
     from etl_craft.services.operations.tokens import authenticate
 
@@ -262,7 +271,7 @@ def second_agent(scene, *, measured=None):
         headers=headers,
         json={
             "version": __version__,
-            "pool": "default",
+            "pool": pool,
             "resources": encode(measured or resources()),
         },
     )
@@ -575,3 +584,424 @@ def test_cancellation_acknowledgement_requires_a_live_pinned_attempt(agent_scene
             {"id": attempt},
         ).scalar_one()
     assert acknowledged is None and observations == 0
+
+
+def queue_pipeline_work(db, code, *, count=1, priority=0, limit=8, **parameters):
+    """Queue independent tasks with explicit order and admission metadata."""
+    with db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, code)
+        conn.execute(
+            text(
+                "UPDATE CFG_PIPELINES SET PRIORITY=:priority, MAX_PARALLEL_TASKS=:limit "
+                "WHERE PIPELINE_ID=:id"
+            ),
+            {"priority": priority, "limit": limit, "id": pipeline},
+        )
+        run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
+        attempts = []
+        for index in range(count):
+            task = add_task(conn, pipeline, f"T{index}", **parameters)
+            summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
+            attempts.append(transitions.queue_attempt(conn, summary, SYSTEM_ACTOR))
+    return attempts
+
+
+def claim_available(scene, *, config=None):
+    """Exercise the nonblocking claim service used by every long poll."""
+    from etl_craft.core.enums import SlotKind
+    from etl_craft.services.operations.agent_claims import claim_once
+    from etl_craft.services.operations.agent_models import AgentClaim
+
+    db, _, _, _, owner, current = scene
+    ctx = OperationContext(
+        db.engine, config or current, SYSTEM_ACTOR, role=ApiRole.AGENT, credential_token_id=owner
+    )
+    return claim_once(ctx, AgentClaim(version=__version__, free_kinds=(SlotKind.WAREHOUSE,)), owner)
+
+
+def test_queue_priority_and_oldest_tie_break(agent_scene):
+    db = agent_scene[0]
+    low = queue_pipeline_work(db, "LOW", priority=-1)[0]
+    first = queue_pipeline_work(db, "FIRST", priority=5)[0]
+    second = queue_pipeline_work(db, "SECOND", priority=5)[0]
+    with db.engine.begin() as conn:
+        for identity, queued_at in (
+            (low, datetime(2025, 1, 1, tzinfo=UTC)),
+            (first, datetime(2026, 1, 2, tzinfo=UTC)),
+            (second, datetime(2026, 1, 1, tzinfo=UTC)),
+        ):
+            conn.execute(
+                text("UPDATE AUD_TASK_ATTEMPTS SET QUEUED_AT=:queued WHERE ATTEMPT_ID=:id"),
+                {"id": identity, "queued": queued_at},
+            )
+    assert claim_available(agent_scene).data["task"]["attempt_id"] == second
+    assert claim_available(agent_scene).data["task"]["attempt_id"] == first
+    with db.engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT STATUS AS status FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"),
+                {"id": low},
+            )
+            .one()
+            .status
+            == "QUEUED"
+        )
+
+
+def test_pipeline_limit_skips_blocked_work_and_preserves_its_reason(agent_scene):
+    db = agent_scene[0]
+    first, blocked = queue_pipeline_work(db, "LIMITED", count=2, priority=10, limit=1)
+    other = queue_pipeline_work(db, "OTHER")[0]
+    assert claim_available(agent_scene).data["task"]["attempt_id"] == first
+    assert claim_available(agent_scene).data["task"]["attempt_id"] == other
+    assert claim_available(agent_scene) is None
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, ERROR_MESSAGE AS reason "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": blocked},
+        ).one()
+    assert row.status == "QUEUED"
+    assert "pipeline LIMITED" in row.reason
+    assert "MAX_PARALLEL_TASKS=1" in row.reason
+
+
+def test_warehouse_limit_is_shared_between_pipelines(agent_scene):
+    db = agent_scene[0]
+    queue_pipeline_work(db, "ONE")
+    second = queue_pipeline_work(db, "TWO")[0]
+    config = replace(agent_scene[-1], max_warehouse_queries=1)
+    assert claim_available(agent_scene, config=config) is not None
+    assert claim_available(agent_scene, config=config) is None
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, ERROR_MESSAGE AS reason "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": second},
+        ).one()
+    assert row.status == "QUEUED"
+    assert "warehouse at MAX_WAREHOUSE_QUERIES=1" in row.reason
+
+
+def test_resource_request_does_not_sum_the_cluster(agent_scene):
+    db = agent_scene[0]
+    queued = queue_pipeline_work(db, "TOO_BIG", MEMORY_REQUEST_MB="40960")[0]
+    assert claim_available(agent_scene) is None
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, RESERVED_CPU AS cpu, "
+                "RESERVED_MEMORY_MB AS memory FROM AUD_TASK_ATTEMPTS "
+                "WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": queued},
+        ).one()
+    assert row.status == "QUEUED"
+    assert row.cpu == row.memory == 0
+
+
+@pytest.mark.parametrize("status", ["SUCCESS", "FAILED", "CANCELLED", "TIMED_OUT"])
+def test_claimed_resources_are_released_with_the_ending(agent_scene, status):
+    from etl_craft.core.enums import AttemptStatus
+
+    db, _, _, _, owner, _ = agent_scene
+    queued = queue_pipeline_work(db, "RELEASE", CPU_REQUEST="1", MEMORY_REQUEST_MB="256")[0]
+    assert claim_available(agent_scene) is not None
+    with db.engine.begin() as conn:
+        before = conn.execute(
+            text(
+                "SELECT RESERVED_CPU AS cpu, RESERVED_MEMORY_MB AS memory "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": queued},
+        ).one()
+        assert before.cpu == 1
+        assert before.memory == 256
+        transitions.finish_attempt(
+            conn, queued, AttemptStatus(status), SYSTEM_ACTOR, owner=str(owner)
+        )
+        after = conn.execute(
+            text(
+                "SELECT RESERVED_CPU AS cpu, RESERVED_MEMORY_MB AS memory "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": queued},
+        ).one()
+        assert after.cpu == after.memory == 0
+
+
+@pytest.mark.parametrize("bound", ["pipeline", "warehouse"])
+def test_pipeline_limit_holds_with_a_thousand_ready_attempts(agent_scene, bound):
+    db = agent_scene[0]
+    with db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "BURST")
+        conn.execute(
+            text("UPDATE CFG_PIPELINES SET MAX_PARALLEL_TASKS=:limit WHERE PIPELINE_ID=:id"),
+            {"id": pipeline, "limit": 1 if bound == "pipeline" else 1000},
+        )
+        run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASKS (PIPELINE_ID,TASK_CODE,TASK_TYPE,HANDLER) "
+                "SELECT :id, 'T'||CAST(n AS varchar), 'ETL', 'SQL' "
+                "FROM generate_series(1,1000) AS n"
+            ),
+            {"id": pipeline},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_RUN_LOG (PIPELINE_RUN_ID,TASK_ID,STATUS) "
+                "SELECT :run,TASK_ID,'IN-PROGRESS' FROM CFG_TASKS WHERE PIPELINE_ID=:id"
+            ),
+            {"run": run, "id": pipeline},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_ATTEMPTS "
+                "(TASK_RUN_ID,ATTEMPT_NUMBER,STATUS,QUEUED_AT) "
+                "SELECT TASK_RUN_ID,1,'QUEUED',clock_timestamp() "
+                "FROM AUD_TASK_RUN_LOG WHERE PIPELINE_RUN_ID=:run"
+            ),
+            {"run": run},
+        )
+    config = replace(agent_scene[-1], max_warehouse_queries=1 if bound == "warehouse" else None)
+    assert claim_available(agent_scene, config=config) is not None
+    assert claim_available(agent_scene, config=config) is None
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT COUNT(*) FILTER (WHERE STATUS='CLAIMED') AS claimed, "
+                "COUNT(*) FILTER (WHERE STATUS='QUEUED') AS queued "
+                "FROM AUD_TASK_ATTEMPTS"
+            )
+        ).one()
+    assert row.claimed == 1
+    assert row.queued == 999
+
+
+def test_resource_reason_names_the_request_and_largest_individual_agent(agent_scene):
+    db = agent_scene[0]
+    queued = queue_pipeline_work(db, "RESOURCE_REASON", MEMORY_REQUEST_MB="40960")[0]
+    assert claim_available(agent_scene) is None
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT ERROR_MESSAGE AS reason FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"),
+            {"id": queued},
+        ).one()
+    for part in ("needs 40960 MB", "largest agent in pool default", "MB free of", "Add capacity"):
+        assert part in row.reason
+
+    _, client, _, human, _, _ = agent_scene
+    status = client.get(
+        "/api/v1/status", headers=human, params={"pipeline_code": "RESOURCE_REASON"}
+    )
+    assert status.status_code == 200, status.text
+    assert status.json()["tasks"][0]["error"] == row.reason
+    explanation = client.get(
+        "/api/v1/explanations",
+        headers=human,
+        params={"pipeline_code": "RESOURCE_REASON", "task_code": "T0"},
+    )
+    assert explanation.status_code == 200, explanation.text
+    assert explanation.json()["state"] == "queued"
+    assert explanation.json()["next_action"] == row.reason
+
+
+def test_large_python_work_is_claimed_only_by_the_agent_that_fits(agent_scene):
+    from etl_craft.core.enums import SlotKind
+    from etl_craft.core.resources import GIB
+    from etl_craft.services.operations.agent_claims import claim_once
+    from etl_craft.services.operations.agent_models import AgentClaim
+
+    db, client, _, _, _, config = agent_scene
+    ctx = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    large = invoke(
+        ctx, ActionName.TOKEN_CREATE, TokenCreate(name="large-agent", role=ApiRole.AGENT)
+    )
+    headers = {"Authorization": f"Bearer {large.token}"}
+    large_resources = resources(cpus=8, memory=8 * GIB, node="large-host", host="large")
+    large_resources = replace(
+        large_resources,
+        allocation=replace(large_resources.allocation, host_cpus=8, host_memory=8 * GIB),
+    )
+    registered = client.post(
+        "/api/v1/agent/register",
+        headers=headers,
+        json={
+            "version": __version__,
+            "pool": "default",
+            "resources": encode(large_resources),
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    with db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "LARGE")
+        task = add_task(
+            conn, pipeline, "load", handler="PYTHON", CPU_REQUEST="2", MEMORY_REQUEST_MB="3072"
+        )
+        run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
+        summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
+        attempt = transitions.queue_attempt(conn, summary, SYSTEM_ACTOR)
+    request = AgentClaim(version=__version__, free_kinds=(SlotKind.PYTHON,))
+    for owner, fits in ((agent_scene[4], False), (large.metadata.token_id, True)):
+        agent_ctx = replace(ctx, role=ApiRole.AGENT, credential_token_id=owner)
+        reply = claim_once(agent_ctx, request, owner)
+        if fits:
+            assert reply.data["task"]["attempt_id"] == attempt
+        else:
+            assert reply is None
+
+
+@pytest.mark.parametrize("pool", ["missing", "disabled"])
+def test_agent_registration_requires_an_active_pool(agent_scene, pool):
+    db, client, _, _, _, config = agent_scene
+    if pool == "disabled":
+        with db.engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO CFG_POOLS (POOL_NAME,ACTIVE_FLAG) VALUES ('disabled','N')")
+            )
+    ctx = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    token = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="new-agent", role=ApiRole.AGENT))
+    answer = client.post(
+        "/api/v1/agent/register",
+        headers={"Authorization": f"Bearer {token.token}"},
+        json={"version": __version__, "pool": pool, "resources": encode(resources())},
+    )
+    assert answer.status_code == 404, answer.text
+    for part in (pool, "CFG_POOLS", "pools.csv", "config apply"):
+        assert part in answer.text
+
+
+@pytest.mark.parametrize("bound", ["pipeline", "warehouse"])
+def test_agents_on_different_hosts_claim_under_one_deployment_limit(agent_scene, bound):
+    from etl_craft.core.enums import SlotKind
+    from etl_craft.services.operations.agent_claims import claim_once
+    from etl_craft.services.operations.agent_models import AgentClaim
+    from fixtures.races import two_at_once
+
+    db, _, _, _, owner, config = agent_scene
+    second, _ = second_agent(agent_scene, measured=resources(node="other-node", host="other-host"))
+    if bound == "warehouse":
+        config = replace(config, max_warehouse_queries=1)
+    first = OperationContext(
+        db.engine, config, SYSTEM_ACTOR, role=ApiRole.AGENT, credential_token_id=owner
+    )
+    second = replace(second, config=config)
+    queue_pipeline_work(db, "BOUNDED", count=2, limit=1 if bound == "pipeline" else 8)
+    request = AgentClaim(version=__version__, free_kinds=(SlotKind.WAREHOUSE,))
+    results = two_at_once(
+        lambda: claim_once(first, request, owner),
+        lambda: claim_once(second, request, second.credential_token_id),
+        at="etl_craft.services.operations.agent_claims.claim_once",
+    )
+    assert sum(reply is not None for reply in results) == 1
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT COUNT(*) AS claimed, SUM(RESERVED_CPU) AS cpu, "
+                "SUM(RESERVED_MEMORY_MB) AS memory "
+                "FROM AUD_TASK_ATTEMPTS WHERE STATUS='CLAIMED'"
+            )
+        ).one()
+    assert row.claimed == 1 and row.cpu == 0.25 and row.memory == 128
+
+
+def test_draining_agent_withdraws_free_resources(agent_scene):
+    db, client, _, human, agent_id, _ = agent_scene
+    response = client.post(
+        "/api/v1/agents/commands", headers=human, json={"agent_id": agent_id, "command": "DRAIN"}
+    )
+    assert response.status_code == 200, response.text
+    command_id = response.json()["data"]["command_id"]
+    response = post(
+        agent_scene,
+        "renew",
+        attempts=[],
+        status="DRAINING",
+        resources=encode(resources()),
+        acknowledged_commands=[command_id],
+    )
+    assert response.status_code == 200, response.text
+    queued = queue_pipeline_work(db, "WAIT_FOR_AGENT")[0]
+    assert claim_available(agent_scene) is None
+    answer = client.get("/api/v1/agents", headers=human)
+    assert answer.status_code == 200, answer.text
+    agent = next(a for a in answer.json()["agents"] if a["agent_id"] == agent_id)
+    assert agent["free_cpu"] == agent["free_memory_mb"] == 0
+    from io import StringIO
+
+    from etl_craft.cli.output import Output
+    from etl_craft.services.operations.agents import AgentsView
+    from etl_craft.services.operations.serialization import from_json
+
+    text_output = StringIO()
+    Output(stdout=text_output).agents(from_json(AgentsView, answer.json()))
+    assert "MEMORY_RESERVED_MB" in text_output.getvalue()
+    assert "POOL\tAGENTS\tCPU" in text_output.getvalue()
+    with db.engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT STATUS AS status FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"),
+                {"id": queued},
+            ).scalar_one()
+            == "QUEUED"
+        )
+
+
+def test_missing_default_pool_cannot_bypass_custom_pool_admission(agent_scene):
+    from etl_craft.core.enums import SlotKind
+    from etl_craft.services.operations.agent_claims import claim_once
+    from etl_craft.services.operations.agent_models import AgentClaim
+
+    db = agent_scene[0]
+    with db.engine.begin() as conn:
+        conn.execute(text("INSERT INTO CFG_POOLS (POOL_NAME) VALUES ('heavy')"))
+    ctx, _ = second_agent(agent_scene, pool="heavy")
+    attempt = queue_pipeline_work(db, "CUSTOM_POOL", POOL="heavy")[0]
+    with db.engine.begin() as conn:
+        conn.execute(text("DELETE FROM CFG_POOLS WHERE POOL_NAME='default'"))
+    assert (
+        claim_once(
+            ctx,
+            AgentClaim(version=__version__, free_kinds=(SlotKind.WAREHOUSE,)),
+            ctx.credential_token_id,
+        )
+        is None
+    )
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, ERROR_MESSAGE AS reason "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+    assert row.status == "QUEUED"
+    for part in ("CFG_POOLS.default", "missing", "expected", "restore", "config apply"):
+        assert part in row.reason
+
+
+def test_slot_ceiling_reason_names_free_and_advertised_slots(agent_scene):
+    from etl_craft.core.resources import Ceilings, size_agent
+
+    measured = resources()
+    ceilings = Ceilings(2, 2, 0)
+    measured = replace(
+        measured, ceilings=ceilings, sizing=size_agent(measured.allocation, ceilings)
+    )
+    response = post(agent_scene, "renew", attempts=[], resources=encode(measured))
+    assert response.status_code == 200, response.text
+    db = agent_scene[0]
+    attempt = queue_pipeline_work(db, "NO_WAREHOUSE_SLOTS")[0]
+    assert claim_available(agent_scene) is None
+    with db.engine.connect() as conn:
+        reason = conn.execute(
+            text("SELECT ERROR_MESSAGE AS reason FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"),
+            {"id": attempt},
+        ).scalar_one()
+    assert "warehouse slots 0 free of 0" in reason
+    assert "adjust task requests or agent slots" in reason

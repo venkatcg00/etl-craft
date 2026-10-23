@@ -1,0 +1,1 @@
+SELECT x.PIPELINE_GRANT_ID AS row_id, x.ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, g.GROUP_NAME AS group_name, x.PIPELINE_CODE AS pipeline_code, x.TAG AS tag, x.ROLE AS role FROM CFG_PIPELINE_GRANTS x JOIN CFG_GROUPS g ON g.GROUP_ID=x.GROUP_ID ORDER BY 1

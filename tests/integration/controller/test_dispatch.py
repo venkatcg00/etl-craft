@@ -288,7 +288,7 @@ def test_shutdown_cancels_all_runs_before_joining_the_shared_pool(cli_project):
 
     p = cli_project
     raw = yaml.safe_load(p.config.config_path.read_text())
-    raw["Orchestration"].update(Max_parallel_tasks=1, Shutdown_grace_seconds=0)
+    raw["Orchestration"].update(Local_warehouse_slots=1, Shutdown_grace_seconds=0)
     p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     (p.config.python_scripts_dir / "block.py").write_text(
         "from pathlib import Path\nimport time\n"

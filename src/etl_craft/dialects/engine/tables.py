@@ -2,6 +2,7 @@
 
 CONFIG_TABLES = frozenset(
     {
+        "CFG_POOLS",
         "CFG_PIPELINES",
         "CFG_PIPELINE_DEPENDENCY",
         "CFG_TASKS",
@@ -40,6 +41,7 @@ AUDIT_TABLES = frozenset(
         "AUD_ATTEMPT_LOG_CHUNKS",
         "AUD_GATE_DECISIONS",
         "AUD_ACTIONS",
+        "AUD_CFG_POOLS_HISTORY",
         "AUD_CFG_PIPELINES_HISTORY",
         "AUD_CFG_PIPELINE_DEPENDENCY_HISTORY",
         "AUD_CFG_TASKS_HISTORY",

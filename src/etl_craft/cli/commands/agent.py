@@ -11,6 +11,7 @@ from etl_craft.cli.lifecycle import shutdown_event
 from etl_craft.cli.output import Output
 from etl_craft.config import load_config, resolve_config_path
 from etl_craft.config.sizing import ceilings
+from etl_craft.core.agent_resources import DeclaredCapacity
 from etl_craft.core.enums import ActionName, AgentCommand
 from etl_craft.core.errors import ExitCode, UsageError
 from etl_craft.services.operations.agent_models import AgentControl
@@ -25,6 +26,15 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pool", default="default")
     parser.add_argument("--python-slots", type=int)
     parser.add_argument("--warehouse-slots", type=int)
+    parser.add_argument("--cpu", type=int, help="Lower measured CPU capacity to this ceiling.")
+    parser.add_argument(
+        "--memory-mb", type=int, help="Lower measured memory capacity to this MB ceiling."
+    )
+    parser.add_argument(
+        "--declared-capacity",
+        action="store_true",
+        help="Front an external quota; requires both --cpu and --memory-mb.",
+    )
     parser.add_argument("--drain-seconds", type=float, default=300)
     configure_output(parser)
 
@@ -78,7 +88,15 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
     with shutdown_event() as stop:
         AgentLoop(
-            config, AgentOptions(args.api, args.pool, selected, args.drain_seconds), stop
+            config,
+            AgentOptions(
+                args.api,
+                args.pool,
+                selected,
+                args.drain_seconds,
+                DeclaredCapacity(args.cpu, args.memory_mb, args.declared_capacity),
+            ),
+            stop,
         ).serve()
     return ExitCode.SUCCESS
 
@@ -86,14 +104,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 def _list(args: argparse.Namespace, out: Output) -> int:
     done = call(args, ActionName.AGENTS, NoInput())
     assert isinstance(done, AgentsView)
-    out.result(
-        done,
-        args.output_format,
-        text=lambda: out.rows(
-            (a.agent_id, a.pool, a.host, a.status, a.used, a.free, a.heartbeat_at)
-            for a in done.agents
-        ),
-    )
+    out.result(done, args.output_format, text=lambda: out.agents(done))
     return ExitCode.SUCCESS
 
 

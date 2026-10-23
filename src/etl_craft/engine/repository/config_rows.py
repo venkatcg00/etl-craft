@@ -25,8 +25,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.types import TypeEngine
 
+from etl_craft.config.model import DEFAULT_MAX_PARALLEL_TASKS
 from etl_craft.core.enums import ApiRole, DependencyType, Handler, RefreshType, RunCondition, YesNo
 from etl_craft.core.errors import MetadataFileError
+from etl_craft.engine.queries import statement
 
 Kind = Literal["code", "text", "choice", "int", "float", "date", "json"]
 Value = str | int | float | date | dict[str, object] | None
@@ -70,7 +72,7 @@ class ConfigTable:
     """A config file and the ``CFG_`` table its rows are.
 
     ``stored`` names the file's columns the table itself holds; the others are the codes of the
-    rows it hangs off. ``parents`` pairs each id ``read_sql`` returns for those rows with the
+    rows it hangs off. ``parents`` pairs each id ``read_query`` returns for those rows with the
     file that holds them, and ``links`` names the id columns an insert sets.
     """
 
@@ -83,7 +85,7 @@ class ConfigTable:
     parents: tuple[tuple[str, str], ...]
     links: tuple[str, ...]
     label_format: str
-    read_sql: str
+    read_query: str
 
     @property
     def updated(self) -> tuple[str, ...]:
@@ -124,11 +126,25 @@ class StoredRow:
     whose ``PIPELINE_ID`` is not its task's.
     """
 
-    row_id: int
+    row_id: int | str
     active: bool
     parents: tuple[int | None, ...]
     well_formed: bool
     values: dict[str, Value]
+
+
+POOLS = ConfigTable(
+    file="pools.csv",
+    table="CFG_POOLS",
+    id_column="POOL_NAME",
+    key=("POOL_NAME",),
+    columns=(Column("POOL_NAME", required=True), Column("DESCRIPTION"), ACTIVE_FLAG),
+    stored=("POOL_NAME", "DESCRIPTION"),
+    parents=(),
+    links=(),
+    label_format="{POOL_NAME}",
+    read_query="config_rows_pools",
+)
 
 
 PIPELINES = ConfigTable(
@@ -152,6 +168,8 @@ PIPELINES = ConfigTable(
         Column("CATCHUP", "choice", default="N", choices=YES_NO),
         Column("MAX_CATCHUP_RUNS", "int", default=1, minimum=1),
         Column("OVERLAP_POLICY", "choice", default="SKIP", choices=("SKIP", "QUEUE")),
+        Column("MAX_PARALLEL_TASKS", "int", default=DEFAULT_MAX_PARALLEL_TASKS, minimum=1),
+        Column("PRIORITY", "int", default=0),
         Column("SLA_IN_HOURS", "float"),
         Column("PIPELINE_PARAMETERS", "json"),
         ACTIVE_FLAG,
@@ -167,22 +185,15 @@ PIPELINES = ConfigTable(
         "CATCHUP",
         "MAX_CATCHUP_RUNS",
         "OVERLAP_POLICY",
+        "MAX_PARALLEL_TASKS",
+        "PRIORITY",
         "SLA_IN_HOURS",
         "PIPELINE_PARAMETERS",
     ),
     parents=(),
     links=(),
     label_format="{PIPELINE_CODE}",
-    read_sql=(
-        "SELECT PIPELINE_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
-        "PIPELINE_CODE AS pipeline_code, PIPELINE_NAME AS pipeline_name, "
-        "DESCRIPTION AS description, REFRESH_TYPE AS refresh_type, "
-        "RUN_SCHEDULE AS run_schedule, SCHEDULE_TIMEZONE AS schedule_timezone, "
-        "SCHEDULE_START_DATE AS schedule_start_date, CATCHUP AS catchup, "
-        "MAX_CATCHUP_RUNS AS max_catchup_runs, OVERLAP_POLICY AS overlap_policy, "
-        "SLA_IN_HOURS AS sla_in_hours, PIPELINE_PARAMETERS AS pipeline_parameters "
-        "FROM CFG_PIPELINES"
-    ),
+    read_query="config_rows_pipelines",
 )
 
 TASKS = ConfigTable(
@@ -214,17 +225,7 @@ TASKS = ConfigTable(
     parents=(("pipeline_id", "pipelines.csv"), ("target_table_id", "tables.csv")),
     links=("PIPELINE_ID", "TARGET_TABLE_ID"),
     label_format="{PIPELINE_CODE}.{TASK_CODE}",
-    read_sql=(
-        "SELECT t.TASK_ID AS row_id, t.ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
-        "t.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code, "
-        "t.TASK_CODE AS task_code, t.TASK_TYPE AS task_type, t.HANDLER AS handler, "
-        "t.RUN_CONDITION AS run_condition, t.RUN_CONDITION_COUNT AS run_condition_count, "
-        "t.TARGET_TABLE_ID AS target_table_id, t.TARGET_ACTIVE_FLAG AS target_active_flag, "
-        "o.CATALOG_NAME AS target_catalog_name, o.SCHEMA_NAME AS target_schema_name, "
-        "o.TABLE_NAME AS target_table_name "
-        "FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
-        "LEFT JOIN CFG_TABLES o ON o.TABLE_ID=t.TARGET_TABLE_ID"
-    ),
+    read_query="config_rows_tasks",
 )
 
 TASK_PARAMETERS = ConfigTable(
@@ -243,14 +244,7 @@ TASK_PARAMETERS = ConfigTable(
     parents=(("task_id", "tasks.csv"),),
     links=("TASK_ID",),
     label_format="{PIPELINE_CODE}.{TASK_CODE} {PARAMETER_NAME}",
-    read_sql=(
-        "SELECT x.TASK_PARAMETER_ID AS row_id, x.ACTIVE_FLAG AS active_flag, "
-        "'Y' AS well_formed, x.TASK_ID AS task_id, p.PIPELINE_CODE AS pipeline_code, "
-        "t.TASK_CODE AS task_code, x.PARAMETER_NAME AS parameter_name, "
-        "x.PARAMETER_VALUE AS parameter_value "
-        "FROM CFG_TASK_PARAMETERS x JOIN CFG_TASKS t ON t.TASK_ID = x.TASK_ID "
-        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID"
-    ),
+    read_query="config_rows_task_parameters",
 )
 
 TASK_DEPENDENCIES = ConfigTable(
@@ -280,20 +274,7 @@ TASK_DEPENDENCIES = ConfigTable(
         "{PIPELINE_CODE}.{TASK_CODE} on {DEPENDS_ON_PIPELINE_CODE}.{DEPENDS_ON_TASK_CODE} "
         "{DEPENDENCY_TYPE}"
     ),
-    read_sql=(
-        "SELECT d.TASK_DEPENDENCY_ID AS row_id, d.ACTIVE_FLAG AS active_flag, "
-        "CASE WHEN d.PIPELINE_ID = t.PIPELINE_ID "
-        "AND COALESCE(d.DEPENDS_ON_PIPELINE_ID, u.PIPELINE_ID) = u.PIPELINE_ID "
-        "THEN 'Y' ELSE 'N' END AS well_formed, "
-        "d.TASK_ID AS task_id, d.DEPENDS_ON_TASK_ID AS depends_on_task_id, "
-        "p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
-        "up.PIPELINE_CODE AS depends_on_pipeline_code, u.TASK_CODE AS depends_on_task_code, "
-        "d.DEPENDENCY_TYPE AS dependency_type, d.CONSUME_REPAIRS AS consume_repairs "
-        "FROM CFG_TASK_DEPENDENCY d JOIN CFG_TASKS t ON t.TASK_ID = d.TASK_ID "
-        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
-        "JOIN CFG_TASKS u ON u.TASK_ID = d.DEPENDS_ON_TASK_ID "
-        "JOIN CFG_PIPELINES up ON up.PIPELINE_ID = u.PIPELINE_ID"
-    ),
+    read_query="config_rows_task_dependency",
 )
 
 PIPELINE_DEPENDENCIES = ConfigTable(
@@ -312,15 +293,7 @@ PIPELINE_DEPENDENCIES = ConfigTable(
     parents=(("pipeline_id", "pipelines.csv"), ("depends_on_pipeline_id", "pipelines.csv")),
     links=("PIPELINE_ID", "DEPENDS_ON_PIPELINE_ID"),
     label_format="{PIPELINE_CODE} on {DEPENDS_ON_PIPELINE_CODE} {DEPENDENCY_TYPE}",
-    read_sql=(
-        "SELECT d.PIPELINE_DEPENDENCY_ID AS row_id, d.ACTIVE_FLAG AS active_flag, "
-        "'Y' AS well_formed, d.PIPELINE_ID AS pipeline_id, "
-        "d.DEPENDS_ON_PIPELINE_ID AS depends_on_pipeline_id, p.PIPELINE_CODE AS pipeline_code, "
-        "up.PIPELINE_CODE AS depends_on_pipeline_code, d.DEPENDENCY_TYPE AS dependency_type, "
-        "d.CONSUME_REPAIRS AS consume_repairs "
-        "FROM CFG_PIPELINE_DEPENDENCY d JOIN CFG_PIPELINES p ON p.PIPELINE_ID = d.PIPELINE_ID "
-        "JOIN CFG_PIPELINES up ON up.PIPELINE_ID = d.DEPENDS_ON_PIPELINE_ID"
-    ),
+    read_query="config_rows_pipeline_dependency",
 )
 
 BUSINESS_RULES = ConfigTable(
@@ -356,20 +329,7 @@ BUSINESS_RULES = ConfigTable(
     parents=(("task_id", "tasks.csv"), ("table_id", "tables.csv")),
     links=("PIPELINE_ID", "TASK_ID", "TARGET_TABLE_ID"),
     label_format="{PIPELINE_CODE}.{TASK_CODE} rule {BUSINESS_RULE_NAME!r}",
-    read_sql=(
-        "SELECT r.BUSINESS_RULE_ID AS row_id, r.ACTIVE_FLAG AS active_flag, "
-        "CASE WHEN r.PIPELINE_ID = t.PIPELINE_ID THEN 'Y' ELSE 'N' END AS well_formed, "
-        "r.TASK_ID AS task_id, r.TARGET_TABLE_ID AS table_id, "
-        "p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, "
-        "r.BUSINESS_RULE_NAME AS business_rule_name, r.SEQUENCE_NUMBER AS sequence_number, "
-        "r.BUSINESS_RULE_TYPE AS business_rule_type, "
-        "r.BUSINESS_RULE_KEY_COLUMN AS business_rule_key_column, "
-        "o.CATALOG_NAME AS catalog_name, o.SCHEMA_NAME AS schema_name, "
-        "o.TABLE_NAME AS table_name, r.BUSINESS_RULE_SQL AS business_rule_sql "
-        "FROM CFG_BUSINESS_RULES r JOIN CFG_TASKS t ON t.TASK_ID = r.TASK_ID "
-        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
-        "JOIN CFG_TABLES o ON o.TABLE_ID=r.TARGET_TABLE_ID"
-    ),
+    read_query="config_rows_business_rules",
 )
 
 OBJECT_TABLES = ConfigTable(
@@ -388,9 +348,7 @@ OBJECT_TABLES = ConfigTable(
     parents=(),
     links=(),
     label_format="{CATALOG_NAME}.{SCHEMA_NAME}.{TABLE_NAME}",
-    read_sql="SELECT TABLE_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
-    "CATALOG_NAME AS catalog_name, SCHEMA_NAME AS schema_name, TABLE_NAME AS table_name, "
-    "OBJECT_KIND AS object_kind FROM CFG_TABLES",
+    read_query="config_rows_tables",
 )
 
 SOURCE_COLUMNS = ConfigTable(
@@ -412,11 +370,7 @@ SOURCE_COLUMNS = ConfigTable(
     parents=(("table_id", "tables.csv"),),
     links=("TABLE_ID",),
     label_format="{CATALOG_NAME}.{SCHEMA_NAME}.{TABLE_NAME}.{COLUMN_NAME}",
-    read_sql="SELECT c.COLUMN_ID AS row_id, c.ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, "
-    "c.TABLE_ID AS table_id, t.CATALOG_NAME AS catalog_name, t.SCHEMA_NAME AS schema_name, "
-    "t.TABLE_NAME AS table_name, c.COLUMN_NAME AS column_name, c.DATA_TYPE AS data_type, "
-    "c.COLUMN_POSITION AS column_position, c.IS_NULLABLE AS is_nullable "
-    "FROM CFG_COLUMNS c JOIN CFG_TABLES t ON t.TABLE_ID=c.TABLE_ID",
+    read_query="config_rows_columns",
 )
 
 PIPELINE_GRANTS = ConfigTable(
@@ -437,14 +391,12 @@ PIPELINE_GRANTS = ConfigTable(
     parents=(),
     links=("GROUP_ID",),
     label_format="{GROUP_NAME} pipeline={PIPELINE_CODE} tag={TAG}",
-    read_sql="SELECT x.PIPELINE_GRANT_ID AS row_id, x.ACTIVE_FLAG AS active_flag, "
-    "'Y' AS well_formed, g.GROUP_NAME AS group_name, x.PIPELINE_CODE AS pipeline_code, "
-    "x.TAG AS tag, x.ROLE AS role FROM CFG_PIPELINE_GRANTS x "
-    "JOIN CFG_GROUPS g ON g.GROUP_ID=x.GROUP_ID",
+    read_query="config_rows_pipeline_grants",
 )
 
 
 TABLES = (
+    POOLS,
     PIPELINES,
     PIPELINE_GRANTS,
     OBJECT_TABLES,
@@ -484,7 +436,7 @@ def stored_value(column: Column, raw: object) -> Value:
 def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
     """Return every row of ``table``, active or not, in id order."""
     rows = []
-    for row in conn.execute(text(f"{table.read_sql} ORDER BY 1")).mappings():
+    for row in conn.execute(statement(conn, table.read_query)).mappings():
         values = {
             column.name: stored_value(column, row[column.name.lower()])
             for column in table.columns
@@ -494,7 +446,7 @@ def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
             values["COLUMN_NAME"] = str(values["COLUMN_NAME"]).lower()
         rows.append(
             StoredRow(
-                int(row["row_id"]),
+                str(row["row_id"]) if table is POOLS else int(row["row_id"]),
                 row["active_flag"] == YesNo.YES,
                 tuple(
                     int(row[name]) if row[name] is not None else None for name, _ in table.parents
@@ -508,7 +460,11 @@ def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
 
 def _bound(table: ConfigTable, sql: str, names: tuple[str, ...]) -> TextClause:
     types = [
-        _BIND_TYPES[table.column(name).kind] if name in table.stored else Integer()
+        _BIND_TYPES[table.column(name).kind]
+        if name in table.stored
+        else String()
+        if table is POOLS
+        else Integer()
         for name in names
     ]
     return text(sql).bindparams(
@@ -550,7 +506,7 @@ def insert_row(
 def update_row(
     conn: Connection,
     table: ConfigTable,
-    row_id: int,
+    row_id: int | str,
     values: Mapping[str, Value],
     links: Mapping[str, int | None] | None = None,
 ) -> None:
@@ -571,7 +527,7 @@ def update_row(
     _write(conn, statement, params, f"updating {table.label(values)} in {table.table}")
 
 
-def retire_row(conn: Connection, table: ConfigTable, row_id: int, label: str) -> None:
+def retire_row(conn: Connection, table: ConfigTable, row_id: int | str, label: str) -> None:
     """Set ``ACTIVE_FLAG = 'N'`` on the active row ``row_id``."""
     statement = text(
         f"UPDATE {table.table} SET ACTIVE_FLAG = 'N' "

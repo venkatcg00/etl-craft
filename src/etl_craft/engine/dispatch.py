@@ -3,6 +3,7 @@
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import Handler, SlotKind, YesNo
+from etl_craft.engine.placement import claim_parameters
 from etl_craft.engine.queries import statement
 
 
@@ -18,10 +19,30 @@ def inherit_dispatch(conn: Connection, attempt_id: int, task_run_id: int) -> Non
     conn.execute(
         statement(conn, "agent_queue"),
         {
+            **claim_parameters(),
             "attempt_id": attempt_id,
             "kind": SlotKind.PYTHON if row.handler == Handler.PYTHON else SlotKind.WAREHOUSE,
             "force": row.force_flag or YesNo.NO,
             "rerun": row.rerun_flag or YesNo.NO,
             "reason": None,
+        },
+    )
+
+
+def dispatch_options(
+    conn: Connection, attempt_id: int, handler: str, reason: str | None, options: dict[str, bool]
+) -> None:
+    """Persist the admitted flags with the task's recorded pool and pipeline priority."""
+    kind = SlotKind.PYTHON if handler == Handler.PYTHON else SlotKind.WAREHOUSE
+
+    conn.execute(
+        statement(conn, "agent_queue"),
+        {
+            **claim_parameters(),
+            "attempt_id": attempt_id,
+            "kind": kind,
+            "force": YesNo.YES if options["force"] else YesNo.NO,
+            "rerun": YesNo.YES if options["rerun"] else YesNo.NO,
+            "reason": reason,
         },
     )

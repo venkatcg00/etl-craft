@@ -31,7 +31,6 @@ Secrets:
 
 Orchestration:
   Task_timeout_seconds: 21600          # value
-  Max_parallel_tasks: 8                # value
   Enforce_sla: false                   # value
 
 Engine:
