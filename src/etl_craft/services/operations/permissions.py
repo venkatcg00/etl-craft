@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.core.enums import ApiRole, YesNo
 from etl_craft.core.errors import PermissionDeniedError
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.pipelines import read_tags
+from etl_craft.engine.repository.pipelines import current_project_id, read_tags
 from etl_craft.services.operations.context import OperationContext
 
 
@@ -44,9 +44,10 @@ def pipeline_access(conn: Connection, ctx: OperationContext) -> PipelineAccess:
         for row in conn.execute(statement(conn, "permission_groups"), {"account": ctx.actor.name})
         if row.explicit_member == YesNo.YES or row.group_id in ctx.sso_group_ids
     }
-    grants = tuple(conn.execute(statement(conn, "permission_grants")))
+    params = {"project_id": ctx.project_id or current_project_id()}
+    grants = tuple(conn.execute(statement(conn, "permission_grants"), params))
     roles: dict[str, ApiRole | None] = {}
-    for row in conn.execute(statement(conn, "permission_pipelines")):
+    for row in conn.execute(statement(conn, "permission_pipelines"), params):
         tags = read_tags(row.pipeline_parameters, row.pipeline_code)
         applicable = [g for g in grants if g.pipeline_code == row.pipeline_code or g.tag in tags]
         if ctx.role is None or ctx.role == ApiRole.ADMIN or not applicable:

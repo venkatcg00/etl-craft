@@ -36,6 +36,7 @@ class ActionRequest:
     recorded: bool = False
     outcome: ActionOutcome = ActionOutcome.REQUESTED
     exit_code: int | None = None
+    project_id: int | None = None
 
     def record(self) -> None:
         """Record the request itself; flow outcomes belong to run and attempt logs."""
@@ -52,7 +53,8 @@ class ActionRequest:
         if self.recorded:
             return
         pipeline = conn.execute(
-            statement(conn, "action_pipeline"), {"code": self.arguments.get("pipeline_code")}
+            statement(conn, "action_pipeline"),
+            {"code": self.arguments.get("pipeline_code"), "project_id": self.project_id},
         ).scalar_one_or_none()
         task = None
         if pipeline is not None and self.arguments.get("task_code"):
@@ -73,6 +75,7 @@ class ActionRequest:
                 "command": self.command,
                 "arguments": payload,
                 "pipeline": pipeline,
+                "project": self.project_id,
                 "task": task,
                 "outcome": self.outcome,
                 "exit_code": self.exit_code,
@@ -94,10 +97,14 @@ def register_engine(engine: Engine) -> None:
 
 
 @contextmanager
-def command_request(command: str, arguments: Mapping[str, Any]) -> Iterator[ActionRequest]:
+def command_request(
+    command: str, arguments: Mapping[str, Any], *, project_id: int | None = None
+) -> Iterator[ActionRequest]:
     """Record one audited request once its Engine DB is bound, whatever its outcome."""
     payload = {key: value for key, value in arguments.items() if key != "handler"}
-    request = ActionRequest(command, mask_arguments(payload), datetime.now(UTC))
+    request = ActionRequest(
+        command, mask_arguments(payload), datetime.now(UTC), project_id=project_id
+    )
     token = _request.set(request)
     try:
         yield request

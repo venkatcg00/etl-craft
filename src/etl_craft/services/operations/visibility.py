@@ -32,7 +32,11 @@ def _run_allowed(conn: Connection, access: PipelineAccess, run_id: int | None) -
 def _visible(conn: Connection, access: PipelineAccess, value: object) -> object:
     if (
         isinstance(value, DependencyView)
-        and not access.permits(value.upstream.partition(".")[0])
+        and (
+            not access.permits(value.upstream.partition(".")[0])
+            or (value.pipeline_dependency_id is not None and "." in value.upstream)
+            or (value.task_dependency_id is not None and value.upstream.count(".") > 1)
+        )
         and ("." in value.upstream or value.pipeline_dependency_id is not None)
     ):
         return DependencyView(

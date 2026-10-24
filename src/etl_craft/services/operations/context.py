@@ -36,3 +36,5 @@ class OperationContext:
     client_address: str | None = None
     client_scheme: HttpScheme | None = None
     shutdown: threading.Event | None = None
+    project: str = "default"
+    project_id: int | None = None

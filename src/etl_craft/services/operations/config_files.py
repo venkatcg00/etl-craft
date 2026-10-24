@@ -55,7 +55,12 @@ def export_config(ctx: OperationContext, request: ConfigExportInput) -> config_f
     target = config_files.config_directory(ctx.config, request.config_dir)
     moment = None if request.as_of is None else resolve_as_of(ctx, request.as_of)
     return config_files.export_config(
-        ctx.engine, target, overwrite=request.force, as_of=moment, config=ctx.config
+        ctx.engine,
+        target,
+        overwrite=request.force,
+        as_of=moment,
+        config=ctx.config,
+        project_code=ctx.project,
     )
 
 

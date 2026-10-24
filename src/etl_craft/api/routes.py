@@ -21,7 +21,7 @@ from etl_craft.core.enums import ActionName, HttpMethod, HttpScheme, Transport
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.services.operations import OperationContext, to_json
-from etl_craft.services.operations.actions import ACTIONS, Action, invoke
+from etl_craft.services.operations.actions import ACTIONS, Action, action_path, invoke
 from etl_craft.services.operations.identity import authenticated_context
 from etl_craft.services.operations.tokens import authenticate
 
@@ -41,7 +41,7 @@ def add_action_routes(app: FastAPI, ctx: OperationContext, names: frozenset[Acti
         action = ACTIONS[name]
         assert action.method is not None and action.path is not None
         app.add_api_route(
-            action.path,
+            action_path(action),
             _endpoint(ctx, action),
             methods=[action.method],
             name=name,
@@ -100,6 +100,9 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
         client_scheme=HttpScheme(request.scope["scheme"]),
     )
     given: dict[str, object] = dict(request.path_params)
+    project = given.pop("project", None)
+    if project is not None:
+        caller = replace(caller, project=str(project), project_id=None)
     if action.method == HttpMethod.GET:
         properties = _adapter(action.name).json_schema().get("properties", {})
         given.update(
@@ -155,8 +158,9 @@ def _parse(action: Action, given: dict[str, object]) -> object:
 def _openapi(action: Action) -> dict[str, object]:
     """Describe the request in the generated contract, as a body or as parameters."""
     schema = _adapter(action.name).json_schema()
-    assert action.path is not None
-    in_path = {part[1:-1] for part in action.path.split("/") if part.startswith("{")}
+    path = action_path(action)
+    in_path = {part[1:-1] for part in path.split("/") if part.startswith("{")}
+    in_path.discard("project")
     required = set(schema.get("required", ()))
     parameters = [
         {
@@ -168,6 +172,10 @@ def _openapi(action: Action) -> dict[str, object]:
         for field, spec in schema.get("properties", {}).items()
         if field in in_path or action.method == HttpMethod.GET
     ]
+    if "{project}" in path:
+        parameters.insert(
+            0, {"name": "project", "in": "path", "required": True, "schema": {"type": "string"}}
+        )
     extra: dict[str, object] = {"parameters": parameters}
     if action.method == HttpMethod.POST and set(schema.get("properties", {})) - in_path:
         extra["requestBody"] = {

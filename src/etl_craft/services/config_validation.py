@@ -5,8 +5,9 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from etl_craft.core.cron import timezone
 from etl_craft.core.enums import RunCondition
-from etl_craft.core.errors import MetadataFileError
+from etl_craft.core.errors import MetadataError, MetadataFileError
 from etl_craft.core.tags import valid_tag
 from etl_craft.core.text import is_metadata_code, is_safe_identifier
 from etl_craft.engine.repository.config_rows import (
@@ -14,6 +15,7 @@ from etl_craft.engine.repository.config_rows import (
     OBJECT_TABLES,
     PIPELINE_DEPENDENCIES,
     PIPELINE_GRANTS,
+    PROJECTS,
     SOURCE_COLUMNS,
     TASK_DEPENDENCIES,
     TASK_PARAMETERS,
@@ -26,8 +28,10 @@ from etl_craft.engine.repository.config_rows import (
 
 def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
     """Return the remedy for an invalid row, before writing any config rows."""
-    if table is PIPELINE_GRANTS:
-        return _grant_problem(values)
+    if table in (PROJECTS, PIPELINE_GRANTS):
+        return {PROJECTS.file: _project_problem, PIPELINE_GRANTS.file: _grant_problem}[table.file](
+            values
+        )
     if table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS):
         names = (
             ("TARGET_CATALOG_NAME", "TARGET_SCHEMA_NAME", "TARGET_TABLE_NAME")
@@ -62,13 +66,19 @@ def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
             return "RUN_CONDITION N needs a RUN_CONDITION_COUNT"
         if condition != RunCondition.N and count is not None:
             return "RUN_CONDITION_COUNT goes with RUN_CONDITION N only; leave it empty"
-    if table is TASK_DEPENDENCIES and (values["PIPELINE_CODE"], values["TASK_CODE"]) == (
-        values["DEPENDS_ON_PIPELINE_CODE"],
-        values["DEPENDS_ON_TASK_CODE"],
+    if (
+        table is TASK_DEPENDENCIES
+        and not values["DEPENDS_ON_PROJECT_CODE"]
+        and (values["PIPELINE_CODE"], values["TASK_CODE"])
+        == (
+            values["DEPENDS_ON_PIPELINE_CODE"],
+            values["DEPENDS_ON_TASK_CODE"],
+        )
     ):
         return f"{values['PIPELINE_CODE']}.{values['TASK_CODE']} depends on itself"
     if (
         table is PIPELINE_DEPENDENCIES
+        and not values["DEPENDS_ON_PROJECT_CODE"]
         and values["PIPELINE_CODE"] == values["DEPENDS_ON_PIPELINE_CODE"]
     ):
         return f"pipeline {values['PIPELINE_CODE']} depends on itself"
@@ -146,3 +156,12 @@ def parse_object(cell: str) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise MetadataFileError("is not a JSON object; write it as {...}")
     return parsed
+
+
+def _project_problem(values: dict[str, Value]) -> str | None:
+    """Require an IANA timezone even when the project has no scheduled pipelines."""
+    try:
+        timezone(str(values["TIMEZONE"]))
+    except MetadataError as error:
+        return f"TIMEZONE={values['TIMEZONE']!r}: {error}; choose an IANA timezone"
+    return None

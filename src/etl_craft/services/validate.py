@@ -262,7 +262,7 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
             report.fail(code, str(error))
             continue
     for edge in data.pipeline_edges:
-        if not edge.depends_on_pipeline_active:
+        if edge.pipeline_code in data.pipeline_codes and not edge.depends_on_pipeline_active:
             report.fail(
                 edge.pipeline_code,
                 f"depends on pipeline {edge.depends_on_pipeline_code}, which is inactive and "
@@ -276,8 +276,10 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
             if edge.depends_on_pipeline_active
         }
     ):
+        if not any(code in data.pipeline_codes for code in cycle):
+            continue
         report.fail(
-            cycle[0],
+            next(code for code in cycle if code in data.pipeline_codes),
             f"pipeline dependencies form a cycle ({' -> '.join([*cycle, cycle[0]])}), so none "
             "of these pipelines can start",
         )
@@ -390,7 +392,7 @@ def _task(
         data.placement.check(
             where,
             ResourceRequest(0, 0) if task.handler == Handler.EVENT_WAIT else request,
-            params.get("POOL", "default"),
+            params.get("POOL", data.placement.default_pool),
         )
         task_timeout_seconds(params, config)
         task_retry_policy(params, config)

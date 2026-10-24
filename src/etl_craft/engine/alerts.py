@@ -85,7 +85,12 @@ def read_alert(
     codes = []
     if pipelines:
         codes = (
-            [str(code) for code in conn.execute(statement(conn, "active_pipeline_codes")).scalars()]
+            [
+                str(code)
+                for code in conn.execute(
+                    statement(conn, "active_pipeline_codes"), {"project_id": None}
+                ).scalars()
+            ]
             if pipelines.strip().upper() == "ALL"
             else [code.strip() for code in pipelines.split("|") if code.strip()]
         )

@@ -15,12 +15,27 @@ from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import acting_as, sso_groups
 from etl_craft.core.definitions import using
-from etl_craft.core.enums import ActionName, ActionScope, ApiRole, Audit, HttpMethod, Placement
-from etl_craft.core.errors import PermissionDeniedError, UsageError
+from etl_craft.core.enums import (
+    ActionName,
+    ActionScope,
+    ApiRole,
+    Audit,
+    HttpMethod,
+    Placement,
+    Transport,
+    YesNo,
+)
+from etl_craft.core.errors import (
+    ConfigurationError,
+    PermissionDeniedError,
+    ResourceNotFoundError,
+    UsageError,
+)
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.group_claims import token_groups
+from etl_craft.engine.repository.pipelines import selected_project
 from etl_craft.engine.repository.tasks import fetch_admitted_parameters
 from etl_craft.engine.schema import InitResult
 from etl_craft.services.catalog.gaps import GapSnapshot
@@ -131,6 +146,14 @@ class Action:
         return self.role if self.escalate is None else self.escalate(ctx, request)
 
 
+def action_path(action: Action) -> str:
+    """Return the public route, adding the selected project to project-owned actions."""
+    assert action.path is not None
+    if action.scope in (ActionScope.PROJECT, ActionScope.PIPELINE):
+        return action.path.replace(API, f"{API}/projects/{{project}}", 1)
+    return action.path
+
+
 def _migration_role(ctx: OperationContext, request: object) -> ApiRole:
     """Require an admin for packaged Engine DB migrations and a developer for project ones."""
     assert isinstance(request, maintenance.MigrateInput)
@@ -149,9 +172,11 @@ HOST = Placement.CONTROLLER_HOST
 
 _ROWS = (
     Action(ActionName.AGENT_DOCTOR, agent_doctor.inspect, agent_doctor.AgentDoctor,
-           agent_doctor.AgentImports, ApiRole.AGENT, POST, f"{API}/agent/doctor", REQUEST),
+           agent_doctor.AgentImports, ApiRole.AGENT, POST, f"{API}/agent/doctor", REQUEST,
+           scope=ActionScope.PROJECT),
     Action(ActionName.BUNDLE_PUBLISH, bundles.publish, bundles.PublishBundle, bundles.BundleView,
-           DEVELOPER, POST, f"{API}/bundles", REQUEST),
+           DEVELOPER, POST, f"{API}/bundles", REQUEST, scope=ActionScope.PROJECT,
+           escalate=bundles.required_role),
     Action(ActionName.AGENTS, agents.list_agents, NoInput, agents.AgentsView, VIEWER, GET,
            f"{API}/agents"),
     Action(ActionName.AGENT_CONTROL, agents.command, agent_models.AgentControl,
@@ -243,7 +268,7 @@ _ROWS = (
            documents.DocsVersions, VIEWER, GET, f"{API}/docs/versions",
            scope=ActionScope.PIPELINE),
     Action(ActionName.REHASH_PLAN, maintenance.plan_rehash, maintenance.RehashInput,
-           RehashResult, VIEWER, GET, f"{API}/rehash"),
+           RehashResult, VIEWER, GET, f"{API}/rehash", scope=ActionScope.PROJECT),
     # Runs and controls.
     Action(ActionName.TRIGGER_PIPELINE, triggers.initialize, triggers.TriggerRequest,
            triggers.TriggerView, OPERATOR, POST, f"{API}/triggers", REQUEST,
@@ -285,9 +310,9 @@ _ROWS = (
            diagnostics.LineageView, DEVELOPER, POST, f"{API}/lineage/refresh", REQUEST,
            scope=ActionScope.PIPELINE),
     Action(ActionName.GENERATE_DOCS, documents.generate_docs, documents.DocsInput,
-           documents.DocsBuild, DEVELOPER, POST, f"{API}/docs", REQUEST),
+           documents.DocsBuild, DEVELOPER, POST, f"{API}/docs", REQUEST, scope=ActionScope.PROJECT),
     Action(ActionName.DOCS_VERSION, documents.record_versions, NoInput, documents.DocsVersions,
-           ADMIN, POST, f"{API}/docs/versions", REQUEST),
+           ADMIN, POST, f"{API}/docs/versions", REQUEST, scope=ActionScope.PROJECT),
     Action(ActionName.DATA_EDIT, values.write_values, values.ValueEdit, values.ValueResult, ADMIN,
            POST, f"{API}/values", BY_ACTION,
            scope=ActionScope.PIPELINE),
@@ -311,21 +336,24 @@ _ROWS = (
     Action(ActionName.TOKEN_REVOKE, tokens.revoke_token, tokens.TokenRevoke, tokens.TokensView,
            ADMIN, POST, f"{API}/tokens/revoke", REQUEST),
     Action(ActionName.REHASH, maintenance.rehash_target, maintenance.RehashInput, RehashResult,
-           ADMIN, POST, f"{API}/rehash", REQUEST),
+           ADMIN, POST, f"{API}/rehash", REQUEST, scope=ActionScope.PROJECT),
     Action(ActionName.UPGRADE_TARGETS, maintenance.upgrade_audit_columns,
            maintenance.UpgradeInput, maintenance.TargetUpgrades, ADMIN, POST,
-           f"{API}/targets/upgrade", REQUEST),
+           f"{API}/targets/upgrade", REQUEST, scope=ActionScope.PROJECT),
     Action(ActionName.CLONE, maintenance.clone_tables, NoInput, maintenance.Clones, ADMIN, POST,
-           f"{API}/clones", REQUEST),
+           f"{API}/clones", REQUEST, scope=ActionScope.PROJECT),
     # The controller's host only: local files, Engine DB setup and long-running processes.
     Action(ActionName.DOCTOR, diagnostics.check_configuration, NoInput, diagnostics.DoctorView,
            VIEWER, placement=HOST, remedy=ON_HOST, provisioning=True),
     Action(ActionName.CONFIG_PLAN, config_files.plan_config, config_files.ConfigDirectory,
-           ConfigSync, VIEWER, placement=HOST, remedy=CONFIG_ON_HOST),
+           ConfigSync, VIEWER, placement=HOST, remedy=CONFIG_ON_HOST,
+           scope=ActionScope.PROJECT),
     Action(ActionName.CONFIG_EXPORT, config_files.export_config, config_files.ConfigExportInput,
-           ConfigExport, VIEWER, placement=HOST, remedy=CONFIG_ON_HOST),
+           ConfigExport, VIEWER, placement=HOST, remedy=CONFIG_ON_HOST,
+           scope=ActionScope.PROJECT),
     Action(ActionName.CONFIG_APPLY, config_files.apply_config, config_files.ConfigDirectory,
-           ConfigSync, DEVELOPER, audit=REQUEST, placement=HOST, remedy=CONFIG_ON_HOST),
+           ConfigSync, DEVELOPER, audit=REQUEST, placement=HOST, remedy=CONFIG_ON_HOST,
+           scope=ActionScope.PROJECT),
     Action(ActionName.SETUP_GRANTS, maintenance.grants, NoInput, maintenance.Grants, VIEWER,
            placement=HOST, remedy=ON_HOST),
     Action(ActionName.SETUP, maintenance.setup_engine, NoInput, SetupResult, ADMIN, audit=REQUEST,
@@ -334,13 +362,13 @@ _ROWS = (
            audit=REQUEST, placement=HOST, remedy=ON_HOST, provisioning=True),
     Action(ActionName.MIGRATE, maintenance.migrate, maintenance.MigrateInput, list, DEVELOPER,
            audit=REQUEST, placement=HOST, remedy=MIGRATION_ON_HOST, provisioning=True,
-           escalate=_migration_role),
+           escalate=_migration_role, scope=ActionScope.PROJECT),
     Action(ActionName.CONTROLLER, processes.controller, NoInput, None, ADMIN, audit=REQUEST,
            placement=HOST, remedy=STARTED_ON_HOST),
     Action(ActionName.UI, processes.ui, NoInput, None, ADMIN, audit=REQUEST, placement=HOST,
            remedy=STARTED_ON_HOST),
     Action(ActionName.PUBLISH_DOCS, None, documents.PublishInput, None, ADMIN, audit=REQUEST,
-           placement=HOST, remedy=STARTED_ON_HOST),
+           placement=HOST, remedy=STARTED_ON_HOST, scope=ActionScope.PROJECT),
 )  # fmt: skip
 
 ACTIONS: dict[ActionName, Action] = {row.name: row for row in _ROWS}
@@ -364,23 +392,25 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
     of the actions the table marks as provisioning.
     """
     action = ACTIONS[name]
+    ctx = _project_context(ctx, action)
     if not isinstance(request, action.request):
         raise UsageError(
             f"{name}: request is {type(request).__name__}; expected {action.request.__name__}"
         )
-    given = arguments(request)
-    required = action.required_role(ctx, request)
-    try:
-        _authorize(ctx, action, request, required)
-    except PermissionDeniedError as error:
-        record_refusal(ctx, name, given, error)
-        raise
-    if action.audit == Audit.REQUEST:
-        with recorded(ctx, name, given):
-            yield
-    else:
-        with acting_as(ctx.actor):
-            yield
+    with selected_project(ctx.project_id):
+        given = arguments(request)
+        required = action.required_role(ctx, request)
+        try:
+            _authorize(ctx, action, request, required)
+        except PermissionDeniedError as error:
+            record_refusal(ctx, name, given, error)
+            raise
+        if action.audit == Audit.REQUEST:
+            with recorded(ctx, name, given):
+                yield
+        else:
+            with acting_as(ctx.actor):
+                yield
 
 
 def _authorize(
@@ -390,6 +420,7 @@ def _authorize(
         _require_role(ctx, action, required)
         return
     _require_trigger_groups(ctx, action, request)
+    _require_project_identity(ctx, action, request)
     if ctx.role == ApiRole.ADMIN or (action.provisioning and ctx.provisioning):
         return
     if action.scope == ActionScope.PIPELINE and required is not None:
@@ -419,6 +450,25 @@ def _authorize(
     _require_role(ctx, action, required)
 
 
+def _require_project_identity(ctx: OperationContext, action: Action, request: object) -> None:
+    """Require an exact run or attempt id to belong to the selected project."""
+    if (
+        action.scope == ActionScope.PIPELINE
+        and any(
+            getattr(request, key, None) is not None
+            for key in ("run_id", "attempt_id", "control_id", "task_run_id")
+        )
+        and getattr(request, "pipeline_code", None) is None
+    ):
+        with ctx.engine.connect() as conn:
+            if not _request_codes(conn, action, request):
+                raise ResourceNotFoundError(
+                    f"project {ctx.project!r}: requested execution identity is outside this "
+                    "project or missing; expected an identity in the selected project; "
+                    "select the owning project and its exact identity"
+                )
+
+
 def _require_role(ctx: OperationContext, action: Action, required: ApiRole | None) -> None:
     """Refuse both insufficient account roles and a different credential protocol."""
     if not has_role(ctx.role, required):
@@ -442,16 +492,91 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     call = ACTIONS[name].call
     if call is None:
         raise UsageError(f"{name} is a long-running process; its interface starts it")
+    ctx = _project_context(ctx, ACTIONS[name])
     ctx = _request_context(ctx, name, request)
     claims = sso_groups.set(ctx.sso_group_ids)
     try:
-        with using(None), admitted(ctx, name, request):
-            result = call(ctx, request)
-        return (
-            visible_result(ctx, result) if ACTIONS[name].scope == ActionScope.PIPELINE else result
-        )
+        with using(None), selected_project(ctx.project_id), admitted(ctx, name, request):
+            result = call(_project_settings(ctx, name), request)
+            return (
+                visible_result(ctx, result)
+                if ACTIONS[name].scope == ActionScope.PIPELINE
+                else result
+            )
     finally:
         sso_groups.reset(claims)
+
+
+def _project_settings(ctx: OperationContext, name: ActionName) -> OperationContext:
+    """Use approved project connections for operations that inspect warehouse resources."""
+    if name not in {
+        ActionName.RUN,
+        ActionName.VALIDATE,
+        ActionName.LINEAGE,
+        ActionName.LINEAGE_REFRESH,
+        ActionName.CATALOG_GAPS,
+        ActionName.REHASH,
+        ActionName.REHASH_PLAN,
+        ActionName.UPGRADE_TARGETS,
+        ActionName.CLONE,
+        ActionName.GENERATE_DOCS,
+        ActionName.DATA_EDIT,
+        ActionName.DATA_UNLOCK,
+        ActionName.DATA_PROVENANCE,
+    } or (ctx.transport == Transport.LOCAL and not ctx.config.artifacts.store):
+        return ctx
+    from etl_craft.config.project import project_config
+    from etl_craft.engine.bundles import Bundle
+
+    with ctx.engine.connect() as conn:
+        identity = conn.execute(statement(conn, "bundle_latest")).scalar_one_or_none()
+        bundle = None if identity is None else Bundle.load(conn, identity)
+    if bundle is None:
+        if ctx.project != ctx.config.project:
+            raise ConfigurationError(
+                f"project {ctx.project!r}: no approved bundle; expected its own connection "
+                "definitions; publish this project as an admin before using warehouse operations"
+            )
+        return ctx
+    root = bundle.materialize(ctx.config)
+    pinned = project_config(ctx.config, root / "craft-connector.yml")
+    return replace(ctx, config=replace(pinned, project=ctx.project, timezone=ctx.config.timezone))
+
+
+def _project_context(ctx: OperationContext, action: Action) -> OperationContext:
+    """Resolve one active project before a project-owned operation reads any object."""
+    if action.scope == ActionScope.DEPLOYMENT or ctx.project_id is not None:
+        return ctx
+    if ctx.transport == Transport.LOCAL:
+        ctx = replace(ctx, config=replace(ctx.config, project=ctx.project))
+    with ctx.engine.connect() as conn:
+        if action.name == ActionName.MIGRATE:
+            from etl_craft.dialects.engine import for_engine
+
+            if not for_engine(conn).has_table(conn, "CFG_PROJECTS"):
+                if ctx.project == "default":
+                    return ctx
+                raise UsageError(
+                    "project metadata is absent; migrate default before selecting another project"
+                )
+        row = conn.execute(statement(conn, "project_by_code"), {"code": ctx.project}).one_or_none()
+    if row is None or (
+        row.active_flag == YesNo.NO
+        and action.name
+        not in {ActionName.CONFIG_PLAN, ActionName.CONFIG_APPLY, ActionName.CONFIG_EXPORT}
+    ):
+        if action.name in (ActionName.CONFIG_PLAN, ActionName.CONFIG_APPLY):
+            return ctx
+        raise UsageError(
+            f"project={ctx.project!r}; expected an active CFG_PROJECTS row; add it to "
+            "projects.csv and run `etl-craft config apply --project " + ctx.project + "`"
+        )
+    return replace(
+        ctx,
+        project_id=int(row.project_id),
+        project=str(row.project_code),
+        config=replace(ctx.config, timezone=str(row.timezone)),
+    )
 
 
 def _request_context(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:

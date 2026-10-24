@@ -23,6 +23,7 @@ from etl_craft.engine.notifications import listener_engine
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import controllers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
+from etl_craft.engine.repository.pipelines import selected_project
 from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.engine.runlog import RunSelector, fetch_pipeline_run_status
 from etl_craft.execution import pipeline, run_types
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 class ActiveRun:
     """One exact run and the cached graph used for its execution."""
 
+    project_id: int
     pipeline_id: int
     pipeline_run_id: int
     pipeline_code: str
@@ -71,6 +73,7 @@ class WorkingSet:
                         )
                 result.append(
                     ActiveRun(
+                        row.project_id,
                         row.pipeline_id,
                         row.pipeline_run_id,
                         row.pipeline_code,
@@ -144,7 +147,8 @@ class _Supervisor:
             graph_data=run.graph_data,
             pool=self.pool,
         )
-        self.jobs[run.pipeline_run_id] = (steps, contextvars.copy_context())
+        with selected_project(run.project_id):
+            self.jobs[run.pipeline_run_id] = (steps, contextvars.copy_context())
         self.advance(run.pipeline_run_id)
 
     def drain(self, controller_id: int) -> None:

@@ -43,10 +43,12 @@ from etl_craft.config.targets import active_catalog, parse_warehouse_url
 from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import CloningError, ConfigurationError
 from etl_craft.core.text import parse_jdbc_url, qualify
+from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.engine.tables import CONFIG_TABLES
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
+from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
 from etl_craft.handlers.resources import LocalLocker
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
@@ -150,14 +152,25 @@ def run_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
         default_hooks(config, engine),
         before_admission=lambda conn, run_id: check_child_start(engine, config, conn, run_id),
     )
-    if not config.cloning.enabled or config.cloning.scope == CloningScope.NONE:
+    if not config.artifacts.store and (
+        not config.cloning.enabled or config.cloning.scope == CloningScope.NONE
+    ):
         return hooks
     before = hooks.on_finalized
 
     def finalized(outcome: PipelineOutcome) -> None:
         if before is not None:
             before(outcome)
-        tables = clone(engine, config)
+        from etl_craft.execution.bundle_files import run_config
+
+        pinned = (
+            run_config(engine, config, outcome.pipeline_run_id)
+            if config.artifacts.store and outcome.pipeline_run_id is not None
+            else config
+        )
+        if not pinned.cloning.enabled or pinned.cloning.scope == CloningScope.NONE:
+            return
+        tables = clone(engine, pinned)
         logger.info(
             "cloned %d table(s), %d row(s), into the warehouse",
             len(tables),
@@ -271,9 +284,10 @@ def _batches(
     names = [name for name, _ in columns]
     with engine.connect() as conn:
         result = conn.execution_options(stream_results=True, yield_per=BATCH_ROWS).execute(
-            text(f"SELECT {', '.join(names)} FROM {table}").columns(
-                *(column(name, kind) for name, kind in columns)
-            )
+            for_engine(conn)
+            .clone_statement(table, names)
+            .columns(*(column(name, kind) for name, kind in columns)),
+            {"project_id": current_project_id()},
         )
         for partition in result.partitions(BATCH_ROWS):
             yield [tuple(_value(v) for v in row) for row in partition]

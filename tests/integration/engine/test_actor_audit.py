@@ -705,7 +705,8 @@ def test_nested_action_secrets_never_reach_audit_logs_cli_or_api(engine_db, log_
     Output(stdout=output).result(code, "json")
     with TestClient(create_app(ctx)) as client:
         response = client.get(
-            "/api/v1/audit", headers={"Authorization": "Bearer " + credential.token}
+            "/api/v1/projects/default/audit",
+            headers={"Authorization": "Bearer " + credential.token},
         )
     assert response.status_code == 200, response.text
     with db.engine.connect() as conn:

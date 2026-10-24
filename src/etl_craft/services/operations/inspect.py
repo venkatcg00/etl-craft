@@ -264,7 +264,11 @@ def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
         if ids is not None and pipeline_id is not None:
             ids &= {pipeline_id}
         actions, changes = fetch_audit_records(
-            conn, pipeline_id if ids is None else None, since, pipeline_ids=ids
+            conn,
+            pipeline_id if ids is None else None,
+            since,
+            pipeline_ids=ids,
+            project_id=ctx.project_id,
         )
         for row in (*actions, *changes):
             row["at"] = as_utc(row["at"])

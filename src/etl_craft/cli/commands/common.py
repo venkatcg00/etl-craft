@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from sqlalchemy.engine import Engine
@@ -15,10 +16,13 @@ from etl_craft.cli.authentication import command_identity
 from etl_craft.cli.client import ApiClient
 from etl_craft.cli.output import Output
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
+from etl_craft.config.discovery import CONFIG_PATH_ENV_VAR
+from etl_craft.config.loader import load_project
 from etl_craft.config.sizing import start_role
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import UsageError
+from etl_craft.core.text import is_metadata_code
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations import OperationContext
@@ -114,9 +118,15 @@ def command_context(
         config = start_role(config, server=role in ("controller", "ui"))
     engine = connect_engine_db(config)
     try:
+        project = args.project or config.project
+        if not is_metadata_code(project):
+            raise UsageError(
+                f"project={project!r}; expected a letter followed by at most 127 letters, "
+                "numbers or underscores; pass --project with a valid code"
+            )
         context = OperationContext(
             engine,
-            config,
+            replace(config, project=project),
             current_actor(),
             ChildOptions(log_level=args.log_level, log_format=args.log_format),
             role=(
@@ -125,6 +135,7 @@ def command_context(
                 else None
             ),
             provisioning=scoped is not None and scoped.provisioning,
+            project=project,
         )
         yield (
             authenticated_context(context, scoped.identity)
@@ -150,9 +161,21 @@ def call(
 ) -> object:
     """Run one action: through the API with ``--api``, else on this project."""
     if args.api:
-        return ApiClient(args.api).invoke(name, request)
+        return ApiClient(args.api, command_project(args)).invoke(name, request)
     with command_context(args, role=role) as ctx:
         return invoke(ctx, name, request)
+
+
+def command_project(args: argparse.Namespace) -> str:
+    """Select an API project without loading any connection credentials."""
+    if args.project is not None:
+        return str(args.project)
+    path = resolve_config_path(args.config)
+    return (
+        load_project(path)
+        if args.config is not None or os.environ.get(CONFIG_PATH_ENV_VAR) or path.is_file()
+        else "default"
+    )
 
 
 def on_host(args: argparse.Namespace, name: ActionName) -> None:

@@ -336,6 +336,7 @@ def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
             datetime.now(UTC),
             actor=ctx.actor,
             outcome=ActionOutcome.SUCCESS,
+            project_id=None if row is None else int(row.project_id),
             exit_code=request.exit_code,
         ).write(conn)
     return AgentReply()

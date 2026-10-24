@@ -251,5 +251,10 @@ It is not wired into the demo pipelines. See the [SQL scripts guide](../../docs/
 for writes, autocommit, retries and the per-statement attempt log.
 
 For deployment with agents, configure artifact storage and publish the project with
-`etl-craft bundle publish --project examples/demo --api URL` before admitting runs. Local
+`etl-craft bundle publish --project-dir examples/demo --api URL` before admitting runs. Local
 working-tree execution needs no artifact store. See the pinned project bundles guide.
+
+`--project CODE` selects the metadata namespace (default `Orchestration.Project`, then
+`default`). Use `--project-dir` for a publication source directory. A shared Engine DB can
+hold another project with the same pipeline codes and its own approved Warehouse, Email and
+Cloning definitions; see the [project bundle guide](../../docs/deploying/project-bundles.md).

@@ -217,52 +217,84 @@ def test_resolved_host_values_never_escape_bundle_validation(tmp_path, monkeypat
         assert part in str(caught.value)
 
 
-@pytest.mark.parametrize("profiled", [False, True])
-def test_bundle_connections_cannot_resolve_or_redirect_host_credentials(
-    tmp_path, monkeypatch, profiled
-):
+def test_finalization_uses_pinned_cloning_even_when_bootstrap_cloning_is_off(tmp_path, monkeypatch):
     from dataclasses import replace
 
-    import yaml
+    from etl_craft.config import CloningConfig
+    from etl_craft.config.object_models import Artifacts
+    from etl_craft.core.enums import RunStatus
+    from etl_craft.execution.run_types import PipelineOutcome, RunHooks
+    from etl_craft.services import cloning
 
-    from etl_craft.config import ConnectionProfile
+    host = replace(config(tmp_path), artifacts=Artifacts((tmp_path / "store").as_uri()))
+    pinned = replace(host, cloning=CloningConfig(enabled=True))
+    monkeypatch.setattr(cloning, "default_hooks", lambda *_: RunHooks())
+    loaded, cloned = [], []
 
-    monkeypatch.setenv("BUNDLE_HOST_PRIVATE", "confidential-host-value-for-test")
-    host = replace(
-        config(tmp_path),
-        warehouse=ConnectionProfile(
-            "WAREHOUSE", "dev", "jdbc:duckdb:trusted.duckdb", "", "NONE", schema="main"
-        ),
+    def retained(engine, bootstrap, run_id):
+        loaded.append(run_id)
+        return pinned
+
+    monkeypatch.setattr("etl_craft.execution.bundle_files.run_config", retained)
+    monkeypatch.setattr(cloning, "clone", lambda engine, selected: cloned.append(selected) or [])
+    cloning.run_hooks(host, None).on_finalized(PipelineOutcome(RunStatus.SUCCESS, "done", 7))
+    assert loaded == [7] and cloned == [pinned]
+
+
+def test_sla_email_uses_pinned_email_settings_and_enforcement(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from dataclasses import replace
+
+    from etl_craft.config import ExecutionLimits
+    from etl_craft.config.object_models import Artifacts
+    from etl_craft.execution import run_types
+    from etl_craft.execution.sla import SlaLapse
+
+    host = replace(config(tmp_path), artifacts=Artifacts((tmp_path / "store").as_uri()))
+    pinned = replace(host, limits=ExecutionLimits(enforce_sla=True))
+    monkeypatch.setattr("etl_craft.execution.bundle_files.run_config", lambda *_: pinned)
+    monkeypatch.setattr(run_types, "resolve_pipeline_id", lambda *_: 1)
+    monkeypatch.setattr(
+        run_types, "fetch_pipeline_detail", lambda *_: SimpleNamespace(email_recipients=[])
     )
-    path = tmp_path / "published.yml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "Secrets": {"Source_type": "ENVIRONMENT"},
-                "Engine": {"dev": {"Jdbc_url": "BUNDLE_HOST_PRIVATE"}},
-                "Warehouse": {
-                    "dev": {
-                        "Jdbc_url": "jdbc:postgresql://untrusted.invalid/db",
-                        "Auth_mode": "PASSWORD",
-                        "Secret": "BUNDLE_HOST_PRIVATE",
-                    }
-                },
-                "Orchestration": {
-                    "Email": {"Host": "untrusted.invalid", "Secret": "BUNDLE_HOST_PRIVATE"}
-                },
-                "Cloning": {"Enabled": True},
-            },
-            sort_keys=False,
-        )
+    sent = []
+    monkeypatch.setattr(
+        run_types, "send_sla_lapse_email", lambda selected, *a, **kw: sent.append(selected)
     )
-    if profiled:
-        raw = yaml.safe_load(path.read_text())
-        raw["Orchestration"] = {"dev": raw["Orchestration"]}
-        path.write_text(yaml.safe_dump(raw, sort_keys=False))
-    pinned = project_config(host, path)
-    assert pinned.warehouse_table_format == host.warehouse_table_format
-    assert pinned.engine == host.engine
-    assert pinned.warehouse == host.warehouse
-    assert pinned.email == host.email
-    assert pinned.cloning == host.cloning
-    assert "confidential-host-value-for-test" not in repr(pinned)
+    engine = SimpleNamespace(connect=lambda: nullcontext(None))
+    run_types.default_hooks(host, engine).on_sla_lapse(SlaLapse("P", 7, 1, 2))
+    assert sent == [pinned]
+
+
+def test_connection_contract_rejects_unsupported_yaml_values_without_resolving_secrets(tmp_path):
+    from etl_craft.config.project import connection_sha256
+
+    path = tmp_path / "craft-connector.yml"
+    path.write_text("Secrets: {}\nWarehouse:\n  dev:\n    Jdbc_url: 2026-01-01\n")
+    with pytest.raises(ConfigurationError) as caught:
+        connection_sha256(path)
+    for part in (str(path), "unsupported connection value", "expected", "correct"):
+        assert part in str(caught.value)
+
+
+def test_implicit_email_profile_names_are_part_of_the_approved_connection_contract(
+    tmp_path, monkeypatch
+):
+    from etl_craft.config.project import connection_sha256
+
+    monkeypatch.setenv("SMTP_DEV_HOST", "dev.example.com")
+    monkeypatch.setenv("SMTP_PROD_HOST", "prod.example.com")
+    path = tmp_path / "craft-connector.yml"
+    template = (
+        "Secrets:\n  Source_type: ENVIRONMENT\nOrchestration:\n"
+        "  Email:\n    Host: SMTP_HOST\n    Port: 25\n    From_address: sender@example.com\n"
+        "  {profile}:\n    Retries: 1\n"
+    )
+    hashes = []
+    hosts = []
+    for profile in ("dev", "prod"):
+        path.write_text(template.format(profile=profile))
+        hashes.append(connection_sha256(path))
+        hosts.append(project_config(config(tmp_path), path).email.host)
+    assert hosts == ["dev.example.com", "prod.example.com"]
+    assert hashes[0] != hashes[1]

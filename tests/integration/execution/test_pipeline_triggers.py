@@ -538,8 +538,10 @@ def test_http_run_details_expose_parent_and_child_links(trigger_scene):
     child = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with TestClient(create_app(ctx)) as client:
         headers = {"Authorization": f"Bearer {token}"}
-        parent = client.get(f"/api/v1/runs/{run}", headers=headers)
-        nested = client.get(f"/api/v1/runs/{child.pipeline_run_id}", headers=headers)
+        parent = client.get(f"/api/v1/projects/default/runs/{run}", headers=headers)
+        nested = client.get(
+            f"/api/v1/projects/default/runs/{child.pipeline_run_id}", headers=headers
+        )
     assert parent.status_code == nested.status_code == 200
     assert parent.json()["child_run_ids"] == [child.pipeline_run_id]
     assert nested.json()["parent_run_id"] == run

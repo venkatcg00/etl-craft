@@ -9,6 +9,7 @@ tables by key: change a file, review the change, and the deployment applies it.
 etl-craft/
 ├── craft-connector.yml
 ├── config/
+│   ├── projects.csv               CFG_PROJECTS
 │   ├── pools.csv                  CFG_POOLS
 │   ├── pipelines.csv              CFG_PIPELINES
 │   ├── tasks.csv                  CFG_TASKS
@@ -21,6 +22,11 @@ etl-craft/
 ├── sql_scripts/
 └── python_scripts/
 ```
+
+The files are the selected project's whole configuration; `pools.csv` is deployment-wide.
+Project files contain exactly one `projects.csv` row. Dependency rows may set
+`DEPENDS_ON_PROJECT_CODE` for another project; an empty value selects this project.
+Applying them never retires another project's rows.
 
 The files are the whole configuration: every row of every table, active or not, each with an
 `ACTIVE_FLAG`. [`docs/examples/config/`](https://github.com/venkatcg00/etl-craft/tree/main/docs/examples/config)
@@ -67,18 +73,19 @@ development, test and production.
 | File | Key |
 |---|---|
 | `grants.csv` | `GROUP_NAME`, `PIPELINE_CODE`, `TAG` (exactly one pipeline or tag) |
+| `projects.csv` | `PROJECT_CODE` (exactly the selected project) |
 | `pools.csv` | `POOL_NAME` |
 | `pipelines.csv` | `PIPELINE_CODE` |
 | `tasks.csv` | `PIPELINE_CODE`, `TASK_CODE` |
 | `task_parameters.csv` | `PIPELINE_CODE`, `TASK_CODE`, `PARAMETER_NAME` |
-| `task_dependencies.csv` | `PIPELINE_CODE`, `TASK_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDS_ON_TASK_CODE`, `DEPENDENCY_TYPE` |
-| `pipeline_dependencies.csv` | `PIPELINE_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDENCY_TYPE` |
+| `task_dependencies.csv` | `PIPELINE_CODE`, `TASK_CODE`, `DEPENDS_ON_PROJECT_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDS_ON_TASK_CODE`, `DEPENDENCY_TYPE` |
+| `pipeline_dependencies.csv` | `PIPELINE_CODE`, `DEPENDS_ON_PROJECT_CODE`, `DEPENDS_ON_PIPELINE_CODE`, `DEPENDENCY_TYPE` |
 | `business_rules.csv` | `PIPELINE_CODE`, `TASK_CODE`, `BUSINESS_RULE_NAME` |
 | `tables.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME` |
 | `columns.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME`, `COLUMN_NAME` |
 
 `pools.csv` holds `POOL_NAME`, `DESCRIPTION` and `ACTIVE_FLAG`. Keep the seeded `default`
-pool active for tasks without `POOL`. Pipelines also have `MAX_PARALLEL_TASKS` (default 8)
+pool available. Tasks without `POOL` use their project's `DEFAULT_POOL`. Pipelines also have `MAX_PARALLEL_TASKS` (default 8)
 and `PRIORITY` (default 0). [Placement](../deploying/agents.md#pools-limits-and-resource-placement)
 explains resource requests, priorities and the shared warehouse limit.
 

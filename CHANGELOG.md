@@ -8,12 +8,25 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Projects share one Engine DB while retaining separate pipeline codes, warehouses,
+  target contracts, lineage history, grants, migration ledgers and docs publications.
+  Select `--project CODE` or `Orchestration.Project` (default `default`); project API
+  routes use `/api/v1/projects/{project}/...`. `projects.csv` holds one selected project;
+  dependency files may name `DEPENDS_ON_PROJECT_CODE`. Project limits and default pools
+  apply across its pipelines; `pause --project CODE --reason TEXT` pauses them all.
+  Bundle connections require admin approval on first publication or any definition change;
+  developers can republish the exact approved connection definitions. Apply migration
+  `0054_engine_projects.sql`; existing metadata belongs to `default`.
+  Directory selection for `bundle publish` and `agent` is now `--project-dir`.
+
+
 - Pinned project bundles: `etl-craft bundle publish` works locally and through `--api`,
   backed by `Artifacts.Store` and named `Object_stores` profiles. Runs retain their bundle,
   metadata version and admitted execution snapshot across edits, retries and restarts.
   Agents download verified files through the API; `doctor --agent` checks static imports.
-  Warehouse, Email and Cloning connections remain host-local; uploaded configuration cannot
-  redirect host credentials, and bundle parsing errors withhold resolved host values.
+  Warehouse, Email and Cloning definitions are pinned after admin approval; Engine DB,
+  authentication and artifact-store credentials remain host-local. Bundle parsing errors
+  withhold resolved host values.
   Apply `0053_project_bundles.sql`; start a new run instead of reopening a completed
   pre-bundle run.
 

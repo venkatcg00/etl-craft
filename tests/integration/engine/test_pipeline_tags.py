@@ -155,7 +155,7 @@ def test_tag_pause_requires_confirmation_and_records_fixed_codes(tagged, capsys)
     )
     with TestClient(create_app(ctx)) as client:
         response = client.post(
-            "/api/v1/controls/bulk",
+            "/api/v1/projects/default/controls/bulk",
             json=encode(request),
             headers={"Authorization": "Bearer " + token},
         )
@@ -307,7 +307,9 @@ def test_invalid_filter_is_refused_by_cli_and_http_without_normalizing(tagged, v
     assert "--tag" in capsys.readouterr().err
     with TestClient(create_app(ctx)) as client:
         response = client.get(
-            "/api/v1/pipelines", params={"tag": value}, headers={"Authorization": "Bearer " + token}
+            "/api/v1/projects/default/pipelines",
+            params={"tag": value},
+            headers={"Authorization": "Bearer " + token},
         )
     assert response.status_code == 400
     assert "tag" in response.text and "replace" in response.text
@@ -422,7 +424,7 @@ def test_validation_filter_counts_only_matching_active_pipelines(tagged, capsys)
     assert result["pipelines"] == 1 and result["tasks"] == 0
     with TestClient(create_app(ctx)) as client:
         response = client.get(
-            "/api/v1/validation",
+            "/api/v1/projects/default/validation",
             params=[("tag", "team:sales"), ("tag", "tier:gold")],
             headers={"Authorization": "Bearer " + token},
         )

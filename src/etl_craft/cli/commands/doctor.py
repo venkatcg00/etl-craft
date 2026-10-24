@@ -7,7 +7,7 @@ from collections.abc import Sequence
 
 from etl_craft import __version__
 from etl_craft.cli.client import ApiClient
-from etl_craft.cli.commands.common import Command, call, configure_output
+from etl_craft.cli.commands.common import Command, call, command_project, configure_output
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import ExitCode, UsageError
@@ -60,7 +60,7 @@ def check_agent_imports(args: argparse.Namespace, out: Output) -> int:
             "doctor --agent: no API address; expected --api or ETL_CRAFT_API "
             "with an agent token; provide the API address"
         )
-    client = ApiClient(args.api)
+    client = ApiClient(args.api, command_project(args))
     names = client.invoke(ActionName.AGENT_DOCTOR, AgentDoctor(version=__version__))
     assert isinstance(names, AgentImports)
     result = client.invoke(

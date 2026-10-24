@@ -244,7 +244,7 @@ def actions_page() -> str:
     """Render each action's command, route, scope, role, audit and placement from its row."""
     from etl_craft.cli.commands import COMMANDS
     from etl_craft.core.enums import Audit, Placement
-    from etl_craft.services.operations.actions import ACTIONS
+    from etl_craft.services.operations.actions import ACTIONS, action_path
 
     commands: dict[str, list[str]] = {}
     for command in COMMANDS:
@@ -261,7 +261,7 @@ def actions_page() -> str:
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for name, action in sorted(ACTIONS.items()):
-        route = f"`{action.method} {action.path}`" if action.path else "—"
+        route = f"`{action.method} {action_path(action)}`" if action.path else "—"
         audited = {Audit.NONE: "no", Audit.REQUEST: "yes", Audit.BY_ACTION: "yes, by the action"}
         where = "anywhere" if action.placement == Placement.ANYWHERE else "controller's host"
         lines.append(

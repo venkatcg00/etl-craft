@@ -128,7 +128,7 @@ def test_cli_and_http_share_the_service_run_policy(project, role, monkeypatch, c
     code = main(args)
     output = capsys.readouterr()
     response = TestClient(create_app(ctx)).post(
-        "/api/v1/runs",
+        "/api/v1/projects/default/runs",
         json={"pipeline_code": "P", "init_only": True},
         headers={"Authorization": "Bearer " + token},
     )
@@ -174,7 +174,7 @@ def test_changing_the_shared_policy_changes_every_transport(project, monkeypatch
     assert "pipeline 'P' needs admin role" in message
     assert "effective role=operator" in message
     response = TestClient(create_app(ctx)).post(
-        "/api/v1/controls",
+        "/api/v1/projects/default/controls",
         json={"pipeline_code": "P", "action": "PAUSE", "reason": "policy test"},
         headers={"Authorization": "Bearer " + credential.token},
     )

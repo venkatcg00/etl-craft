@@ -6,7 +6,7 @@ WITH shown AS (
         SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG
         WHERE PIPELINE_ID = p.PIPELINE_ID ORDER BY PIPELINE_RUN_ID DESC LIMIT :limit
     ) r
-    WHERE p.ACTIVE_FLAG = 'Y'
+    WHERE p.ACTIVE_FLAG = 'Y' AND p.PROJECT_ID=:project_id
 ), relevant AS (
     SELECT DISTINCT selected.consumption_id FROM shown
     CROSS JOIN LATERAL (

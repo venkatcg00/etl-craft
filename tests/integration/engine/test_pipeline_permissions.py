@@ -67,14 +67,14 @@ def test_direct_and_tag_grants_filter_lists_and_elevate_only_members(scene, tag)
     assert act(reader, ActionName.STATUS).runs == ()
     api = TestClient(create_app(ctx))
     headers = {"Authorization": "Bearer " + token}
-    assert api.get(f"/api/v1/runs/{run_id}", headers=headers).status_code == 403
+    assert api.get(f"/api/v1/projects/default/runs/{run_id}", headers=headers).status_code == 403
     assert [
         p["pipeline_code"]
-        for p in api.get("/api/v1/pipelines", headers=headers).json()["pipelines"]
+        for p in api.get("/api/v1/projects/default/pipelines", headers=headers).json()["pipelines"]
     ] == ["OPEN"]
     act(ctx, ActionName.GROUP_ADD_MEMBER, name="sales", account="reader")
     assert act(reader, ActionName.RUN_DETAIL, run_id=run_id).pipeline_run_id == run_id
-    assert api.get(f"/api/v1/runs/{run_id}", headers=headers).status_code == 200
+    assert api.get(f"/api/v1/projects/default/runs/{run_id}", headers=headers).status_code == 200
     # A viewer can operate their own restricted pipeline, not deployment-wide controls.
     act(reader, ActionName.CONTROL, pipeline_code="PRIVATE", action="PAUSE", reason="test")
     with pytest.raises(PermissionDeniedError, match="admin role is required"):

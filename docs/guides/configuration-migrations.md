@@ -226,3 +226,12 @@ is retained unchanged for deployments that already applied it. Keep applied proj
 place with their original bytes and names; do not replace them with the reactivation example.
 That legacy example creates a duplicate `publish` identity and cannot be newly applied after
 0027. For a fresh project use the reactivation example above.
+
+Project migration filenames and checksums are scoped to `--project` (default
+`Orchestration.Project`, then `default`). Two projects may each have `0001_setup.sql`.
+Packaged ENGINE migrations are applied once for the whole deployment. Existing project
+migration records migrate to `default`; create a project with `config apply` before
+applying its migrations.
+
+Project migration SQL must name the selected project when inserting project-owned metadata.
+Use `config apply` for code-based CSV merging; a scoped ledger does not rewrite arbitrary SQL.

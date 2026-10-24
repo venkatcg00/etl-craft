@@ -10,14 +10,17 @@ from typing import ClassVar
 from uuid import uuid4
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.project import project_config
+from etl_craft.config.project import connection_sha256, project_config
 from etl_craft.core.actor import current_actor
-from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.enums import ApiRole, YesNo
+from etl_craft.core.errors import ConfigurationError, PermissionDeniedError
 from etl_craft.core.text import sha256_hex
+from etl_craft.engine import locks
 from etl_craft.engine.artifacts import ArtifactStore
 from etl_craft.engine.bundles import Bundle
 from etl_craft.engine.project_files import MAX_BYTES, decode_files
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.services.operations.agent_models import AgentTask
 from etl_craft.services.operations.context import OperationContext
@@ -41,6 +44,32 @@ class BundleView:
     files: dict[str, str]
 
 
+def _uploaded(
+    ctx: OperationContext, request: PublishBundle
+) -> tuple[dict[str, str], dict[str, bytes], str]:
+    """Decode and validate one upload, returning its unresolved connection contract hash."""
+    manifest, content = decode_files(request.files)
+    with tempfile.TemporaryDirectory(prefix="etl-craft-publish-") as scratch:
+        config_file = Path(scratch) / "craft-connector.yml"
+        config_file.write_bytes(content["craft-connector.yml"])
+        digest = connection_sha256(config_file)
+    return manifest, content, digest
+
+
+def required_role(ctx: OperationContext, request: object) -> ApiRole:
+    """Require an admin only when a publication changes the approved connection contract."""
+    assert isinstance(request, PublishBundle)
+    if ctx.role == ApiRole.ADMIN:
+        return ApiRole.DEVELOPER
+    _, _, digest = _uploaded(ctx, request)
+    with ctx.engine.connect() as conn:
+        approved = conn.execute(
+            statement(conn, "bundle_approved_connection"),
+            {"project_id": ctx.project_id or current_project_id()},
+        ).scalar_one_or_none()
+    return ApiRole.DEVELOPER if approved == digest else ApiRole.ADMIN
+
+
 def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
     """Validate before publishing; only a committed row makes a bundle admissible."""
     location = ctx.config.artifacts.store
@@ -49,11 +78,7 @@ def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
             "Artifacts.Store is unset; expected file:///shared/path or a "
             "profiled s3:// location; configure it on the API/controller host before publishing"
         )
-    manifest, content = decode_files(request.files)
-    with tempfile.TemporaryDirectory(prefix="etl-craft-publish-") as scratch:
-        config_file = Path(scratch) / "craft-connector.yml"
-        config_file.write_bytes(content["craft-connector.yml"])
-        project_config(ctx.config, config_file)
+    manifest, content, connections = _uploaded(ctx, request)
     bundle_id = sha256_hex(uuid4().bytes)
     store = ArtifactStore(ctx.config, location, ctx.config.artifacts.profile)
     for name, digest in manifest.items():
@@ -67,18 +92,43 @@ def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
         },
         sort_keys=True,
     )
-    with ctx.engine.begin() as conn:
+    warehouse_limit = project_config_from_content(ctx, content).max_warehouse_queries
+    with locks.BUNDLES.hold(ctx.engine), ctx.engine.begin() as conn:
+        approved = conn.execute(
+            statement(conn, "bundle_approved_connection"),
+            {"project_id": ctx.project_id or current_project_id()},
+        ).scalar_one_or_none()
+        if ctx.role != ApiRole.ADMIN and approved != connections:
+            raise PermissionDeniedError(
+                f"project {ctx.project!r}: connection contract changed since admission; "
+                "expected the latest admin-approved definitions; ask an admin to publish "
+                "this connection contract before retrying"
+            )
         conn.execute(
             statement(conn, "bundle_insert"),
             {
                 "bundle_id": bundle_id,
+                "project_id": ctx.project_id or current_project_id(),
                 "manifest": recorded,
+                "connections": connections,
+                "approved": YesNo.YES,
+                "warehouse_limit": warehouse_limit,
                 "actor": current_actor().name,
                 "now": datetime.now(UTC),
             },
         )
     ctx.engine.update_execution_options(bundles_enabled=True)
     return BundleView(bundle_id, manifest)
+
+
+def project_config_from_content(
+    ctx: OperationContext, content: dict[str, bytes]
+) -> ConnectorConfig:
+    """Parse uploaded project settings once without retaining its temporary path."""
+    with tempfile.TemporaryDirectory(prefix="etl-craft-config-") as scratch:
+        path = Path(scratch) / "craft-connector.yml"
+        path.write_bytes(content["craft-connector.yml"])
+        return project_config(ctx.config, path)
 
 
 def file_reply(bundle: Bundle, config: ConnectorConfig, path: str | None) -> dict[str, object]:

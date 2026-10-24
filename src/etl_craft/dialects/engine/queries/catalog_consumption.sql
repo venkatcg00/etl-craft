@@ -5,7 +5,7 @@ WITH shown AS (
                ROW_NUMBER() OVER (PARTITION BY r.PIPELINE_ID ORDER BY r.PIPELINE_RUN_ID DESC) AS rn
         FROM AUD_PIPELINES_RUN_LOG r
         JOIN CFG_PIPELINES p ON p.PIPELINE_ID = r.PIPELINE_ID
-        WHERE p.ACTIVE_FLAG = 'Y'
+        WHERE p.ACTIVE_FLAG = 'Y' AND p.PROJECT_ID=:project_id
     ) ranked WHERE rn <= :limit
 )
 SELECT dp.PIPELINE_CODE AS pipeline_code, c.PIPELINE_RUN_ID AS pipeline_run_id,

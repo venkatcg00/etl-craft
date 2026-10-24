@@ -48,6 +48,12 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
         default=default(None),
     )
     group.add_argument(
+        "--project",
+        metavar="CODE",
+        help="Project code (default: Orchestration.Project, else default).",
+        default=default(None),
+    )
+    group.add_argument(
         "--log-level",
         type=str.upper,
         choices=log.LEVELS,

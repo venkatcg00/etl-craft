@@ -40,13 +40,13 @@ def _configure(parser: argparse.ArgumentParser, *, action: ControlAction) -> Non
 def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int:
     if args.tag and args.pipeline_code is not None:
         raise UsageError("choose --pipeline-code or --tag, not both")
-    if args.tag:
+    if args.tag or (args.project and args.pipeline_code is None):
         selected = call(args, ActionName.PIPELINES, request_from(args, TagFilter))
         assert isinstance(selected, PipelineListView)
         codes = tuple(p.pipeline_code for p in selected.pipelines)
         preview = Output(stdout=out.stderr) if args.output_format == "json" else out
         preview.line("Selected pipelines: " + (", ".join(codes) or "(none)"))
-        if not args.yes:
+        if args.tag and not args.yes:
             raise UsageError(
                 "tag-selected changes need --yes; "
                 "review the printed pipelines and repeat with --yes"

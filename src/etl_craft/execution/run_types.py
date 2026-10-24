@@ -87,15 +87,22 @@ def default_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
         if outcome.pipeline_run_id is not None:
             wake_child_waits(engine, outcome.pipeline_run_id)
 
-    if not config.limits.enforce_sla:
+    if not config.limits.enforce_sla and not config.artifacts.store:
         return RunHooks(on_finalized=finalized)
 
     def email_the_lapse(lapse: SlaLapse) -> None:
+        from etl_craft.execution.bundle_files import run_config
+
+        pinned = (
+            run_config(engine, config, lapse.pipeline_run_id) if config.artifacts.store else config
+        )
+        if not pinned.limits.enforce_sla:
+            return
         with engine.connect() as conn:
             pipeline_id = resolve_pipeline_id(conn, lapse.pipeline_code)
             recipients = fetch_pipeline_detail(conn, pipeline_id).email_recipients
         send_sla_lapse_email(
-            config,
+            pinned,
             recipients,
             pipeline_code=lapse.pipeline_code,
             pipeline_run_id=lapse.pipeline_run_id,
