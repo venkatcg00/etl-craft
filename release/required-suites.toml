@@ -39,6 +39,26 @@ linux = [
     "tests/integration/execution/test_leases.py::test_parent_sigkill_reconciles_and_retries_real_child[postgresql]",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
     "tests/integration/controller/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_dead_worker_is_lost_before_another_worker_retries[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_dead_worker_is_lost_before_another_worker_retries[queue-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_late_success_from_a_lost_worker_is_fenced[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_late_success_from_a_lost_worker_is_fenced[queue-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[queue-postgresql]",
+]
+
+[suites.cluster]
+marker = "cluster"
+description = "Shared local/queue pool contracts on PostgreSQL."
+
+[suites.cluster.platform_only]
+linux = [
+    "tests/integration/execution/test_pool_contract.py::test_a_dead_worker_is_lost_before_another_worker_retries[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_dead_worker_is_lost_before_another_worker_retries[queue-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_late_success_from_a_lost_worker_is_fenced[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_late_success_from_a_lost_worker_is_fenced[queue-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[queue-postgresql]",
 ]
 
 [suites.warehouse-postgres]
@@ -104,4 +124,10 @@ linux = [
     "tests/integration/controller/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[sqlite]",
     "tests/integration/execution/test_leases.py::test_child_sigkill_is_failed_by_live_parent[postgresql]",
     "tests/integration/controller/test_server.py::test_killed_server_reconciles_before_retrying_exact_task_run[postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_dead_worker_is_lost_before_another_worker_retries[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_dead_worker_is_lost_before_another_worker_retries[queue-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_late_success_from_a_lost_worker_is_fenced[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_a_late_success_from_a_lost_worker_is_fenced[queue-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[local-postgresql]",
+    "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[queue-postgresql]",
 ]

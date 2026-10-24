@@ -328,3 +328,5 @@ Engine DB. The tests create and drop a unique schema, so use a dedicated accepta
 with schema-creation permission. They run `init-db`, `migrate`, a Python task, process loss
 after reservation and a child exit after committing its outcome. Run the affected cloud
 marker with `-k managed_engine_db`; missing configuration is reported as unavailable.
+Cloud lifecycle commands allow up to 15 minutes for the schema and audit catalog round trips,
+within a 20-minute test deadline. The local procedure retains its 30-second command limit.

@@ -9,6 +9,7 @@ from etl_craft.core.actor import acting_as
 from etl_craft.core.agent_resources import AgentResources
 from etl_craft.core.enums import AgentStatus, SlotKind, YesNo
 from etl_craft.core.errors import PermissionDeniedError, RunRefusedError
+from etl_craft.core.faults import fault_point
 from etl_craft.engine import agent_transitions
 from etl_craft.engine.notifications import agent_channel, notification_hub, pool_channel
 from etl_craft.engine.queries import statement
@@ -82,6 +83,7 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
         task_run_id = int(work.task_run_id)
         force, rerun = work.force_flag == YesNo.YES, work.rerun_flag == YesNo.YES
         budget = (claimed.lease_expires_at - claimed.db_now).total_seconds()
+    fault_point("agent.after_claim")
     context = build_task_context(ctx.engine, ctx.config, task_run_id, force=force, rerun=rerun)
     context = replace(context, attempt_id=int(claimed.attempt_id), owner=str(agent_id))
     metadata = {

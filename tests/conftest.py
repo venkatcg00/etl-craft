@@ -7,6 +7,8 @@ pytest_plugins = [
     "plugins.suites",
     "fixtures.engine_db",
     "fixtures.cli_project",
+    "fixtures.cluster",
+    "fixtures.pool_contract",
     "fixtures.metadata_project",
     "fixtures.sql_warehouse",
     "fixtures.smtp",

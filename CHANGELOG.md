@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Queue execution now treats handles belonging to another provider as unknown and refuses to
+  cancel their attempts. Shared local/queue contract tests cover submission, ownership loss,
+  retries, fencing, cancellation and admission limits; the demo includes ten project namespaces
+  sharing one Engine DB. Managed-cloud acceptance allows WAN setup deadlines while local
+  command limits remain unchanged.
+
 - PostgreSQL processes reserve deployment-wide Engine DB capacity before startup and fail above
   80% of `max_connections`. `Orchestration.Db_pool_size` defaults to 10 with no overflow;
   API-only agents contribute zero connections and local task children use `NullPool`. Doctor

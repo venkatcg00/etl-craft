@@ -16,7 +16,7 @@ from fixtures.metadata import add_pipeline, add_task
 
 
 @contextmanager
-def managed_project(config, directory, monkeypatch):
+def managed_project(config, directory, monkeypatch, *, timeout=30):
     profile = replace(config.engine, schema="managed_" + uuid4().hex)
     fields = {
         "Jdbc_url": profile.jdbc_url,
@@ -43,10 +43,10 @@ def managed_project(config, directory, monkeypatch):
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA "{profile.schema}"'))
     try:
-        code, output = project.run("init-db")
+        code, output = project.run("init-db", timeout=timeout)
         assert code == 0, output
         monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine))
-        code, output = project.run("migrate")
+        code, output = project.run("migrate", timeout=timeout)
         assert code == 0, output
         isolated.python_scripts_dir.mkdir()
         (isolated.python_scripts_dir / "load.py").write_text(
@@ -67,13 +67,15 @@ def managed_project(config, directory, monkeypatch):
         engine.dispose()
 
 
-def run_and_recover(project):
+def run_and_recover(project, *, timeout=30):
     """A dead owner leaves history, and a committed child outcome survives process loss."""
     killed = project.start(
         "run", "--pipeline-code", "P", fault="connections.after_reservation:kill"
     )
     assert killed.wait() == 137, killed.output
-    code, output = project.run("run", "--pipeline-code", "P", fault="child.after_outcome:kill")
+    code, output = project.run(
+        "run", "--pipeline-code", "P", fault="child.after_outcome:kill", timeout=timeout
+    )
     assert code == 0, output
     with project.engine.connect() as conn:
         row = conn.execute(
