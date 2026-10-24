@@ -423,7 +423,7 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
     )
     token = act(ctx, ActionName.LOGIN, name="alice", password="correct horse battery").access_token
     headers = {"Authorization": "Bearer " + token}
-    path = "/api/v1/values"
+    path = "/api/v1/projects/default/values"
     task = {"pipeline_code": "P", "task_code": "load"}
     with TestClient(create_app(ctx)) as client:
         body = {

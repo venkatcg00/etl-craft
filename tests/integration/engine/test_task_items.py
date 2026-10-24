@@ -472,7 +472,7 @@ def test_item_http_actions_preserve_quoted_keys_and_report_the_operator(scene):
     scene.store.prepare_items((key, "untouched"))
     token = service_token(scene.db)
     headers = {"Authorization": f"Bearer {token}"}
-    path = f"/api/v1/pipelines/P/runs/{scene.run}/tasks/T/items"
+    path = f"/api/v1/projects/default/pipelines/P/runs/{scene.run}/tasks/T/items"
     with TestClient(create_app(context(scene))) as client:
         changed = client.post(
             path + "/controls",

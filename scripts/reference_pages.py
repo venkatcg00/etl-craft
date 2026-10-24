@@ -161,9 +161,41 @@ _CHECK_IN = re.compile(r"CHECK \((\w+) IN \(([^)]*)\)\)")
 _UNIQUE_INDEX = re.compile(r"CREATE UNIQUE INDEX \w+\s+ON (\w+) \(([^)]*)\)(?:\s+WHERE ([^;]+))?;")
 
 
+def schema_text(schema: Path) -> str:
+    """Describe the final tables, including additions and SQLite table rebuilds."""
+    text = schema.read_text(encoding="utf-8")
+    for match in list(re.finditer(r"CREATE TABLE (\w+)_new \((.*?)\n\);", text, re.S)):
+        name, body = match.groups()
+        original = re.search(rf"CREATE TABLE {name} \(.*?\n\);", text, re.S)
+        if original is not None:
+            text = text.replace(original[0], f"CREATE TABLE {name} ({body}\n);", 1)
+        text = text.replace(match.group(), "")
+    for match in list(re.finditer(r"ALTER TABLE (\w+) ADD COLUMN (.*?);", text, re.S)):
+        name, column = match.groups()
+        original = re.search(rf"(CREATE TABLE {name} \(.*?)(\n\);)", text, re.S)
+        if original is not None:
+            text = text.replace(original[0], original[1] + ",\n    " + column + original[2], 1)
+        text = text.replace(match.group(), "")
+    for name, column, change in re.findall(
+        r"ALTER TABLE (\w+) ALTER COLUMN (\w+) SET (NOT NULL|DEFAULT [^;]+);", text
+    ):
+        original = re.search(rf"CREATE TABLE {name} \(.*?\n\);", text, re.S)
+        if original is not None:
+            line = next(
+                line for line in original[0].splitlines() if line.startswith(f"    {column} ")
+            )
+            updated = line.rstrip(",") + " " + change + ("," if line.endswith(",") else "")
+            text = text.replace(original[0], original[0].replace(line, updated), 1)
+    for name in re.findall(r"DROP INDEX (\w+);", text):
+        indexes = list(re.finditer(rf"CREATE (?:UNIQUE )?INDEX {name}\s+.*?;", text, re.S))
+        for index in indexes[:-1]:
+            text = text.replace(index.group(), "", 1)
+    return text
+
+
 def schema_tables(schema: Path = SCHEMA) -> list[Table]:
     """Read the tables of ``schema``: comments, columns, allowed values and unique keys."""
-    text = schema.read_text(encoding="utf-8")
+    text = schema_text(schema)
     tables: list[Table] = []
     for match in _CREATE.finditer(text):
         before = text[: match.start()].rstrip("\n").split("\n")
@@ -178,7 +210,7 @@ def schema_tables(schema: Path = SCHEMA) -> list[Table]:
             if not re.match(r"^[A-Z_][A-Z_0-9]*\s", line):
                 continue
             name, rest = line.split(None, 1)
-            if name in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "UNIQUE"}:
+            if name in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}:
                 continue
             type_ = re.split(
                 r"\s+(NOT NULL|DEFAULT|REFERENCES|GENERATED|PRIMARY|CONSTRAINT|CHECK)", rest
@@ -244,7 +276,7 @@ def actions_page() -> str:
     """Render each action's command, route, scope, role, audit and placement from its row."""
     from etl_craft.cli.commands import COMMANDS
     from etl_craft.core.enums import Audit, Placement
-    from etl_craft.services.operations.actions import ACTIONS
+    from etl_craft.services.operations.actions import ACTIONS, action_path
 
     commands: dict[str, list[str]] = {}
     for command in COMMANDS:
@@ -261,7 +293,7 @@ def actions_page() -> str:
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for name, action in sorted(ACTIONS.items()):
-        route = f"`{action.method} {action.path}`" if action.path else "—"
+        route = f"`{action.method} {action_path(action)}`" if action.path else "—"
         audited = {Audit.NONE: "no", Audit.REQUEST: "yes", Audit.BY_ACTION: "yes, by the action"}
         where = "anywhere" if action.placement == Placement.ANYWHERE else "controller's host"
         lines.append(

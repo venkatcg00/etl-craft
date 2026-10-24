@@ -20,6 +20,7 @@ INTEGER_NAMES = frozenset(
         "length",
         "key",
         "pipeline",
+        "project",
         "target",
         "task",
         "version_number",
@@ -36,6 +37,8 @@ INTEGER_NAMES = frozenset(
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
     "bundle_id": "a" * 64,
+    "connections": "a" * 64,
+    "approved": "Y",
     "use_bundles": False,
     "event_wait": False,
     "manifest": "{}",
@@ -88,6 +91,7 @@ VALUES = {
     "started": MOMENT,
     "ended": MOMENT,
     "now": MOMENT,
+    "since": MOMENT,
     "run_date": MOMENT.date(),
     "create_date": MOMENT,
     "end_date": MOMENT,
@@ -154,12 +158,17 @@ def bindings(sql, name=""):
 
 
 def migration_query(name):
-    return name.startswith(("config_history_", "source_contract_", "target_contract_")) or name in {
-        "account_legacy_tokens",
-        "recorded_hash_version_names",
-        "recorded_rule_result_names",
-        "recorded_view_statement_names",
-    }
+    return (
+        name.endswith("_legacy")
+        or name.startswith(("config_history_", "source_contract_", "target_contract_"))
+        or name
+        in {
+            "account_legacy_tokens",
+            "recorded_hash_version_names",
+            "recorded_rule_result_names",
+            "recorded_view_statement_names",
+        }
+    )
 
 
 @contextmanager
@@ -195,6 +204,9 @@ def migration_schema(conn):
         conn.exec_driver_sql(
             "INSERT INTO CFG_SOURCE_COLUMNS SELECT * FROM public.AUD_SOURCE_COLUMNS_BASELINE"
         )
+        conn.exec_driver_sql(
+            "CREATE INDEX plan_legacy_pipeline_code ON CFG_PIPELINES (PIPELINE_CODE)"
+        )
         conn.exec_driver_sql("ANALYZE")
         yield
     finally:
@@ -206,7 +218,12 @@ def catalog_plans(conn, dialect):
     for historical in (False, True):
         with migration_schema(conn) if historical else nullcontext():
             for name in sorted(name for name in names if migration_query(name) == historical):
-                statement, values = bindings(dialect.query(name), name)
+                sql = (
+                    dialect.clone_statement("CFG_PIPELINES", ["PIPELINE_ID"]).text
+                    if name == "clone_project_scope"
+                    else dialect.query(name)
+                )
+                statement, values = bindings(sql, name)
                 with conn.begin_nested():
                     plan = conn.execute(statement, values).scalar_one()[0]["Plan"]
                 yield name, plan
@@ -229,6 +246,14 @@ def full_scans(plan, partial_indexes=frozenset(), limited=False):
 
 REGISTRY = "Reads the agent registry: one row per agent token, bounded by the tokens issued."
 FULL_READS = {
+    (
+        "audit_project_pipeline_ids",
+        "cfg_pipelines",
+    ): "Collects all project pipeline identities to filter retained audit history.",
+    (
+        "clone_project_scope",
+        "cfg_pipelines",
+    ): "Exports every pipeline in the selected project to the warehouse mirror.",
     (
         "config_rows_pipelines",
         "cfg_pipelines",

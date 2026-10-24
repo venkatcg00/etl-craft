@@ -8,6 +8,7 @@ value and the folder, and suggests close matches.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -15,7 +16,45 @@ from pathlib import Path, PurePosixPath
 from etl_craft.config.loader import parse_config, read_config
 from etl_craft.config.model import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError, MetadataError
-from etl_craft.core.text import suggest
+from etl_craft.core.text import sha256_hex, suggest
+
+
+def connection_sha256(path: Path) -> str:
+    """Hash connection definitions without resolving or retaining any credential value."""
+    raw = read_config(path)
+    if not isinstance(raw, dict):
+        raise ConfigurationError(
+            f"bundle config {path}: expected a YAML mapping; correct and republish it"
+        )
+    orchestration = raw.get("Orchestration")
+    email: object = None
+    if isinstance(orchestration, dict):
+        email = {
+            key: value if key == "Email" else value.get("Email")
+            for key, value in orchestration.items()
+            if key == "Email" or isinstance(value, dict)
+        }
+    secrets = raw.get("Secrets")
+    try:
+        encoded = json.dumps(
+            {
+                "Warehouse": raw.get("Warehouse"),
+                "Cloning": raw.get("Cloning"),
+                "Email": email,
+                "Profile": secrets.get("Profile") if isinstance(secrets, dict) else None,
+                "Email_profile": orchestration.get("Profile")
+                if isinstance(orchestration, dict)
+                else None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    except (TypeError, ValueError) as error:
+        raise ConfigurationError(
+            f"bundle config {path}: unsupported connection value ({error}); expected plain "
+            "YAML strings, numbers, flags, lists and mappings; correct the connection sections"
+        ) from None
+    return sha256_hex(encoded)
 
 
 def sql_script(config: ConnectorConfig, name: str, *, setting: str = "SCRIPT_FILE") -> Path:
@@ -89,7 +128,7 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         raw["Secrets"]["Path"] = host.source.path
     else:
         raw["Secrets"].pop("Path", None)
-    # Credentials and deployment roles belong to this host, never to downloaded project bytes.
+    # Infrastructure credentials and deployment roles belong to this host.
     for name in (
         "Engine",
         "Auth",
@@ -97,16 +136,8 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         "Artifacts",
         "Deployment",
         "Docs_site",
-        "Warehouse",
-        "Cloning",
     ):
         raw.pop(name, None)
-    orchestration = raw.get("Orchestration")
-    if isinstance(orchestration, dict):
-        orchestration.pop("Email", None)
-        for profile in orchestration.values():
-            if isinstance(profile, dict):
-                profile.pop("Email", None)
     bootstrap = host._host_config_path or host.config_path
     try:
         pinned = parse_config(raw, bootstrap or path, agent=True)
@@ -122,10 +153,10 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         _host_config_path=bootstrap,
         source=host.source,
         engine=host.engine,
-        warehouse=host.warehouse,
-        warehouse_table_format=host.warehouse_table_format,
-        email=host.email,
-        cloning=host.cloning,
+        warehouse=pinned.warehouse,
+        warehouse_table_format=pinned.warehouse_table_format,
+        email=pinned.email,
+        cloning=pinned.cloning,
         auth=host.auth,
         deployment=host.deployment,
         sizing=host.sizing,
@@ -133,7 +164,7 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         artifacts=host.artifacts,
         object_stores=host.object_stores,
         log_dir=host.log_dir,
-        max_warehouse_queries=host.max_warehouse_queries,
+        max_warehouse_queries=pinned.max_warehouse_queries,
         limits=replace(
             pinned.limits,
             max_parallel_tasks=host.limits.max_parallel_tasks,

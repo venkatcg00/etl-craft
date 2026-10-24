@@ -192,7 +192,7 @@ def test_catalog_resolution_round_trip_keeps_parent_and_column_ids(
     monkeypatch.setattr(
         "etl_craft.services.lineage.dialect_and_catalog", lambda config: ("duckdb", "analytics")
     )
-    monkeypatch.setattr("etl_craft.services.config_files.seed_sources", lambda *args: definitions)
+    monkeypatch.setattr("etl_craft.services.config_export.seed_sources", lambda *args: definitions)
     folder = tmp_path / "resolved"
     export_config(db.engine, folder, config=db.config)
     tables = list(csv.DictReader((folder / "tables.csv").open()))

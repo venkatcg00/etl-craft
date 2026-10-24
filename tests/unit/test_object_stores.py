@@ -73,7 +73,7 @@ def test_bad_store_locations_name_the_remedy(tmp_path, store, profile):
         parse_config(raw, tmp_path / "craft-connector.yml")
 
 
-def test_pinned_config_keeps_live_host_credentials_capacity_and_file_connections(tmp_path):
+def test_pinned_config_keeps_host_infrastructure_and_project_warehouse_limits(tmp_path):
     from dataclasses import replace
 
     import yaml
@@ -91,17 +91,21 @@ def test_pinned_config_keeps_live_host_credentials_capacity_and_file_connections
     bundle.mkdir()
     raw = {
         "Secrets": raw["Secrets"],
-        "Orchestration": {"Task_timeout_seconds": 3, "Local_python_slots": 1},
+        "Orchestration": {
+            "Task_timeout_seconds": 3,
+            "Local_python_slots": 1,
+        },
         "Engine": raw["Engine"],
         "Warehouse": raw["Warehouse"],
     }
+    raw["Warehouse"]["Max_warehouse_queries"] = 4
     path = bundle / "craft-connector.yml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False))
     pinned = project_config(host, path)
     assert pinned.project_dir == bundle
     assert pinned.engine == host.engine
     assert pinned.warehouse.jdbc_url == host.warehouse.jdbc_url
-    assert pinned.max_warehouse_queries == 7
+    assert pinned.max_warehouse_queries == 4
     assert pinned.limits.local_python_slots == 2
     assert pinned.limits.task_timeout_seconds == 3
     assert pinned._host_config_path == host_path

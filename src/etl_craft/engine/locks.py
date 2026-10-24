@@ -34,6 +34,9 @@ CLONE = EngineLock("clone", 8_241_008)
 ACCOUNTS = EngineLock("accounts", 8_241_010)
 """Serialize account recovery and credential changes with sign-in."""
 
+BUNDLES = EngineLock("bundle publication", 8_241_011)
+"""Serialize connection approval and publication so superseded contracts cannot return."""
+
 LINEAGE = EngineLock("lineage", 8_241_009)
 """Serializes task cache computations and table lineage version publication."""
 

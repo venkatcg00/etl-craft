@@ -108,17 +108,23 @@ def test_a_dialect_query_overrides_the_shared_one(tmp_path, monkeypatch):
 
 
 def schema_columns(path: Path) -> dict[str, list[str]]:
+    from fixtures.scripts import load
+
+    source = load("reference_pages").schema_text(path)
     tables: dict[str, list[str]] = {}
-    for match in re.finditer(r"CREATE TABLE (\w+) \((.*?)\n\);", path.read_text("utf-8"), re.S):
+    for match in re.finditer(r"CREATE TABLE (\w+) \((.*?)\n\);", source, re.S):
         columns = []
         for line in match[2].splitlines():
             first = line.strip().split(" ", 1)[0]
-            if first and first.isupper() and first not in {"CONSTRAINT", "CHECK", "OR", "AND"}:
+            if (
+                first
+                and first.isupper()
+                and first
+                not in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}
+            ):
                 columns.append(first)
         tables[match[1]] = columns
-    for table, column in re.findall(
-        r"ALTER TABLE (\w+) DROP COLUMN (\w+);", path.read_text("utf-8")
-    ):
+    for table, column in re.findall(r"ALTER TABLE (\w+) DROP COLUMN (\w+);", source):
         tables[table].remove(column)
     return tables
 

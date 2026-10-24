@@ -1,4 +1,7 @@
-SELECT a.TASK_RUN_ID AS task_run_id, a.FORCE_FLAG AS force_flag,
+SELECT (SELECT p.PROJECT_ID FROM AUD_TASK_RUN_LOG t
+JOIN AUD_PIPELINES_RUN_LOG r ON r.PIPELINE_RUN_ID=t.PIPELINE_RUN_ID
+JOIN CFG_PIPELINES p ON p.PIPELINE_ID=r.PIPELINE_ID WHERE t.TASK_RUN_ID=a.TASK_RUN_ID) AS project_id,
+a.TASK_RUN_ID AS task_run_id, a.FORCE_FLAG AS force_flag,
 a.RERUN_FLAG AS rerun_flag, a.STATUS AS status, a.OWNER_ID AS owner_id,
 a.SOURCE_COUNT AS source_count, a.TARGET_COUNT AS target_count,
 a.INSERT_COUNT AS insert_count, a.UPDATE_COUNT AS update_count, a.DELETE_COUNT AS delete_count,

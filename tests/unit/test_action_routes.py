@@ -18,7 +18,7 @@ from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import ApiRole, Audit, HttpMethod, RunStatus
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.services.operations import OperationContext, actions
-from etl_craft.services.operations.actions import ACTIONS, invoke
+from etl_craft.services.operations.actions import ACTIONS, action_path, invoke
 from etl_craft.services.operations.permissions import PipelineAccess
 from etl_craft.services.operations.serialization import encode
 from fixtures.agents import resources
@@ -75,9 +75,10 @@ def build(cls):
 def context(role=ApiRole.ADMIN):
     return OperationContext(
         types.SimpleNamespace(connect=lambda: nullcontext(None)),
-        types.SimpleNamespace(docs_site=None),
+        types.SimpleNamespace(docs_site=None, artifacts=types.SimpleNamespace(store=None)),
         ADMIN,
         role=role,
+        project_id=1,
     )
 
 
@@ -112,19 +113,28 @@ def test_the_app_has_exactly_one_route_per_routed_action():
         for method in getattr(route, "methods", ()) or ()
         if method in set(HttpMethod)
     }
-    table = {(ACTIONS[name].method, ACTIONS[name].path) for name in ROUTED}
+    table = {(ACTIONS[name].method, action_path(ACTIONS[name])) for name in ROUTED}
     assert len(table) == len(ROUTED)
     # FastAPI serves its own contract and its interactive page beside the actions.
     assert generated - {("GET", "/api/v1/openapi.json"), ("GET", "/api/v1/docs")} == table
+    contract = app.openapi()["paths"]
+    for method, path in table:
+        if "{project}" in path:
+            parameter = next(
+                p for p in contract[path][method.lower()]["parameters"] if p["name"] == "project"
+            )
+            assert parameter["in"] == "path" and parameter["required"] is True
 
 
 @pytest.mark.parametrize("name", ROUTED)
 def test_a_route_names_its_method_and_carries_only_request_fields_in_its_path(name):
     action = ACTIONS[name]
     assert action.method in set(HttpMethod)
-    assert re.fullmatch(r"/api/v1(/[a-z-]+|/\{[a-z_]+\})+", action.path), action.path
-    in_path = set(re.findall(r"{([a-z_]+)}", action.path))
-    assert in_path <= {f.name for f in fields(action.request)}
+    assert re.fullmatch(r"/api/v1(/[a-z-]+|/\{[a-z_]+\})+", action_path(action)), action_path(
+        action
+    )
+    in_path = set(re.findall(r"{([a-z_]+)}", action_path(action)))
+    assert in_path <= {f.name for f in fields(action.request)} | {"project"}
     build(action.request)
 
 
@@ -156,8 +166,9 @@ def test_an_unknown_field_is_refused_by_name_before_the_operation_runs(server, n
     client, calls = server
     action = ACTIONS[name]
     given = encode(build(action.request))
-    path = action.path.format(
-        **{key: given.pop(key) for key in re.findall(r"{([a-z_]+)}", action.path)}
+    given["project"] = "default"
+    path = action_path(action).format(
+        **{key: given.pop(key) for key in re.findall(r"{([a-z_]+)}", action_path(action))}
     )
     given = {key: value for key, value in given.items() if value is not None} | {"unexpected": 1}
     headers = {"Authorization": "Bearer token"}
@@ -183,9 +194,10 @@ def test_a_malformed_value_is_refused_by_name_before_the_operation_runs(server, 
     client, calls = server
     action = ACTIONS[name]
     given = {k: v for k, v in encode(build(action.request)).items() if v is not None}
+    given["project"] = "default"
     given[field] = "not-a-number"
-    path_fields = re.findall(r"{([a-z_]+)}", action.path)
-    path = action.path.format(**{key: given.pop(key) for key in path_fields})
+    path_fields = re.findall(r"{([a-z_]+)}", action_path(action))
+    path = action_path(action).format(**{key: given.pop(key) for key in path_fields})
     headers = {"Authorization": "Bearer token"}
     if action.method == HttpMethod.GET:
         response = client.get(path, params=given, headers=headers)

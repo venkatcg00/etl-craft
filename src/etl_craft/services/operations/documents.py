@@ -91,6 +91,7 @@ def generate_docs(ctx: OperationContext, request: DocsInput) -> DocsBuild:
         actor=ctx.actor,
         engine=ctx.engine,
         outcome=ActionOutcome.FAILURE,
+        project_id=ctx.project_id,
         exit_code=ExitCode.UNEXPECTED,
     )
     try:

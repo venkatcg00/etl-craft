@@ -57,7 +57,7 @@ def test_the_parameter_page_lists_what_each_handler_reads():
 @pytest.mark.parametrize("dialect", ["postgres", "sqlite"])
 def test_every_engine_db_table_is_described_and_read_whole(dialect):
     tables = pages.schema_tables(SCHEMAS / dialect / "schema.sql")
-    text = (SCHEMAS / dialect / "schema.sql").read_text(encoding="utf-8")
+    text = pages.schema_text(SCHEMAS / dialect / "schema.sql")
     assert [t.name for t in tables] == re.findall(r"^CREATE TABLE (\w+)", text, re.MULTILINE)
     assert [t.name for t in tables if not t.comment] == []
     for table in tables:
@@ -66,7 +66,8 @@ def test_every_engine_db_table_is_described_and_read_whole(dialect):
             line.split()[0]
             for line in body.splitlines()
             if re.match(r"^\s+[A-Z_][A-Z_0-9]*\s", line)
-            and line.split()[0] not in {"CONSTRAINT", "CHECK", "OR", "AND"}
+            and line.split()[0]
+            not in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}
         ]
         dropped = re.findall(rf"ALTER TABLE {table.name} DROP COLUMN (\w+);", text)
         assert [c.name for c in table.columns] == [
@@ -85,7 +86,7 @@ def test_the_schema_page_shows_types_allowed_values_and_unique_keys():
     assert "| `CONFIG_SHA256` | `VARCHAR(64)` |" in page
     assert "| `CONSUME_REPAIRS` | `VARCHAR(1)` | no | `'Y'` | `Y`, `N` |" in page
     assert "| `REFRESH_TYPE` | `VARCHAR` | no |  | `FULL`, `INCREMENTAL` |" in page
-    assert "Unique: `PIPELINE_CODE`." in page
+    assert "Unique: `PROJECT_ID, PIPELINE_CODE`." in page
     assert "| `ACTIVE_FLAG` | `VARCHAR` | no | `'Y'` | `Y`, `N` |" in page
 
 
@@ -94,3 +95,12 @@ def test_the_configuration_page_has_every_section():
     for section in settings_by_section():
         assert f"## `{section}`" in page
     assert "| `Dependency_gates` | [`craft-connector.example.yml`]" in page
+
+
+def test_bundle_ownership_and_approval_columns_include_their_final_constraints():
+    tables = {table.name: table for table in pages.schema_tables()}
+    columns = {column.name: column for column in tables["AUD_PROJECT_BUNDLES"].columns}
+    assert not columns["PROJECT_ID"].nullable
+    assert columns["PROJECT_ID"].default == "1"
+    assert not columns["CONNECTIONS_SHA256"].nullable
+    assert columns["CONNECTIONS_APPROVED_FLAG"].allowed == ["Y", "N"]

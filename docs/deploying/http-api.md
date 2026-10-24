@@ -95,11 +95,11 @@ and its `/log` carry an id in the path.
 
 ```bash
 curl -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
-  'http://127.0.0.1:8730/api/v1/status?pipeline_code=SALES'
+  'http://127.0.0.1:8730/api/v1/projects/default/status?pipeline_code=SALES'
 curl -X POST -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"pipeline_code":"SALES","run_date":"2026-10-01","reason":"manual refresh"}' \
-  http://127.0.0.1:8730/api/v1/runs
+  http://127.0.0.1:8730/api/v1/projects/default/runs
 ```
 
 A whole-pipeline run over HTTP initializes or resumes the run and returns its exact identity;
@@ -161,7 +161,7 @@ validation and live-attempt refusal as the CLI. Task and attempt documents inclu
 
 ## Catalog comparisons
 
-`GET /api/v1/catalog/gaps` returns `etl-craft/catalog-gaps/1`, with `generated_at`, nullable
+`GET /api/v1/projects/default/catalog/gaps` returns `etl-craft/catalog-gaps/1`, with `generated_at`, nullable
 `compared_at`, warehouse profile/catalog, the config/SQL `contract_version`, and `records`.
 Each record names its table, optional column, attribute, state, declared/deployed values, reason,
 affected tasks and whether the column is engine managed. `?compare=true` explicitly requests a
@@ -174,7 +174,7 @@ states for check failures. The generated catalog's `gaps.json` uses this same do
 
 ```bash
 curl -H "Authorization: Bearer $ETL_CRAFT_API_TOKEN" \
-  'http://127.0.0.1:8730/api/v1/catalog/gaps?compare=true'
+  'http://127.0.0.1:8730/api/v1/projects/default/catalog/gaps?compare=true'
 ```
 
 ## Shared role enforcement
@@ -187,7 +187,7 @@ table gives the action; routes hold no role logic of their own. Insufficient rol
 
 ## Protected SCD values
 
-`POST /api/v1/values` writes a reasoned value edit or insert (admin); its body names
+`POST /api/v1/projects/default/values` writes a reasoned value edit or insert (admin); its body names
 `pipeline_code` and `task_code`. `/values/unlock` releases selected locks (human admin), and
 `/values/provenance` reads known column writers and protection history (viewer). Each calls the shared Python operation.
 See [Protecting human SCD edits](../guides/human-overrides.md) for request bodies, integration
@@ -197,14 +197,14 @@ identities, atomic warehouse support and recovery.
 
 Provision a SERVICE account with the operator role and keep its token in `ETL_CRAFT_TOKEN`.
 Call `etl-craft run --pipeline-code SALES --api https://etl.example.com`, or
-`POST /api/v1/runs` with `{"pipeline_code":"SALES"}` and bearer authentication. The controller owns dispatch,
+`POST /api/v1/projects/default/runs` with `{"pipeline_code":"SALES"}` and bearer authentication. The controller owns dispatch,
 leases and finalization. Use the documented command exit codes and explicit run identities to
 inspect progress; no scheduler-specific package or exported DAG is needed.
 
 ## Tag filters
 
-The existing GET actions `/api/v1/pipelines`, `/api/v1/status`, `/api/v1/history`,
-`/api/v1/audit`, `/api/v1/validation` and `/api/v1/catalog/gaps` accept repeated `tag` query
+The existing GET actions `/api/v1/projects/default/pipelines`, `/api/v1/projects/default/status`, `/api/v1/projects/default/history`,
+`/api/v1/projects/default/audit`, `/api/v1/projects/default/validation` and `/api/v1/projects/default/catalog/gaps` accept repeated `tag` query
 parameters, such as `?tag=team:sales&tag=tier:gold`. All tags must match exactly; an unknown tag
 returns an empty selection. The tag values and request fields are validated at the shared
 operation boundary. `history` provides the cross-pipeline run list with its existing `limit`
@@ -215,7 +215,11 @@ for resolving a group before submitting explicit bulk controls.
 Pipeline-trigger run details use the existing run and task read actions. Run documents add
 `parent_run_id`, `triggered_by_task_run_id` and `child_run_ids`; task-run documents add
 `child_run_ids`. A waiting trigger's explanation identifies its child and controller ownership.
-The generated `POST /api/v1/triggers` action is used by an owned trigger attempt. It requires
+The generated `POST /api/v1/projects/default/triggers` action is used by an owned trigger attempt. It requires
 `task_run_id`, `attempt_id` and `owner`, checks the initiating account and ownership lease,
 and returns `etl-craft/trigger/1`. Configure tasks and start their parent for ordinary usage;
 there is no additional CLI execution command.
+
+Project operations use `/api/v1/projects/{project}/...`. The examples above select
+`default`; substitute your `PROJECT_CODE` for another project. Authentication, accounts,
+groups, tokens, agent coordination and health remain deployment-wide.

@@ -64,18 +64,21 @@ def test_two_ui_processes_share_sessions_runs_refresh_and_revocation(cli_project
     who = httpx.get(two + "/api/v1/whoami", headers=headers)
     assert who.status_code == 200 and who.json()["name"] == "alice"
     admission = httpx.post(
-        one + "/api/v1/runs",
+        one + "/api/v1/projects/default/runs",
         headers=headers,
         json={"pipeline_code": "P", "init_only": True, "run_key": "split-api"},
     )
     assert admission.status_code == 200, admission.text
     run_id = admission.json()["run"]["pipeline_run_id"]
-    detail = httpx.get(two + f"/api/v1/runs/{run_id}", headers=headers)
+    detail = httpx.get(two + f"/api/v1/projects/default/runs/{run_id}", headers=headers)
     assert detail.status_code == 200 and detail.json()["pipeline_run_id"] == run_id
     renewed = httpx.post(one + "/api/v1/login/refresh", json={"token": session["refresh_token"]})
     assert renewed.status_code == 200, renewed.text
     renewed_headers = {"Authorization": "Bearer " + renewed.json()["access_token"]}
-    assert httpx.get(two + "/api/v1/pipelines", headers=renewed_headers).status_code == 200
+    assert (
+        httpx.get(two + "/api/v1/projects/default/pipelines", headers=renewed_headers).status_code
+        == 200
+    )
     first.signal(signal.SIGTERM)
     assert first.wait() == 0, first.output
     assert httpx.get(two + "/api/v1/whoami", headers=renewed_headers).status_code == 200
@@ -257,7 +260,7 @@ def test_ui_trusts_only_configured_proxy_hops_and_records_client_origin(cli_proj
         "X-Forwarded-Proto": "https",
     }
     response = httpx.post(
-        url + "/api/v1/controls",
+        url + "/api/v1/projects/default/controls",
         headers=headers,
         json={"pipeline_code": "P", "action": "PAUSE", "reason": "proxy check"},
     )
@@ -273,7 +276,7 @@ def test_ui_trusts_only_configured_proxy_hops_and_records_client_origin(cli_proj
     assert origin["scheme"] == ("https" if trusted else "http")
     if trusted:
         response = httpx.post(
-            url + "/api/v1/controls",
+            url + "/api/v1/projects/default/controls",
             headers={**headers, "X-Forwarded-Proto": "javascript"},
             json={"pipeline_code": "P", "action": "RESUME", "reason": "bad proto"},
         )
@@ -364,7 +367,7 @@ def test_ui_sigterm_withdraws_readiness_drains_work_and_bounds_open_stream(
             assert time.monotonic() < deadline
             threading.Event().wait(0.01)
         assert "shutting down" in response.text
-        assert httpx.get(url + "/api/v1/pipelines").status_code == 503
+        assert httpx.get(url + "/api/v1/projects/default/pipelines").status_code == 503
         (p.config.project_dir / "release").write_text("yes")
         assert held.result().json() == {"finished": True}
         assert poll.result().json() == []

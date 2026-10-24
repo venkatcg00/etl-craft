@@ -41,7 +41,7 @@ The manifest stores the location and profile name, not their credentials.
 ## Publish and run
 
 ```bash
-etl-craft bundle publish --project ./project --api https://craft.example.com
+etl-craft bundle publish --project-dir ./project --api https://craft.example.com
 etl-craft run --pipeline-code SALES --api https://craft.example.com
 ```
 
@@ -60,11 +60,12 @@ Local development with no store uses the working directory; its metadata is stil
 
 Agents download their assigned bundle through fenced API requests. They need no access to
 the Engine DB or artifact store and no separate copy of the execution files. Their bootstrap
-configuration supplies Engine, Warehouse, Email and Cloning connections, authentication,
-store credentials and resource limits. Those connection definitions remain host-local until
-multi-project support; uploaded configuration cannot redirect them. Execution files and
-project execution settings come from the publication. Bundle parsing errors withhold resolved
-host values; validate the source configuration locally for detailed diagnostics. Files remain relative to the materialized project root.
+configuration supplies Engine DB, authentication and artifact-store credentials and host
+resource ceilings. Each bundle supplies Warehouse, Email and Cloning definitions. An admin
+must publish the initial connection contract and approve each changed contract by publishing
+it; a developer can publish only definitions matching the latest approved contract. Credential
+fields remain variable names, resolved on the serving host or agent. Execution files and
+settings come from the publication; diagnostics withhold resolved host values.
 Relative connection file paths resolve beside the host's bootstrap configuration, so a local
 warehouse database is not placed in the verified cache. Place generated outputs outside that root.
 Use absolute host/shared paths for external file arrivals: relative `EVENT_FILE` patterns also
@@ -91,5 +92,44 @@ imports cannot be discovered statically.
 Apply migration `0053_project_bundles.sql` before running this package. Active and queued
 pre-bundle runs receive their current metadata definition during upgrade and retain local
 working-tree execution. Completed older runs have no historical snapshot and cannot be
-reopened: start a new run. Publish before admitting new agent runs. Bundle records are
-currently deployment-scoped; project ownership is introduced with multi-project support.
+reopened: start a new run. Publish before admitting new agent runs. Apply `0054_engine_projects.sql` for project ownership. Existing metadata, publications,
+lineage and project migration records move to `default`. Republish existing bundles as an
+admin to establish their connection approvals before admitting new bundled runs.
+
+## Several projects in one Engine DB
+
+Select `--project CODE`; its default is `Orchestration.Project`, then `default`.
+`--project-dir` selects a filesystem directory for publication or agent bootstrap.
+Each project has its own warehouse. Deployment roles remain shared, with pipeline grants
+scoped to their project. Pools remain deployment-wide.
+
+Keep exactly the selected project in `config/projects.csv`:
+
+```csv
+PROJECT_CODE,PROJECT_NAME,TIMEZONE,DEFAULT_POOL,MAX_RUNNING_TASKS,ACTIVE_FLAG
+sales,Sales,UTC,default,8,Y
+```
+
+Apply it with `etl-craft config apply --project sales`. It cannot retire another project's
+pipelines, tables or grants. `DEFAULT_POOL` is used when a task has no `POOL` parameter;
+`MAX_RUNNING_TASKS` caps claims across all pipelines in that project. Each approved bundle
+records its warehouse query limit. A full project does not prevent another from claiming work.
+
+Publish and run with the same selection:
+
+```bash
+etl-craft bundle publish --project sales --project-dir ./sales --api https://craft.example.com
+etl-craft run --project sales --pipeline-code DAILY --api https://craft.example.com
+etl-craft pause --project sales --reason "Maintenance"
+```
+
+Project API routes use `/api/v1/projects/sales/...`; deployment accounts, tokens, groups,
+agent claims and health routes keep their deployment paths. Exact execution IDs must belong
+to the selected project. Cross-project dependencies retain their upstream IDs and recorded
+consumption decisions; set `DEPENDS_ON_PROJECT_CODE` in the dependency CSV to name another
+project, or leave it empty for the selected project.
+
+Cloning copies only the selected project's rows and retained history, plus shared deployment
+configuration and runtime records. Credential hashes are excluded. As with the static catalog,
+project-wide mirrors include all pipelines in that project; warehouse access must be reviewed
+by the admin approving its connection contract.

@@ -12,6 +12,8 @@ from etl_craft.services.config_files import cell, read_config_files
 pytestmark = pytest.mark.unit
 
 GOOD = {
+    "projects.csv": "PROJECT_CODE,PROJECT_NAME,TIMEZONE,DEFAULT_POOL,MAX_RUNNING_TASKS,"
+    "ACTIVE_FLAG\ndefault,Default project,UTC,default,8,Y\n",
     "pools.csv": "POOL_NAME,DESCRIPTION,ACTIVE_FLAG\ndefault,Deployment default pool,Y\n",
     "grants.csv": "GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG\n",
     "tables.csv": "CATALOG_NAME,SCHEMA_NAME,TABLE_NAME\n,sales,orders\n",
@@ -256,3 +258,16 @@ def test_target_parameter_is_refused_even_when_disabled(tmp_path, name):
     )
     assert "TARGET_OBJECT is derived" in message
     assert "tasks.csv" in message
+
+
+def test_a_project_without_tasks_still_requires_a_valid_timezone(tmp_path):
+    path = folder(tmp_path) / "projects.csv"
+    path.write_text(
+        GOOD["projects.csv"].replace(
+            "default,Default project,UTC", "default,Default project,Not/AZone"
+        )
+    )
+    with pytest.raises(MetadataFileError) as caught:
+        read_config_files(tmp_path)
+    for part in ("projects.csv", "Not/AZone", "IANA timezone"):
+        assert part in str(caught.value)

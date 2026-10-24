@@ -146,6 +146,32 @@ POOLS = ConfigTable(
     read_query="config_rows_pools",
 )
 
+PROJECTS = ConfigTable(
+    file="projects.csv",
+    table="CFG_PROJECTS",
+    id_column="PROJECT_ID",
+    key=("PROJECT_CODE",),
+    columns=(
+        Column("PROJECT_CODE", "code", required=True),
+        Column("PROJECT_NAME", required=True),
+        Column("TIMEZONE", required=True, default="UTC"),
+        Column("DEFAULT_POOL", required=True, default="default"),
+        Column("MAX_RUNNING_TASKS", "int", default=8, minimum=1),
+        ACTIVE_FLAG,
+    ),
+    stored=(
+        "PROJECT_CODE",
+        "PROJECT_NAME",
+        "TIMEZONE",
+        "DEFAULT_POOL",
+        "MAX_RUNNING_TASKS",
+    ),
+    parents=(),
+    links=(),
+    label_format="{PROJECT_CODE}",
+    read_query="config_rows_projects",
+)
+
 
 PIPELINES = ConfigTable(
     file="pipelines.csv",
@@ -191,7 +217,7 @@ PIPELINES = ConfigTable(
         "PIPELINE_PARAMETERS",
     ),
     parents=(),
-    links=(),
+    links=("PROJECT_ID",),
     label_format="{PIPELINE_CODE}",
     read_query="config_rows_pipelines",
 )
@@ -254,6 +280,7 @@ TASK_DEPENDENCIES = ConfigTable(
     key=(
         "PIPELINE_CODE",
         "TASK_CODE",
+        "DEPENDS_ON_PROJECT_CODE",
         "DEPENDS_ON_PIPELINE_CODE",
         "DEPENDS_ON_TASK_CODE",
         "DEPENDENCY_TYPE",
@@ -261,6 +288,7 @@ TASK_DEPENDENCIES = ConfigTable(
     columns=(
         Column("PIPELINE_CODE", "code", required=True),
         Column("TASK_CODE", "code", required=True),
+        Column("DEPENDS_ON_PROJECT_CODE", "code"),
         Column("DEPENDS_ON_PIPELINE_CODE", "code", required=True),
         Column("DEPENDS_ON_TASK_CODE", "code", required=True),
         Column("DEPENDENCY_TYPE", "choice", required=True, choices=DEPENDENCY_TYPES),
@@ -281,9 +309,10 @@ PIPELINE_DEPENDENCIES = ConfigTable(
     file="pipeline_dependencies.csv",
     table="CFG_PIPELINE_DEPENDENCY",
     id_column="PIPELINE_DEPENDENCY_ID",
-    key=("PIPELINE_CODE", "DEPENDS_ON_PIPELINE_CODE", "DEPENDENCY_TYPE"),
+    key=("PIPELINE_CODE", "DEPENDS_ON_PROJECT_CODE", "DEPENDS_ON_PIPELINE_CODE", "DEPENDENCY_TYPE"),
     columns=(
         Column("PIPELINE_CODE", "code", required=True),
+        Column("DEPENDS_ON_PROJECT_CODE", "code"),
         Column("DEPENDS_ON_PIPELINE_CODE", "code", required=True),
         Column("DEPENDENCY_TYPE", "choice", required=True, choices=DEPENDENCY_TYPES),
         Column("CONSUME_REPAIRS", "choice", default="Y", choices=YES_NO),
@@ -346,7 +375,7 @@ OBJECT_TABLES = ConfigTable(
     ),
     stored=("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "OBJECT_KIND"),
     parents=(),
-    links=(),
+    links=("PROJECT_ID",),
     label_format="{CATALOG_NAME}.{SCHEMA_NAME}.{TABLE_NAME}",
     read_query="config_rows_tables",
 )
@@ -389,7 +418,7 @@ PIPELINE_GRANTS = ConfigTable(
     ),
     stored=("PIPELINE_CODE", "TAG", "ROLE"),
     parents=(),
-    links=("GROUP_ID",),
+    links=("PROJECT_ID", "GROUP_ID"),
     label_format="{GROUP_NAME} pipeline={PIPELINE_CODE} tag={TAG}",
     read_query="config_rows_pipeline_grants",
 )
@@ -397,6 +426,7 @@ PIPELINE_GRANTS = ConfigTable(
 
 TABLES = (
     POOLS,
+    PROJECTS,
     PIPELINES,
     PIPELINE_GRANTS,
     OBJECT_TABLES,
@@ -433,10 +463,17 @@ def stored_value(column: Column, raw: object) -> Value:
     return str(raw)
 
 
-def read_rows(conn: Connection, table: ConfigTable) -> list[StoredRow]:
+def read_rows(
+    conn: Connection,
+    table: ConfigTable,
+    *,
+    project_code: str,
+    project_id: int | None,
+) -> list[StoredRow]:
     """Return every row of ``table``, active or not, in id order."""
     rows = []
-    for row in conn.execute(statement(conn, table.read_query)).mappings():
+    params = {"project_code": project_code, "project_id": project_id}
+    for row in conn.execute(statement(conn, table.read_query), params).mappings():
         values = {
             column.name: stored_value(column, row[column.name.lower()])
             for column in table.columns

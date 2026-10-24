@@ -3,5 +3,5 @@ TARGET_SCHEMA_NAME AS schema_name, TARGET_TABLE_NAME AS table_name,
 VERSION_NUMBER AS version_number, EDGES_HASH AS edges_hash, VALID_FROM AS valid_from,
 VALID_TO AS valid_to, CURRENT_FLAG AS current_flag
 FROM AUD_LINEAGE_VERSIONS
-WHERE :current_only=0 OR CURRENT_FLAG='Y'
+WHERE PROJECT_ID=:project_id AND (:current_only=0 OR CURRENT_FLAG='Y')
 ORDER BY LINEAGE_VERSION_ID

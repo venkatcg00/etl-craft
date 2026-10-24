@@ -1,6 +1,7 @@
 """A plain-SQL cache reset starts lineage history on both Engine DBs."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect, text
@@ -32,7 +33,23 @@ def before_lineage_upgrade(empty_engine_db, monkeypatch):
     return db
 
 
-def test_pre_slice_cache_is_discarded_without_conversion(before_lineage_upgrade):
+def legacy_lineage(db, config, monkeypatch):
+    """Read the pre-project schema with its captured query shapes for the before-upgrade oracle."""
+    from etl_craft.dialects.engine.base import EngineDialect
+
+    original = EngineDialect.query
+    folder = Path(__file__).parents[2] / "fixtures/pre_project_lineage_queries"
+
+    def query(dialect, name):
+        path = folder / f"{name}.sql"
+        return path.read_text() if path.is_file() else original(dialect, name)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(EngineDialect, "query", query)
+        return collect(db.engine, config, refresh=True, record=False)
+
+
+def test_pre_slice_cache_is_discarded_without_conversion(before_lineage_upgrade, monkeypatch):
     db = before_lineage_upgrade
     with db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
@@ -52,7 +69,7 @@ def test_pre_slice_cache_is_discarded_without_conversion(before_lineage_upgrade)
             ),
             {"task": task},
         )
-    before = collect(db.engine, db.config, refresh=True, record=False)
+    before = legacy_lineage(db, db.config, monkeypatch)
     applied = migrations.apply_pending_migrations(db.engine)
     assert "0031_lineage_versions.sql" in applied
     assert applied == sorted(applied)
@@ -107,7 +124,7 @@ def test_table_versions_and_edges_cannot_be_rewritten(engine_db):
 
 
 def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
-    before_lineage_upgrade, tmp_path
+    before_lineage_upgrade, tmp_path, monkeypatch
 ):
     import shutil
 
@@ -144,7 +161,7 @@ def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
         placement = [sql for sql in statements if "MAX_PARALLEL_TASKS" in sql]
         assert len(placement) == 1
         run_script(conn, [sql for sql in statements if sql not in placement])
-    before = collect(db.engine, config, refresh=True, record=False)
+    before = legacy_lineage(db, config, monkeypatch)
     assert before and not [item.error for item in before if item.error]
     migrations.apply_pending_migrations(db.engine)
     after = collect(db.engine, config)

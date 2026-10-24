@@ -30,9 +30,9 @@ SELECT origin.catalog_name AS catalog_name, origin.schema_name AS schema_name,
 FROM origin
 LEFT JOIN AUD_TASK_OFFSET_TRACKER off ON off.TASK_ID=origin.TASK_ID
   AND origin.watermark_enabled
-LEFT JOIN AUD_TARGET_HASH_VERSION h ON h.TARGET_CATALOG_NAME=origin.catalog_name
+LEFT JOIN AUD_TARGET_HASH_VERSION h ON h.PROJECT_ID=:project_id AND h.TARGET_CATALOG_NAME=origin.catalog_name
   AND h.TARGET_SCHEMA_NAME=origin.schema_name AND h.TARGET_TABLE_NAME=origin.table_name
-LEFT JOIN AUD_TARGET_VIEW_STATEMENT v ON v.TARGET_CATALOG_NAME=origin.catalog_name
+LEFT JOIN AUD_TARGET_VIEW_STATEMENT v ON v.PROJECT_ID=:project_id AND v.TARGET_CATALOG_NAME=origin.catalog_name
   AND v.TARGET_SCHEMA_NAME=origin.schema_name AND v.TARGET_TABLE_NAME=origin.table_name
 LEFT JOIN writers peer ON peer.pipeline_id=:pipeline_id AND :sql_action IN ('SETUP_TABLE','DROP_TABLE')
 LEFT JOIN AUD_TASK_RUN_LOG r ON r.TASK_ID=peer.task_id AND r.PIPELINE_RUN_ID=:pipeline_run_id

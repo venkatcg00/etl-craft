@@ -85,7 +85,7 @@ def claim(scene, handler="SQL"):
 
 def test_agent_and_account_credentials_cannot_cross_protocols(agent_scene):
     _, client, agent, person, _, _ = agent_scene
-    response = client.get("/api/v1/pipelines", headers=agent)
+    response = client.get("/api/v1/projects/default/pipelines", headers=agent)
     assert response.status_code == 403
     response = client.post(
         "/api/v1/agent/deregister", headers=person, json={"version": __version__}
@@ -800,12 +800,14 @@ def test_resource_reason_names_the_request_and_largest_individual_agent(agent_sc
 
     _, client, _, human, _, _ = agent_scene
     status = client.get(
-        "/api/v1/status", headers=human, params={"pipeline_code": "RESOURCE_REASON"}
+        "/api/v1/projects/default/status",
+        headers=human,
+        params={"pipeline_code": "RESOURCE_REASON"},
     )
     assert status.status_code == 200, status.text
     assert status.json()["tasks"][0]["error"] == row.reason
     explanation = client.get(
-        "/api/v1/explanations",
+        "/api/v1/projects/default/explanations",
         headers=human,
         params={"pipeline_code": "RESOURCE_REASON", "task_code": "T0"},
     )
@@ -966,6 +968,7 @@ def test_missing_default_pool_cannot_bypass_custom_pool_admission(agent_scene):
     ctx, _ = second_agent(agent_scene, pool="heavy")
     attempt = queue_pipeline_work(db, "CUSTOM_POOL", POOL="heavy")[0]
     with db.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_PROJECTS SET DEFAULT_POOL='heavy'"))
         conn.execute(text("DELETE FROM CFG_POOLS WHERE POOL_NAME='default'"))
     assert (
         claim_once(
@@ -1141,20 +1144,25 @@ def test_agent_doctor_checks_static_imports_without_executing_project_code(agent
         ),
     )
     payload = {"version": __version__}
-    discovery = client.post("/api/v1/agent/doctor", headers=agent, json=payload)
+    discovery = client.post("/api/v1/projects/default/agent/doctor", headers=agent, json=payload)
     assert discovery.status_code == 200, discovery.text
     assert discovery.json()["imports"] == ["absent_bundle_dependency_xyz"]
     observations = payload | {
         "bundle_id": bundle.bundle_id,
         "missing": ["absent_bundle_dependency_xyz"],
     }
-    answer = client.post("/api/v1/agent/doctor", headers=agent, json=observations)
+    answer = client.post("/api/v1/projects/default/agent/doctor", headers=agent, json=observations)
     assert answer.status_code == 200, answer.text
     assert answer.json()["missing"] == ["absent_bundle_dependency_xyz"]
-    assert client.post("/api/v1/agent/doctor", headers=person, json=payload).status_code == 403
     assert (
         client.post(
-            "/api/v1/agent/doctor",
+            "/api/v1/projects/default/agent/doctor", headers=person, json=payload
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/v1/projects/default/agent/doctor",
             headers=agent,
             json=payload | {"bundle_id": bundle.bundle_id, "missing": ["not_in_the_bundle"]},
         ).status_code
@@ -1171,7 +1179,7 @@ def test_streamed_upload_limits_apply_before_parsing_or_action_dispatch(
 
     db, client, agent, person, _, _ = agent_scene
     model, path, headers = (
-        (PublishBundle, "/api/v1/bundles", person)
+        (PublishBundle, "/api/v1/projects/default/bundles", person)
         if upload == "bundle"
         else (AgentLog, "/api/v1/agent/log", agent)
     )

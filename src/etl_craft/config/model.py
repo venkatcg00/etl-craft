@@ -250,6 +250,7 @@ class ConnectorConfig:
     _host_config_path: Path | None = field(default=None, repr=False)
     api_address: str = "127.0.0.1:8730"
     timezone: str = "UTC"
+    project: str = "default"
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)

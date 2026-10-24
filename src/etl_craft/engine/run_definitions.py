@@ -8,6 +8,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.core.definitions import Definition, current, using
 from etl_craft.core.errors import RunStateError
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.pipelines import selected_project
 from etl_craft.engine.runlog import RunSelector, select_run
 
 
@@ -19,8 +20,8 @@ def for_run(bind: Engine | Connection, run_id: int | None) -> Iterator[None]:
         yield
         return
     with bind.connect() if isinstance(bind, Engine) else nullcontext(bind) as conn:
-        definition = _read(conn, run_id)
-    with using(definition):
+        definition, project_id = _read(conn, run_id)
+    with using(definition), selected_project(project_id):
         yield
 
 
@@ -29,16 +30,16 @@ def for_selection(engine: Engine, pipeline_id: int, selector: RunSelector) -> It
     """Select an exact existing run before resolving its admitted task codes."""
     with engine.connect() as conn:
         selected = select_run(conn, pipeline_id, selector)
-        definition = _read(conn, selected.pipeline_run_id)
-    with using(definition):
+        definition, project_id = _read(conn, selected.pipeline_run_id)
+    with using(definition), selected_project(project_id):
         yield
 
 
-def _read(conn: Connection, run_id: int) -> Definition:
+def _read(conn: Connection, run_id: int) -> tuple[Definition, int]:
     row = conn.execute(statement(conn, "run_definition"), {"run_id": run_id}).one_or_none()
     if row is None or row.snapshot is None:
         raise RunStateError(
             f"run {run_id}: no admitted metadata snapshot; expected a pinned definition; "
             "start a new run instead of reopening a pre-bundle completed run"
         )
-    return Definition.read(row.snapshot, run_id, row.bundle_id)
+    return Definition.read(row.snapshot, run_id, row.bundle_id), int(row.project_id)

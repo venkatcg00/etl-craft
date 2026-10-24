@@ -21,7 +21,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import bindparam, inspect, text
+from sqlalchemy import TextClause, bindparam, inspect, text
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config.auth import EngineSpec
@@ -255,6 +255,34 @@ class EngineDialect(ABC):
         for table in tables:
             first = inspect(conn).get_columns(self.stored_name(table))[0]["name"]
             self._insert_history(conn, table, first, ("INSERT", migration, actor, now))
+
+    def clone_statement(self, table: str, columns: list[str]) -> TextClause:
+        """Select project-owned rows through their closest retained ownership key."""
+        fields = {name.upper() for name in columns}
+        owners = (
+            ("PROJECT_ID", ":project_id"),
+            ("PIPELINE_ID", "SELECT PIPELINE_ID FROM project_pipelines"),
+            ("PIPELINE_RUN_ID", "SELECT PIPELINE_RUN_ID FROM project_runs"),
+            ("TASK_RUN_ID", "SELECT TASK_RUN_ID FROM project_task_runs"),
+            ("TASK_ID", "SELECT TASK_ID FROM project_tasks"),
+            ("ATTEMPT_ID", "SELECT ATTEMPT_ID FROM project_attempts"),
+            ("BUSINESS_RULE_ID", "SELECT BUSINESS_RULE_ID FROM project_rules"),
+            ("BUSINESS_RULE_RUN_ID", "SELECT BUSINESS_RULE_RUN_ID FROM project_rule_runs"),
+            ("LINEAGE_VERSION_ID", "SELECT LINEAGE_VERSION_ID FROM project_lineage"),
+            ("TABLE_ID", "SELECT TABLE_ID FROM project_tables"),
+        )
+        condition = next((f"{name} IN ({query})" for name, query in owners if name in fields), None)
+        if condition is None and table in {
+            "AUD_SOURCE_COLUMNS_BASELINE",
+            "AUD_CFG_SOURCE_COLUMNS_HISTORY",
+        }:
+            condition = ":project_id=1"
+        sql = f"SELECT {', '.join(columns)} FROM {table}"
+        return text(
+            self.query("clone_project_scope")
+            + "\n"
+            + (sql if condition is None else f"{sql} WHERE {condition}")
+        )
 
     def _insert_history(
         self,

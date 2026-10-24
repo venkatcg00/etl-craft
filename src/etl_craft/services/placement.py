@@ -19,6 +19,7 @@ class Placement:
     pools: dict[str, str]
     agents: dict[str, dict[int, ResourceRequest]]
     local: ResourceRequest | None
+    default_pool: str = "default"
 
     def check(self, task: str, request: ResourceRequest, pool: str) -> None:
         """Refuse invalid pool names or a request that fits no available allocation."""
@@ -52,4 +53,5 @@ def placement(conn: Connection, config: ConnectorConfig) -> Placement:
     else:
         measured = local_capacity(config)
         local = ResourceRequest(measured.cpu, measured.memory_mb)
-    return Placement(pools, agents, local)
+    project = conn.execute(statement(conn, "project_by_code"), {"code": config.project}).one()
+    return Placement(pools, agents, local, str(project.default_pool))

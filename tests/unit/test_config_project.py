@@ -99,3 +99,15 @@ def test_symlinks_cannot_read_outside_their_folder(project, reader, folder, suff
     link.symlink_to(external)
     with pytest.raises(MetadataError, match="resolves outside"):
         reader(project, f"{folder}/{link.name}")
+
+
+def test_api_project_selection_does_not_resolve_connection_credentials(tmp_path, monkeypatch):
+    from etl_craft.config.loader import load_project
+
+    monkeypatch.delenv("MISSING_CONNECTION_SECRET", raising=False)
+    path = tmp_path / "craft-connector.yml"
+    path.write_text(
+        "Secrets:\n  Source_type: ENVIRONMENT\nOrchestration:\n  Project: sales\n"
+        "Engine:\n  dev:\n    Jdbc_url: MISSING_CONNECTION_SECRET\n"
+    )
+    assert load_project(path) == "sales"

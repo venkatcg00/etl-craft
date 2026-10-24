@@ -1,5 +1,5 @@
 -- Read active definitions and their metadata revision without loading ended runs.
-SELECT p.PIPELINE_ID AS pipeline_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
+SELECT p.PROJECT_ID AS project_id, p.PIPELINE_ID AS pipeline_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
        p.PIPELINE_CODE AS pipeline_code, r.BACKFILL AS backfill,
        r.METADATA_SNAPSHOT AS metadata_snapshot,r.METADATA_VERSION AS metadata_version
 FROM AUD_PIPELINES_RUN_LOG r JOIN CFG_PIPELINES p ON p.PIPELINE_ID = r.PIPELINE_ID

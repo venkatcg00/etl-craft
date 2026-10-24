@@ -79,7 +79,16 @@ def _copy_tables(
         key = table.id_column.lower()
         current = dialect.table_rows(conn, table.table)
         columns = list(current[0]) if current else dialect.column_names(conn, table.table)
-        rows = _at(current, versions[table.table], key, table.table, as_of)
+        history = versions[table.table]
+        rows = _at(current, history, key, table.table, as_of)
+        if table.table == "CFG_PROJECTS" and history:
+            first = min(history, key=lambda row: row["change_id"])
+            if (
+                first.get("project_id") == 1
+                and first.get("project_code") == "default"
+                and as_of < as_utc(first["valid_from"])
+            ):
+                rows = [first]
         if table.table == "CFG_BUSINESS_RULES":
             legacy_rules = [row for row in rows if row.get("target_table_id") is None]
         if table.table == "CFG_TASKS":

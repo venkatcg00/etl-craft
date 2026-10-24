@@ -16,8 +16,8 @@ DAY = f"({STAMP}+(d-1)*INTERVAL '1 day')"
 SEEDS = [
     (
         "AUD_PROJECT_BUNDLES",
-        "BUNDLE_ID,MANIFEST,CREATED_BY,CREATED_AT",
-        f"lpad(p::text,64,'0'),'{{}}','plan',{STAMP}",
+        "BUNDLE_ID,MANIFEST,CREATED_BY,CREATED_AT,CONNECTIONS_APPROVED_FLAG",
+        f"lpad(p::text,64,'0'),'{{}}','plan',{STAMP},'Y'",
         "generate_series(1,:pipelines) p",
     ),
     (
