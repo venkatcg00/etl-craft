@@ -24,6 +24,7 @@ def check_event_queries(world, target):
             EVENT_SQL=f"SELECT ready FROM {world.name(target)} WHERE ready=1",
             EVENT_TIMEOUT_MINUTES="NONE",
         )
+    world.new_run()
     now = datetime.now(UTC)
     waiting = check_event(world.engine_db, world.config, world.pipeline_run_id, event, now)
     assert waiting.next_check_at
@@ -61,7 +62,7 @@ def check_event_queries(world, target):
 SIGNAL_KEY = "object/a\\b:batch'01@version-1"
 
 
-def signal_scene(world, target):
+def signal_scene(world, target, *, admit=True):
     """A team-owned signal table, read by one stable event task."""
     world.execute(
         f"CREATE TABLE {world.name(target)} (event_id VARCHAR(200), payload VARCHAR(200))"
@@ -82,6 +83,8 @@ def signal_scene(world, target):
             EVENT_POLL_SECONDS="1",
             EVENT_TIMEOUT_MINUTES="NONE",
         )
+    if admit:
+        world.new_run()
     return task
 
 
