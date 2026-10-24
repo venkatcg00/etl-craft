@@ -478,3 +478,52 @@ def test_export_refuses_an_unknown_project_with_a_remedy(engine_db, tmp_path):
     with pytest.raises(MetadataFileError, match=r"project 'missing'.*select another project"):
         export_config(engine_db.engine, directory, project_code="missing")
     assert not directory.exists()
+
+
+def test_sql_task_state_reads_only_its_projects_target_contract(engine_db):
+    from etl_craft.engine.queries import statement
+    from etl_craft.engine.repository.hash_versions import save_view_statement
+
+    with engine_db.engine.begin() as conn:
+        first = add_pipeline(conn, "P")
+        task = add_task(conn, first, "merge", TARGET_OBJECT="warehouse.main.shared")
+        run = start_run(conn, first)
+        other = project(conn, "other")
+        save_hash_version(conn, "warehouse.main.shared", 1)
+        save_view_statement(conn, "warehouse.main.shared", "a" * 64)
+        with selected_project(other):
+            save_hash_version(conn, "warehouse.main.shared", 2)
+            save_view_statement(conn, "warehouse.main.shared", "b" * 64)
+        rows = conn.execute(
+            statement(conn, "sql_task_state"),
+            {
+                "task_id": task,
+                "pipeline_id": first,
+                "pipeline_run_id": run,
+                "sql_action": "SCD1_MERGE",
+                "catalog": "warehouse",
+            },
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].hash_version == 1
+    assert rows[0].statement_sha256 == "a" * 64
+
+
+def test_item_lookup_refuses_a_run_from_another_project(engine_db):
+    from etl_craft.engine import transitions
+    from etl_craft.engine.queries import statement
+
+    with engine_db.engine.begin() as conn:
+        first = add_pipeline(conn, "P")
+        task = add_task(conn, first, "T", "PYTHON")
+        run = start_run(conn, first)
+        transitions.find_or_create_task_run(conn, task, run)
+        other = project(conn, "other")
+        with selected_project(other):
+            assert (
+                conn.execute(
+                    statement(conn, "item_task"),
+                    {"run_id": run, "pipeline_code": "P", "task_code": "T"},
+                ).one_or_none()
+                is None
+            )
