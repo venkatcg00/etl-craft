@@ -171,7 +171,11 @@ def validate_on(
 ) -> Report:
     """``validate`` on an open connection, including any changes it has not committed yet."""
     if pipeline_code is not None:
-        resolve_pipeline_id(conn, pipeline_code)
+        resolve_pipeline_id(
+            conn,
+            pipeline_code,
+            before_projects=not for_engine(conn).has_table(conn, "CFG_PROJECTS"),
+        )
     tasks = fetch_active_tasks(conn)
     pipeline_parameters = fetch_pipeline_parameters(conn)
     data = _Metadata(
@@ -255,7 +259,9 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
                 "remove the unknown key or replace it with an allowed key",
             )
         try:
-            pipeline_id = resolve_pipeline_id(conn, code)
+            pipeline_id = resolve_pipeline_id(
+                conn, code, before_projects=not for_engine(conn).has_table(conn, "CFG_PROJECTS")
+            )
             graph = fetch_pipeline_graph(conn, pipeline_id)
             build_graph(graph.tasks, graph.same_pipeline_edges)
         except EtlCraftError as error:

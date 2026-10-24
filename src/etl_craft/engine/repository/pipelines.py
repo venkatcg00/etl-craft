@@ -42,16 +42,19 @@ def with_suggestions(message: str, unknown: str, candidates: list[str]) -> str:
     return f"{message} — did you mean: {', '.join(hints)}" if hints else message
 
 
-def resolve_pipeline_id(conn: Connection, pipeline_code: str) -> int:
+def resolve_pipeline_id(
+    conn: Connection, pipeline_code: str, *, before_projects: bool = False
+) -> int:
     """Return the id of active pipeline ``pipeline_code``; ``MetadataError`` if there is none."""
+    query = project_statement if before_projects else statement
     pipeline_id = conn.execute(
-        project_statement(conn, "pipeline_id_by_code"),
+        query(conn, "pipeline_id_by_code"),
         {"pipeline_code": pipeline_code, "project_id": current_project_id()},
     ).scalar_one_or_none()
     if pipeline_id is None:
         known = list(
             conn.execute(
-                project_statement(conn, "active_pipeline_codes"),
+                query(conn, "active_pipeline_codes"),
                 {"project_id": current_project_id()},
             ).scalars()
         )
