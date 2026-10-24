@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import ClassVar
@@ -38,6 +38,7 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
+from etl_craft.engine.run_definitions import for_run
 from etl_craft.execution import control_flow
 from etl_craft.execution.manual import select_tasks
 from etl_craft.handlers.resources import LocalLocker
@@ -284,6 +285,26 @@ def control_scope(ctx: OperationContext, request: ControlRequest) -> Iterator[in
     with ctx.engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
         selected = runlog.select_run(conn, pipeline_id, request.selector)
+    with (
+        (
+            for_run(ctx.engine, selected.pipeline_run_id)
+            if request.action != ControlAction.RESTART
+            else nullcontext()
+        ),
+        _control_scope(ctx, request, pipeline_id, selected) as run_id,
+    ):
+        yield run_id
+
+
+@contextmanager
+def _control_scope(
+    ctx: OperationContext,
+    request: ControlRequest,
+    pipeline_id: int,
+    selected: runlog.RunIdentity,
+) -> Iterator[int]:
+    """Fence probes and controls using the selected execution definition."""
+    with ctx.engine.connect() as conn:
         scope = run_scopes.fetch_selection(conn, selected.pipeline_run_id)
         tasks = fetch_task_codes(conn, pipeline_id)
         event_ids = [

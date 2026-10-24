@@ -1,4 +1,4 @@
-SELECT t.HANDLER AS handler, previous.FORCE_FLAG AS force_flag, previous.RERUN_FLAG AS rerun_flag
+SELECT t.TASK_ID AS task_id, t.HANDLER AS handler, previous.SLOT_KIND AS previous_kind, previous.FORCE_FLAG AS force_flag, previous.RERUN_FLAG AS rerun_flag
 FROM AUD_TASK_RUN_LOG r JOIN CFG_TASKS t ON t.TASK_ID=r.TASK_ID
 LEFT JOIN AUD_TASK_ATTEMPTS previous ON previous.ATTEMPT_ID=(
     SELECT p.ATTEMPT_ID FROM AUD_TASK_ATTEMPTS p

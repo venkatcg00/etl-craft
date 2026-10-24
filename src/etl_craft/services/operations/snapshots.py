@@ -93,6 +93,7 @@ def run_document(row: RowMapping) -> RunView:
         values["selected_task_ids"] = scope.task_ids
         values["ignore_dependencies"] = scope.ignore_dependencies
     values["exclusive_run"] = values.get("exclusive_run", YesNo.YES) == YesNo.YES
+    values["newer_metadata_available"] = bool(values.get("newer_metadata_available", False))
     return RunView(**values)
 
 

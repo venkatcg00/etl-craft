@@ -37,7 +37,7 @@ def create_token(ctx, name, role, expires=None):
 
 
 @pytest.fixture
-def api(engine_db, tmp_path):
+def api(engine_db, tmp_path, request):
     ctx = OperationContext(
         engine_db.engine,
         replace(engine_db.config, log_dir=tmp_path / "logs"),
@@ -47,7 +47,7 @@ def api(engine_db, tmp_path):
     with ctx.engine.begin() as conn:
         engine_db.dialect.refresh_metadata_triggers(conn)
         pipeline = add_pipeline(conn, "P")
-        task = add_task(conn, pipeline, "T")
+        task = add_task(conn, pipeline, "T", **getattr(request, "param", {}))
         run = start_run(conn, pipeline)
         summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
         attempt = transitions.queue_attempt(conn, summary, current_actor())
@@ -517,6 +517,20 @@ def test_tokens_work_after_released_schema_upgrade(empty_engine_db, tmp_path, mo
     assert apply_pending_migrations(db.engine) == []
 
 
+@pytest.mark.parametrize(
+    "api",
+    [
+        {
+            "TARGET_OBJECT": "s.events",
+            "SQL_ACTION": "APPEND_TABLE",
+            "SELECT_QUERY": "SELECT id FROM raw.events WHERE id > $$watermark",
+            "WATERMARK_COLUMN": "id",
+            "WATERMARK_TYPE": "NUMBER",
+            "WATERMARK_START": "0",
+        }
+    ],
+    indirect=True,
+)
 def test_watermark_reset_validates_and_audits_the_api_actor(api):
     from etl_craft.config import ConnectionProfile
     from etl_craft.engine.repository.offsets import fetch_task_offset
@@ -531,23 +545,6 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
     client = TestClient(create_app(replace(ctx, config=config)))
     with ctx.engine.begin() as conn:
         task = conn.execute(text("SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='T'")).scalar_one()
-        from fixtures.metadata import set_task_target
-
-        set_task_target(conn, task, "s.events")
-        for name, value in {
-            "SQL_ACTION": "APPEND_TABLE",
-            "SELECT_QUERY": "SELECT id FROM raw.events WHERE id > $$watermark",
-            "WATERMARK_COLUMN": "id",
-            "WATERMARK_TYPE": "NUMBER",
-            "WATERMARK_START": "0",
-        }.items():
-            conn.execute(
-                text(
-                    "INSERT INTO CFG_TASK_PARAMETERS(TASK_ID, PARAMETER_NAME, PARAMETER_VALUE) "
-                    "VALUES (:task, :name, :value)"
-                ),
-                {"task": task, "name": name, "value": value},
-            )
     path = "/api/v1/marks"
     h = headers(creds["operator"])
     selected = {"pipeline_code": "P", "task_code": "T", "run_id": run}

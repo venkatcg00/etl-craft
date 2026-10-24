@@ -72,6 +72,7 @@ def claim_with_capacity(
                 "row_id": attempt_id,
                 "candidate_ids": (attempt_id,),
                 "warehouse_limit": None,
+                "event_wait": False,
                 "local_cpu": None,
                 "local_memory_mb": None,
                 "local_slots": None,

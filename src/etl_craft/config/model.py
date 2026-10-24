@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from etl_craft.config.docs_site import external_url
+from etl_craft.config.object_models import Artifacts, ObjectStore
 from etl_craft.core.enums import (
     AuthMode,
     CloningScope,
@@ -246,6 +247,7 @@ class ConnectorConfig:
     email: EmailProfile | None = None
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     config_path: Path | None = None
+    _host_config_path: Path | None = field(default=None, repr=False)
     api_address: str = "127.0.0.1:8730"
     timezone: str = "UTC"
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
@@ -256,6 +258,8 @@ class ConnectorConfig:
     sizing: Sizing | None = None
     """Set at ``run`` and ``server`` startup from the measured allocation and ``deployment``."""
 
+    artifacts: Artifacts = field(default_factory=Artifacts)
+    object_stores: dict[str, ObjectStore] = field(default_factory=dict)
     retry_on: RetryOn = RetryOn.TRANSIENT
 
     @property

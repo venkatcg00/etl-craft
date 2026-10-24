@@ -192,6 +192,9 @@ class ActionScope(StrEnum):
 class ActionName(StrEnum):
     """Every action an interface can request; the value is its audit and role-policy name."""
 
+    BUNDLE_PUBLISH = "bundle publish"
+    AGENT_DOCTOR = "agent doctor"
+
     AGENT_REGISTER = "agent register"
     AGENT_DEREGISTER = "agent deregister"
     AGENT_CLAIM = "agent claim"
@@ -600,6 +603,7 @@ class AgentReport(StrEnum):
     ITEMS = "ITEMS"
     ITEM_EVENT = "ITEM_EVENT"
     ITEM_PREPARE = "ITEM_PREPARE"
+    BUNDLE = "BUNDLE"
     RULE_BEGIN = "RULE_BEGIN"
     RULE_KEYS = "RULE_KEYS"
     RULE_END = "RULE_END"
@@ -646,3 +650,17 @@ class ItemAction(StrEnum):
     CANCEL = "CANCEL"
     RERUN = "RERUN"
     MARK = "MARK"
+
+
+class ObjectStoreAuth(StrEnum):
+    """Authentication supported by an S3-compatible object store."""
+
+    KEYS = "KEYS"
+    DEFAULT = "DEFAULT"
+
+
+class ObjectUrlStyle(StrEnum):
+    """S3 bucket addressing."""
+
+    PATH = "PATH"
+    VIRTUAL = "VIRTUAL"

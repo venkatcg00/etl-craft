@@ -114,6 +114,7 @@ def run_checks(config: ConnectorConfig, *, engine_state: bool = True) -> list[Ch
         *_cloning(config),
         *_docs_site(config),
         *_project(config),
+        *_artifacts(config),
         *resource_checks(config),
     ]
 
@@ -560,5 +561,26 @@ def _project(config: ConnectorConfig) -> list[Check]:
             f"{', '.join(present)} in {config.project_dir}"
             if present
             else f"no sql_scripts/, python_scripts/ or migrations/ in {config.project_dir} yet",
+        )
+    ]
+
+
+def _artifacts(config: ConnectorConfig) -> list[Check]:
+    """Prove the prefix used by immutable project files is reachable and writable."""
+    from etl_craft.core.errors import EtlCraftError
+    from etl_craft.engine.artifacts import ArtifactStore
+
+    if config.artifacts.store is None:
+        return []
+    store = ArtifactStore(config, config.artifacts.store, config.artifacts.profile)
+    try:
+        store.probe()
+    except (EtlCraftError, OSError) as error:
+        return [fail("Artifact store", str(error))]
+    return [
+        ok(
+            "Artifact store",
+            f"profile={config.artifacts.profile}, "
+            f"prefix={config.artifacts.store}: list/write/read succeeded",
         )
     ]

@@ -2,6 +2,7 @@
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.definitions import current
 from etl_craft.core.enums import Handler, SlotKind, YesNo
 from etl_craft.engine.placement import claim_parameters
 from etl_craft.engine.queries import statement
@@ -16,12 +17,21 @@ def inherit_dispatch(conn: Connection, attempt_id: int, task_run_id: int) -> Non
             "task_run_id": task_run_id,
         },
     ).one()
+    definition = current.get()
+    handler = (
+        row.handler
+        if definition is None
+        else definition.row("CFG_TASKS", "task_id", row.task_id)["handler"]
+    )
+    kind = SlotKind.PYTHON if handler == Handler.PYTHON else SlotKind.WAREHOUSE
+    if definition is None and row.previous_kind is not None:
+        kind = SlotKind(row.previous_kind)
     conn.execute(
         statement(conn, "agent_queue"),
         {
             **claim_parameters(),
             "attempt_id": attempt_id,
-            "kind": SlotKind.PYTHON if row.handler == Handler.PYTHON else SlotKind.WAREHOUSE,
+            "kind": kind,
             "force": row.force_flag or YesNo.NO,
             "rerun": row.rerun_flag or YesNo.NO,
             "reason": None,

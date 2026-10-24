@@ -1,6 +1,6 @@
 """The agent protocol: every exchange is bound to a token, version and exact attempt."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 from etl_craft.core.agent_resources import AgentResources
@@ -55,6 +55,7 @@ class AgentTask(AgentRequest):
     """Report one bounded operation against this token's exact owned attempt."""
 
     attempt_id: int
+    bundle_path: str | None = None
     operation: AgentReport
     item: ItemRecord | None = None
     item_keys: tuple[str, ...] = ()
@@ -83,9 +84,10 @@ class AgentTask(AgentRequest):
 class AgentLog(AgentRequest):
     """One ordered, retry-safe log chunk; its content is never in action arguments."""
 
+    MAX_BODY_BYTES: ClassVar[int] = 65536 * 6 + 4096
     attempt_id: int
     sequence: int
-    content: str
+    content: str = field(metadata={"audit": False})
 
     def __post_init__(self) -> None:
         """Bound each upload before opening a file or database transaction."""

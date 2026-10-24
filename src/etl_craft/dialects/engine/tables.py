@@ -54,6 +54,7 @@ AUDIT_TABLES = frozenset(
         "AUD_GATE_WAITS",
         "AUD_TASK_EVENTS",
         "AUD_TASK_ITEMS",
+        "AUD_PROJECT_BUNDLES",
         "AUD_EVENT_FILES",
         "AUD_EVENT_KEYS",
         "AUD_SOURCE_COLUMNS_BASELINE",

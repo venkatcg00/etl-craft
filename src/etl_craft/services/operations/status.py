@@ -238,8 +238,24 @@ def _snapshots(
     policy: GatePolicy,
     task_code: str | None = None,
 ) -> list[TaskSnapshot]:
+    from etl_craft.engine.run_definitions import for_run
+
     selected = runlog.select_run(conn, pipeline_id, selector)
-    run = run_view(conn, pipeline_id, selected.pipeline_run_id)
+    with for_run(conn, selected.pipeline_run_id):
+        return _admitted_snapshots(conn, pipeline_id, selected.pipeline_run_id, policy, task_code)
+
+
+def _admitted_snapshots(
+    conn: Connection,
+    pipeline_id: int,
+    run_id: int,
+    policy: GatePolicy,
+    task_code: str | None,
+) -> list[TaskSnapshot]:
+    """Explain the admitted graph against live outcomes and operator controls."""
+    if task_code is not None:
+        resolve_task_id(conn, pipeline_id, task_code)
+    run = run_view(conn, pipeline_id, run_id)
     pipeline = pipeline_view(conn, pipeline_id)
     data = fetch_pipeline_graph(conn, pipeline_id)
     graph = build_graph(data.tasks, data.same_pipeline_edges)
@@ -253,7 +269,8 @@ def _snapshots(
     codes = {r.task_id: r.task_code for r in definitions}
     decisions = (
         conn.execute(
-            statement(conn, "inspection_gate_decisions"), {"pipeline_run_id": run.pipeline_run_id}
+            statement(conn, "inspection_gate_decisions"),
+            {"pipeline_run_id": run.pipeline_run_id},
         )
         .mappings()
         .all()
@@ -272,6 +289,46 @@ def _snapshots(
         )
     )
     now = datetime.now(UTC)
+    pipeline_dependencies = _pipeline_dependencies(conn, pipeline_id, run, policy, decisions, now)
+    snapshots = []
+    for definition in definitions:
+        if task_code is not None and definition.task_code != task_code:
+            continue
+        task = task_run_view(
+            conn, pipeline_id, pipeline_run_id=run.pipeline_run_id, task_id=definition.task_id
+        )
+        dependencies = _dependencies(
+            conn, graph, state, codes, definition.task_id, task, decisions, policy, run.backfill
+        )
+        snapshots.append(
+            TaskSnapshot(
+                pipeline,
+                run,
+                definition.task_id,
+                definition.task_code,
+                task,
+                definition.run_condition or RunCondition.ALL,
+                graph.required_edge_count(definition.task_id),
+                dependencies,
+                tuple(pipeline_dependencies),
+                tuple(w for w in waits if w.task_id in (None, definition.task_id)),
+                definition.task_id in impossible,
+                now,
+                definition.task_id in failed_blocks,
+            )
+        )
+    return snapshots
+
+
+def _pipeline_dependencies(
+    conn: Connection,
+    pipeline_id: int,
+    run: RunView,
+    policy: GatePolicy,
+    decisions: Sequence[RowMapping],
+    now: datetime,
+) -> list[DependencyView]:
+    """Explain recorded admission choices or the next eligible upstream outcome."""
     pipeline_dependencies = []
     for edge in fetch_pipeline_dependency_edges(conn, pipeline_id):
         recorded = [
@@ -327,34 +384,7 @@ def _snapshots(
                     pipeline_dependency_id=edge.pipeline_dependency_id,
                 )
             )
-    snapshots = []
-    for definition in definitions:
-        if task_code is not None and definition.task_code != task_code:
-            continue
-        task = task_run_view(
-            conn, pipeline_id, pipeline_run_id=run.pipeline_run_id, task_id=definition.task_id
-        )
-        dependencies = _dependencies(
-            conn, graph, state, codes, definition.task_id, task, decisions, policy, run.backfill
-        )
-        snapshots.append(
-            TaskSnapshot(
-                pipeline,
-                run,
-                definition.task_id,
-                definition.task_code,
-                task,
-                definition.run_condition or RunCondition.ALL,
-                graph.required_edge_count(definition.task_id),
-                dependencies,
-                tuple(pipeline_dependencies),
-                tuple(w for w in waits if w.task_id in (None, definition.task_id)),
-                definition.task_id in impossible,
-                now,
-                definition.task_id in failed_blocks,
-            )
-        )
-    return snapshots
+    return pipeline_dependencies
 
 
 def _dependencies(
@@ -542,7 +572,6 @@ def explain_task(ctx: OperationContext, request: TaskSelection) -> Explanation:
     pipeline_code, task_code, selector = request.pipeline_code, request.task_code, request.selector
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        resolve_task_id(conn, pipeline_id, task_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates, task_code)
     return explain(snapshots[0])
 

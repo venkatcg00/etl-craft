@@ -28,6 +28,7 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
+from etl_craft.engine.run_definitions import for_run
 from etl_craft.engine.runlog import select_run
 from etl_craft.execution.attempt_records import attempt_log_path
 from etl_craft.services.operations.context import OperationContext
@@ -135,26 +136,27 @@ def pipeline_steps(ctx: OperationContext, request: RunSelection) -> StepsView:
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
         selected = select_run(conn, pipeline_id, request.selector)
-        steps = tuple(
-            StepView(
-                pipeline_id,
-                selected.pipeline_run_id,
-                row.task_id,
-                row.task_code,
-                row.task_run_id,
-                row.task_type,
-                row.handler,
-                row.run_condition,
-                row.run_condition_count,
-                dict(sorted(fetch_task_parameters(conn, row.task_id).items())),
-                None if row.status is None else RunStatus(row.status),
+        with for_run(conn, selected.pipeline_run_id):
+            steps = tuple(
+                StepView(
+                    pipeline_id,
+                    selected.pipeline_run_id,
+                    row.task_id,
+                    row.task_code,
+                    row.task_run_id,
+                    row.task_type,
+                    row.handler,
+                    row.run_condition,
+                    row.run_condition_count,
+                    dict(sorted(fetch_task_parameters(conn, row.task_id).items())),
+                    None if row.status is None else RunStatus(row.status),
+                )
+                for row in conn.execute(
+                    statement(conn, "pipeline_steps"),
+                    {"pipeline_id": pipeline_id, "run_id": selected.pipeline_run_id},
+                )
             )
-            for row in conn.execute(
-                statement(conn, "pipeline_steps"),
-                {"pipeline_id": pipeline_id, "run_id": selected.pipeline_run_id},
-            )
-        )
-        return StepsView(pipeline_id, selected.pipeline_run_id, steps)
+            return StepsView(pipeline_id, selected.pipeline_run_id, steps)
 
 
 def run_history(ctx: OperationContext, request: HistoryInput) -> HistoryView:

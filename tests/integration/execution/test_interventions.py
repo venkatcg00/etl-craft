@@ -1044,29 +1044,20 @@ def test_a_task_left_running_by_a_dead_process_is_released_with_stale(config, pi
     assert statuses(engine, run)["transform"][0] == "SUCCESS"
 
 
-def behave(engine, task_id, behaviour):
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = :b "
-                "WHERE TASK_ID = :t AND PARAMETER_NAME = 'BEHAVIOUR'"
-            ),
-            {"b": behaviour, "t": task_id},
-        )
-
-
-def test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run(config, engine_db):
+def test_a_rerun_of_a_failed_task_leaves_what_its_failure_skipped_to_run(
+    config, engine_db, tmp_path
+):
     engine = engine_db.engine
     with engine.begin() as conn:
         q = add_pipeline(conn, "Q")
-        a = add_task(conn, q, "a", BEHAVIOUR="fail")
+        a = add_task(conn, q, "a", BEHAVIOUR="source", SOURCE_FILE=str(tmp_path / "source"))
         c = add_task(conn, q, "c", BEHAVIOUR="succeed")
         add_dependency(conn, q, c, a)
     failed = run_pipeline(engine, config, "Q", child=CHILD)
     assert failed.status == RunStatus.FAILED
     assert statuses(engine, failed.pipeline_run_id)["c"][0] == "SKIPPED"
 
-    behave(engine, a, "succeed")
+    (tmp_path / "source").touch()
     fixed = rerun_task(
         engine,
         config,
@@ -1154,16 +1145,33 @@ def test_a_skipped_run_is_ended_for_a_single_task(config, pipeline):
     assert run_status(engine, skipped.pipeline_run_id) == "SKIPPED"
 
 
-def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline):
+def test_a_forced_task_reopens_an_ended_run_and_ends_it_again(config, pipeline, tmp_path):
     engine, ids = pipeline
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE CFG_TASKS SET ACTIVE_FLAG = 'N' WHERE TASK_ID IN (:b, :a)"),
             {"b": ids["broken"], "a": ids["after_broken"]},
         )
+    source = tmp_path / "source"
+    source.touch()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='source' "
+                "WHERE TASK_ID=:id AND PARAMETER_NAME='BEHAVIOUR'"
+            ),
+            {"id": ids["transform"]},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
+                "VALUES (:id,'SOURCE_FILE',:path)"
+            ),
+            {"id": ids["transform"], "path": str(source)},
+        )
     first = run_pipeline(engine, config, "P", child=CHILD)
     assert first.status == RunStatus.SUCCESS
-    behave(engine, ids["transform"], "fail")
+    source.unlink()
 
     forced = force_task(
         engine,

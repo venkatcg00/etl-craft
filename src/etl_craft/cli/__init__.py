@@ -106,7 +106,7 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
     log.configure(args.log_level, args.log_format)
     args.api = args.api or os.environ.get("ETL_CRAFT_API")
     try:
-        if args.api or args.command == "agent":
+        if args.api or args.command == "agent" or (args.command == "doctor" and args.agent):
             return int(args.handler(args, out))
         with access_context(args):
             return int(args.handler(args, out))

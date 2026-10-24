@@ -79,5 +79,6 @@ def build_engine(
     engine = for_jdbc_url(profile.jdbc_url).build_engine(
         config, profile, supervised=supervised, **engine_kwargs
     )
+    engine.update_execution_options(bundles_enabled=config.artifacts.store is not None)
     mark_connections(engine)
     return engine

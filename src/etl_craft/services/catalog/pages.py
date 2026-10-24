@@ -309,6 +309,9 @@ class Pages:
             [
                 ("Pipeline", self._link(pipeline_url(code), code)),
                 ("Status", _status(run.status)),
+                ("Metadata version", _e(run.metadata_version)),
+                ("Newer metadata available", "yes" if run.newer_metadata_available else "no"),
+                ("Bundle", _e(run.bundle_id)),
                 ("Run date", _e(run.run_date) + (" (backfill)" if run.backfill else "")),
                 ("Started", _e(_when(run.start))),
                 ("Ended", _e(_when(run.end))),

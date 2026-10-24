@@ -20,6 +20,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core import enums
 from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.counts import Counts
+from etl_craft.core.definitions import Definition
 from etl_craft.core.errors import HandlerError
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import LocalTaskStore, TaskIdentity, TaskStore
@@ -57,6 +58,9 @@ class TaskContext:
     event_keys: tuple[str, ...] = ()
     event_rows: tuple[Mapping[str, Any], ...] = ()
     writer: str = SYSTEM_ACTOR.name
+    bundle_id: str | None = None
+    metadata_version: str | None = None
+    _definition: Definition | None = None
 
 
 @dataclass(frozen=True)
@@ -141,4 +145,5 @@ def task_store(context: TaskContext, backend: Engine | TaskStore) -> TaskStore:
             context.owner,
         ),
         LocalLocker(backend, context.config, with_warehouse=True),
+        definition=context._definition,
     )

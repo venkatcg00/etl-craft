@@ -46,6 +46,7 @@ from etl_craft.engine.repository.pipelines import (
     resolve_pipeline_id,
 )
 from etl_craft.engine.repository.tasks import fetch_task_codes
+from etl_craft.engine.run_definitions import for_run
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_records import run_cancelled
 from etl_craft.execution.attempt_types import ChildOptions
@@ -134,7 +135,7 @@ def pipeline_steps(
         return paused_outcome(pipeline_code, paused)
     clock = clock or Clock()
     hooks = hooks or default_hooks(config, engine)
-    pipeline_id, detail = prepare(engine, config, pipeline_code)
+    pipeline_id, detail = prepare(engine, config, pipeline_code, selector=selector)
     pipeline_run_id, skip_reason = yield from start_steps(
         engine,
         config,
@@ -190,34 +191,40 @@ def _run_schedule(
     engine: Engine, config: ConnectorConfig, run: PipelineRun, options: _ScheduleOptions
 ) -> Generator[float, None, PipelineOutcome]:
     """Drive admitted tasks, then finish only when the supervisor is allowed to finish."""
-    scheduler = Scheduler(
-        engine,
-        config,
-        run.pipeline_code,
-        run.pipeline_id,
-        run.pipeline_run_id,
-        run.task_codes,
-        run.graph,
-        force=options.force,
-        clock=options.clock,
-        pool=options.pool,
-        child=options.child or ChildOptions(),
-        paused=lambda: (
-            (options.stop_dispatch is not None and options.stop_dispatch.is_set())
-            or open_pause(
-                engine, run.pipeline_code, selector=runlog.RunSelector(run_id=run.pipeline_run_id)
-            )
-            is not None
-        ),
-        settle=lambda final: settle_unsatisfiable(
-            engine, run.graph, run.pipeline_run_id, run.task_codes, failures_final=final
-        ),
-    )
-    yield from _drive_scheduler(engine, run, scheduler, options)
-    stopped = _stopped_run(engine, run, scheduler, options)
-    if stopped is not None:
-        return stopped
-    return finalize(engine, run, options.hooks, scheduler.never_ready, scheduler.after_failure)
+    from etl_craft.execution.bundle_files import run_config
+
+    with for_run(engine, run.pipeline_run_id):
+        config = run_config(engine, config, run.pipeline_run_id)
+        scheduler = Scheduler(
+            engine,
+            config,
+            run.pipeline_code,
+            run.pipeline_id,
+            run.pipeline_run_id,
+            run.task_codes,
+            run.graph,
+            force=options.force,
+            clock=options.clock,
+            pool=options.pool,
+            child=options.child or ChildOptions(),
+            paused=lambda: (
+                (options.stop_dispatch is not None and options.stop_dispatch.is_set())
+                or open_pause(
+                    engine,
+                    run.pipeline_code,
+                    selector=runlog.RunSelector(run_id=run.pipeline_run_id),
+                )
+                is not None
+            ),
+            settle=lambda final: settle_unsatisfiable(
+                engine, run.graph, run.pipeline_run_id, run.task_codes, failures_final=final
+            ),
+        )
+        yield from _drive_scheduler(engine, run, scheduler, options)
+        stopped = _stopped_run(engine, run, scheduler, options)
+        if stopped is not None:
+            return stopped
+        return finalize(engine, run, options.hooks, scheduler.never_ready, scheduler.after_failure)
 
 
 def _drive_scheduler(

@@ -18,6 +18,7 @@ from etl_craft.core.time import as_utc
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.engine.run_definitions import for_run
 
 
 @dataclass(frozen=True)
@@ -81,48 +82,49 @@ def refresh_retries(
     engine: Engine, config: ConnectorConfig, pipeline_run_id: int, task_ids: Set[int]
 ) -> tuple[dict[int, datetime], set[int]]:
     """Queue eligible failures once; return delayed attempts and exhausted task IDs."""
-    waiting: dict[int, datetime] = {}
-    exhausted: set[int] = set()
-    with engine.begin() as conn:
-        rows = conn.execute(
-            statement(conn, "retry_attempts").columns(retryable=Boolean),
-            {"pipeline_run_id": pipeline_run_id},
-        ).all()
-        for row in rows:
-            if row.task_id not in task_ids:
-                continue
-            if row.status == AttemptStatus.QUEUED and row.not_before is not None:
-                waiting[row.task_id] = as_utc(row.not_before)
-                continue
-            if row.status == AttemptStatus.HANDED_OFF and (
-                row.marked or row.task_status != RunStatus.FAILED or row.retry_on != RetryOn.ANY
-            ):
-                exhausted.add(row.task_id)
-                continue
-            if row.status not in {
-                AttemptStatus.FAILED,
-                AttemptStatus.TIMED_OUT,
-                AttemptStatus.LOST,
-                AttemptStatus.HANDED_OFF,
-            }:
-                continue
-            policy = task_retry_policy(fetch_task_parameters(conn, row.task_id), config)
-            if not policy.retries:
-                continue
-            if not row.retryable or row.attempt_number > policy.retries:
-                exhausted.add(row.task_id)
-                continue
-            due = datetime.now(UTC) + timedelta(seconds=policy.delay(row.attempt_number))
-            try:
-                queued = transitions.queue_attempt(
-                    conn,
-                    row.task_run_id,
-                    current_actor(),
-                    not_before=due,
-                    previous_attempt_id=row.attempt_id,
-                )
-                transitions.set_attempt_retry_policy(conn, queued, policy.retry_on)
-            except StaleTransitionError:
-                continue
-            waiting[row.task_id] = due
-    return waiting, exhausted
+    with for_run(engine, pipeline_run_id):
+        waiting: dict[int, datetime] = {}
+        exhausted: set[int] = set()
+        with engine.begin() as conn:
+            rows = conn.execute(
+                statement(conn, "retry_attempts").columns(retryable=Boolean),
+                {"pipeline_run_id": pipeline_run_id},
+            ).all()
+            for row in rows:
+                if row.task_id not in task_ids:
+                    continue
+                if row.status == AttemptStatus.QUEUED and row.not_before is not None:
+                    waiting[row.task_id] = as_utc(row.not_before)
+                    continue
+                if row.status == AttemptStatus.HANDED_OFF and (
+                    row.marked or row.task_status != RunStatus.FAILED or row.retry_on != RetryOn.ANY
+                ):
+                    exhausted.add(row.task_id)
+                    continue
+                if row.status not in {
+                    AttemptStatus.FAILED,
+                    AttemptStatus.TIMED_OUT,
+                    AttemptStatus.LOST,
+                    AttemptStatus.HANDED_OFF,
+                }:
+                    continue
+                policy = task_retry_policy(fetch_task_parameters(conn, row.task_id), config)
+                if not policy.retries:
+                    continue
+                if not row.retryable or row.attempt_number > policy.retries:
+                    exhausted.add(row.task_id)
+                    continue
+                due = datetime.now(UTC) + timedelta(seconds=policy.delay(row.attempt_number))
+                try:
+                    queued = transitions.queue_attempt(
+                        conn,
+                        row.task_run_id,
+                        current_actor(),
+                        not_before=due,
+                        previous_attempt_id=row.attempt_id,
+                    )
+                    transitions.set_attempt_retry_policy(conn, queued, policy.retry_on)
+                except StaleTransitionError:
+                    continue
+                waiting[row.task_id] = due
+        return waiting, exhausted

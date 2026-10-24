@@ -8,6 +8,7 @@ from sqlalchemy import text
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import ActionName, ApiRole, FailureClass, RetryOn, RunStatus
 from etl_craft.engine.repository.catalog import fetch_task_runs
+from etl_craft.execution.attempt_types import TaskRun
 from etl_craft.execution.pipeline import run_pipeline
 from etl_craft.services.operations.context import OperationContext
 from fixtures.actions import act
@@ -118,7 +119,13 @@ def test_admission_fills_only_an_unrecorded_queued_policy(engine_db, config, pre
             text("UPDATE AUD_TASK_ATTEMPTS SET RETRY_ON=:policy WHERE ATTEMPT_ID=:id"),
             {"policy": previous_policy, "id": queued},
         )
-    admitted = admit_attempt(engine, config, task, "load", "P", run, False)
+    admitted = admit_attempt(
+        engine,
+        config,
+        TaskRun(
+            pipeline_code="P", task_code="load", task_id=task, pipeline_run_id=run, force=False
+        ),
+    )
     assert admitted.attempt_id == queued
     with engine.connect() as conn:
         policy = conn.execute(

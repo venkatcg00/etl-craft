@@ -11,7 +11,7 @@ from etl_craft.core.enums import ActionName, ApiRole, AttemptStatus, Handler, Ru
 from etl_craft.engine import transitions
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import leases
-from etl_craft.execution.attempt_types import ChildOptions
+from etl_craft.execution.attempt_types import ChildOptions, TaskRun
 from etl_craft.execution.runner import admit_attempt, execute_attempt
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import invoke
@@ -21,18 +21,39 @@ from fixtures.metadata import add_pipeline, add_task
 
 @pytest.fixture
 def trigger_scene(metadata_project):
-    return lambda: build_scene(metadata_project)
+    return lambda **params: build_scene(metadata_project, **params)
 
 
-def build_scene(metadata_project):
+def build_scene(
+    metadata_project, *, task_type="ETL", handler=Handler.RUN_PIPELINE, other_task=False, **params
+):
     project = metadata_project
     service_token(project.engine)
     with project.engine.begin() as conn:
         parent = add_pipeline(conn, "PARENT")
         child = add_pipeline(conn, "CHILD")
         task = add_task(
-            conn, parent, "trigger", Handler.RUN_PIPELINE, TRIGGER_PIPELINE_CODE="CHILD"
+            conn,
+            parent,
+            "trigger",
+            handler,
+            **{"TRIGGER_PIPELINE_CODE": "CHILD", **params},
         )
+        conn.execute(
+            text("UPDATE CFG_TASKS SET TASK_TYPE=:kind WHERE TASK_ID=:id"),
+            {"id": task, "kind": task_type},
+        )
+        for name, value in params.items():
+            if value is None:
+                conn.execute(
+                    text(
+                        "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE=NULL "
+                        "WHERE TASK_ID=:id AND PARAMETER_NAME=:name"
+                    ),
+                    {"id": task, "name": name},
+                )
+        if other_task:
+            add_task(conn, parent, "other", Handler.PYTHON)
         run = transitions.create_run(
             conn, parent, Actor("test-admin", ActorKind.SERVICE), run_date=date(2026, 9, 2)
         )
@@ -55,13 +76,15 @@ def owned(scene, *, rerun=False, decisions=()):
     spec = admit_attempt(
         project.engine,
         project.config,
-        task,
-        "trigger",
-        "PARENT",
-        run,
-        False,
+        TaskRun(
+            pipeline_code="PARENT",
+            task_code="trigger",
+            task_id=task,
+            pipeline_run_id=run,
+            force=False,
+            decisions=decisions,
+        ),
         rerun=rerun,
-        decisions=decisions,
     )
     owner = leases.owner_id()
     with project.engine.begin() as conn:
@@ -114,7 +137,17 @@ def test_wait_handoff_and_each_child_ending(trigger_scene, ending):
 def test_real_attempt_frees_its_slot_after_handoff(trigger_scene):
     trigger_scene = trigger_scene()
     project, _, _, task, run = trigger_scene
-    spec = admit_attempt(project.engine, project.config, task, "trigger", "PARENT", run, False)
+    spec = admit_attempt(
+        project.engine,
+        project.config,
+        TaskRun(
+            pipeline_code="PARENT",
+            task_code="trigger",
+            task_id=task,
+            pipeline_run_id=run,
+            force=False,
+        ),
+    )
     outcome = execute_attempt(project.engine, project.config, spec, ChildOptions())
     assert outcome.waiting
     assert outcome.status == RunStatus.IN_PROGRESS
@@ -122,17 +155,8 @@ def test_real_attempt_frees_its_slot_after_handoff(trigger_scene):
 
 
 def test_detach_ends_only_after_child_is_committed(trigger_scene):
-    trigger_scene = trigger_scene()
-    project, ctx, _, task, run = trigger_scene
-    with project.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_TASK_PARAMETERS "
-                "(TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) VALUES "
-                "(:id,'TRIGGER_MODE','DETACH')"
-            ),
-            {"id": task},
-        )
+    trigger_scene = trigger_scene(TRIGGER_MODE="DETACH")
+    project, ctx, _, _task, run = trigger_scene
     request = owned(trigger_scene)
     done = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     assert done.status == RunStatus.SUCCESS
@@ -163,17 +187,8 @@ def test_detach_ends_only_after_child_is_committed(trigger_scene):
 
 
 def test_timeout_leaves_child_running(trigger_scene):
-    trigger_scene = trigger_scene()
-    project, ctx, _, task, run = trigger_scene
-    with project.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_TASK_PARAMETERS "
-                "(TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) VALUES "
-                "(:id,'TRIGGER_TIMEOUT_MINUTES','1')"
-            ),
-            {"id": task},
-        )
+    trigger_scene = trigger_scene(TRIGGER_TIMEOUT_MINUTES="1")
+    project, ctx, _, _task, run = trigger_scene
     request = owned(trigger_scene)
     child = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     assert check_trigger_waits(project.engine, run, datetime.now(UTC) + timedelta(minutes=2)) == []
@@ -251,20 +266,11 @@ def test_mark_waiting_task_closes_wait_without_cancelling_child(trigger_scene):
 @pytest.mark.parametrize("mode", ["WAIT", "DETACH"])
 @pytest.mark.parametrize("action", ["STOP", "ABORT"])
 def test_parent_stop_only_cancels_wait_children(trigger_scene, mode, action):
-    trigger_scene = trigger_scene()
+    trigger_scene = trigger_scene(TRIGGER_MODE=mode)
     from etl_craft.core.enums import ControlAction
     from etl_craft.services.operations.requests import ControlRequest
 
-    project, ctx, _, task, run = trigger_scene
-    with project.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO CFG_TASK_PARAMETERS "
-                "(TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) VALUES "
-                "(:id,'TRIGGER_MODE',:mode)"
-            ),
-            {"id": task, "mode": mode},
-        )
+    project, ctx, _, _task, run = trigger_scene
     request = owned(trigger_scene)
     child = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     from etl_craft.engine import controls
@@ -360,19 +366,11 @@ def test_controller_runs_child_and_resumes_parent(trigger_scene, mode, resume):
     from etl_craft.controller.supervisor import serve
     from etl_craft.core.actor import acting_as
 
-    scene = trigger_scene()
-    project, ctx, child, task, _ = scene
+    scene = trigger_scene(TRIGGER_MODE=mode)
+    project, ctx, child, _task, _ = scene
     with project.engine.begin() as conn:
         add_task(
             conn, child, "work", Handler.PYTHON, SCRIPT_FILE="python_scripts/sales/fetch_orders.py"
-        )
-        conn.execute(
-            text(
-                "INSERT INTO CFG_TASK_PARAMETERS "
-                "(TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) VALUES "
-                "(:id,'TRIGGER_MODE',:mode)"
-            ),
-            {"id": task, "mode": mode},
         )
     (project.config.python_scripts_dir / "sales/fetch_orders.py").write_text(
         "from etl_craft.scripting import ScriptResult\ndef run(task):\n    return ScriptResult(1)\n"
@@ -515,35 +513,17 @@ def test_invalid_trigger_parameters_fail_validation_and_admission(trigger_scene,
     from etl_craft.core.errors import MetadataError
     from etl_craft.services.validate import validate
 
-    scene = trigger_scene()
-    project, ctx, _, task, _ = scene
-    request = owned(scene)
-    with project.engine.begin() as conn:
-        conn.execute(
-            text("DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID=:id AND PARAMETER_NAME=:name"),
-            {"id": task, "name": name},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
-                "VALUES (:id,:name,:value)"
-            ),
-            {"id": task, "name": name, "value": value},
-        )
-        if mode:
-            conn.execute(
-                text(
-                    "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
-                    "VALUES (:id,'TRIGGER_MODE',:mode)"
-                ),
-                {"id": task, "mode": mode},
-            )
+    params = {name: value}
+    if mode:
+        params["TRIGGER_MODE"] = mode
+    scene = trigger_scene(**params)
+    project, ctx, _, _task, _ = scene
     report = validate(project.engine, project.config)
     assert any(
         name in finding.message and "expected" in finding.message for finding in report.findings
     )
     with pytest.raises(MetadataError, match=name):
-        invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
+        invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(scene))
 
 
 def test_http_run_details_expose_parent_and_child_links(trigger_scene):
@@ -573,17 +553,8 @@ def test_http_run_details_expose_parent_and_child_links(trigger_scene):
 def test_child_failure_is_permanent_for_captured_retry_policy(trigger_scene, policy, retries):
     from etl_craft.execution.retries import refresh_retries
 
-    scene = trigger_scene()
+    scene = trigger_scene(RETRIES="1", RETRY_DELAY_SECONDS="0", RETRY_ON=policy)
     project, ctx, _, task, run = scene
-    with project.engine.begin() as conn:
-        for name, value in (("RETRIES", "1"), ("RETRY_DELAY_SECONDS", "0"), ("RETRY_ON", policy)):
-            conn.execute(
-                text(
-                    "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
-                    "VALUES (:id,:name,:value)"
-                ),
-                {"id": task, "name": name, "value": value},
-            )
     request = owned(scene)
     child = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with project.engine.begin() as conn:
@@ -625,17 +596,8 @@ def test_marked_failed_wait_does_not_automatically_relaunch(trigger_scene):
     from etl_craft.execution.retries import refresh_retries
     from etl_craft.services.operations.requests import MarkRequest
 
-    scene = trigger_scene()
+    scene = trigger_scene(RETRIES="1", RETRY_ON=RetryOn.ANY)
     project, ctx, _, task, run = scene
-    with project.engine.begin() as conn:
-        for name, value in (("RETRIES", "1"), ("RETRY_ON", RetryOn.ANY)):
-            conn.execute(
-                text(
-                    "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
-                    "VALUES (:id,:name,:value)"
-                ),
-                {"id": task, "name": name, "value": value},
-            )
     invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(scene))
     invoke(
         ctx,
@@ -654,17 +616,13 @@ def test_marked_failed_wait_does_not_automatically_relaunch(trigger_scene):
 def test_marking_another_task_preserves_skipped_trigger_history(trigger_scene):
     from etl_craft.services.operations.requests import MarkRequest
 
-    scene = trigger_scene()
+    scene = trigger_scene(other_task=True)
     project, ctx, _, _, run = scene
     request = owned(scene)
     child = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with project.engine.begin() as conn:
         transitions.admit_run(conn, child.pipeline_run_id, ctx.actor)
         transitions.finalize_pipeline_run(conn, child.pipeline_run_id, RunStatus.SKIPPED)
-        parent = conn.execute(
-            text("SELECT PIPELINE_ID AS id FROM CFG_PIPELINES WHERE PIPELINE_CODE='PARENT'")
-        ).scalar_one()
-        add_task(conn, parent, "other", Handler.PYTHON)
     check_trigger_waits(project.engine, run, datetime.now(UTC))
     invoke(
         ctx,
@@ -742,13 +700,9 @@ def test_trigger_task_requires_etl_type(trigger_scene):
     from etl_craft.core.errors import MetadataError
     from etl_craft.services.validate import validate
 
-    scene = trigger_scene()
-    project, ctx, _, task, _ = scene
+    scene = trigger_scene(task_type="INGESTION")
+    project, ctx, _, _task, _ = scene
     request = owned(scene)
-    with project.engine.begin() as conn:
-        conn.execute(
-            text("UPDATE CFG_TASKS SET TASK_TYPE='INGESTION' WHERE TASK_ID=:id"), {"id": task}
-        )
     assert any(
         "TASK_TYPE" in finding.message and "ETL" in finding.message
         for finding in validate(project.engine, project.config).findings
@@ -795,16 +749,11 @@ def test_trigger_request_refuses_missing_or_other_handler_attempt(trigger_scene,
 
     from etl_craft.core.errors import UsageError
 
-    scene = trigger_scene()
-    project, ctx, _, task, _ = scene
+    scene = trigger_scene(handler=Handler.RUN_PIPELINE if missing else Handler.PYTHON)
+    project, ctx, _, _, _ = scene
     request = owned(scene)
     if missing:
         request = replace(request, task_run_id=request.task_run_id + 1000)
-    else:
-        with project.engine.begin() as conn:
-            conn.execute(
-                text("UPDATE CFG_TASKS SET HANDLER='PYTHON' WHERE TASK_ID=:id"), {"id": task}
-            )
     with pytest.raises(UsageError, match="expected an existing RUN_PIPELINE"):
         invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with project.engine.connect() as conn:
@@ -1080,3 +1029,26 @@ def test_queued_child_rechecks_permission_when_it_reaches_admission(trigger_scen
             {"id": child.pipeline_run_id},
         ).scalar_one()
         assert "test-admin" in reason and "CHILD" in reason and "operator" in reason
+
+
+def test_admitted_trigger_edge_cannot_close_a_new_child_cycle(trigger_scene):
+    from etl_craft.core.errors import MetadataError
+
+    scene = trigger_scene()
+    project, ctx, child, task, _ = scene
+    with project.engine.begin() as conn:
+        add_pipeline(conn, "OTHER")
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='OTHER' WHERE "
+                "TASK_ID=:id AND PARAMETER_NAME='TRIGGER_PIPELINE_CODE'"
+            ),
+            {"id": task},
+        )
+        add_task(conn, child, "return", Handler.RUN_PIPELINE, TRIGGER_PIPELINE_CODE="PARENT")
+    with pytest.raises(MetadataError, match=r"cycle.*acyclic.*remove"):
+        invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(scene))
+    with project.engine.connect() as conn:
+        assert (
+            conn.execute(text("SELECT count(*) AS n FROM AUD_PIPELINES_RUN_LOG")).scalar_one() == 1
+        )

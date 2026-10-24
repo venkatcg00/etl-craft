@@ -10,6 +10,7 @@ from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine import run_scopes, runlog
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
+from etl_craft.engine.run_definitions import for_run
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.controls import check_control, control_scope
 from etl_craft.services.operations.recovery import control_effect
@@ -44,9 +45,10 @@ def control_capabilities(ctx: OperationContext, request: CapabilitiesInput) -> C
     with ctx.engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         selected = runlog.select_run(conn, pipeline_id, request.selector)
-        task_id = None if task_code is None else resolve_task_id(conn, pipeline_id, task_code)
-        if task_id is not None:
-            run_scopes.check_task(conn, selected.pipeline_run_id, task_id)
+        with for_run(conn, selected.pipeline_run_id):
+            task_id = None if task_code is None else resolve_task_id(conn, pipeline_id, task_code)
+            if task_id is not None:
+                run_scopes.check_task(conn, selected.pipeline_run_id, task_id)
     actions = []
     for action in ControlAction:
         if action in DEFINITION_CONTROLS:

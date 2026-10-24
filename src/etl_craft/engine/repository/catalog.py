@@ -171,6 +171,9 @@ class RunSummary:
     ended_by: str | None = None
     ended_by_kind: str | None = None
     run_kind: CatalogRunKind = CatalogRunKind.OTHER
+    bundle_id: str | None = None
+    metadata_version: str | None = None
+    newer_metadata_available: bool = False
 
     @property
     def seconds(self) -> float | None:
@@ -220,11 +223,18 @@ class Consumption:
 
 def fetch_pipeline_runs(conn: Connection, limit: int = RUN_HISTORY) -> dict[str, list[RunSummary]]:
     """Return the latest ``limit`` runs of every active pipeline, by code, newest first."""
+    versions = {
+        row.pipeline_code: row.metadata_version
+        for row in conn.execute(statement(conn, "catalog_metadata_versions"))
+    }
     runs: dict[str, list[RunSummary]] = {}
     query = statement(conn, "catalog_pipeline_runs").columns(backfill=Boolean)
     for row in conn.execute(query, {"limit": limit}):
         values = dict(row._mapping)
         code = values.pop("pipeline_code")
+        values["newer_metadata_available"] = (
+            row.metadata_version is not None and row.metadata_version != versions.get(code)
+        )
         values["run_date"] = None if row.run_date is None else as_date(row.run_date)
         values["run_kind"] = CatalogRunKind(row.run_kind)
         runs.setdefault(code, []).append(RunSummary(**values))

@@ -9,6 +9,7 @@ from etl_craft.core.enums import (
     InterventionAction,
     RunStatus,
 )
+from etl_craft.engine.repository import trackers
 from etl_craft.execution.processes import (
     KILL_GRACE_SECONDS,
 )
@@ -70,3 +71,16 @@ class ChildOptions:
     kill_grace_seconds: float = KILL_GRACE_SECONDS
     cancel: threading.Event | None = None
     cancel_poll_seconds: float = CANCEL_POLL_SECONDS
+
+
+@dataclass(frozen=True)
+class TaskRun:
+    """The task and explicit run shared by retrying and attempt admission."""
+
+    pipeline_code: str
+    task_code: str
+    task_id: int
+    pipeline_run_id: int
+    force: bool
+    decisions: tuple[trackers.GateDecision, ...] = ()
+    reopened: str | None = None

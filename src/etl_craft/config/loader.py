@@ -48,6 +48,7 @@ from etl_craft.config.loader_orchestration import (
 )
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
 from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectionProfile, ConnectorConfig
+from etl_craft.config.object_stores import ARTIFACT_KEYS, STORE_KEYS, with_artifacts
 from etl_craft.config.resolve import Resolver
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import AuthMode
@@ -62,6 +63,8 @@ SECTIONS = (
     "Cloning",
     "Docs_site",
     "Auth",
+    "Object_stores",
+    "Artifacts",
 )
 
 
@@ -87,6 +90,8 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Cloning": CLONING_KEYS,
         "Docs_site": DOCS_SITE_KEYS,
         "Auth": AUTH_KEYS,
+        "Object_stores": STORE_KEYS,
+        "Artifacts": ARTIFACT_KEYS,
     }
 
 
@@ -148,8 +153,8 @@ class _StrictLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
-def load_config(path: str | Path, *, agent: bool = False) -> ConnectorConfig:
-    """Read, parse and validate the ``craft-connector.yml`` at ``path``."""
+def read_config(path: str | Path) -> object:
+    """Read project YAML once with duplicate-key diagnostics, without resolving credentials."""
     path = Path(path)
     if not path.is_file():
         raise ConfigurationError(
@@ -162,7 +167,12 @@ def load_config(path: str | Path, *, agent: bool = False) -> ConnectorConfig:
         raise ConfigurationError(f"{path}: {error}") from error
     except yaml.YAMLError as error:
         raise ConfigurationError(f"{path} is not valid YAML: {error}") from error
-    return parse_config(raw, path, agent=agent)
+    return raw
+
+
+def load_config(path: str | Path, *, agent: bool = False) -> ConnectorConfig:
+    """Read, parse and validate the craft-connector.yml at path."""
+    return parse_config(read_config(path), Path(path), agent=agent)
 
 
 def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorConfig:
@@ -236,6 +246,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         settings=tuple(resolver.sources),
         log_dir=log_dir,
     )
+    config = with_artifacts(config, raw, path, resolver)
     if warehouse is not None:
         # Every warehouse profile names the database the engine connects to and writes in.
         try:
@@ -260,6 +271,7 @@ def _check_layout(raw: object, path: Path) -> dict[str, object]:
     if present != expected:
         raise ConfigurationError(
             f"{path}: sections are in the order {present}; write them as {expected} "
-            "(Secrets, Orchestration, Deployment, Engine, Warehouse, Cloning, Docs_site, then Auth)"
+            "(Secrets, Orchestration, Deployment, Engine, Warehouse, "
+            "Cloning, Docs_site, then Auth; followed by Object_stores and Artifacts)"
         )
     return raw

@@ -6,6 +6,7 @@ import pytest
 import yaml
 from sqlalchemy import text
 
+from etl_craft.execution.attempt_types import TaskRun
 from etl_craft.execution.pools import ExecutionHandle, HandleState
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.execution.runner import admit_attempt
@@ -37,7 +38,15 @@ def admitted(project):
     with project.engine.connect() as conn:
         run_id = conn.execute(text("SELECT PIPELINE_RUN_ID FROM AUD_PIPELINES_RUN_LOG")).scalar()
     return admit_attempt(
-        project.engine, project.config, project.task_id, "load", "P", run_id, False
+        project.engine,
+        project.config,
+        TaskRun(
+            pipeline_code="P",
+            task_code="load",
+            task_id=project.task_id,
+            pipeline_run_id=run_id,
+            force=False,
+        ),
     )
 
 

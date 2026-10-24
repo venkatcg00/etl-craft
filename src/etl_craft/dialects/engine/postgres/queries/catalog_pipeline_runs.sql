@@ -1,5 +1,6 @@
 -- Indexed top-N history for each active definition.
 SELECT p.PIPELINE_CODE AS pipeline_code, r.PIPELINE_RUN_ID AS pipeline_run_id,
+       r.BUNDLE_ID AS bundle_id, r.METADATA_VERSION AS metadata_version,
        r.STATUS AS status,
        CASE WHEN r.OUTPUT_REVISION > 1 OR r.REPAIR_PENDING = 'Y' THEN 'REPAIR'
             WHEN r.BACKFILL = 'Y' THEN 'BACKFILL'

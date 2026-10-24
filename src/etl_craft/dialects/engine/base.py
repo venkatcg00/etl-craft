@@ -26,6 +26,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config.auth import EngineSpec
 from etl_craft.core.actor import Actor
+from etl_craft.core.definitions import Definition
 from etl_craft.core.text import split_statements
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.engine.tables import team_config
@@ -154,7 +155,21 @@ class EngineDialect(ABC):
         comment may name a ``:parameter`` without the driver seeing a second one.
         """
         lines = self.query_path(name).read_text(encoding="utf-8").splitlines()
-        return "\n".join(line for line in lines if not line.lstrip().startswith("--")).strip()
+        sql = "\n".join(line for line in lines if not line.lstrip().startswith("--")).strip()
+        if "{{metadata_capture}}" in sql:
+            sql = sql.replace("{{metadata_capture}}", self.query("metadata_capture"))
+        if "{{pipeline_metadata_capture}}" in sql:
+            sql = sql.replace(
+                "{{pipeline_metadata_capture}}",
+                self.query("metadata_capture").replace(":pipeline_id", "p.PIPELINE_ID"),
+            )
+        return sql
+
+    def admitted_query(self, sql: str, definition: Definition, *, name: str = "") -> str:
+        """Use JSON metadata rows in a SQLite execution-definition query."""
+        from etl_craft.dialects.engine.definitions import projection
+
+        return projection(sql, definition, postgres=False, name=name)
 
     def existing_tables(self, engine: Engine, names: tuple[str, ...]) -> list[str]:
         """Return which of ``names`` already exist as tables, in lower case and sorted."""

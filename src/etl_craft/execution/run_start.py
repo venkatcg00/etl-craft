@@ -30,6 +30,7 @@ from etl_craft.engine.repository.pipelines import (
     resolve_pipeline_id,
 )
 from etl_craft.engine.repository.tasks import fetch_task_codes
+from etl_craft.engine.run_definitions import for_run
 from etl_craft.execution.attempt_records import run_cancelled
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -67,7 +68,7 @@ def init_pipeline_run(
     paused = open_pause(engine, pipeline_code, selector=selector)
     if paused is not None:
         return paused_outcome(pipeline_code, paused)
-    pipeline_id, _ = prepare(engine, config, pipeline_code)
+    pipeline_id, _ = prepare(engine, config, pipeline_code, selector=selector)
     selected_clock = clock or Clock()
     pipeline_run_id, skip_reason = drive(
         start_steps(
@@ -116,27 +117,51 @@ def load_pipeline(
     run_id: int | None = None,
 ) -> tuple[PipelineDetail, DependencyGraph, dict[int, str]]:
     """Load one pipeline's details, dependency graph and active task codes."""
-    detail = detail or fetch_pipeline_detail(conn, pipeline_id)
-    data = graph_data or fetch_pipeline_graph(conn, pipeline_id)
-    scope = None if run_id is None else run_scopes.fetch_selection(conn, run_id)
-    if scope is not None:
-        data = run_scopes.selected_graph(data, scope)
-    codes = fetch_task_codes(conn, pipeline_id)
-    return (
-        detail,
-        build_graph(data.tasks, data.same_pipeline_edges),
-        {task.task_id: codes[task.task_id] for task in data.tasks},
-    )
+    with for_run(conn, run_id):
+        detail = (
+            fetch_pipeline_detail(conn, pipeline_id)
+            if run_id is not None
+            else detail or fetch_pipeline_detail(conn, pipeline_id)
+        )
+        data = graph_data or fetch_pipeline_graph(conn, pipeline_id)
+        scope = None if run_id is None else run_scopes.fetch_selection(conn, run_id)
+        if scope is not None:
+            data = run_scopes.selected_graph(data, scope)
+        codes = {task.task_id: task.task_code or str(task.task_id) for task in data.tasks}
+        return (
+            detail,
+            build_graph(data.tasks, data.same_pipeline_edges),
+            {task.task_id: codes[task.task_id] for task in data.tasks},
+        )
 
 
 def prepare(
-    engine: Engine, config: ConnectorConfig, pipeline_code: str
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    *,
+    selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> tuple[int, PipelineDetail]:
     """Resolve the pipeline and test the connections its run uses."""
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        detail = fetch_pipeline_detail(conn, pipeline_id)
-        handlers = fetch_pipeline_handlers(conn, pipeline_id)
+        candidates = runlog.run_candidates(conn, pipeline_id)
+        existing = selector.run_id is not None or any(
+            r.run_key == selector.run_key
+            if selector.run_key is not None
+            else r.task_selection is None and r.status in {RunStatus.QUEUED, RunStatus.IN_PROGRESS}
+            for r in candidates
+        )
+        run_id = (
+            runlog.select_run(conn, pipeline_id, selector).pipeline_run_id if existing else None
+        )
+        with for_run(conn, run_id):
+            detail = fetch_pipeline_detail(conn, pipeline_id)
+            handlers = fetch_pipeline_handlers(conn, pipeline_id)
+    if run_id is not None:
+        from etl_craft.execution.bundle_files import run_config
+
+        config = run_config(engine, config, run_id)
     sends_sla_email = config.limits.enforce_sla and detail.sla_in_hours is not None
     check_run_connections(engine, config, pipeline_code, handlers, sends_sla_email=sends_sla_email)
     return pipeline_id, detail

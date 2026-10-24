@@ -38,6 +38,9 @@ class RunView:
     triggered_by_task_run_id: int | None = None
     parent_run_id: int | None = None
     child_run_ids: tuple[int, ...] = ()
+    bundle_id: str | None = None
+    metadata_version: str | None = None
+    newer_metadata_available: bool = False
     item_progress: str | None = None
 
 

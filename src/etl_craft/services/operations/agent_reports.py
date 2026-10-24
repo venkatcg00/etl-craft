@@ -44,11 +44,13 @@ from etl_craft.engine.audit import ActionRequest
 from etl_craft.engine.notifications import notification_hub
 from etl_craft.engine.queries import statement
 from etl_craft.engine.task_store import LocalTaskStore, TaskIdentity
+from etl_craft.execution.bundle_files import prepare_task
 from etl_craft.execution.context import build_task_context
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.resources import LocalLocker
 from etl_craft.services.operations.agent_models import AgentReply, AgentTask
 from etl_craft.services.operations.agents import check_agent
+from etl_craft.services.operations.bundles import bundle_report
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.serialization import encode
 from etl_craft.warehouse.connection import WAREHOUSE_LOCK_KEY, is_single_writer
@@ -74,13 +76,15 @@ def _context(ctx: OperationContext, request: AgentTask) -> TaskContext:
         force=work.force_flag == YesNo.YES,
         rerun=work.rerun_flag == YesNo.YES,
     )
+    if context.bundle_id is not None and request.operation != AgentReport.BUNDLE:
+        context = prepare_task(ctx.engine, context)
     return replace(context, attempt_id=request.attempt_id, owner=str(ctx.credential_token_id))
 
 
 def _store(ctx: OperationContext, task: TaskContext) -> LocalTaskStore:
     return LocalTaskStore(
         ctx.engine,
-        ctx.config,
+        task.config,
         TaskIdentity(
             task.pipeline_id,
             task.task_id,
@@ -90,13 +94,14 @@ def _store(ctx: OperationContext, task: TaskContext) -> LocalTaskStore:
             task.owner,
             ctx.credential_digest,
         ),
-        LocalLocker(ctx.engine, ctx.config),
+        LocalLocker(ctx.engine, task.config),
+        definition=task._definition,
     )
 
 
 def _target(ctx: OperationContext, task: TaskContext, target: str) -> None:
     expected = task.task_params.get("TARGET_OBJECT")
-    catalog = active_catalog(ctx.config)
+    catalog = active_catalog(task.config)
     if expected is None or qualify(target, catalog).lower() != qualify(expected, catalog).lower():
         raise PermissionDeniedError(
             f"attempt {task.attempt_id}: target {target!r} is not its admitted target; "
@@ -127,9 +132,9 @@ def _lock(ctx: OperationContext, task: TaskContext, request: AgentTask) -> Agent
     key = required(request.lock_key, "lock_key")
     allowed = {}
     if target := task.task_params.get("TARGET_OBJECT"):
-        lock = locks.target(target, active_catalog(ctx.config))
+        lock = locks.target(target, active_catalog(task.config))
         allowed[lock.key] = lock.name
-    if is_single_writer(ctx.config):
+    if is_single_writer(task.config):
         allowed[WAREHOUSE_LOCK_KEY] = "warehouse"
     if key not in allowed:
         raise PermissionDeniedError(
@@ -217,6 +222,7 @@ def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[
             "report only this task's admitted work"
         )
     progress: dict[AgentReport, Callable[[], object]] = {
+        AgentReport.BUNDLE: lambda: bundle_report(ctx, task, request),
         AgentReport.STATE: lambda: store.state(task.task_params.get("SQL_ACTION")),
         AgentReport.ALERT: lambda: store.alert(task.task_params.get("EMAIL_PIPELINES")),
         AgentReport.ITEMS: store.items,

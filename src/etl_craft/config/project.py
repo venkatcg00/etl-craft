@@ -9,10 +9,12 @@ value and the folder, and suggests close matches.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
+from etl_craft.config.loader import parse_config, read_config
 from etl_craft.config.model import ConnectorConfig
-from etl_craft.core.errors import MetadataError
+from etl_craft.core.errors import ConfigurationError, MetadataError
 from etl_craft.core.text import suggest
 
 
@@ -66,3 +68,78 @@ def project_file(directory: Path, name: str, *, setting: str, suffix: str) -> Pa
     if not os.access(path, os.R_OK):
         raise MetadataError(f"{where}: {path} is not readable")
     return path
+
+
+def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
+    """Pin project files without distributing Engine DB or artifact-store credentials."""
+    try:
+        raw = read_config(path)
+    except (ConfigurationError, OSError, UnicodeError) as error:
+        raise ConfigurationError(
+            f"bundle config {path}: invalid or unreadable YAML ({type(error).__name__}); "
+            "expected a UTF-8 project mapping; validate the source config and republish it"
+        ) from None
+    if not isinstance(raw, dict) or not isinstance(raw.get("Secrets"), dict):
+        raise ConfigurationError(
+            f"bundle config {path}: invalid Secrets section; expected a project "
+            f"mapping; correct and republish it"
+        )
+    raw["Secrets"]["Source_type"] = host.source.type
+    if host.source.path is not None:
+        raw["Secrets"]["Path"] = host.source.path
+    else:
+        raw["Secrets"].pop("Path", None)
+    # Credentials and deployment roles belong to this host, never to downloaded project bytes.
+    for name in (
+        "Engine",
+        "Auth",
+        "Object_stores",
+        "Artifacts",
+        "Deployment",
+        "Docs_site",
+        "Warehouse",
+        "Cloning",
+    ):
+        raw.pop(name, None)
+    orchestration = raw.get("Orchestration")
+    if isinstance(orchestration, dict):
+        orchestration.pop("Email", None)
+        for profile in orchestration.values():
+            if isinstance(profile, dict):
+                profile.pop("Email", None)
+    bootstrap = host._host_config_path or host.config_path
+    try:
+        pinned = parse_config(raw, bootstrap or path, agent=True)
+    except ConfigurationError as error:
+        raise ConfigurationError(
+            f"bundle config {path}: rejected project settings ({type(error).__name__}); "
+            "expected valid execution settings; validate the source config locally and "
+            "republish it (resolved host values are withheld)"
+        ) from None
+    return replace(
+        pinned,
+        config_path=path,
+        _host_config_path=bootstrap,
+        source=host.source,
+        engine=host.engine,
+        warehouse=host.warehouse,
+        warehouse_table_format=host.warehouse_table_format,
+        email=host.email,
+        cloning=host.cloning,
+        auth=host.auth,
+        deployment=host.deployment,
+        sizing=host.sizing,
+        api_address=host.api_address,
+        artifacts=host.artifacts,
+        object_stores=host.object_stores,
+        log_dir=host.log_dir,
+        max_warehouse_queries=host.max_warehouse_queries,
+        limits=replace(
+            pinned.limits,
+            max_parallel_tasks=host.limits.max_parallel_tasks,
+            local_python_slots=host.limits.local_python_slots,
+            local_warehouse_slots=host.limits.local_warehouse_slots,
+            shutdown_grace_seconds=host.limits.shutdown_grace_seconds,
+            engine_db_outage_seconds=host.limits.engine_db_outage_seconds,
+        ),
+    )

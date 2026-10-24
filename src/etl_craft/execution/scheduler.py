@@ -30,7 +30,7 @@ from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch
 from etl_craft.engine.retry import TRANSIENT_ERRORS
 from etl_craft.execution import control_flow, leases
 from etl_craft.execution.attempt_records import run_cancelled
-from etl_craft.execution.attempt_types import ChildOptions
+from etl_craft.execution.attempt_types import ChildOptions, TaskRun
 from etl_craft.execution.events import EventCheck, check_event
 from etl_craft.execution.file_events import FileEvents
 from etl_craft.execution.gates import Clock, CrossPipelineCheck, TrackedGate, check_gate
@@ -358,12 +358,14 @@ class Scheduler:
             spec = admit_attempt(
                 self.engine,
                 self.config,
-                task_id,
-                code,
-                self.pipeline_code,
-                self.pipeline_run_id,
-                self.force,
-                decisions=decisions,
+                TaskRun(
+                    pipeline_code=self.pipeline_code,
+                    task_code=code,
+                    task_id=task_id,
+                    pipeline_run_id=self.pipeline_run_id,
+                    force=self.force,
+                    decisions=decisions,
+                ),
             )
         except TRANSIENT_ERRORS:
             raise

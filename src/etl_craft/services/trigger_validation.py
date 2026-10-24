@@ -31,10 +31,14 @@ def trigger_definition(conn: Connection, pipeline_id: int, params: Mapping[str, 
     return trigger
 
 
-def trigger_graph_problems(conn: Connection) -> list[tuple[str, str]]:
+def trigger_graph_problems(
+    conn: Connection, executing_edge: tuple[str, str] | None = None
+) -> list[tuple[str, str]]:
     """Combine trigger edges and pipeline dependencies to name every trigger cycle."""
     rows = conn.execute(statement(conn, "pipeline_triggers")).all()
     edges = {(r.pipeline_code, r.target_code) for r in rows if r.target_code}
+    if executing_edge is not None:
+        edges.add(executing_edge)
     edges.update(
         (e.pipeline_code, e.depends_on_pipeline_code)
         for e in fetch_pipeline_edges(conn)

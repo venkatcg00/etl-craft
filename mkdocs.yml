@@ -126,6 +126,7 @@ nav:
   - Deploying:
       - deploying/index.md
       - The project directory: deploying/project-layout.md
+      - Pinned project bundles: deploying/project-bundles.md
       - Scheduling runs: deploying/scheduling.md
       - Controller: deploying/controller.md
       - Agents and the queue: deploying/agents.md

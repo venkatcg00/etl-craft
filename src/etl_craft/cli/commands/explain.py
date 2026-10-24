@@ -43,6 +43,10 @@ def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
                 else ""
             )
         )
+        out.line(
+            f"metadata_version={done.run.metadata_version} bundle_id={done.run.bundle_id} "
+            f"newer_metadata_available={done.run.newer_metadata_available}"
+        )
         if done.task is not None and done.task.watermark_from is not None:
             out.line(f"watermark={done.task.watermark_from} -> {done.task.watermark_to}")
         if done.task is not None:

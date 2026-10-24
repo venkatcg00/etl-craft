@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.core.items import ItemRecord, ItemState, ItemStore
@@ -148,6 +149,7 @@ class LocalTaskStore:
     config: ConnectorConfig
     identity: TaskIdentity
     locks: ResourceLocker
+    definition: Definition | None = None
     _contracts: dict[str, TargetState] = field(default_factory=dict, compare=False)
 
     @property
@@ -179,32 +181,34 @@ class LocalTaskStore:
 
     def alert(self, pipelines: str | None) -> AlertState:
         """Read the exact run's report, using the deployment's SLA policy."""
-        identity = self.identity
-        with self.engine.connect() as conn:
-            self._assert(conn)
-            return read_alert(
-                conn,
-                identity.pipeline_id,
-                identity.pipeline_run_id,
-                identity.task_id,
-                self.config.limits.enforce_sla,
-                pipelines,
-            )
+        with using(self.definition):
+            identity = self.identity
+            with self.engine.connect() as conn:
+                self._assert(conn)
+                return read_alert(
+                    conn,
+                    identity.pipeline_id,
+                    identity.pipeline_run_id,
+                    identity.task_id,
+                    self.config.limits.enforce_sla,
+                    pipelines,
+                )
 
     def state(self, sql_action: str | None = None) -> TaskState:
         """Read only metadata belonging to the selected task and its run."""
-        identity = self.identity
-        with self.engine.connect() as conn:
-            self._assert(conn)
-            if sql_action is not None:
-                return self._sql_state(conn, sql_action)
-            return TaskState(
-                fetch_task_offset(conn, identity.task_id),
-                tuple(fetch_business_rules_for_task(conn, identity.task_id)),
-                (),
-                {},
-                None,
-            )
+        with using(self.definition):
+            identity = self.identity
+            with self.engine.connect() as conn:
+                self._assert(conn)
+                if sql_action is not None:
+                    return self._sql_state(conn, sql_action)
+                return TaskState(
+                    fetch_task_offset(conn, identity.task_id),
+                    tuple(fetch_business_rules_for_task(conn, identity.task_id)),
+                    (),
+                    {},
+                    None,
+                )
 
     def _sql_state(self, conn: Connection, sql_action: str) -> TaskState:
         """Read checkpoint, peer outcomes and target contract from one database snapshot."""
@@ -349,7 +353,8 @@ class LocalTaskStore:
     def _rule(self, conn: Connection, rule_id: int) -> BusinessRule:
         from etl_craft.core.errors import PermissionDeniedError
 
-        rules = fetch_business_rules_for_task(conn, self.identity.task_id)
+        with using(self.definition):
+            rules = fetch_business_rules_for_task(conn, self.identity.task_id)
         for rule in rules:
             if rule.business_rule_id == rule_id:
                 return rule
@@ -360,7 +365,7 @@ class LocalTaskStore:
 
     def begin_rule(self, rule_id: int) -> RuleRunBinding:
         """Bind a validated rule under this attempt's task run."""
-        with self.engine.begin() as conn:
+        with using(self.definition), self.engine.begin() as conn:
             self._assert(conn)
             self._rule(conn, rule_id)
             return begin_rule_run(conn, rule_id, self.identity.task_run_id, datetime.now(UTC))

@@ -26,6 +26,10 @@ def handler(context, engine):
     )
     print(f"stdout from {context.task_code}", flush=True)
     print(f"stderr from {context.task_code}", file=sys.stderr, flush=True)
+    if behaviour == "source":
+        if not Path(context.task_params["SOURCE_FILE"]).exists():
+            raise HandlerError("the source file is missing")
+        return HandlerResult(source_count=10, target_count=9, insert_count=7)
     if behaviour == "succeed":
         return HandlerResult(source_count=10, target_count=9, insert_count=7)
     if behaviour == "variables":

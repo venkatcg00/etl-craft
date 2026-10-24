@@ -177,6 +177,8 @@ def seeded_tables(db):
             conn, attempt, AttemptStatus.SUCCESS, ALICE, owner="audit-fixture"
         )
         values = {
+            "bundle_id": "a" * 64,
+            "manifest": "{}",
             "attempt_id": attempt,
             "kind": ControlAcknowledgement.PROCESS,
             "request_key": "audit-guard-fixture",
@@ -576,6 +578,7 @@ def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):
         "AUD_EVENT_FILES",
         "AUD_EVENT_KEYS",
         "AUD_TASK_ITEMS",
+        "AUD_PROJECT_BUNDLES",
         "AUD_RUN_INTERVENTIONS",
         "AUD_GATE_DECISIONS",
         "AUD_DEPENDENCY_CONSUMPTION",

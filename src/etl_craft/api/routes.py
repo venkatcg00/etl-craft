@@ -4,6 +4,7 @@ A route only reads the request (query and path for a GET, JSON body for a POST),
 ``invoke`` as the bearer token's account, and answers with the result's JSON document.
 """
 
+import json
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace
 from functools import cache
@@ -110,7 +111,7 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
             }
         )
     else:
-        body = await request.json() if await request.body() else {}
+        body = await read_body(request, getattr(action.request, "MAX_BODY_BYTES", None))
         if not isinstance(body, dict):
             raise UsageError("the request body must be a JSON object")
         given.update(body)
@@ -124,6 +125,20 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
     if action.result is None:
         return Response(status_code=204)
     return JSONResponse(to_json(result))
+
+
+async def read_body(request: Request, maximum: int | None) -> object:
+    """Bound upload bytes before JSON parsing, including chunked requests without a length."""
+    content = bytearray()
+    async for chunk in request.stream():
+        found = len(content) + len(chunk)
+        if maximum is not None and found > maximum:
+            raise UsageError(
+                f"{request.url.path}: request body has at least {found} bytes; expected "
+                f"at most {maximum}; send a smaller request with shorter paths or content"
+            )
+        content.extend(chunk)
+    return json.loads(content) if content else {}
 
 
 def _parse(action: Action, given: dict[str, object]) -> object:

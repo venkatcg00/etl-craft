@@ -313,6 +313,11 @@ def sqlite_creator(database: str) -> Callable[[], Any]:
             check_same_thread=False,
             isolation_level=None,
         )
+        from etl_craft.core.text import sha256_hex
+
+        conn.create_function(
+            "etl_craft_sha256", 1, lambda value: sha256_hex(value.encode()), deterministic=True
+        )
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
         conn.execute("PRAGMA foreign_keys = ON")

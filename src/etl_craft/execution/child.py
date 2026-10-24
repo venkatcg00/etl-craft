@@ -32,6 +32,7 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig, load_config
 from etl_craft.core import log
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
+from etl_craft.core.definitions import using
 from etl_craft.core.enums import AttemptStatus, ControlAcknowledgement, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.core.faults import fault_point
@@ -40,6 +41,7 @@ from etl_craft.engine import attempt_starts, controls, transitions
 from etl_craft.engine.connection import engine_db
 from etl_craft.engine.resource_locks import attempt_scope, holder_tag
 from etl_craft.engine.transitions import finish_task_run
+from etl_craft.execution.bundle_files import prepare_task
 from etl_craft.execution.classify import classify_failure
 from etl_craft.execution.context import build_task_context
 from etl_craft.execution.control_flow import process_local_queries
@@ -126,13 +128,19 @@ def _run_bound(
                 logger.error("could not start the attempt: %s", error)
                 return error.exit_code
         try:
-            context = build_task_context(
-                engine, config, args.task_run_id, force=args.force, rerun=args.rerun
+            context = prepare_task(
+                engine,
+                build_task_context(
+                    engine, config, args.task_run_id, force=args.force, rerun=args.rerun
+                ),
             )
         except EtlCraftError as error:
             logger.error("could not start the task: %s", error)
             _record_failure(engine, args.task_run_id, error, config)
             return error.exit_code
+        if context.bundle_id is not None:
+            sys.dont_write_bytecode = True
+            os.chdir(context.config.project_dir)
         with log.log_context(
             pipeline=context.pipeline_code,
             task=context.task_code,
@@ -164,6 +172,7 @@ def run_handler(
             result = resolve_handler(context.handler)(context, engine)
         else:
             with (
+                using(context._definition),
                 attempt_scope(*identity),
                 cancellation_scope(context.config, holder_tag(attempt_holder(*identity))),
             ):

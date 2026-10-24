@@ -21,9 +21,13 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from etl_craft.core.enums import AuthMode
+from etl_craft.core.enums import AuthMode, ObjectStoreAuth
+
+if TYPE_CHECKING:
+    from etl_craft.config import ConnectorConfig
+    from etl_craft.config.object_models import ObjectStore
 from etl_craft.core.errors import ConfigurationError
 
 TOKEN_REQUEST_TIMEOUT_SECONDS = 30
@@ -119,3 +123,122 @@ def aws_rds_auth_token(
     except Exception as error:  # botocore's own exceptions are not importable without it
         raise ConfigurationError(f"could not obtain an AWS IAM database token: {error}") from error
     return str(token)
+
+
+class S3Objects:
+    """Bounded S3 operations; vendor imports and credential values stay in this adapter."""
+
+    def __init__(self, config: ConnectorConfig, profile: ObjectStore) -> None:
+        """Use the host chain or explicitly named secrets; never store credentials in a manifest."""
+        from etl_craft.config.resolve import resolve_named_secret
+
+        try:
+            import boto3
+        except ImportError:
+            raise ConfigurationError(
+                f"Object_stores.{profile.name}: boto3 is missing; expected the aws extra; "
+                "install `pip install etl-craft[aws]`"
+            ) from None
+        settings: dict[str, str] = {}
+        if profile.auth_mode == ObjectStoreAuth.KEYS:
+            assert profile.access_key_id and profile.secret_access_key
+            settings = {
+                "aws_access_key_id": resolve_named_secret(config, profile.access_key_id),
+                "aws_secret_access_key": resolve_named_secret(config, profile.secret_access_key),
+            }
+        self.name = profile.name
+        try:
+            self.client = boto3.client(
+                "s3",
+                endpoint_url=profile.endpoint,
+                region_name=profile.region,
+                config=boto3.session.Config(
+                    connect_timeout=10,
+                    read_timeout=30,
+                    retries={"max_attempts": 1},
+                    s3={"addressing_style": profile.url_style.lower()},
+                ),
+                **settings,
+            )
+        except Exception as error:
+            # SDK initialization can include credential-provider URLs in its message.
+            raise ConfigurationError(
+                f"Object_stores.{profile.name}: client initialization failed "
+                f"({type(error).__name__}); expected usable host credentials and "
+                "an S3 endpoint; check the profile and credential provider"
+            ) from None
+
+    def read(self, bucket: str, key: str, maximum: int) -> bytes:
+        """Read and close a bounded object, including error responses."""
+        try:
+            response = self.client.get_object(Bucket=bucket, Key=key)
+            with response["Body"] as stream:
+                data: bytes = stream.read(maximum + 1)
+            if len(data) > maximum:
+                raise ConfigurationError(
+                    f"Object_stores.{self.name}, s3://{bucket}/{key}: object "
+                    f"exceeds {maximum} bytes; expected a bounded artifact; "
+                    f"restore the recorded object"
+                )
+            return data
+        except Exception as error:
+            # The provider boundary names the operation without echoing a signed URL or key.
+            raise ConfigurationError(
+                f"Object_stores.{self.name}, s3://{bucket}/{key}: read failed "
+                f"({type(error).__name__}); expected a readable artifact; check "
+                f"the prefix and its permissions"
+            ) from None
+
+    def write(self, bucket: str, key: str, content: bytes) -> None:
+        """Write content-addressed immutable bytes; an identical writer is harmless."""
+        try:
+            self.client.put_object(Bucket=bucket, Key=key, Body=content, IfNoneMatch="*")
+        except Exception as error:
+            # S3's conditional write can lose to an identical uploader; verify, never overwrite.
+            response = getattr(error, "response", {})
+            if (
+                isinstance(response, dict)
+                and response.get("Error", {}).get("Code")
+                in {
+                    "PreconditionFailed",
+                    "412",
+                }
+                and self.read(bucket, key, len(content)) == content
+            ):
+                return
+            raise ConfigurationError(
+                f"Object_stores.{self.name}, s3://{bucket}/{key}: immutable write "
+                f"failed ({type(error).__name__}); expected a writable prefix; "
+                f"check the object store and permissions"
+            ) from None
+
+    def probe(self, bucket: str, prefix: str) -> None:
+        """Prove list/write/read/delete on a private, unique probe without changing bundles."""
+        from uuid import uuid4
+
+        key = (prefix.rstrip("/") + "/.doctor-" + uuid4().hex).lstrip("/")
+        try:
+            self.client.put_object(Bucket=bucket, Key=key, Body=b"etl-craft store probe")
+            self.client.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1)
+            if self.read(bucket, key, 64) != b"etl-craft store probe":
+                raise ConfigurationError(
+                    f"Object_stores.{self.name}: probe contents differ; expected "
+                    f"the bytes written; check the store"
+                )
+        except Exception as error:
+            # This provider boundary keeps credential-bearing driver messages out of diagnostics.
+            raise ConfigurationError(
+                f"Object_stores.{self.name}, s3://{bucket}/{prefix}: list/write "
+                f"probe failed ({type(error).__name__}); expected list/write/read "
+                f"access; fix prefix permissions"
+            ) from None
+        finally:
+            try:
+                self.client.delete_object(Bucket=bucket, Key=key)
+            except Exception as error:
+                # Provider cleanup errors must not expose a signed URL or credential.
+                raise ConfigurationError(
+                    f"Object_stores.{self.name}, s3://{bucket}/{prefix}: probe cleanup "
+                    f"failed ({type(error).__name__}); expected delete access; "
+                    "fix prefix permissions"
+                ) from None

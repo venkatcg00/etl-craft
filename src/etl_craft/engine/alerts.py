@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.definitions import using
 from etl_craft.core.enums import SlaStatus
 from etl_craft.core.errors import MetadataError
 from etl_craft.engine.queries import statement
@@ -36,22 +37,23 @@ def latest_run_of(conn: Connection, pipeline_code: str) -> PipelineDigest:
     One wrong code in ``EMAIL_PIPELINES`` shows as its own row rather than losing the report on
     every other pipeline.
     """
-    try:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-    except MetadataError:
-        return PipelineDigest(pipeline_code, "UNKNOWN", None, None, None, [])
-    latest = fetch_latest_pipeline_run(conn, pipeline_id)
-    if latest is None:
-        return PipelineDigest(pipeline_code, "NEVER_RUN", None, None, None, [])
-    tasks = fetch_task_statuses_for_run(conn, pipeline_id, latest.pipeline_run_id)
-    return PipelineDigest(
-        pipeline_code,
-        latest.status,
-        latest.pipeline_run_id,
-        latest.start_date,
-        latest.end_date,
-        tasks,
-    )
+    with using(None):
+        try:
+            pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        except MetadataError:
+            return PipelineDigest(pipeline_code, "UNKNOWN", None, None, None, [])
+        latest = fetch_latest_pipeline_run(conn, pipeline_id)
+        if latest is None:
+            return PipelineDigest(pipeline_code, "NEVER_RUN", None, None, None, [])
+        tasks = fetch_task_statuses_for_run(conn, pipeline_id, latest.pipeline_run_id)
+        return PipelineDigest(
+            pipeline_code,
+            latest.status,
+            latest.pipeline_run_id,
+            latest.start_date,
+            latest.end_date,
+            tasks,
+        )
 
 
 @dataclass(frozen=True)

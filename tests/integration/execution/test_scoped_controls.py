@@ -22,7 +22,7 @@ from etl_craft.core.errors import PermissionDeniedError, RunRefusedError, RunSta
 from etl_craft.engine import attempt_starts, controls, runlog, transitions
 from etl_craft.engine.runlog import RunSelector
 from etl_craft.execution import control_flow
-from etl_craft.execution.attempt_types import ChildOptions
+from etl_craft.execution.attempt_types import ChildOptions, TaskRun
 from etl_craft.execution.pipeline import run_pipeline
 from etl_craft.execution.runner import admit_attempt, execute_attempt
 from etl_craft.handlers.resources import LocalLocker
@@ -37,12 +37,12 @@ from fixtures.scoped_controls import ctx as ctx
 CHILD = ChildOptions(module="fixtures.task_child", kill_grace_seconds=1, cancel_poll_seconds=0.05)
 
 
-def seed(ctx):
+def seed(ctx, *, admit=True):
     with ctx.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
         first = add_task(conn, pipeline, "first", "PYTHON", BEHAVIOUR="succeed")
         second = add_task(conn, pipeline, "second", "PYTHON", BEHAVIOUR="succeed")
-        run = start_run(conn, pipeline)
+        run = start_run(conn, pipeline) if admit else None
     return pipeline, run, first, second
 
 
@@ -73,7 +73,13 @@ def test_task_hold_release_and_force_admission_are_scoped(ctx):
     assert held.status == ControlStatus.COMPLETED and held.attempt_ids == ()
     assert held.requested_by == "operator" and held.task_id == first
     with pytest.raises(RunRefusedError, match="fenced by HOLD"):
-        admit_attempt(ctx.engine, ctx.config, first, "first", "P", run, True)
+        admit_attempt(
+            ctx.engine,
+            ctx.config,
+            TaskRun(
+                pipeline_code="P", task_code="first", task_id=first, pipeline_run_id=run, force=True
+            ),
+        )
     assert queue(ctx, run, second)
     released = ask(ctx, run, ControlAction.RELEASE, "first")
     assert released.status == ControlStatus.COMPLETED
@@ -226,7 +232,13 @@ def test_role_legacy_and_reason_refusals_are_explicit(ctx):
 
 def test_completed_summary_is_not_process_exit_evidence(ctx):
     _, run, first, _ = seed(ctx)
-    spec = admit_attempt(ctx.engine, ctx.config, first, "first", "P", run, False)
+    spec = admit_attempt(
+        ctx.engine,
+        ctx.config,
+        TaskRun(
+            pipeline_code="P", task_code="first", task_id=first, pipeline_run_id=run, force=False
+        ),
+    )
     from etl_craft.execution import runner
 
     # The child has committed SUCCESS and exited, but its parent has not recorded that observation.
@@ -283,7 +295,7 @@ def wait_for(check, timeout=20):
 def test_task_control_observes_just_its_worker_and_preserves_other_work(ctx, tmp_path, action):
     from concurrent.futures import ThreadPoolExecutor
 
-    _, run, first, second = seed(ctx)
+    pipeline, run, first, second = seed(ctx, admit=False)
     ready, release = tmp_path / "ready", tmp_path / "release"
     other_ready, other_release = tmp_path / "other-ready", tmp_path / "other-release"
     with ctx.engine.begin() as conn:
@@ -303,8 +315,21 @@ def test_task_control_observes_just_its_worker_and_preserves_other_work(ctx, tmp
                     ),
                     {"task": task, "name": name, "value": str(value)},
                 )
-    first_spec = admit_attempt(ctx.engine, ctx.config, first, "first", "P", run, False)
-    other_spec = admit_attempt(ctx.engine, ctx.config, second, "second", "P", run, False)
+        run = start_run(conn, pipeline)
+    first_spec = admit_attempt(
+        ctx.engine,
+        ctx.config,
+        TaskRun(
+            pipeline_code="P", task_code="first", task_id=first, pipeline_run_id=run, force=False
+        ),
+    )
+    other_spec = admit_attempt(
+        ctx.engine,
+        ctx.config,
+        TaskRun(
+            pipeline_code="P", task_code="second", task_id=second, pipeline_run_id=run, force=False
+        ),
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
         first_future = pool.submit(
             contextvars.copy_context().run,
@@ -366,7 +391,7 @@ def test_event_probe_control_is_fenced_without_claiming_an_unobserved_query_ende
     from etl_craft.engine import locks
     from etl_craft.execution.events import check_event
 
-    pipeline, run, _, _ = seed(ctx)
+    pipeline, run, _, _ = seed(ctx, admit=False)
     path = tmp_path / "ready.csv"
     path.write_text("ready")
     with ctx.engine.begin() as conn:
@@ -379,6 +404,7 @@ def test_event_probe_control_is_fenced_without_claiming_an_unobserved_query_ende
             EVENT_SETTLE_SECONDS="0",
             EVENT_TIMEOUT_MINUTES="NONE",
         )
+        run = start_run(conn, pipeline)
     # A running probe holds the lock in its own process: hold it on another thread here, so
     # the control is a separate holder rather than a nested one.
     taken, done = threading.Event(), threading.Event()
@@ -500,7 +526,7 @@ def test_request_key_racing_across_runs_has_one_owner(ctx):
 
 @pytest.mark.parametrize("behavior", ["succeed", "exit"])
 def test_server_query_acknowledgement_requires_handler_completion_not_just_exit(ctx, behavior):
-    _, run, first, _ = seed(ctx)
+    pipeline, run, first, _ = seed(ctx, admit=False)
     with ctx.engine.begin() as conn:
         conn.execute(text("UPDATE CFG_TASKS SET HANDLER='SQL' WHERE TASK_ID=:id"), {"id": first})
         conn.execute(
@@ -510,6 +536,7 @@ def test_server_query_acknowledgement_requires_handler_completion_not_just_exit(
             ),
             {"behavior": behavior, "task": first},
         )
+        run = start_run(conn, pipeline)
     server = replace(
         ctx,
         config=replace(
@@ -520,7 +547,13 @@ def test_server_query_acknowledgement_requires_handler_completion_not_just_exit(
         ),
     )
     # The fake handler exercises the agent protocol without issuing a warehouse query.
-    spec = admit_attempt(ctx.engine, server.config, first, "first", "P", run, False)
+    spec = admit_attempt(
+        ctx.engine,
+        server.config,
+        TaskRun(
+            pipeline_code="P", task_code="first", task_id=first, pipeline_run_id=run, force=False
+        ),
+    )
     result = execute_attempt(ctx.engine, server.config, spec, CHILD)
     assert result.status == (RunStatus.SUCCESS if behavior == "succeed" else RunStatus.FAILED)
     with ctx.engine.connect() as conn:
@@ -751,3 +784,40 @@ def test_capability_inspection_never_cancels_an_event_probe(ctx, monkeypatch):
     assert any(row.action == ControlAction.ABORT and row.available for row in view.actions)
     with ctx.engine.connect() as conn:
         assert controls.blocked(conn, run) == {}
+
+
+def test_mark_uses_admitted_tasks_and_refuses_later_graph_additions(ctx):
+    from etl_craft.core.errors import MetadataError
+    from etl_craft.services.operations.requests import MarkRequest
+
+    pipeline, run, first, _ = seed(ctx)
+    with ctx.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_TASKS SET ACTIVE_FLAG='N' WHERE TASK_ID=:id"), {"id": first})
+        add_task(conn, pipeline, "later", "PYTHON")
+    done = invoke(
+        ctx,
+        ActionName.MARK,
+        MarkRequest(
+            pipeline_code="P",
+            run_id=run,
+            task_code="first",
+            status=RunStatus.SUCCESS,
+            reason="operator checked the admitted output",
+        ),
+    )
+    assert done.status == RunStatus.SUCCESS
+    with pytest.raises(MetadataError, match="later"):
+        invoke(
+            ctx,
+            ActionName.MARK,
+            MarkRequest(
+                pipeline_code="P",
+                run_id=run,
+                task_code="later",
+                status=RunStatus.SUCCESS,
+                reason="this task was not admitted",
+            ),
+        )
+    with ctx.engine.connect() as conn:
+        assert runlog.fetch_task_run_status(conn, first, run) == RunStatus.SUCCESS
+        assert conn.execute(text("SELECT count(*) AS n FROM AUD_TASK_RUN_LOG")).scalar_one() == 1

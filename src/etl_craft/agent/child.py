@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -18,7 +19,7 @@ from etl_craft.config import load_config
 from etl_craft.core import log
 from etl_craft.core.counts import Counts
 from etl_craft.core.enums import AgentReport, AttemptStatus, Handler
-from etl_craft.core.errors import EtlCraftError, ExitCode
+from etl_craft.core.errors import ConfigurationError, EtlCraftError, ExitCode
 from etl_craft.core.text import mask_arguments
 from etl_craft.engine.resource_locks import holder_tag
 from etl_craft.execution.child import exit_now
@@ -91,6 +92,15 @@ def main() -> int:
         exit_code=ExitCode.UNEXPECTED,
     )
     try:
+        if context.bundle_id is None:
+            raise ConfigurationError(
+                f"attempt {args.attempt_id}: no pinned bundle; expected a published project; "
+                "publish a bundle and start a new run"
+            )
+        config = store.project(config, context.bundle_id)
+        context = replace(context, config=config)
+        sys.dont_write_bytecode = True
+        os.chdir(config.project_dir)
         with cancellation_scope(config, store.session_tag):
             counts = resolve_handler(context.handler)(context, store)
         result = replace(
@@ -127,7 +137,5 @@ def failed(kind: type[BaseException], error: BaseException, trace: TracebackType
 
 
 if __name__ == "__main__":
-    import sys
-
     sys.excepthook = failed
     exit_now(main())

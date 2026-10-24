@@ -56,6 +56,10 @@ def _text_status(out: Output, done: StatusView) -> None:
         f"start={run.start_date} duration_seconds={done.duration_seconds} SLA={run.sla_status} "
         f"sla_hours={done.pipeline.sla_in_hours}"
     )
+    out.line(
+        f"metadata_version={run.metadata_version} bundle_id={run.bundle_id} "
+        f"newer_metadata_available={run.newer_metadata_available}"
+    )
     if run.parent_run_id is not None:
         out.line(
             f"parent pipeline_run_id={run.parent_run_id}; "
