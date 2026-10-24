@@ -233,11 +233,12 @@ def seeded_tables(db):
         }
         inspector = inspect(conn)
         schema = None if engine.dialect.name == "sqlite" else inspector.default_schema_name
+        live = {name.upper() for name in inspector.get_table_names(schema=schema)}
         declared = re.findall(r"CREATE TABLE (\w+)", db.dialect.schema_path().read_text())
         tables = [
             table if engine.dialect.name == "sqlite" else table.lower()
             for table in declared
-            if table.startswith(("CFG_", "AUD_"))
+            if table.startswith(("CFG_", "AUD_")) and table in live
         ]
         for table in tables:
             if conn.exec_driver_sql(f'SELECT 1 FROM "{table}" LIMIT 1').first():
@@ -722,3 +723,16 @@ def test_nested_action_secrets_never_reach_audit_logs_cli_or_api(engine_db, log_
         assert "[REDACTED]" in visible
         assert "sslmode=require" in visible
     assert arguments["connections"][0]["password"] == secret
+
+
+def test_direct_pipeline_requests_record_the_selected_project(engine_db):
+    with engine_db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "P")
+    with acting_as(ALICE), command_request("run", {"pipeline_code": "P"}):
+        register_engine(engine_db.engine)
+    with engine_db.engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT PROJECT_ID AS project_id,PIPELINE_ID AS pipeline_id FROM AUD_ACTIONS")
+        ).one()
+    assert row.project_id == 1
+    assert row.pipeline_id == pipeline

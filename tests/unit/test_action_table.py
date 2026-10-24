@@ -119,8 +119,11 @@ def test_pipeline_selections_use_pipeline_scope_and_identity_administration_stay
         ActionName.GROUP_DISABLE,
         ActionName.GROUP_ADD_MEMBER,
         ActionName.GROUP_REMOVE_MEMBER,
-        ActionName.CONFIG_APPLY,
         ActionName.ACCOUNT_ADD,
         ActionName.TOKEN_CREATE,
     ):
         assert ACTIONS[name].scope == ActionScope.DEPLOYMENT
+
+
+def test_config_apply_has_project_scope():
+    assert ACTIONS[ActionName.CONFIG_APPLY].scope == ActionScope.PROJECT

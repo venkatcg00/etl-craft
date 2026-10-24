@@ -73,7 +73,13 @@ def export_config(
             )
             current_ids[table.file] = {row.row_id for row in current[table.file].values()}
             if table is PROJECTS:
-                project_id = int(next(iter(current[table.file].values())).row_id)
+                selected = current[table.file]
+                if not selected:
+                    raise MetadataFileError(
+                        f"project {project_code!r}: no recorded project at the selected time; "
+                        "expected an existing project; select another project or a later time"
+                    )
+                project_id = int(next(iter(selected.values())).row_id)
     if config is not None and as_of is None:
         with selected_project(project_id):
             _warehouse_rows(engine, config, directory, current)

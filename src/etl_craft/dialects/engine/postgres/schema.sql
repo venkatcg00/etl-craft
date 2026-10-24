@@ -1665,6 +1665,7 @@ CREATE TRIGGER trg_run_definition_immutable BEFORE UPDATE ON AUD_PIPELINES_RUN_L
 DROP TRIGGER trg_actor_guard_aud_project_bundles ON AUD_PROJECT_BUNDLES;
 DROP TRIGGER trg_actor_guard_aud_actions ON AUD_ACTIONS;
 -- etl-craft: rebuild-metadata
+-- Projects own pipeline namespaces and approved warehouse connections.
 CREATE TABLE CFG_PROJECTS (
     PROJECT_ID BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     PROJECT_CODE VARCHAR NOT NULL,
@@ -1686,6 +1687,7 @@ INSERT INTO CFG_PROJECTS
 VALUES ('default','Default project','UTC','default',8,'Y',current_setting('etl_craft.actor'),now(),
         current_setting('etl_craft.actor'),now());
 
+-- Immutable versions of project settings.
 CREATE TABLE AUD_CFG_PROJECTS_HISTORY (
     CHANGE_ID BIGINT PRIMARY KEY,
     VALID_FROM TIMESTAMPTZ NOT NULL,

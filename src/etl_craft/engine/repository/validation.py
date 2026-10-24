@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection
 
-from etl_craft.engine.queries import statement
+from etl_craft.engine.queries import project_statement
 
 
 @dataclass(frozen=True)
@@ -29,12 +29,12 @@ class ActiveTask:
 
 def fetch_active_tasks(conn: Connection) -> list[ActiveTask]:
     """Return every active task of an active pipeline, by pipeline and task code."""
-    return [ActiveTask(**r._mapping) for r in conn.execute(statement(conn, "active_tasks"))]
+    return [ActiveTask(**r._mapping) for r in conn.execute(project_statement(conn, "active_tasks"))]
 
 
 def fetch_pipeline_parameters(conn: Connection) -> list[tuple[str, object]]:
     """Return every active pipeline's code and ``PIPELINE_PARAMETERS`` as stored."""
-    rows = conn.execute(statement(conn, "active_pipeline_parameters"))
+    rows = conn.execute(project_statement(conn, "active_pipeline_parameters"))
     return [(r.pipeline_code, r.pipeline_parameters) for r in rows]
 
 
@@ -74,7 +74,7 @@ def fetch_task_dependency_edges(conn: Connection) -> list[DependencyEdge]:
     return [
         DependencyEdge(**r._mapping)
         for r in conn.execute(
-            statement(conn, "active_task_dependency_edges").columns(
+            project_statement(conn, "active_task_dependency_edges").columns(
                 depends_on_task_active=Boolean, depends_on_pipeline_active=Boolean
             )
         )
@@ -96,7 +96,7 @@ def fetch_pipeline_edges(conn: Connection) -> list[PipelineEdge]:
     return [
         PipelineEdge(**r._mapping)
         for r in conn.execute(
-            statement(conn, "active_pipeline_dependency_edges").columns(
+            project_statement(conn, "active_pipeline_dependency_edges").columns(
                 depends_on_pipeline_active=Boolean
             )
         )

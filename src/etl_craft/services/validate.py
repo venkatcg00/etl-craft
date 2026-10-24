@@ -32,7 +32,7 @@ from etl_craft.core.graph import build_graph, cycles
 from etl_craft.core.placement import ResourceRequest, resource_request
 from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.dialects.engine import for_engine
-from etl_craft.engine.queries import statement
+from etl_craft.engine.queries import project_statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.normalization import normalization_problems
@@ -205,7 +205,7 @@ def validate_on(
         problem = definition_problem(definition, dialect)
         if problem:
             report.fail(f"source {definition.table_name}.{definition.column_name}", problem)
-    for schedule in conn.execute(statement(conn, "active_schedule_definitions")):
+    for schedule in conn.execute(project_statement(conn, "active_schedule_definitions")):
         zone = (
             schedule.schedule_timezone
             if schedule.schedule_timezone is not None

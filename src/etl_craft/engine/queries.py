@@ -39,3 +39,10 @@ def run_script(conn: Connection, statements: Iterable[str]) -> None:
     escape = conn.dialect.paramstyle in {"format", "pyformat"}
     for sql in statements:
         conn.exec_driver_sql(sql.replace("%", "%%") if escape else sql)
+
+
+def project_statement(conn: Connection, name: str) -> TextClause:
+    """Select the pre-project query while inspecting an installation before migration."""
+    if not for_engine(conn).has_table(conn, "CFG_PROJECTS"):
+        name += "_legacy"
+    return statement(conn, name)

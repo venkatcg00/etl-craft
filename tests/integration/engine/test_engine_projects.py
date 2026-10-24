@@ -466,3 +466,15 @@ def test_delayed_developer_publication_cannot_restore_a_superseded_contract(
             conn.execute(text("SELECT COUNT(*) AS count FROM AUD_PROJECT_BUNDLES")).scalar_one()
             == 2
         )
+
+
+def test_export_refuses_an_unknown_project_with_a_remedy(engine_db, tmp_path):
+    import pytest
+
+    from etl_craft.core.errors import MetadataFileError
+    from etl_craft.services.config_files import export_config
+
+    directory = tmp_path / "missing"
+    with pytest.raises(MetadataFileError, match=r"project 'missing'.*select another project"):
+        export_config(engine_db.engine, directory, project_code="missing")
+    assert not directory.exists()

@@ -81,7 +81,7 @@ def test_cli_and_http_apply_every_tag_and_preserve_unfiltered_reads(tagged, comm
     assert codes and set(codes) == {"SALES"}
     with TestClient(create_app(ctx)) as client:
         response = client.get(
-            "/api/v1/" + command,
+            "/api/v1/projects/default/" + command,
             params=[("tag", "team:sales"), ("tag", "tier:gold")],
             headers={"Authorization": "Bearer " + token},
         )
@@ -93,7 +93,7 @@ def test_cli_and_http_apply_every_tag_and_preserve_unfiltered_reads(tagged, comm
             assert actual == document
         assert (
             client.get(
-                "/api/v1/" + command,
+                "/api/v1/projects/default/" + command,
                 params={"tag": "missing"},
                 headers={"Authorization": "Bearer " + token},
             ).json()[field]
@@ -284,7 +284,7 @@ def test_other_project_read_filters_agree_through_generated_routes(tagged, actio
     _, ctx, token = tagged
     with TestClient(create_app(ctx)) as client:
         response = client.get(
-            "/api/v1/" + path,
+            "/api/v1/projects/default/" + path,
             params=[("tag", "missing")],
             headers={"Authorization": "Bearer " + token},
         )

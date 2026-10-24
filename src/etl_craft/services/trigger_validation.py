@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from etl_craft.core.enums import TaskType
 from etl_craft.core.errors import MetadataError
 from etl_craft.core.graph import cycles
-from etl_craft.engine.queries import statement
+from etl_craft.engine.queries import project_statement
 from etl_craft.engine.repository.pipelines import current_project_id, resolve_pipeline_id
 from etl_craft.engine.repository.validation import fetch_pipeline_edges
 from etl_craft.handlers.run_pipeline import Trigger, read_trigger
@@ -35,7 +35,7 @@ def trigger_graph_problems(
     conn: Connection, executing_edge: tuple[str, str] | None = None
 ) -> list[tuple[str, str]]:
     """Combine trigger edges and pipeline dependencies to name every trigger cycle."""
-    rows = conn.execute(statement(conn, "pipeline_triggers")).all()
+    rows = conn.execute(project_statement(conn, "pipeline_triggers")).all()
     edges = {(r.pipeline_code, r.target_code) for r in rows if r.target_code}
     if executing_edge is not None:
         edges.add(executing_edge)

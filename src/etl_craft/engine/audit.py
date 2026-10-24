@@ -20,6 +20,7 @@ from etl_craft.core.enums import ActionOutcome
 from etl_craft.core.text import mask_arguments
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.pipelines import current_project_id
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ class ActionRequest:
             return
         pipeline = conn.execute(
             statement(conn, "action_pipeline"),
-            {"code": self.arguments.get("pipeline_code"), "project_id": self.project_id},
+            {
+                "code": self.arguments.get("pipeline_code"),
+                "project_id": self.project_id or current_project_id(),
+            },
         ).scalar_one_or_none()
         task = None
         if pipeline is not None and self.arguments.get("task_code"):
@@ -75,7 +79,9 @@ class ActionRequest:
                 "command": self.command,
                 "arguments": payload,
                 "pipeline": pipeline,
-                "project": self.project_id,
+                "project": (self.project_id or current_project_id())
+                if pipeline is not None
+                else self.project_id,
                 "task": task,
                 "outcome": self.outcome,
                 "exit_code": self.exit_code,

@@ -65,7 +65,7 @@ EXPECTED = {
     },
     enums.Placement: {"ANYWHERE", "CONTROLLER_HOST"},
     enums.Audit: {"NONE", "REQUEST", "BY_ACTION"},
-    enums.ActionScope: {"deployment", "pipeline"},
+    enums.ActionScope: {"deployment", "project", "pipeline"},
     enums.Transport: {"LOCAL", "HTTP"},
     enums.HttpMethod: {"GET", "POST"},
     enums.HttpScheme: {"http", "https"},
