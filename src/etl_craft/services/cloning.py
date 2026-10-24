@@ -39,6 +39,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.config.managed_engine import managed_cloning_problem
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
 from etl_craft.core.enums import CloningScope
 from etl_craft.core.errors import CloningError, ConfigurationError
@@ -91,6 +92,8 @@ def cloning_problem(config: ConnectorConfig) -> str | None:
     Nothing connects: this is the Warehouse section, the storage the mirrors need, and whether
     the warehouse schema is the Engine DB's own.
     """
+    if problem := managed_cloning_problem(config.engine, config.cloning):
+        return problem
     if config.warehouse is None:
         return "Cloning is enabled, but there is no Warehouse section to copy the tables into"
     problem = warehouse_dialect(config).cloning_storage_problem(config.cloning)

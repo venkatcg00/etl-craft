@@ -28,6 +28,21 @@ PROFILE_VARS = ("ETL_CRAFT_PROFILE", "ETL_CRAFT_AUTH")
 # Values for the variable names the examples use. Only the warehouse URL
 # differs by example; it is supplied per file below.
 VALUES = {
+    "LAKEBASE_JDBC_URL": "jdbc:postgresql://lakebase.example/metadata?sslmode=verify-full",
+    "LAKEBASE_POSTGRES_USER": "service",
+    "LAKEBASE_CLIENT_ID": "client",
+    "LAKEBASE_CLIENT_SECRET": "s",
+    "LAKEBASE_TOKEN_URL": "https://workspace.example/oidc/v1/token",
+    "LAKEBASE_WORKSPACE_URL": "https://workspace.example",
+    "LAKEBASE_ENDPOINT": "projects/p/branches/b/endpoints/e",
+    "SNOWFLAKE_POSTGRES_JDBC_URL": "jdbc:postgresql://snowpg.example/metadata?sslmode=verify-full",
+    "SNOWFLAKE_POSTGRES_USER": "service",
+    "SNOWFLAKE_CLIENT_ID": "client",
+    "SNOWFLAKE_CLIENT_SECRET": "s",
+    "SNOWFLAKE_OAUTH_TOKEN_URL": "https://identity.example/token",
+    "SNOWFLAKE_OAUTH_SCOPE": "session:role:TRANSFORMER",
+    "SNOWFLAKE_ACCOUNT": "org-account",
+    "SNOWFLAKE_POSTGRES_INSTANCE": "metadata",
     "ENGINE_JDBC_URL": "jdbc:postgresql://engine-db:5432/etl_craft",
     "ENGINE_USER": "etl_craft",
     "ENGINE_AUTH_MODE": "PASSWORD",
@@ -92,6 +107,8 @@ class Expected:
 
 
 EXPECTED = {
+    "lakebase-engine.yml": Expected("postgresql", "duckdb"),
+    "snowflake-postgres-engine.yml": Expected("postgresql", "duckdb"),
     "minimal-local.yml": Expected("sqlite", "duckdb"),
     "docs-site.yml": Expected("sqlite", "duckdb"),
     "docs-site-proxy.yml": Expected("sqlite", "duckdb"),

@@ -17,6 +17,7 @@ account in this project, which ``doctor`` reports.
 
 from __future__ import annotations
 
+import base64
 import json
 import urllib.error
 import urllib.parse
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from etl_craft.config import ConnectorConfig
     from etl_craft.config.object_models import ObjectStore
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.http_client import open_request
 
 TOKEN_REQUEST_TIMEOUT_SECONDS = 30
 MINTED_CREDENTIAL_POOL_RECYCLE_SECONDS = 10 * 60
@@ -38,11 +40,17 @@ MINTED_AUTH_MODES = frozenset({AuthMode.OAUTH, AuthMode.STS, AuthMode.SSO})
 
 
 def client_credentials_token(
-    token_url: str, client_id: str, client_secret: str, scope: str | None = None
+    token_url: str,
+    client_id: str,
+    client_secret: str,
+    scope: str | None = None,
+    *,
+    basic_auth: bool = False,
 ) -> str:
     """Exchange a client id and secret for an access token.
 
-    The secret travels only in the POST body, never in a URL, and no error message repeats it.
+    The secret travels in the POST body or HTTP Basic header, never a URL. Redirects are refused;
+    no error message repeats the client secret.
     Raises ``ConfigurationError`` when the endpoint refuses, cannot be reached, or answers
     without an access token.
     """
@@ -53,17 +61,20 @@ def client_credentials_token(
     }
     if scope:
         form["scope"] = scope
+    headers = {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
+    if basic_auth:
+        form.pop("client_id")
+        form.pop("client_secret")
+        encoded = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
+        headers["Authorization"] = f"Basic {encoded}"
     request = urllib.request.Request(
         token_url,
         data=urllib.parse.urlencode(form).encode("ascii"),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        headers=headers,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=TOKEN_REQUEST_TIMEOUT_SECONDS) as response:
+        with open_request(request, timeout=TOKEN_REQUEST_TIMEOUT_SECONDS) as response:
             payload: Any = json.load(response)
     except urllib.error.HTTPError as error:
         raise ConfigurationError(

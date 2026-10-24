@@ -1,0 +1,23 @@
+# Requires etl-craft[snowflake] and a mapped Snowflake/Postgres identity.
+Secrets:
+  Source_type: ENVIRONMENT  # value
+Engine:
+  dev:
+    Jdbc_url: SNOWFLAKE_POSTGRES_JDBC_URL  # variable — jdbc:postgresql://host/database?sslmode=verify-full
+    Schema: etl_craft  # value
+    User: SNOWFLAKE_POSTGRES_USER  # variable
+    Auth_mode: OAUTH  # value
+    Client_id: SNOWFLAKE_CLIENT_ID  # variable
+    Secret: SNOWFLAKE_CLIENT_SECRET  # variable
+    Token_url: SNOWFLAKE_OAUTH_TOKEN_URL  # variable
+    Scope: SNOWFLAKE_OAUTH_SCOPE  # variable
+    Managed_provider: SNOWFLAKE  # value
+    Account: SNOWFLAKE_ACCOUNT  # variable
+    Instance: SNOWFLAKE_POSTGRES_INSTANCE  # variable
+Warehouse:
+  Name: duckdb  # value
+  dev:
+    Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
+    Schema: main  # value
+Cloning:
+  Enabled: False  # value

@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 from etl_craft.config.loader import parse_config, read_config
+from etl_craft.config.managed_engine import managed_cloning_problem
 from etl_craft.config.model import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError, MetadataError
 from etl_craft.core.text import sha256_hex, suggest
@@ -147,7 +148,7 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
             "expected valid execution settings; validate the source config locally and "
             "republish it (resolved host values are withheld)"
         ) from None
-    return replace(
+    scoped = replace(
         pinned,
         config_path=path,
         _host_config_path=bootstrap,
@@ -175,3 +176,6 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
             engine_db_outage_seconds=host.limits.engine_db_outage_seconds,
         ),
     )
+    if problem := managed_cloning_problem(scoped.engine, scoped.cloning):
+        raise ConfigurationError(f"bundle config {path}: {problem}")
+    return scoped

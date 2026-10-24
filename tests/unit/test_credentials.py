@@ -20,6 +20,7 @@ class _TokenEndpoint(BaseHTTPRequestHandler):
     requests: ClassVar[list[dict]] = []
 
     def do_POST(self):
+        type(self).authorization = self.headers.get("Authorization")
         length = int(self.headers["Content-Length"])
         form = parse_qs(self.rfile.read(length).decode())
         type(self).requests.append({key: value[0] for key, value in form.items()})
@@ -165,3 +166,36 @@ def test_sts_without_boto3_names_the_extra(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_boto3)
     with pytest.raises(ConfigurationError, match=r"etl-craft\[aws\]"):
         credentials.aws_rds_auth_token("db", 5432, "etl", "us-east-1")
+
+
+def test_basic_client_auth_keeps_the_secret_out_of_the_grant_body(token_endpoint):
+    import base64
+
+    url, endpoint = token_endpoint
+    assert (
+        credentials.client_credentials_token(url, "client", "secret", "all-apis", basic_auth=True)
+        == "t0k3n"
+    )
+    assert endpoint.authorization == "Basic " + base64.b64encode(b"client:secret").decode()
+    assert endpoint.requests == [{"grant_type": "client_credentials", "scope": "all-apis"}]
+
+
+def test_oauth_redirects_do_not_forward_client_credentials(token_endpoint, monkeypatch):
+    url, endpoint = token_endpoint
+    redirected = []
+
+    def redirect(self):
+        self.send_response(302)
+        self.send_header("Location", url + "/redirect")
+        self.end_headers()
+
+    def followed(self):
+        redirected.append(True)
+        self.send_response(500)
+        self.end_headers()
+
+    monkeypatch.setattr(endpoint, "do_POST", redirect)
+    monkeypatch.setattr(endpoint, "do_GET", followed, raising=False)
+    with pytest.raises(ConfigurationError, match="HTTP 302"):
+        credentials.client_credentials_token(url, "client", "secret")
+    assert not redirected

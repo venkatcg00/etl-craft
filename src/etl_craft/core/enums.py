@@ -173,6 +173,14 @@ class ConnectionUse(StrEnum):
     HEALTH = "HEALTH"
 
 
+class ManagedProvider(StrEnum):
+    """Platforms that mint short-lived PostgreSQL database credentials."""
+
+    NONE = "NONE"
+    SNOWFLAKE = "SNOWFLAKE"
+    DATABRICKS = "DATABRICKS"
+
+
 class ProcessRole(StrEnum):
     """Processes that reserve Engine DB capacity; API-only agents reserve none."""
 
