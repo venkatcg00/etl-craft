@@ -24,7 +24,7 @@ dependencies = [
     "duckdb-engine>=0.13",
     "psycopg[binary]>=3.3.6",
     "pyyaml>=6.0.3",
-    "sqlalchemy>=2.0.54",
+    "sqlalchemy<2.1,>=2.0.54",
     "sqlglot>=26",
     "watchdog>=6",
 ]
@@ -47,7 +47,7 @@ databricks = [
     "databricks-sqlalchemy>=2",
     "databricks-sql-connector>=4.5.0",
     # databricks-sql-connector's rows are not the tuples SQLAlchemy 2.1 requires.
-    "sqlalchemy>=2.0.54,<2.1",
+    "sqlalchemy<2.1,>=2.0.54,<2.1",
 ]
 publish = [
     "ngrok>=1.4",
