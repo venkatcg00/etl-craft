@@ -204,6 +204,19 @@ def _manual(ctx: OperationContext, request: RunRequest, pipeline_id: int) -> Ope
 
 def mark(ctx: OperationContext, request: MarkRequest) -> OperationResult:
     """Mark a task, a run, or a new stand-in run, or reset a task's watermark or offset."""
+    from etl_craft.engine.repository.pipelines import resolve_pipeline_id
+    from etl_craft.engine.run_definitions import for_selection
+
+    if request.new_run:
+        return _mark(ctx, request)
+    with ctx.engine.connect() as conn:
+        pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
+    with for_selection(ctx.engine, pipeline_id, request.selector):
+        return _mark(ctx, request)
+
+
+def _mark(ctx: OperationContext, request: MarkRequest) -> OperationResult:
+    """Apply the mark to the selected execution definition, or create a fresh stand-in."""
     pipeline_code, task_code, reason = request.pipeline_code, request.task_code, request.reason
     selector = request.selector
     if request.watermark is not None:

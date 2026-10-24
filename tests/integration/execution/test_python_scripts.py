@@ -73,7 +73,7 @@ def restore_logging():
 
 
 @pytest.fixture
-def project(engine_db, tmp_path):
+def project(engine_db, tmp_path, request):
     """A project with a DuckDB warehouse, scripts in python_scripts/, and task P.load."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
@@ -106,7 +106,8 @@ def project(engine_db, tmp_path):
             ),
             {"t": task, "v": '{"region": "eu", "count": 2}'},
         )
-        start_run(conn, pipeline)
+        if getattr(request, "param", True):
+            start_run(conn, pipeline)
     return engine, config, pipeline, task
 
 
@@ -443,6 +444,7 @@ def test_the_task_process_exits_once_its_outcome_is_recorded(project):
     assert "pool-1" in attempt_log(config)
 
 
+@pytest.mark.parametrize("project", [False], indirect=True)
 def test_what_a_script_printed_is_kept_when_it_is_stopped(project):
     engine, config, _, _ = project
     with_script(
@@ -454,6 +456,8 @@ def test_what_a_script_printed_is_kept_when_it_is_stopped(project):
         "    time.sleep(60)\n",
         TASK_TIMEOUT_SECONDS="10",
     )
+    with engine.begin() as conn:
+        start_run(conn, project[2])
     outcome = run_task(engine, config, "P", "load")
     assert outcome.status == RunStatus.FAILED
     assert "timed out after 10s" in outcome.message

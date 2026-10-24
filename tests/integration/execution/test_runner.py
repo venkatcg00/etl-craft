@@ -42,7 +42,7 @@ def restore_logger():
 
 
 @pytest.fixture
-def project(engine_db, tmp_path):
+def project(engine_db, tmp_path, request):
     """A craft-connector.yml for the test Engine DB, and a pipeline P with tasks."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
@@ -114,7 +114,7 @@ def project(engine_db, tmp_path):
                 ),
                 {"p": ids["pipeline"], "t": ids[task], "u": ids[upstream], "k": kind},
             )
-        ids["run"] = start_run(conn, ids["pipeline"])
+        ids["run"] = start_run(conn, ids["pipeline"]) if getattr(request, "param", True) else None
     return engine, config, ids
 
 
@@ -217,14 +217,28 @@ def test_a_task_process_that_ends_without_an_outcome_is_recorded_failed(project,
     assert f"stdout from {task}" in recorded.task_log
 
 
-def test_a_retry_is_a_new_attempt_on_the_same_row_with_its_own_log(project):
+@pytest.mark.parametrize("project", [False], indirect=True)
+def test_a_retry_is_a_new_attempt_on_the_same_row_with_its_own_log(project, tmp_path):
     engine, _, ids = project
-    first = run(project, "fails")
+    source = tmp_path / "source"
     with engine.begin() as conn:
         conn.execute(
-            text("UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE = 'succeed' WHERE TASK_ID = :t"),
-            {"t": ids["fails"]},
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='source' "
+                "WHERE TASK_ID=:id AND PARAMETER_NAME='BEHAVIOUR'"
+            ),
+            {"id": ids["fails"]},
         )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
+                "VALUES (:id,'SOURCE_FILE',:path)"
+            ),
+            {"id": ids["fails"], "path": str(source)},
+        )
+        ids["run"] = start_run(conn, ids["pipeline"])
+    first = run(project, "fails")
+    source.touch()
     second = run(project, "fails")
     assert second.task_run_id == first.task_run_id
     recorded = row(engine, second.task_run_id)
@@ -233,8 +247,8 @@ def test_a_retry_is_a_new_attempt_on_the_same_row_with_its_own_log(project):
         2,
         None,
     )
-    assert "fake handler doing fail" in attempt_log(project, "fails", 1)
-    assert "fake handler doing succeed" in attempt_log(project, "fails", 2)
+    assert "task failed: the source file is missing" in attempt_log(project, "fails", 1)
+    assert "task failed" not in attempt_log(project, "fails", 2)
 
 
 def test_a_settled_task_is_not_run_again_unless_forced(project):
@@ -284,6 +298,7 @@ def test_errors_before_running(project):
         run(project, "ok")
 
 
+@pytest.mark.parametrize("project", [False], indirect=True)
 def test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere(project):
     engine, _, ids = project
     with engine.begin() as conn:
@@ -307,6 +322,7 @@ def test_the_cross_pipeline_gate_decides_a_task_with_dependencies_elsewhere(proj
             ),
             {"p": ids["pipeline"], "t": ids["values"], "q": other, "u": upstream},
         )
+        ids["run"] = start_run(conn, ids["pipeline"])
     # An unfinished admission leaves no task summary, so a later check can admit it.
     unchecked = run(
         project,
@@ -327,6 +343,7 @@ def task_row_status(engine, task_id, run_id):
         return runlog.fetch_task_run_status(conn, task_id, run_id)
 
 
+@pytest.mark.parametrize("project", [False], indirect=True)
 def test_a_bad_time_limit_fails_before_the_task_is_bound(project):
     engine, _, ids = project
     with engine.begin() as conn:
@@ -337,6 +354,7 @@ def test_a_bad_time_limit_fails_before_the_task_is_bound(project):
             ),
             {"t": ids["ok"]},
         )
+        ids["run"] = start_run(conn, ids["pipeline"])
     with pytest.raises(HandlerError, match="TASK_TIMEOUT_SECONDS='soon' is not a whole number"):
         run(project, "ok")
     assert task_row_status(engine, ids["ok"], ids["run"]) is None

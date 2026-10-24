@@ -1,0 +1,44 @@
+"""Bind execution reads to a stored run definition, independent of live controls."""
+
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+
+from sqlalchemy.engine import Connection, Engine
+
+from etl_craft.core.definitions import Definition, current, using
+from etl_craft.core.errors import RunStateError
+from etl_craft.engine.queries import statement
+from etl_craft.engine.runlog import RunSelector, select_run
+
+
+@contextmanager
+def for_run(bind: Engine | Connection, run_id: int | None) -> Iterator[None]:
+    """Read once per execution scope; nested metadata readers share the admitted image."""
+    old = current.get()
+    if run_id is None or (old is not None and old.run_id == run_id):
+        yield
+        return
+    with bind.connect() if isinstance(bind, Engine) else nullcontext(bind) as conn:
+        definition = _read(conn, run_id)
+    with using(definition):
+        yield
+
+
+@contextmanager
+def for_selection(engine: Engine, pipeline_id: int, selector: RunSelector) -> Iterator[None]:
+    """Select an exact existing run before resolving its admitted task codes."""
+    with engine.connect() as conn:
+        selected = select_run(conn, pipeline_id, selector)
+        definition = _read(conn, selected.pipeline_run_id)
+    with using(definition):
+        yield
+
+
+def _read(conn: Connection, run_id: int) -> Definition:
+    row = conn.execute(statement(conn, "run_definition"), {"run_id": run_id}).one_or_none()
+    if row is None or row.snapshot is None:
+        raise RunStateError(
+            f"run {run_id}: no admitted metadata snapshot; expected a pinned definition; "
+            "start a new run instead of reopening a pre-bundle completed run"
+        )
+    return Definition.read(row.snapshot, run_id, row.bundle_id)

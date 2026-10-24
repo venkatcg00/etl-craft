@@ -62,10 +62,14 @@ def check_syntax_error(world):
         RETRIES="3",
         RETRY_DELAY_SECONDS="0",
     )
+    world.new_run()
     with world.engine_db.begin() as conn:
+        task_run = transitions.find_or_create_task_run(
+            conn, context.task_id, world.pipeline_run_id
+        ).task_run_id
         transitions.queue_attempt(
             conn,
-            context.task_run_id,
+            task_run,
             current_actor(),
             not_before=datetime(2000, 1, 1, tzinfo=UTC),
         )
@@ -96,10 +100,14 @@ def check_connection_retry(world, monkeypatch, policy=RetryOn.TRANSIENT):
         RETRY_ON=policy,
         RETRY_DELAY_SECONDS="0",
     )
+    world.new_run()
     with world.engine_db.begin() as conn:
+        task_run = transitions.find_or_create_task_run(
+            conn, context.task_id, world.pipeline_run_id
+        ).task_run_id
         queued = transitions.queue_attempt(
             conn,
-            context.task_run_id,
+            task_run,
             current_actor(),
             not_before=datetime(2000, 1, 1, tzinfo=UTC),
         )

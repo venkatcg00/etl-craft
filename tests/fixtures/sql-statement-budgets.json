@@ -1,7 +1,7 @@
 {
   "attempt": {
     "engine_connections": 1,
-    "engine_statements": 85,
+    "engine_statements": 84,
     "engine_transactions": 22,
     "warehouse_connections": 1,
     "warehouse_statements": 5

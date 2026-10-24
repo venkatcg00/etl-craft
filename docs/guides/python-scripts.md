@@ -287,3 +287,10 @@ status, item attempt number, row count, timestamps, error and task attempt id; t
 the existing attempt log API. The item API routes and their exact requests are in the
 [operations reference](../reference/actions.md). Interactive graph strips and runs-grid
 segments are delivered with the S7.A web UI.
+
+## Published project files
+
+A bundled run uses the admitted Python files and metadata for every attempt. Editing the
+working tree does not change it. Install imported dependencies in the agent image and check
+with `etl-craft doctor --agent --api URL`. See [project bundles](../deploying/project-bundles.md).
+Keep outputs outside the verified bundle directory; bytecode is not written into the cache.

@@ -10,7 +10,8 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2] / "src" / "etl_craft"
 # Runs and attempts, business-rule runs and agents each have one module owning their lifecycle.
 TRANSITION_MODULES = {
-    ROOT / "engine" / name for name in ("transitions.py", "rule_runs.py", "agent_transitions.py")
+    ROOT / "engine" / name
+    for name in ("transitions.py", "rule_runs.py", "agent_transitions.py", "run_creation.py")
 }
 STATUS_WRITE = re.compile(
     r"\bSET\s+(?:STATUS\s*=|(?:(?!\bWHERE\b)[^;])*?,\s*STATUS\s*=)", re.IGNORECASE | re.DOTALL

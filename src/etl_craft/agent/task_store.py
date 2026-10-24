@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 
 from etl_craft import __version__
 from etl_craft.agent.client import AgentClient
+from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import ActionName, AgentReport
 from etl_craft.core.errors import ServerError
 from etl_craft.core.items import ItemRecord, ItemState
@@ -155,3 +156,43 @@ class RemoteTaskStore:
             if not completed:
                 confirm_stale(self.confirm, name, self.holder_id)
             self.call(replace(self.request(AgentReport.UNLOCK), lock_key=key))
+
+    def project(self, config: ConnectorConfig, bundle_id: str) -> ConnectorConfig:
+        """Download only this attempt's bundle through the API, retaining host credentials."""
+        import base64
+
+        from etl_craft.config.project import project_config
+        from etl_craft.engine.project_files import materialize
+
+        answer = self.call(self.request(AgentReport.BUNDLE))
+        if not isinstance(answer, dict) or answer.get("bundle_id") != bundle_id:
+            raise ServerError(
+                f"attempt {self.attempt_id}: bundle identity differs; expected "
+                f"{bundle_id}; refresh the claim and inspect the API"
+            )
+        files = answer.get("files")
+        if not isinstance(files, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in files.items()
+        ):
+            raise ServerError(
+                f"bundle {bundle_id}: invalid manifest; expected paths and "
+                f"hashes; check the API version"
+            )
+
+        def read(path: str) -> bytes:
+            value = self.call(replace(self.request(AgentReport.BUNDLE), bundle_path=path))
+            if not isinstance(value, dict) or not isinstance(value.get("content"), str):
+                raise ServerError(
+                    f"bundle {bundle_id}, file {path}: invalid bytes; expected "
+                    f"base64 content; check the API"
+                )
+            try:
+                return base64.b64decode(value["content"], validate=True)
+            except ValueError as error:
+                raise ServerError(
+                    f"bundle {bundle_id}, file {path}: invalid encoding; expected "
+                    f"base64; restore its artifact"
+                ) from error
+
+        root = materialize(bundle_id, files, read)
+        return project_config(config, root / "craft-connector.yml")

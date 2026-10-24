@@ -15,10 +15,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.controller.leadership import leadership
 from etl_craft.controller.schedules import Schedules
 from etl_craft.core.actor import ActorKind, acting_as
+from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import RunStatus, YesNo
 from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError
 from etl_craft.core.outage import OutageBudget
-from etl_craft.core.time import as_utc
 from etl_craft.engine.notifications import listener_engine
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import controllers
@@ -50,37 +50,32 @@ class ActiveRun:
 
 
 class WorkingSet:
-    """Retain graphs only for active runs, refreshing on metadata edits."""
+    """Retain each active run's admitted graph until that run ends."""
 
     def __init__(self) -> None:
         """Start with no cached history or graphs."""
-        self.graphs: dict[int, tuple[tuple[datetime | None, int], PipelineGraphData]] = {}
+        self.graphs: dict[int, PipelineGraphData] = {}
 
     def refresh(self, ctx: OperationContext) -> list[ActiveRun]:
         """Read active unpaused runs; never scan or retain terminal history."""
         with ctx.engine.connect() as conn:
             rows = conn.execute(statement(conn, "controller_active_runs")).all()
-            active = {row.pipeline_id for row in rows}
+            active = {row.pipeline_run_id for row in rows}
             self.graphs = {key: value for key, value in self.graphs.items() if key in active}
             result = []
             for row in rows:
-                version = (
-                    None if row.metadata_version is None else as_utc(row.metadata_version),
-                    row.change_id or 0,
-                )
-                cached = self.graphs.get(row.pipeline_id)
-                if cached is None or cached[0] != version:
-                    self.graphs[row.pipeline_id] = (
-                        version,
-                        fetch_pipeline_graph(conn, row.pipeline_id),
-                    )
+                if row.pipeline_run_id not in self.graphs:
+                    with using(Definition.read(row.metadata_snapshot, row.pipeline_run_id)):
+                        self.graphs[row.pipeline_run_id] = fetch_pipeline_graph(
+                            conn, row.pipeline_id
+                        )
                 result.append(
                     ActiveRun(
                         row.pipeline_id,
                         row.pipeline_run_id,
                         row.pipeline_code,
                         row.backfill == YesNo.YES,
-                        self.graphs[row.pipeline_id][1],
+                        self.graphs[row.pipeline_run_id],
                     )
                 )
             return result

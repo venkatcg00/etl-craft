@@ -1,5 +1,6 @@
 """Real agents execute project files through HTTP without Engine DB credentials."""
 
+import base64
 import signal
 import socket
 import threading
@@ -11,6 +12,7 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.config import load_config
+from etl_craft.config.loader import SECTIONS
 from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.services.operations import OperationContext
@@ -34,7 +36,9 @@ def cluster(cli_project, monkeypatch, tmp_path):
         "Deployment": {"Profile": "CONTROLLER_AGENTS"},
         "Engine": raw["Engine"],
         "Warehouse": raw["Warehouse"],
+        "Artifacts": {"Store": (tmp_path / "artifacts").as_uri()},
     }
+    raw["Warehouse"]["dev"]["Jdbc_url"] = f"jdbc:duckdb:{tmp_path / 'warehouse.duckdb'}"
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -72,8 +76,25 @@ def cluster(cli_project, monkeypatch, tmp_path):
     yield p, url, token, agent_dir
 
 
+def publish_project(project, agent_dir):
+    """Publish execution bytes, then leave an agent with only its bootstrap config."""
+    from etl_craft.engine.project_files import collect
+    from etl_craft.services.operations.bundles import PublishBundle
+
+    uploaded = collect(agent_dir)
+    raw = yaml.safe_load((agent_dir / "craft-connector.yml").read_text())
+    raw["Engine"] = yaml.safe_load(project.config.config_path.read_text())["Engine"]
+    uploaded["craft-connector.yml"] = base64.b64encode(
+        yaml.safe_dump({key: raw[key] for key in SECTIONS if key in raw}, sort_keys=False).encode()
+    ).decode()
+    ctx = OperationContext(project.engine, project.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    invoke(ctx, ActionName.BUNDLE_PUBLISH, PublishBundle(files=uploaded))
+
+
 @pytest.mark.parametrize("fan_out", [False, True], ids=["plain", "fan-out"])
-def test_agent_runs_from_its_own_project_without_engine_credentials(cluster, monkeypatch, fan_out):
+def test_agent_runs_its_pinned_bundle_without_engine_or_store_credentials(
+    cluster, monkeypatch, fan_out
+):
     p, url, token, agent_dir = cluster
     if fan_out:
         (agent_dir / "python_scripts" / "load.py").write_text(
@@ -83,6 +104,7 @@ def test_agent_runs_from_its_own_project_without_engine_credentials(cluster, mon
             "    return task.fan_out(['first','second'], "
             "lambda key: ScriptResult(4 if key == 'first' else 3), max_items=2)\n"
         )
+    publish_project(p, agent_dir)
     controller = p.start("controller", "--no-ui")
     code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "agent-test")
     assert code == 0, output
@@ -139,7 +161,7 @@ def test_a_lost_agent_stops_its_writer_before_a_second_holder(cluster, monkeypat
         "    with task.warehouse() as engine:\n"
         "        with engine.begin() as conn:\n"
         '            conn.execute(text("CREATE TABLE evidence (id INTEGER)"))\n'
-        '        (task.config.project_dir / "writing").touch()\n'
+        f'        __import__("pathlib").Path({str(agent_dir / "writing")!r}).touch()\n'
         "        counter = 0\n"
         "        while True:\n"
         "            with engine.begin() as conn:\n"
@@ -147,6 +169,7 @@ def test_a_lost_agent_stops_its_writer_before_a_second_holder(cluster, monkeypat
         "            counter += 1\n"
         "            threading.Event().wait(.02)\n"
     )
+    publish_project(p, agent_dir)
     p.start("controller", "--no-ui")
     code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", failure)
     assert code == 0, output
@@ -217,10 +240,11 @@ def test_agent_cancel_is_acknowledged_by_notification_or_renewal(
     (agent_dir / "python_scripts" / "load.py").write_text(
         "import threading\n"
         "def run(task):\n"
-        "    (task.config.project_dir / 'ready').touch()\n"
+        f"    __import__('pathlib').Path({str(agent_dir / 'ready')!r}).touch()\n"
         "    threading.Event().wait(120)\n",
         encoding="utf-8",
     )
+    publish_project(p, agent_dir)
     controller = p.start("controller", "--no-ui")
     code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "cancel")
     assert code == 0, output
@@ -259,3 +283,18 @@ def test_agent_cancel_is_acknowledged_by_notification_or_renewal(
         raise AssertionError(
             f"{error}\nagent:\n{agent.output}\ncontroller:\n{controller.output}"
         ) from error
+
+
+def test_api_publication_needs_only_project_files_and_a_person_token(cluster, monkeypatch):
+    from fixtures.engine_db import SECRET_VAR
+
+    project, url, _, _ = cluster
+    with monkeypatch.context() as isolated:
+        isolated.delenv(SECRET_VAR)
+        code, output = project.run("bundle", "publish", "--api", url)
+    assert code == 0, output
+    with project.engine.connect() as conn:
+        bundle = conn.execute(
+            text("SELECT BUNDLE_ID AS bundle_id FROM AUD_PROJECT_BUNDLES")
+        ).scalar_one()
+    assert bundle in output

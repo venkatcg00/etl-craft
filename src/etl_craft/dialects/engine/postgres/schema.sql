@@ -215,6 +215,14 @@ CREATE TRIGGER trg_audit_cfg_business_rules
     FOR EACH ROW EXECUTE FUNCTION trg_set_audit_columns();
 COMMENT ON TABLE CFG_BUSINESS_RULES IS 'Checks a BUSINESS_RULES task runs against a warehouse table. The referenced target must have a single-column primary key, named by BUSINESS_RULE_KEY_COLUMN; `validate` checks it in the warehouse.';
 
+-- Immutable reviewed project manifests and their content-addressed artifact locations.
+CREATE TABLE AUD_PROJECT_BUNDLES (
+    BUNDLE_ID VARCHAR(64) PRIMARY KEY,
+    MANIFEST TEXT NOT NULL,
+    CREATED_BY VARCHAR NOT NULL,
+    CREATED_AT TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_project_bundles_latest ON AUD_PROJECT_BUNDLES (CREATED_AT DESC,BUNDLE_ID DESC);
 -- One row per pipeline run: its status, when it ran, whether it met its SLA, the date it ran
 -- as of (RUN_DATE, the SQL tasks' $$run_date), and whether it was part of a backfill.
 CREATE TABLE AUD_PIPELINES_RUN_LOG (
@@ -242,6 +250,9 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     EXCLUSIVE_RUN    VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_run_exclusive CHECK (EXCLUSIVE_RUN IN ('Y','N') AND (EXCLUSIVE_RUN='Y' OR TASK_SELECTION IS NOT NULL)),
     TRIGGERED_BY_TASK_RUN_ID BIGINT,
     SSO_GROUP_IDS TEXT NOT NULL DEFAULT '[]',
+    BUNDLE_ID VARCHAR(64) REFERENCES AUD_PROJECT_BUNDLES(BUNDLE_ID),
+    METADATA_VERSION VARCHAR(64),
+    METADATA_SNAPSHOT TEXT,
     CONSTRAINT ck_pipeline_run_trigger_kind CHECK (TRIGGER_KIND IN ('SCHEDULE','MANUAL','BACKFILL','ORCHESTRATOR','STAND_IN','PIPELINE_TASK')),
     CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('QUEUED','IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
@@ -795,7 +806,7 @@ BEGIN
         RAISE EXCEPTION USING MESSAGE = upper(TG_TABLE_NAME) || ' is written only by etl-craft; change runs with etl-craft mark, cancel or run, and metadata with a project migration (etl-craft migrate)';
     END IF;
     IF COALESCE(current_setting('etl_craft.purpose', true), '') <> 'retention' AND TG_OP IN ('UPDATE','DELETE','TRUNCATE') THEN
-        IF TG_TABLE_NAME IN ('aud_run_interventions','aud_actions','aud_dependency_consumption','aud_gate_decisions','aud_task_events','aud_event_files','aud_event_keys','aud_task_items') THEN
+        IF TG_TABLE_NAME IN ('aud_run_interventions','aud_actions','aud_dependency_consumption','aud_gate_decisions','aud_task_events','aud_event_files','aud_event_keys','aud_task_items','aud_project_bundles') THEN
             RAISE EXCEPTION USING MESSAGE = upper(TG_TABLE_NAME) || ' is append-only; use etl-craft retention';
         END IF;
         IF TG_TABLE_NAME ~ '^aud_cfg_.*_history$' THEN
@@ -1636,3 +1647,15 @@ CREATE INDEX ix_task_items_latest ON AUD_TASK_ITEMS (TASK_RUN_ID, ITEM_KEY, ITEM
 CREATE INDEX ix_task_items_attempt ON AUD_TASK_ITEMS (ATTEMPT_ID, ITEM_KEY, ITEM_RECORD_ID DESC);
 CREATE TRIGGER trg_actor_guard_aud_task_items BEFORE INSERT OR UPDATE OR DELETE ON AUD_TASK_ITEMS FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
 CREATE TRIGGER trg_truncate_aud_task_items BEFORE TRUNCATE ON AUD_TASK_ITEMS FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
+
+CREATE TRIGGER trg_actor_guard_aud_project_bundles BEFORE INSERT OR UPDATE OR DELETE ON AUD_PROJECT_BUNDLES FOR EACH ROW EXECUTE FUNCTION etl_craft_guard();
+CREATE TRIGGER trg_truncate_aud_project_bundles BEFORE TRUNCATE ON AUD_PROJECT_BUNDLES FOR EACH STATEMENT EXECUTE FUNCTION etl_craft_guard();
+CREATE FUNCTION etl_craft_guard_run_definition() RETURNS trigger AS $$
+BEGIN
+ IF OLD.METADATA_SNAPSHOT IS NOT NULL AND (NEW.BUNDLE_ID IS DISTINCT FROM OLD.BUNDLE_ID OR NEW.METADATA_VERSION IS DISTINCT FROM OLD.METADATA_VERSION OR NEW.METADATA_SNAPSHOT IS DISTINCT FROM OLD.METADATA_SNAPSHOT) THEN
+  RAISE EXCEPTION 'run definition is immutable; start a new run';
+ END IF;
+ RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_run_definition_immutable BEFORE UPDATE ON AUD_PIPELINES_RUN_LOG FOR EACH ROW EXECUTE FUNCTION etl_craft_guard_run_definition();

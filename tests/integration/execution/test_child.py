@@ -29,7 +29,7 @@ def restore_logger():
 
 
 @pytest.fixture
-def bound(engine_db, tmp_path):
+def bound(engine_db, tmp_path, request):
     """A config file, a task T with parameter X=1, and its row bound under a run."""
     profile = engine_db.config.engine
     schema = "public" if profile.jdbc_url.startswith("jdbc:postgresql") else "main"
@@ -56,9 +56,9 @@ def bound(engine_db, tmp_path):
         task = conn.execute(
             text(
                 "INSERT INTO CFG_TASKS (TASK_CODE, TASK_TYPE, PIPELINE_ID, HANDLER) "
-                "VALUES ('T', 'ETL', :p, 'SQL') RETURNING TASK_ID"
+                "VALUES ('T', 'ETL', :p, :handler) RETURNING TASK_ID"
             ),
-            {"p": pipeline},
+            {"p": pipeline, "handler": getattr(request, "param", "SQL")},
         ).scalar_one()
         conn.execute(
             text(
@@ -143,6 +143,7 @@ def test_an_unknown_task_run(bound):
     assert child.main(args(config_path, 999999)) == ExitCode.RUN_STATE
 
 
+@pytest.mark.parametrize("bound", ["EMAIL_ALERT"], indirect=True)
 def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch, engine_db):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     engine, config_path, task_run_id, _ = bound
@@ -150,7 +151,6 @@ def test_the_command_line_records_a_handler_failure(bound, capsys, monkeypatch, 
     # An earlier attempt failed, so this run is a retry of the same row.
     with engine.begin() as conn:
         transitions.finish_task_run(conn, task_run_id, status=RunStatus.FAILED)
-        conn.execute(text("UPDATE CFG_TASKS SET HANDLER = 'EMAIL_ALERT'"))
     code = cli_main(["run", "--pipeline-code", "P", "--task-code", "T"])
     assert code == ExitCode.FAILURE
     message = "EMAIL_TO is required: one or more addresses separated by '|'"

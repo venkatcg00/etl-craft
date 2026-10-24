@@ -30,7 +30,10 @@ MAX_REASON = 4096
 
 def arguments(request: DataclassInstance) -> dict[str, Any]:
     """Return a request's fields for its audit row; the audit masks secret names."""
-    return {f.name: getattr(request, f.name) for f in fields(request)}
+    return {
+        f.name: getattr(request, f.name) if f.metadata.get("audit", True) else "[content omitted]"
+        for f in fields(request)
+    }
 
 
 def require_text(name: str, value: str | None, *, limit: int | None = None) -> None:
@@ -55,6 +58,7 @@ class Request:
     """
 
     __pydantic_config__: ClassVar[dict[str, str]] = {"extra": "forbid"}
+    MAX_BODY_BYTES: ClassVar[int | None] = None
 
 
 @dataclass(frozen=True, kw_only=True)

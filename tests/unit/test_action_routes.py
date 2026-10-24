@@ -49,6 +49,7 @@ def sample(hint):
 
 # Requests whose checks need more than one value of each required field's type.
 GIVEN = {
+    "PublishBundle": {"files": {"craft-connector.yml": "eA=="}},
     "ItemControl": {"item_key": "x"},
     "MarkRequest": {"status": RunStatus.SUCCESS},
     "ControlRequest": {"run_id": 1, "request_key": "k"},

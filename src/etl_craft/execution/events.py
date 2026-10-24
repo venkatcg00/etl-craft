@@ -60,27 +60,32 @@ def check_event(
     force_check: bool = False,
 ) -> EventCheck:
     """Check once; waiting never admits an attempt or holds an agent slot."""
-    try:
-        locker = LocalLocker(
-            engine, config, identity=f"e:{pipeline_run_id:x}:{task_id:x}:{uuid4().hex[:8]}"
-        )
-        with locks.event(task_id).hold(locker, wait_seconds=0.1):
-            with engine.begin() as conn:
-                fences = controls.blocked(conn, pipeline_run_id)
-                if None in fences or task_id in fences:
-                    return EventCheck(now + timedelta(seconds=1), message="dispatch is held")
-                controls.assert_dispatch(conn, pipeline_run_id, task_id)
-            wait = _EventWait(
-                engine, config, pipeline_run_id, task_id, decisions, cancel, force_check
-            )
-            return _check_event(wait, now)
-    except RunRefusedError as error:
-        from etl_craft.execution.control_flow import advance
+    from etl_craft.engine.run_definitions import for_run
+    from etl_craft.execution.bundle_files import run_config
 
-        advance(engine, pipeline_run_id, observed=True, config=config)
-        return EventCheck(now + timedelta(seconds=1), message=str(error))
-    except LockTimeoutError:
-        return EventCheck(now + timedelta(seconds=1))
+    with for_run(engine, pipeline_run_id):
+        config = run_config(engine, config, pipeline_run_id)
+        try:
+            locker = LocalLocker(
+                engine, config, identity=f"e:{pipeline_run_id:x}:{task_id:x}:{uuid4().hex[:8]}"
+            )
+            with locks.event(task_id).hold(locker, wait_seconds=0.1):
+                with engine.begin() as conn:
+                    fences = controls.blocked(conn, pipeline_run_id)
+                    if None in fences or task_id in fences:
+                        return EventCheck(now + timedelta(seconds=1), message="dispatch is held")
+                    controls.assert_dispatch(conn, pipeline_run_id, task_id)
+                wait = _EventWait(
+                    engine, config, pipeline_run_id, task_id, decisions, cancel, force_check
+                )
+                return _check_event(wait, now)
+        except RunRefusedError as error:
+            from etl_craft.execution.control_flow import advance
+
+            advance(engine, pipeline_run_id, observed=True, config=config)
+            return EventCheck(now + timedelta(seconds=1), message=str(error))
+        except LockTimeoutError:
+            return EventCheck(now + timedelta(seconds=1))
 
 
 @dataclass(frozen=True)
@@ -273,12 +278,17 @@ def _complete(
         policy = task_retry_policy(fetch_task_parameters(conn, wait.task_id), wait.config)
         transitions.set_attempt_retry_policy(conn, attempt, policy.retry_on)
         owner = f"event:{attempt}"
-        transitions.claim_attempt(
+        from etl_craft.engine.agent_transitions import claim_with_capacity
+
+        claim_with_capacity(
             conn,
             attempt,
             current_actor(),
-            owner=owner,
-            lease_expires_at=datetime.now(UTC) + timedelta(seconds=60),
+            {
+                "owner": owner,
+                "lease": datetime.now(UTC) + timedelta(seconds=60),
+                "event_wait": True,
+            },
         )
         trackers.record_decisions(conn, wait.pipeline_run_id, wait.decisions, attempt_id=attempt)
         if evidence:

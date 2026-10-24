@@ -33,7 +33,6 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import (
-    ConfigurationError,
     EtlCraftError,
     UsageError,
 )
@@ -48,11 +47,12 @@ from etl_craft.engine.repository.dependencies import (
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import (
     fetch_task_execution_detail,
-    fetch_task_parameters,
     resolve_task_id,
 )
 from etl_craft.engine.retry import retrying
+from etl_craft.engine.run_definitions import for_run, for_selection
 from etl_craft.execution import control_flow, leases
+from etl_craft.execution.attempt_admission import admit_attempt as admit_attempt
 from etl_craft.execution.attempt_records import (
     CancelWatch,
     attempt_log_path,
@@ -60,7 +60,13 @@ from etl_craft.execution.attempt_records import (
     record_attempt,
     run_cancelled,
 )
-from etl_craft.execution.attempt_types import CHILD_MODULE, ChildOptions, Override, TaskOutcome
+from etl_craft.execution.attempt_types import (
+    CHILD_MODULE,
+    ChildOptions,
+    Override,
+    TaskOutcome,
+    TaskRun,
+)
 from etl_craft.execution.events import check_event
 from etl_craft.execution.gates import CrossPipelineCheck, TrackedGate
 from etl_craft.execution.interventions import (
@@ -69,7 +75,6 @@ from etl_craft.execution.interventions import (
     record_change,
     record_gate_bypass,
 )
-from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.pools import AttemptSpec
 from etl_craft.execution.processes import (
     ChildSpec,
@@ -77,22 +82,9 @@ from etl_craft.execution.processes import (
 )
 from etl_craft.execution.readiness import backfill_cross_check, describe_unready, upstream_pending
 from etl_craft.execution.reconcile import reconcile
-from etl_craft.execution.retries import refresh_retries, task_retry_policy
+from etl_craft.execution.retries import refresh_retries
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class _TaskRun:
-    """The task and explicit run shared by retrying and attempt admission."""
-
-    pipeline_code: str
-    task_code: str
-    task_id: int
-    pipeline_run_id: int
-    force: bool
-    decisions: tuple[trackers.GateDecision, ...] = ()
-    reopened: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,9 +135,10 @@ def run_task(
             f"recorded. `etl-craft resume --pipeline-code {pipeline_code}` lets it run again"
         )
     if override is not None:
-        return _run_overridden(
-            engine, config, pipeline_code, pipeline_id, task_code, override, child, selector
-        )
+        with for_selection(engine, pipeline_id, selector):
+            return _run_overridden(
+                engine, config, pipeline_code, pipeline_id, task_code, override, child, selector
+            )
     return _run_local(
         engine,
         config,
@@ -165,89 +158,97 @@ def _run_local(
     options: _LocalOptions,
 ) -> TaskOutcome:
     """Resolve the selected run, check admission and drive its attempts and durable retries."""
-    gate = options.gate or TrackedGate(
-        policy=config.dependency_gates, wait_seconds=config.limits.gate_wait_minutes * 60
-    )
-    with engine.connect() as conn:
-        task_id = resolve_task_id(conn, pipeline_id, task_code)
-    with engine.begin() as conn:
-        pipeline_run_id, reopened = transitions.resolve_run(
-            conn,
-            pipeline_id,
-            force=options.force,
-            reason=f"force: {task_code} runs again under the ended run",
-            selector=options.selector,
+    from etl_craft.core.definitions import current
+    from etl_craft.execution.bundle_files import run_config
+
+    with for_selection(engine, pipeline_id, options.selector):
+        admitted = current.get()
+        if admitted is not None and admitted.run_id is not None:
+            config = run_config(engine, config, admitted.run_id)
+        gate = options.gate or TrackedGate(
+            policy=config.dependency_gates, wait_seconds=config.limits.gate_wait_minutes * 60
         )
-    decisions: tuple[trackers.GateDecision, ...] = ()
-    if not options.force:
-        blocked, cross = preflight(
-            engine, gate, pipeline_id, task_id, task_code, pipeline_run_id, options.admission
-        )
-        if blocked is not None:
-            logger.info(blocked.message)
-            return blocked
-        decisions = cross.decisions
-        if cross.bypassed:
-            record_gate_bypass(
-                engine,
+        with engine.connect() as conn:
+            task_id = resolve_task_id(conn, pipeline_id, task_code)
+        with engine.begin() as conn:
+            pipeline_run_id, reopened = transitions.resolve_run(
+                conn,
                 pipeline_id,
-                pipeline_run_id,
-                config.dependency_gates,
-                cross.bypassed,
-                task_id=task_id,
+                force=options.force,
+                reason=f"force: {task_code} runs again under the ended run",
+                selector=options.selector,
             )
-    task = _TaskRun(
-        pipeline_code, task_code, task_id, pipeline_run_id, options.force, decisions, reopened
-    )
-    return _run_with_retries(engine, config, task, gate, options)
+        decisions: tuple[trackers.GateDecision, ...] = ()
+        if not options.force:
+            blocked, cross = preflight(
+                engine, gate, pipeline_id, task_id, task_code, pipeline_run_id, options.admission
+            )
+            if blocked is not None:
+                logger.info(blocked.message)
+                return blocked
+            decisions = cross.decisions
+            if cross.bypassed:
+                record_gate_bypass(
+                    engine,
+                    pipeline_id,
+                    pipeline_run_id,
+                    config.dependency_gates,
+                    cross.bypassed,
+                    task_id=task_id,
+                )
+        task = TaskRun(
+            pipeline_code, task_code, task_id, pipeline_run_id, options.force, decisions, reopened
+        )
+        return _run_with_retries(engine, config, task, gate, options)
 
 
 def _run_with_retries(
     engine: Engine,
     config: ConnectorConfig,
-    task: _TaskRun,
+    task: TaskRun,
     gate: TrackedGate,
     options: _LocalOptions,
 ) -> TaskOutcome:
     """Wait for durable retry deadlines outside the agent, preserving each attempt's outcome."""
-    if options.automatic_retries:
-        waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
-        if task.task_id in waiting and not _wait_retry(
-            engine,
-            task.pipeline_run_id,
-            task.pipeline_code,
-            waiting[task.task_id],
-            gate,
-            options.child,
-        ):
-            return TaskOutcome(
-                RunStatus.CANCELLED
-                if run_cancelled(engine, task.pipeline_run_id)
-                else RunStatus.IN_PROGRESS,
-                f"{task.task_code}: retry was not started",
-            )
-    outcome = _run_attempt(engine, config, task, options.child)
-    while options.automatic_retries and outcome.status == RunStatus.FAILED:
-        waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
-        if task.task_id not in waiting:
-            break
-        if not _wait_retry(
-            engine,
-            task.pipeline_run_id,
-            task.pipeline_code,
-            waiting[task.task_id],
-            gate,
-            options.child,
-        ):
-            return TaskOutcome(
-                RunStatus.CANCELLED
-                if run_cancelled(engine, task.pipeline_run_id)
-                else RunStatus.IN_PROGRESS,
-                f"{task.task_code}: retry was not started",
-                outcome.task_run_id,
-            )
+    with for_run(engine, task.pipeline_run_id):
+        if options.automatic_retries:
+            waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
+            if task.task_id in waiting and not _wait_retry(
+                engine,
+                task.pipeline_run_id,
+                task.pipeline_code,
+                waiting[task.task_id],
+                gate,
+                options.child,
+            ):
+                return TaskOutcome(
+                    RunStatus.CANCELLED
+                    if run_cancelled(engine, task.pipeline_run_id)
+                    else RunStatus.IN_PROGRESS,
+                    f"{task.task_code}: retry was not started",
+                )
         outcome = _run_attempt(engine, config, task, options.child)
-    return replace(outcome, reopened=task.reopened) if task.reopened is not None else outcome
+        while options.automatic_retries and outcome.status == RunStatus.FAILED:
+            waiting, _ = refresh_retries(engine, config, task.pipeline_run_id, {task.task_id})
+            if task.task_id not in waiting:
+                break
+            if not _wait_retry(
+                engine,
+                task.pipeline_run_id,
+                task.pipeline_code,
+                waiting[task.task_id],
+                gate,
+                options.child,
+            ):
+                return TaskOutcome(
+                    RunStatus.CANCELLED
+                    if run_cancelled(engine, task.pipeline_run_id)
+                    else RunStatus.IN_PROGRESS,
+                    f"{task.task_code}: retry was not started",
+                    outcome.task_run_id,
+                )
+            outcome = _run_attempt(engine, config, task, options.child)
+        return replace(outcome, reopened=task.reopened) if task.reopened is not None else outcome
 
 
 def _wait_retry(
@@ -317,7 +318,7 @@ def _run_overridden(
     outcome = _run_attempt(
         engine,
         config,
-        _TaskRun(pipeline_code, task_code, task_id, pipeline_run_id, False),
+        TaskRun(pipeline_code, task_code, task_id, pipeline_run_id, False),
         child,
         rerun=status in SETTLED_STATUSES,
     )
@@ -367,64 +368,67 @@ def preflight(
     The check says what the task consumes once it succeeds, and what ``Dependency_gates``
     bypassed.
     """
-    with engine.connect() as conn:
-        status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
-        run_status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
-        backfill = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
-        queued_here = _queued_retry(conn, pipeline_run_id, task_id)
-        run_scopes.check_task(conn, pipeline_run_id, task_id)
-        graph_data = fetch_pipeline_graph(conn, pipeline_id)
-        scope = run_scopes.fetch_selection(conn, pipeline_run_id)
-        if scope is not None:
-            graph_data = run_scopes.selected_graph(graph_data, scope)
-        run_state = runlog.fetch_run_state(
-            conn, pipeline_run_id, [task.task_id for task in graph_data.tasks]
-        )
-    if status in SETTLED_STATUSES:
-        return _skipped(
-            f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}"
-        ), NO_CROSS
-    if status == RunStatus.IN_PROGRESS and not queued_here:
-        return TaskOutcome(
-            RunStatus.IN_PROGRESS,
-            f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
-            "starting it twice",
-        ), NO_CROSS
-    if run_status == RunStatus.SKIPPED:
-        reason = f"pipeline_run_id={pipeline_run_id} is itself SKIPPED"
-        return _record_skipped(engine, task_id, pipeline_run_id, task_code, reason), NO_CROSS
-
-    graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
-    still_needed = graph.required_edge_count(task_id) - graph.satisfied_edge_count(
-        task_id, run_state, 0
-    )
-    cross = CrossPipelineCheck(0)
-    if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
-        if backfill:
-            cross = backfill_cross_check(engine, task_id, still_needed)
-        else:
-            cross = (
-                admission if admission is not None else gate.check(engine, task_id, still_needed)
+    with for_run(engine, pipeline_run_id):
+        with engine.connect() as conn:
+            status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
+            run_status = runlog.fetch_pipeline_run_status(conn, pipeline_run_id)
+            backfill = runlog.fetch_run_kind(conn, pipeline_run_id).backfill
+            queued_here = _queued_retry(conn, pipeline_run_id, task_id)
+            run_scopes.check_task(conn, pipeline_run_id, task_id)
+            graph_data = fetch_pipeline_graph(conn, pipeline_id)
+            scope = run_scopes.fetch_selection(conn, pipeline_run_id)
+            if scope is not None:
+                graph_data = run_scopes.selected_graph(graph_data, scope)
+            run_state = runlog.fetch_run_state(
+                conn, pipeline_run_id, [task.task_id for task in graph_data.tasks]
             )
-        still_needed -= cross.satisfied_count
-    if still_needed <= 0:
-        return None, cross
-
-    unready = describe_unready(graph, task_id, pipeline_run_id)
-    if cross.reasons:
-        reasons = "; ".join(cross.reasons)
-        if cross.definitive and not upstream_pending(graph, task_id, run_state):
-            return _record_skipped(
-                engine, task_id, pipeline_run_id, task_code, reasons, decisions=cross.decisions
+        if status in SETTLED_STATUSES:
+            return _skipped(
+                f"{task_code}: already {status} under pipeline_run_id={pipeline_run_id}"
             ), NO_CROSS
-        return _skipped(
-            f"{task_code}: {reasons}, and {unready}; nothing recorded", waiting=True
-        ), NO_CROSS
-    if task_id in graph.unsatisfiable(run_state):
-        never = describe_unready(graph, task_id, pipeline_run_id, can_never=True)
-        return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
-    waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
-    return _skipped(waiting, waiting=True), NO_CROSS
+        if status == RunStatus.IN_PROGRESS and not queued_here:
+            return TaskOutcome(
+                RunStatus.IN_PROGRESS,
+                f"{task_code}: already IN-PROGRESS under pipeline_run_id={pipeline_run_id}; not "
+                "starting it twice",
+            ), NO_CROSS
+        if run_status == RunStatus.SKIPPED:
+            reason = f"pipeline_run_id={pipeline_run_id} is itself SKIPPED"
+            return _record_skipped(engine, task_id, pipeline_run_id, task_code, reason), NO_CROSS
+
+        graph = build_graph(graph_data.tasks, graph_data.same_pipeline_edges)
+        still_needed = graph.required_edge_count(task_id) - graph.satisfied_edge_count(
+            task_id, run_state, 0
+        )
+        cross = CrossPipelineCheck(0)
+        if still_needed > 0 and task_id in graph_data.cross_pipeline_task_ids:
+            if backfill:
+                cross = backfill_cross_check(engine, task_id, still_needed)
+            else:
+                cross = (
+                    admission
+                    if admission is not None
+                    else gate.check(engine, task_id, still_needed)
+                )
+            still_needed -= cross.satisfied_count
+        if still_needed <= 0:
+            return None, cross
+
+        unready = describe_unready(graph, task_id, pipeline_run_id)
+        if cross.reasons:
+            reasons = "; ".join(cross.reasons)
+            if cross.definitive and not upstream_pending(graph, task_id, run_state):
+                return _record_skipped(
+                    engine, task_id, pipeline_run_id, task_code, reasons, decisions=cross.decisions
+                ), NO_CROSS
+            return _skipped(
+                f"{task_code}: {reasons}, and {unready}; nothing recorded", waiting=True
+            ), NO_CROSS
+        if task_id in graph.unsatisfiable(run_state):
+            never = describe_unready(graph, task_id, pipeline_run_id, can_never=True)
+            return _record_skipped(engine, task_id, pipeline_run_id, task_code, never), NO_CROSS
+        waiting = f"{task_code}: {unready}; nothing recorded, run it again once they are"
+        return _skipped(waiting, waiting=True), NO_CROSS
 
 
 """The dependency types on another pipeline that a backfill counts as met without checking."""
@@ -468,7 +472,7 @@ def _record_skipped(
 def _run_attempt(
     engine: Engine,
     config: ConnectorConfig,
-    task: _TaskRun,
+    task: TaskRun,
     child: ChildOptions | None,
     *,
     rerun: bool = False,
@@ -491,96 +495,8 @@ def _run_attempt(
             result.task_run_id,
             waiting=result.next_check_at is not None,
         )
-    spec = admit_attempt(
-        engine,
-        config,
-        task.task_id,
-        task.task_code,
-        task.pipeline_code,
-        task.pipeline_run_id,
-        task.force,
-        rerun=rerun,
-        decisions=task.decisions,
-    )
+    spec = admit_attempt(engine, config, task, rerun=rerun)
     return execute_attempt(engine, config, spec, child or ChildOptions())
-
-
-def admit_attempt(
-    engine: Engine,
-    config: ConnectorConfig,
-    task_id: int,
-    task_code: str,
-    pipeline_code: str,
-    pipeline_run_id: int,
-    force: bool,
-    *,
-    rerun: bool = False,
-    decisions: tuple[trackers.GateDecision, ...] = (),
-) -> AttemptSpec:
-    """Check the task's settings, then bind its task run and queue an attempt to run.
-
-    Whatever can be checked before binding is checked first, so a bad setting fails without
-    touching the task's row. An attempt an earlier admission queued and nobody claimed is reused.
-    The gate decisions that admitted the task are recorded with the attempt.
-    """
-    if config.config_path is None:
-        raise ConfigurationError("a task process needs the craft-connector.yml it was loaded from")
-    with engine.connect() as conn:
-        params = fetch_task_parameters(conn, task_id)
-        detail = fetch_task_execution_detail(conn, task_id)
-        handler = detail.handler
-    from etl_craft.execution.placement import check_admission
-
-    reason = check_admission(config, detail, params)
-    timeout = task_timeout_seconds(params, config)
-    policy = task_retry_policy(params, config)
-    fault_point("runner.after_timeout")
-    with engine.begin() as conn:
-        binding = transitions.find_or_create_task_run(conn, task_id, pipeline_run_id)
-        active = transitions.active_attempt(conn, binding.task_run_id)
-        if active is not None and active.status == AttemptStatus.QUEUED:
-            attempt_id = active.attempt_id
-            transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on, overwrite=False)
-        else:
-            if rerun and handler == Handler.RUN_PIPELINE:
-                conn.execute(
-                    statement(conn, "trigger_generation"), {"task_run_id": binding.task_run_id}
-                )
-                conn.execute(
-                    statement(conn, "trigger_wait_reset"),
-                    {"pipeline_run_id": pipeline_run_id, "task_id": task_id},
-                )
-            attempt_id = transitions.queue_attempt(conn, binding.task_run_id, current_actor())
-            transitions.set_attempt_retry_policy(conn, attempt_id, policy.retry_on)
-        if active is None or active.status != AttemptStatus.QUEUED:
-            from etl_craft.engine.dispatch import dispatch_options
-            from etl_craft.engine.resource_locks import notify
-
-            dispatch_options(
-                conn,
-                attempt_id,
-                handler,
-                reason,
-                options={"force": force, "rerun": rerun},
-            )
-            notify(conn)
-        trackers.record_decisions(conn, pipeline_run_id, decisions, attempt_id=attempt_id)
-        active = transitions.active_attempt(conn, binding.task_run_id)
-        assert active is not None
-    return AttemptSpec(
-        attempt_id=attempt_id,
-        attempt_number=active.attempt_number,
-        task_run_id=binding.task_run_id,
-        pipeline_run_id=pipeline_run_id,
-        pipeline_code=pipeline_code,
-        task_code=task_code,
-        handler=handler,
-        timeout_seconds=timeout,
-        lease_seconds=leases.LEASE_SECONDS,
-        force=force,
-        rerun=rerun,
-        pool=detail.pool,
-    )
 
 
 def execute_attempt(
@@ -772,7 +688,7 @@ def _child_argv(
         if spec.handler == Handler.RUN_PIPELINE and child.module == CHILD_MODULE
         else child.module,
         "--config",
-        str(config.config_path),
+        str(config._host_config_path or config.config_path),
         "--task-run-id",
         str(spec.task_run_id),
         "--attempt-id",

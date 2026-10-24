@@ -12,12 +12,12 @@ from sqlalchemy.engine import Engine, RowMapping
 from etl_craft.controller.catalog import CatalogSchedule
 from etl_craft.core.actor import acting_as, current_actor
 from etl_craft.core.cron import next_after, timezone
-from etl_craft.core.enums import InterventionAction, RunStatus, YesNo
+from etl_craft.core.enums import InterventionAction, RunStatus, TriggerKind, YesNo
 from etl_craft.core.errors import MetadataError
 from etl_craft.core.time import as_utc
-from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.intervention_rows import record_intervention
+from etl_craft.engine.run_creation import RunCreation, create
 from etl_craft.engine.runlog import as_date
 from etl_craft.services.operations import OperationContext
 
@@ -135,14 +135,16 @@ def _create_tick(
         if existing is not None:
             return
         status = RunStatus.SKIPPED if reason else RunStatus.QUEUED
-        run_id = transitions.create_run(
+        run_id = create(
             conn,
             pipeline_id,
             current_actor(),
-            run_date=instant.astimezone(zone).date(),
-            trigger_kind="SCHEDULE",
-            run_key=key,
-            status=status,
+            RunCreation(
+                run_date=instant.astimezone(zone).date(),
+                trigger_kind=TriggerKind.SCHEDULE,
+                run_key=key,
+                status=status,
+            ),
         )
         record_intervention(
             conn,

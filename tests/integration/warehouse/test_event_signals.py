@@ -122,7 +122,7 @@ def test_bad_signal_queries_fail_validation_before_run_state_changes(signal_worl
     from etl_craft.services.validate import validate
 
     w = signal_world
-    task = signal_scene(w, "signals")
+    task = signal_scene(w, "signals", admit=False)
     send_signal(w, "signals")
     if problem == "overflow":
         send_signal(w, "signals", "second", "later")
@@ -150,6 +150,7 @@ def test_bad_signal_queries_fail_validation_before_run_state_changes(signal_worl
                 ),
                 {"task": task, "name": name, "value": value},
             )
+    w.new_run()
     report = validate(w.engine_db, w.config)
     assert report.failed
     messages = " ".join(f"{f.where}: {f.message}" for f in report.findings)
@@ -161,7 +162,12 @@ def test_bad_signal_queries_fail_validation_before_run_state_changes(signal_worl
         assert conn.execute(text("SELECT count(*) AS n FROM AUD_GATE_WAITS")).scalar_one() == 0
         assert conn.execute(text("SELECT count(*) AS n FROM AUD_EVENT_KEYS")).scalar_one() == 0
         assert (
-            conn.execute(text("SELECT STATUS AS status FROM AUD_PIPELINES_RUN_LOG")).scalar_one()
+            conn.execute(
+                text(
+                    "SELECT STATUS AS status FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID=:id"
+                ),
+                {"id": w.pipeline_run_id},
+            ).scalar_one()
             == RunStatus.IN_PROGRESS
         )
     failed = check_event(w.engine_db, w.config, w.pipeline_run_id, task, datetime.now(UTC))
@@ -198,7 +204,7 @@ def test_retry_and_recovery_keep_the_successful_waits_original_keys(signal_world
     from fixtures.metadata import add_dependency, add_task
 
     w = signal_world
-    wait = signal_scene(w, "signals")
+    wait = signal_scene(w, "signals", admit=False)
     send_signal(w, "signals")
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
@@ -246,6 +252,7 @@ def test_retry_and_recovery_keep_the_successful_waits_original_keys(signal_world
             RETRY_ON="TRANSIENT",
         )
         add_dependency(conn, w.pipeline_id, consumer, wait)
+    w.new_run()
     selector = RunSelector(run_id=w.pipeline_run_id)
     first = run_pipeline(w.engine_db, config, "P", selector=selector)
     assert first.status == RunStatus.FAILED
@@ -261,15 +268,6 @@ def test_retry_and_recovery_keep_the_successful_waits_original_keys(signal_world
             )
             with w.engine_db.begin() as conn:
                 controls.observe_exit(conn, attempt.attempt_id, queries_ended=True)
-    # Recovery preserves attempt history; explicitly allow one more attempt after repair.
-    with w.engine_db.begin() as conn:
-        conn.execute(
-            text(
-                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='2' "
-                "WHERE TASK_ID=:task AND PARAMETER_NAME='RETRIES'"
-            ),
-            {"task": consumer},
-        )
     ctx = OperationContext(w.engine_db, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     prepared = invoke(
         ctx,
@@ -283,6 +281,22 @@ def test_retry_and_recovery_keep_the_successful_waits_original_keys(signal_world
         ),
     )
     assert prepared.execution_run_id == w.pipeline_run_id
+    from etl_craft.execution.reruns import rerun_task
+
+    retried = rerun_task(w.engine_db, config, "P", "consume", "source restored", selector=selector)
+    assert retried.status == RunStatus.IN_PROGRESS
+    assert retried.pipeline_run_id == w.pipeline_run_id
+    with w.engine_db.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT STATUS AS status FROM AUD_TASK_RUN_LOG "
+                    "WHERE PIPELINE_RUN_ID=:run AND TASK_ID=:task"
+                ),
+                {"run": w.pipeline_run_id, "task": consumer},
+            ).scalar_one()
+            == RunStatus.SUCCESS
+        )
     assert run_pipeline(w.engine_db, config, "P", selector=selector).status == RunStatus.SUCCESS
     assert (w.project / "calls").read_text() == "3"
     with w.engine_db.connect() as conn:

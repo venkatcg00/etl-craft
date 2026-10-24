@@ -24,14 +24,14 @@ def world(engine_db, tmp_path):
     return engine_db.engine, config
 
 
-def setup(world, **params):
+def setup(world, *, admit=True, **params):
     engine, config = world
     with engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
         task = add_task(
             conn, pipeline, "wait", "EVENT_WAIT", **{"EVENT_POLL_SECONDS": "1", **params}
         )
-        run = start_run(conn, pipeline)
+        run = start_run(conn, pipeline) if admit else None
     return engine, config, pipeline, task, run
 
 
@@ -149,7 +149,9 @@ def test_validation_uses_the_runtime_condition_checks(world):
 
 
 def test_pipeline_releases_downstream_scripts_and_sql(world):
-    engine, config, pipeline, task, _ = setup(world, EVENT_FILE="*.csv", EVENT_SETTLE_SECONDS="0")
+    engine, config, pipeline, task, _ = setup(
+        world, admit=False, EVENT_FILE="*.csv", EVENT_SETTLE_SECONDS="0"
+    )
     folder = config.project_dir / "python_scripts"
     folder.mkdir()
     (folder / "consume.py").write_text(
@@ -191,6 +193,7 @@ def test_pipeline_releases_downstream_scripts_and_sql(world):
             INPUT_PARAMS='{"files":"$$event_files"}',
         )
         add_dependency(conn, pipeline, downstream, task)
+        start_run(conn, pipeline)
     arrived = False
 
     def arrive(seconds):
@@ -264,7 +267,7 @@ def test_timeout_dependents_follow_normal_dependency_types(world, policy, expect
     from etl_craft.execution.pools import Capacity
 
     engine, config, pipeline, task, run = setup(
-        world, EVENT_FILE="absent", EVENT_TIMEOUT_MINUTES="0", EVENT_ON_TIMEOUT=policy
+        world, admit=False, EVENT_FILE="absent", EVENT_TIMEOUT_MINUTES="0", EVENT_ON_TIMEOUT=policy
     )
     with engine.begin() as conn:
         success = add_task(
@@ -297,6 +300,7 @@ def test_timeout_dependents_follow_normal_dependency_types(world, policy, expect
         add_dependency(conn, pipeline, success, task, "SUCCESS")
         add_dependency(conn, pipeline, failure, task, "FAILURE")
         add_dependency(conn, pipeline, always, task, "ALWAYS")
+        run = start_run(conn, pipeline)
 
     class Pool:
         def capacity(self):

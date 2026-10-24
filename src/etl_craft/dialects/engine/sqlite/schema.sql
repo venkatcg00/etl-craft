@@ -188,6 +188,14 @@ CREATE INDEX ix_br_pipeline ON CFG_BUSINESS_RULES (PIPELINE_ID);
 
 
 
+-- Immutable reviewed project manifests and their content-addressed artifact locations.
+CREATE TABLE AUD_PROJECT_BUNDLES (
+    BUNDLE_ID VARCHAR(64) PRIMARY KEY,
+    MANIFEST TEXT NOT NULL,
+    CREATED_BY VARCHAR NOT NULL,
+    CREATED_AT TIMESTAMP NOT NULL
+);
+CREATE INDEX ix_project_bundles_latest ON AUD_PROJECT_BUNDLES (CREATED_AT DESC,BUNDLE_ID DESC);
 -- One row per pipeline run: its status, when it ran, whether it met its SLA, the date it ran
 -- as of (RUN_DATE, the SQL tasks' $$run_date), and whether it was part of a backfill.
 CREATE TABLE AUD_PIPELINES_RUN_LOG (
@@ -215,6 +223,9 @@ CREATE TABLE AUD_PIPELINES_RUN_LOG (
     EXCLUSIVE_RUN    VARCHAR(1) NOT NULL DEFAULT 'Y' CONSTRAINT ck_run_exclusive CHECK (EXCLUSIVE_RUN IN ('Y','N') AND (EXCLUSIVE_RUN='Y' OR TASK_SELECTION IS NOT NULL)),
     TRIGGERED_BY_TASK_RUN_ID BIGINT REFERENCES AUD_TASK_RUN_LOG(TASK_RUN_ID),
     SSO_GROUP_IDS TEXT NOT NULL DEFAULT '[]',
+    BUNDLE_ID VARCHAR(64) REFERENCES AUD_PROJECT_BUNDLES(BUNDLE_ID),
+    METADATA_VERSION VARCHAR(64),
+    METADATA_SNAPSHOT TEXT,
     CONSTRAINT ck_pipeline_run_trigger_kind CHECK (TRIGGER_KIND IN ('SCHEDULE','MANUAL','BACKFILL','ORCHESTRATOR','STAND_IN','PIPELINE_TASK')),
     CONSTRAINT ck_pipeline_run_backfill CHECK (BACKFILL IN ('Y','N')),
     CONSTRAINT ck_pipeline_run_status CHECK (STATUS IN ('QUEUED','IN-PROGRESS','SUCCESS','FAILED','SKIPPED','CANCELLED')),
@@ -1781,3 +1792,21 @@ BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TASK_ITEMS is written only by etl-craft') END;
     SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_TASK_ITEMS is append-only; use etl-craft retention') END;
 END;
+
+CREATE TRIGGER trg_actor_guard_aud_project_bundles_insert BEFORE INSERT ON AUD_PROJECT_BUNDLES
+BEGIN
+ SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_PROJECT_BUNDLES is written only by etl-craft') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_project_bundles_update BEFORE UPDATE ON AUD_PROJECT_BUNDLES
+BEGIN
+ SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_PROJECT_BUNDLES is written only by etl-craft') END;
+ SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_PROJECT_BUNDLES is append-only; use etl-craft retention') END;
+END;
+CREATE TRIGGER trg_actor_guard_aud_project_bundles_delete BEFORE DELETE ON AUD_PROJECT_BUNDLES
+BEGIN
+ SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_PROJECT_BUNDLES is written only by etl-craft') END;
+ SELECT CASE WHEN etl_craft_purpose() <> 'retention' THEN RAISE(ABORT, 'AUD_PROJECT_BUNDLES is append-only; use etl-craft retention') END;
+END;
+CREATE TRIGGER trg_run_definition_immutable BEFORE UPDATE OF BUNDLE_ID,METADATA_VERSION,METADATA_SNAPSHOT ON AUD_PIPELINES_RUN_LOG
+WHEN OLD.METADATA_SNAPSHOT IS NOT NULL AND (NEW.BUNDLE_ID IS NOT OLD.BUNDLE_ID OR NEW.METADATA_VERSION IS NOT OLD.METADATA_VERSION OR NEW.METADATA_SNAPSHOT IS NOT OLD.METADATA_SNAPSHOT)
+BEGIN SELECT RAISE(ABORT, 'run definition is immutable; start a new run'); END;

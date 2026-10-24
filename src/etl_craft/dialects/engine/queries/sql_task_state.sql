@@ -1,5 +1,7 @@
 WITH origin AS (
     SELECT t.TASK_ID, t.PIPELINE_ID, t.TARGET_TABLE_ID, t.TARGET_ACTIVE_FLAG,
+           EXISTS (SELECT 1 AS found FROM CFG_TASK_PARAMETERS wp WHERE wp.TASK_ID=t.TASK_ID
+                   AND wp.PARAMETER_NAME='WATERMARK_COLUMN' AND wp.ACTIVE_FLAG='Y') AS watermark_enabled,
            lower(COALESCE(o.CATALOG_NAME, :catalog)) AS catalog_name,
            lower(o.SCHEMA_NAME) AS schema_name, lower(o.TABLE_NAME) AS table_name
     FROM CFG_TASKS t LEFT JOIN CFG_TABLES o ON o.TABLE_ID=t.TARGET_TABLE_ID
@@ -27,8 +29,7 @@ SELECT origin.catalog_name AS catalog_name, origin.schema_name AS schema_name,
         AND upper(trim(w.sql_action))<>:sql_action LIMIT 1) AS merge_conflict
 FROM origin
 LEFT JOIN AUD_TASK_OFFSET_TRACKER off ON off.TASK_ID=origin.TASK_ID
-  AND EXISTS (SELECT 1 FROM CFG_TASK_PARAMETERS wp WHERE wp.TASK_ID=origin.TASK_ID
-              AND wp.PARAMETER_NAME='WATERMARK_COLUMN' AND wp.ACTIVE_FLAG='Y')
+  AND origin.watermark_enabled
 LEFT JOIN AUD_TARGET_HASH_VERSION h ON h.TARGET_CATALOG_NAME=origin.catalog_name
   AND h.TARGET_SCHEMA_NAME=origin.schema_name AND h.TARGET_TABLE_NAME=origin.table_name
 LEFT JOIN AUD_TARGET_VIEW_STATEMENT v ON v.TARGET_CATALOG_NAME=origin.catalog_name

@@ -34,7 +34,7 @@
       "src/etl_craft/execution/pipeline.py": 10,
       "src/etl_craft/execution/reruns.py": 4,
       "src/etl_craft/execution/run_start.py": 1,
-      "src/etl_craft/execution/runner.py": 11,
+      "src/etl_craft/execution/runner.py": 8,
       "src/etl_craft/execution/scheduler.py": 7,
       "src/etl_craft/handlers/sql/rejects.py": 1,
       "src/etl_craft/handlers/sql/session.py": 1,
@@ -92,7 +92,7 @@
       "src/etl_craft/services/catalog/collect.py": 31,
       "src/etl_craft/services/config_files.py": 27,
       "src/etl_craft/services/lineage.py": 35,
-      "src/etl_craft/services/operations/status.py": 52
+      "src/etl_craft/services/operations/status.py": 8
     },
     "inline-sql": {
       "src/etl_craft/engine/connection.py": 1,
@@ -106,7 +106,7 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 80
+      "src/etl_craft/engine/transitions.py": 39
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

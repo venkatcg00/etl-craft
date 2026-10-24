@@ -8,6 +8,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Pinned project bundles: `etl-craft bundle publish` works locally and through `--api`,
+  backed by `Artifacts.Store` and named `Object_stores` profiles. Runs retain their bundle,
+  metadata version and admitted execution snapshot across edits, retries and restarts.
+  Agents download verified files through the API; `doctor --agent` checks static imports.
+  Warehouse, Email and Cloning connections remain host-local; uploaded configuration cannot
+  redirect host credentials, and bundle parsing errors withhold resolved host values.
+  Apply `0053_project_bundles.sql`; start a new run instead of reopening a completed
+  pre-bundle run.
+
 - Python `task.fan_out` runs bounded work items inside one task, retaining committed successes
   across retries, timeouts and lost attempts. `etl-craft items list|mark|cancel` and the
   matching API expose and control them with actor/reason audit; `run --rerun` selects

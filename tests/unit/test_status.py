@@ -10,6 +10,7 @@ from etl_craft.cli import build_parser, main
 from etl_craft.cli.commands import Command
 from etl_craft.core.enums import ActionName, ControlAction
 from etl_craft.core.errors import ExitCode
+from etl_craft.engine import transitions
 from etl_craft.engine.repository.pauses import Pause
 from etl_craft.services.operations import to_json
 from etl_craft.services.operations.actions import invoke
@@ -172,10 +173,11 @@ def test_inspection_cli_json_schemas(ctx, command, schema, capsys):
 def test_waiting_and_paused_backfill_exit_codes(ctx, capsys):
     from fixtures.metadata import add_dependency, add_task
 
-    pipeline, _, task, _ = seed(ctx, active=True, task=True)
+    pipeline, _, task, _ = seed(ctx, active=False, task=True)
     with ctx.engine.begin() as conn:
         after = add_task(conn, pipeline, "after", "PYTHON")
         add_dependency(conn, pipeline, after, task)
+        transitions.create_active_run(conn, pipeline)
     args = ["--config", str(ctx.config.config_path), "run", "--pipeline-code", "P"]
     assert main([*args, "--task-code", "after", "--format", "json"]) == ExitCode.WAITING
     assert json.loads(capsys.readouterr().out)["waiting"] is True

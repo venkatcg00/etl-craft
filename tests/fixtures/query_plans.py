@@ -35,6 +35,10 @@ INTEGER_NAMES = frozenset(
 )
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
+    "bundle_id": "a" * 64,
+    "use_bundles": False,
+    "event_wait": False,
+    "manifest": "{}",
     **dict.fromkeys(
         (
             "warehouse_limit",
@@ -285,6 +289,10 @@ FULL_READS = {
         "cfg_pipelines",
     ): "Builds bounded task history for every active pipeline.",
     ("catalog_pipeline_runs", "cfg_pipelines"): "Builds bounded history for every active pipeline.",
+    (
+        "catalog_metadata_versions",
+        "cfg_pipelines",
+    ): "Reports current versions for every catalog pipeline.",
     ("catalog_pipelines", "cfg_pipelines"): "Lists every active pipeline in the catalog.",
     (
         "catalog_consumption",

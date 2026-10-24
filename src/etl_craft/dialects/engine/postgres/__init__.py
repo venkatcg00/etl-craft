@@ -15,6 +15,7 @@ from sqlalchemy.exc import OperationalError
 
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
 from etl_craft.core.actor import Actor
+from etl_craft.core.definitions import Definition
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, EngineDbError, LockTimeoutError
 from etl_craft.core.outage import OutageBudget
@@ -32,6 +33,12 @@ C = TypeVar("C")
 
 class PostgresEngineDialect(EngineDialect):
     """PostgreSQL: transactional DDL and advisory locks."""
+
+    def admitted_query(self, sql: str, definition: Definition, *, name: str = "") -> str:
+        """Expand an admitted definition through PostgreSQL composite row types."""
+        from etl_craft.dialects.engine.definitions import projection
+
+        return projection(sql, definition, postgres=True, name=name)
 
     supports_api_replicas = True
     spec = engine_for_jdbc_url("jdbc:postgresql:")

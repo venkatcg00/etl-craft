@@ -84,7 +84,11 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
         budget = (claimed.lease_expires_at - claimed.db_now).total_seconds()
     context = build_task_context(ctx.engine, ctx.config, task_run_id, force=force, rerun=rerun)
     context = replace(context, attempt_id=int(claimed.attempt_id), owner=str(agent_id))
-    metadata = {f.name: getattr(context, f.name) for f in fields(context) if f.name != "config"}
+    metadata = {
+        f.name: getattr(context, f.name)
+        for f in fields(context)
+        if f.name != "config" and not f.name.startswith("_")
+    }
     return AgentReply(
         {
             "task": metadata,

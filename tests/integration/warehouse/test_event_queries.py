@@ -38,6 +38,7 @@ def test_slow_sql_event_does_not_block_other_events_or_scheduler_shutdown(sql_wo
             EVENT_SETTLE_SECONDS="0",
         )
         data = fetch_pipeline_graph(conn, world.pipeline_id)
+    world.new_run()
     (world.project / "ready.csv").write_text("ready")
 
     class FullPool:
@@ -131,6 +132,7 @@ def test_slow_query_obeys_original_event_deadline(sql_world, policy, status):
             EVENT_TIMEOUT_MINUTES="0.05",
             EVENT_ON_TIMEOUT=policy,
         )
+    world.new_run()
     started = time.monotonic()
     result = check_event(
         world.engine_db, world.config, world.pipeline_run_id, task, datetime.now(UTC)
@@ -148,6 +150,7 @@ def test_sql_event_pipeline_finalizes_successfully(sql_world):
     world = sql_world
     with world.engine_db.begin() as conn:
         add_task(conn, world.pipeline_id, "wait", "EVENT_WAIT", EVENT_SQL="SELECT 1 AS ready")
+    world.new_run()
     outcome = run_pipeline(world.engine_db, world.config, "P")
     with world.engine_db.connect() as conn:
         errors = conn.execute(text("SELECT ERROR_MESSAGE FROM AUD_TASK_ATTEMPTS")).scalars().all()

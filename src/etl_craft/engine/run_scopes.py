@@ -97,7 +97,13 @@ def check_task(
             f"pipeline_run_id={run_id}: task_id={task_id} is outside selected tasks "
             f"{scope.task_ids}; select a run containing this task or start a new manual run"
         )
-    exclusive = scope.exclusive(conn) if definition is None else task_exclusive(*definition)
+    if definition is None:
+        from etl_craft.engine.run_definitions import for_run
+
+        with for_run(conn, run_id):
+            exclusive = scope.exclusive(conn)
+    else:
+        exclusive = task_exclusive(*definition)
     if exclusive and exclusive_run == YesNo.NO:
         raise RunRefusedError(
             f"pipeline_run_id={run_id}: selected task metadata now needs exclusive admission; "

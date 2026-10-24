@@ -58,22 +58,25 @@ def agent_scene(engine_db, tmp_path):
         )
 
 
-def queue(db):
+def queue(db, handler="SQL"):
     with db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
-        task = add_task(conn, pipeline, "T")
+        task = add_task(conn, pipeline, "T", handler)
         run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
         summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
         return transitions.queue_attempt(conn, summary, SYSTEM_ACTOR)
 
 
-def claim(scene):
+def claim(scene, handler="SQL"):
     db, client, headers, _, _, _ = scene
-    attempt = queue(db)
+    attempt = queue(db, handler)
     answer = client.post(
         "/api/v1/agent/claim",
         headers=headers,
-        json={"version": __version__, "free_kinds": ["warehouse"]},
+        json={
+            "version": __version__,
+            "free_kinds": ["python" if handler == "PYTHON" else "warehouse"],
+        },
     )
     assert answer.status_code == 200, answer.text
     assert answer.json()["data"]["task"]["attempt_id"] == attempt
@@ -107,7 +110,7 @@ def test_a_queued_attempt_is_claimed_by_its_token_identity(agent_scene):
     with count_round_trips(db.engine) as counter:
         reply = claim_available(agent_scene)
     assert reply.data["task"]["attempt_id"] == attempt
-    assert counter.counts["engine_statements"] == 13, counter.queries
+    assert counter.counts["engine_statements"] == 12, counter.queries
     assert counter.counts["engine_transactions"] == 2
     assert counter.counts["engine_connections"] == 0
     with db.engine.connect() as conn:
@@ -324,10 +327,10 @@ def test_two_agents_racing_on_an_overlapping_scope_reserve_it_only_once(agent_sc
     first = authenticated_context(second, authenticate(second, raw))
     with db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "RACE")
+        tasks = [add_task(conn, pipeline, code) for code in ("A", "B")]
         run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
         attempts = []
-        for code in ("A", "B"):
-            task = add_task(conn, pipeline, code)
+        for task in tasks:
             summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
             attempts.append(transitions.queue_attempt(conn, summary, SYSTEM_ACTOR))
     request = AgentClaim(version=__version__, free_kinds=("warehouse",))
@@ -597,10 +600,10 @@ def queue_pipeline_work(db, code, *, count=1, priority=0, limit=8, **parameters)
             ),
             {"priority": priority, "limit": limit, "id": pipeline},
         )
+        tasks = [add_task(conn, pipeline, f"T{index}", **parameters) for index in range(count)]
         run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
         attempts = []
-        for index in range(count):
-            task = add_task(conn, pipeline, f"T{index}", **parameters)
+        for task in tasks:
             summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
             attempts.append(transitions.queue_attempt(conn, summary, SYSTEM_ACTOR))
     return attempts
@@ -743,7 +746,6 @@ def test_pipeline_limit_holds_with_a_thousand_ready_attempts(agent_scene, bound)
             text("UPDATE CFG_PIPELINES SET MAX_PARALLEL_TASKS=:limit WHERE PIPELINE_ID=:id"),
             {"id": pipeline, "limit": 1 if bound == "pipeline" else 1000},
         )
-        run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
         conn.execute(
             text(
                 "INSERT INTO CFG_TASKS (PIPELINE_ID,TASK_CODE,TASK_TYPE,HANDLER) "
@@ -752,6 +754,7 @@ def test_pipeline_limit_holds_with_a_thousand_ready_attempts(agent_scene, bound)
             ),
             {"id": pipeline},
         )
+        run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
         conn.execute(
             text(
                 "INSERT INTO AUD_TASK_RUN_LOG (PIPELINE_RUN_ID,TASK_ID,STATUS) "
@@ -1011,9 +1014,7 @@ def test_agent_item_reports_are_fenced_and_shared_between_api_copies(agent_scene
     from uuid import uuid4
 
     db, client, headers, _, _owner, config = agent_scene
-    attempt = claim(agent_scene)
-    with db.engine.begin() as conn:
-        conn.execute(text("UPDATE CFG_TASKS SET HANDLER='PYTHON'"))
+    attempt = claim(agent_scene, handler="PYTHON")
     prepared = {
         "version": __version__,
         "attempt_id": attempt,
@@ -1051,3 +1052,132 @@ def test_agent_item_reports_are_fenced_and_shared_between_api_copies(agent_scene
     assert client.post("/api/v1/agent/report", headers=headers, json=prepared).status_code != 200
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) AS n FROM AUD_TASK_ITEMS")).scalar_one() == 3
+
+
+def test_bundle_download_is_assigned_fenced_and_hides_store_credentials(agent_scene, tmp_path):
+    import base64
+
+    from etl_craft.config.object_models import Artifacts
+    from etl_craft.services.operations.bundles import PublishBundle
+
+    db, client, agent, person, _, config = agent_scene
+    ctx = OperationContext(
+        db.engine,
+        replace(config, artifacts=Artifacts((tmp_path / "store").as_uri())),
+        SYSTEM_ACTOR,
+        role=ApiRole.ADMIN,
+    )
+    content = (
+        b"Secrets:\n  Source_type: ENVIRONMENT\nEngine:\n"
+        b"  dev:\n    Jdbc_url: jdbc:sqlite:engine.db\n    Schema: main\n"
+    )
+    bundle = invoke(
+        ctx,
+        ActionName.BUNDLE_PUBLISH,
+        PublishBundle(files={"craft-connector.yml": base64.b64encode(content).decode()}),
+    )
+    attempt = claim(agent_scene)
+    payload = {"version": __version__, "attempt_id": attempt, "operation": "BUNDLE"}
+    manifest = client.post("/api/v1/agent/report", headers=agent, json=payload)
+    assert manifest.status_code == 200, manifest.text
+    assert manifest.json()["data"] == {"bundle_id": bundle.bundle_id, "files": bundle.files}
+    assert str(tmp_path / "store") not in manifest.text
+    file = client.post(
+        "/api/v1/agent/report", headers=agent, json=payload | {"bundle_path": "craft-connector.yml"}
+    )
+    assert base64.b64decode(file.json()["data"]["content"]) == content
+    assert client.post("/api/v1/agent/report", headers=person, json=payload).status_code == 403
+    assert (
+        client.post(
+            "/api/v1/agent/report", headers=agent, json=payload | {"bundle_path": "../outside"}
+        ).status_code
+        == 404
+    )
+    with db.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:past WHERE ATTEMPT_ID=:id"),
+            {"past": datetime.now(UTC) - timedelta(seconds=1), "id": attempt},
+        )
+        arguments = (
+            conn.execute(
+                text(
+                    "SELECT ARGUMENTS AS arguments FROM AUD_ACTIONS WHERE COMMAND='bundle publish'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert all(base64.b64encode(content).decode() not in value for value in arguments)
+    assert client.post("/api/v1/agent/report", headers=agent, json=payload).status_code == 409
+
+
+def test_agent_doctor_checks_static_imports_without_executing_project_code(agent_scene, tmp_path):
+    import base64
+
+    from etl_craft.config.object_models import Artifacts
+    from etl_craft.services.operations.bundles import PublishBundle
+
+    db, client, agent, person, _, config = agent_scene
+    ctx = OperationContext(
+        db.engine,
+        replace(config, artifacts=Artifacts((tmp_path / "store").as_uri())),
+        SYSTEM_ACTOR,
+        role=ApiRole.ADMIN,
+    )
+    files = {
+        "craft-connector.yml": (
+            b"Secrets:\n  Source_type: ENVIRONMENT\nEngine:\n"
+            b"  dev:\n    Jdbc_url: jdbc:sqlite:engine.db\n    Schema: main\n"
+        ),
+        "python_scripts/check.py": (
+            b"import absent_bundle_dependency_xyz\nraise AssertionError('never execute')\n"
+        ),
+    }
+    bundle = invoke(
+        ctx,
+        ActionName.BUNDLE_PUBLISH,
+        PublishBundle(
+            files={name: base64.b64encode(data).decode() for name, data in files.items()}
+        ),
+    )
+    payload = {"version": __version__}
+    discovery = client.post("/api/v1/agent/doctor", headers=agent, json=payload)
+    assert discovery.status_code == 200, discovery.text
+    assert discovery.json()["imports"] == ["absent_bundle_dependency_xyz"]
+    observations = payload | {
+        "bundle_id": bundle.bundle_id,
+        "missing": ["absent_bundle_dependency_xyz"],
+    }
+    answer = client.post("/api/v1/agent/doctor", headers=agent, json=observations)
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["missing"] == ["absent_bundle_dependency_xyz"]
+    assert client.post("/api/v1/agent/doctor", headers=person, json=payload).status_code == 403
+    assert (
+        client.post(
+            "/api/v1/agent/doctor",
+            headers=agent,
+            json=payload | {"bundle_id": bundle.bundle_id, "missing": ["not_in_the_bundle"]},
+        ).status_code
+        == 400
+    )
+
+
+@pytest.mark.parametrize("upload", ["bundle", "log"])
+def test_streamed_upload_limits_apply_before_parsing_or_action_dispatch(
+    agent_scene, monkeypatch, upload
+):
+    from etl_craft.services.operations.agent_models import AgentLog
+    from etl_craft.services.operations.bundles import PublishBundle
+
+    db, client, agent, person, _, _ = agent_scene
+    model, path, headers = (
+        (PublishBundle, "/api/v1/bundles", person)
+        if upload == "bundle"
+        else (AgentLog, "/api/v1/agent/log", agent)
+    )
+    monkeypatch.setattr(model, "MAX_BODY_BYTES", 64)
+    response = client.post(path, headers=headers, content=(b" " * 40 for _ in range(3)))
+    assert response.status_code == 400, response.text
+    assert "request body" in response.text and "at most 64" in response.text
+    with db.engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) AS n FROM AUD_PROJECT_BUNDLES")).scalar_one() == 0

@@ -20,6 +20,7 @@ from etl_craft.engine.repository.dependencies import (
 from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
+from etl_craft.engine.run_definitions import for_run
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.interventions import check_override, open_pause
 from etl_craft.execution.pipeline import run_pipeline
@@ -56,14 +57,17 @@ def run_manual(
         check_override(config, "`ignore_dependencies`", options.get("reason") or "")
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        scope = select_tasks(
-            conn,
-            pipeline_id,
-            task_code,
-            with_downstream=options.get("with_downstream", False),
-            ignore_dependencies=options.get("ignore_dependencies", False),
-        )
-        selected = _select_run(conn, pipeline_id, selector, scope, options.get("run_date"))
+        selected = _select_run(conn, pipeline_id, selector, options.get("run_date"))
+        with for_run(conn, None if selected is None else selected.pipeline_run_id):
+            scope = select_tasks(
+                conn,
+                pipeline_id,
+                task_code,
+                with_downstream=options.get("with_downstream", False),
+                ignore_dependencies=options.get("ignore_dependencies", False),
+            )
+            if selected is not None:
+                _check_selection(conn, selected, scope)
         if selected is not None:
             run_id = selected.pipeline_run_id
             if selected.status != RunStatus.IN_PROGRESS:
@@ -142,7 +146,6 @@ def _select_run(
     conn: Connection,
     pipeline_id: int,
     selector: runlog.RunSelector,
-    scope: run_scopes.TaskSelection,
     run_date: date | None,
 ) -> runlog.RunIdentity | None:
     """Only an explicit identity may resume the same manual selection."""
@@ -156,11 +159,17 @@ def _select_run(
             f"requested={run_date}; "
             "a run date cannot change. Use its original date or start a new manual run."
         )
+    return selected
+
+
+def _check_selection(
+    conn: Connection, selected: runlog.RunIdentity, scope: run_scopes.TaskSelection
+) -> None:
+    """Keep the exact admitted manual selection on an explicit resume."""
     stored = run_scopes.fetch_selection(conn, selected.pipeline_run_id)
     if stored != scope:
         raise RunStateError(
             f"run_id={selected.pipeline_run_id}: selection={stored}; expected manual "
-            f"selection={scope}. Use its original selection to resume, or omit the selector "
-            "to start a new manual run"
+            f"selection={scope}. Use its original selection to resume, or omit the "
+            "selector to start a new manual run"
         )
-    return selected

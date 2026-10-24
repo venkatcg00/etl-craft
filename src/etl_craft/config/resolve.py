@@ -135,6 +135,17 @@ class Resolver:
             raise ConfigurationError(f"{self.path}: {where} must be a non-empty string")
         return value.strip()
 
+    def secret_reference(self, raw: object, where: str) -> str | None:
+        """Validate a variable reference without requiring credentials on an unused host."""
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or not is_env_name(raw.strip()):
+            raise ConfigurationError(
+                f"{self.path}: {where} must be the name of a variable holding the secret — "
+                "a secret is never written into craft-connector.yml"
+            )
+        return raw.strip()
+
     def secret_name(
         self, raw: Any, where: str, *, profile: str | None, field_name: str
     ) -> str | None:
@@ -144,14 +155,9 @@ class Resolver:
         is not set. Only the selected profile is parsed, so another environment's secrets need
         not be present.
         """
-        if raw is None:
+        written = self.secret_reference(raw, where)
+        if written is None:
             return None
-        if not isinstance(raw, str) or not is_env_name(raw.strip()):
-            raise ConfigurationError(
-                f"{self.path}: {where} must be the name of a variable holding the secret — "
-                "a secret is never written into craft-connector.yml"
-            )
-        written = raw.strip()
         name = self.selected_name(written, profile, field_name)
         if name not in self.values:
             specific = profile_variable_name(written, profile, field_name) if profile else None

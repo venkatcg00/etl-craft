@@ -1,6 +1,9 @@
+WITH image AS ( {{metadata_capture}} )
 -- One run belonging to the requested pipeline, regardless of terminal status.
 SELECT p.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code,
        r.PIPELINE_RUN_ID AS pipeline_run_id, r.RUN_KEY AS run_key,
+       r.BUNDLE_ID AS bundle_id, r.METADATA_VERSION AS metadata_version,
+       COALESCE(r.METADATA_VERSION <> (SELECT encode(sha256(convert_to(CAST(snapshot AS text),'UTF8')),'hex') FROM image),FALSE) AS newer_metadata_available,
        r.TASK_SELECTION AS task_selection, r.EXCLUSIVE_RUN AS exclusive_run,
        r.TRIGGER_KIND AS trigger_kind, r.RUN_DATE AS run_date, r.STATUS AS status,
        r.START_DATE AS start_date, r.END_DATE AS end_date, r.SLA_STATUS AS sla_status,

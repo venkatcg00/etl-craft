@@ -21,8 +21,8 @@ Keep the returned token secret. An agent credential cannot invoke a person's act
 person's credential cannot register, claim, renew or report an agent attempt. Revoking the token
 prevents further requests; the agent stops its task processes before their leases expire.
 
-Install the same package version as the API and controller, copy the project's files to the
-agent, then start it:
+Install the same package version as the API and controller, publish a
+[project bundle](project-bundles.md), then start the agent with its bootstrap configuration:
 
 ```sh
 export ETL_CRAFT_TOKEN="$HOST_A_AGENT_TOKEN"
@@ -31,11 +31,12 @@ etl-craft agent --api https://craft.example.com --project /srv/project \
 ```
 
 `--project` resolves `craft-connector.yml` in that directory. Without it, the normal config
-resolution applies, including `--config` and `ETL_CRAFT_CONFIG`. Paths such as
-`python_scripts/load.py` and `sql_scripts/orders.sql` remain relative to that project copy.
-The agent ignores the Engine section, which may be absent. Warehouse and email settings and
-credentials required by its tasks must be available on the agent. Keep project copies aligned
-until pinned bundles are available. HTTP is accepted only on loopback; use HTTPS elsewhere.
+resolution applies, including `--config` and `ETL_CRAFT_CONFIG`.
+Execution files are downloaded from the run's pinned publication through the API. The agent
+ignores the bootstrap Engine section, which may be absent. Warehouse, Email and Cloning
+connections stay in that bootstrap configuration; their credentials must be available through
+the agent's configured Secrets provider.
+HTTP is accepted only on loopback; use HTTPS elsewhere.
 
 Claims wait up to 30 seconds on notifications. A single session connection on each API copy
 serves all claim polls. A missed notification falls back to another queue check within ten

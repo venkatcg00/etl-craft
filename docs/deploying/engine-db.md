@@ -273,3 +273,7 @@ spelling as recorded, never today's configured catalog. Values and timestamps ar
 recorded name that cannot be split stops the upgrade before any change, naming the row; correct
 or delete it with a project migration and migrate again. Upgrade those merge targets with
 [`etl-craft rehash`](../guides/sql-tasks.md#change-hash-version-2).
+
+Run admission stores `METADATA_VERSION` and `METADATA_SNAPSHOT`, plus `BUNDLE_ID` when
+artifact storage is configured. `AUD_PROJECT_BUNDLES` holds immutable manifests and publication
+actors. See [pinned project bundles](project-bundles.md) for storage and upgrade behaviour.

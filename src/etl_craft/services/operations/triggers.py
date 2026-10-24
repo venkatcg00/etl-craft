@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Row
 
 from etl_craft.core.actor import Actor, ActorKind, current_actor
+from etl_craft.core.definitions import Definition
 from etl_craft.core.enums import (
     AttemptStatus,
     Handler,
@@ -21,7 +22,7 @@ from etl_craft.engine import controls, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pauses import fetch_open_pause
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
-from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.engine.repository.tasks import fetch_admitted_parameters
 from etl_craft.execution import run_start
 from etl_craft.execution.run_types import PipelineOutcome
 from etl_craft.handlers.run_pipeline import Trigger
@@ -68,15 +69,7 @@ def initialize(ctx: OperationContext, request: RunRequest | TriggerRequest) -> P
         )
     assert request.attempt_id is not None and request.owner is not None
     with ctx.engine.begin() as conn:
-        row = conn.execute(
-            statement(conn, "trigger_context"), {"task_run_id": request.task_run_id}
-        ).one_or_none()
-        if row is None or row.handler != Handler.RUN_PIPELINE:
-            found = None if row is None else row.handler
-            raise UsageError(
-                f"trigger task_run_id={request.task_run_id}: found {found!r}; "
-                "expected an existing RUN_PIPELINE ETL task run; dispatch that task's owned attempt"
-            )
+        row = _trigger_row(conn, request.task_run_id)
         if ctx.actor != Actor(row.started_by, ActorKind(row.started_by_kind)):
             raise PermissionDeniedError(
                 f"trigger task_run_id={request.task_run_id}: actor={ctx.actor.name!r}; "
@@ -85,9 +78,9 @@ def initialize(ctx: OperationContext, request: RunRequest | TriggerRequest) -> P
         controls.assert_dispatch(conn, row.pipeline_run_id, row.task_id)
         transitions.assert_attempt(conn, request.attempt_id, request.task_run_id, request.owner)
         trigger = trigger_definition(
-            conn, row.pipeline_id, fetch_task_parameters(conn, row.task_id)
+            conn, row.pipeline_id, fetch_admitted_parameters(conn, row.task_id, row.pipeline_run_id)
         )
-        problems = trigger_graph_problems(conn)
+        problems = trigger_graph_problems(conn, (row.pipeline_code, trigger.pipeline_code))
         if problems:
             raise MetadataError("; ".join(problem for _, problem in problems))
         child_id = resolve_pipeline_id(conn, trigger.pipeline_code)
@@ -132,6 +125,26 @@ def initialize(ctx: OperationContext, request: RunRequest | TriggerRequest) -> P
         message,
         run_id,
     )
+
+
+def _trigger_row(conn: Connection, task_run_id: int) -> Row[tuple[object, ...]]:
+    """Require the parent run's admitted trigger handler before authorizing child admission."""
+    row = conn.execute(
+        statement(conn, "trigger_context"), {"task_run_id": task_run_id}
+    ).one_or_none()
+    found = (
+        None
+        if row is None
+        else Definition.read(row.metadata_snapshot).row("CFG_TASKS", "task_id", row.task_id)[
+            "handler"
+        ]
+    )
+    if row is None or found != Handler.RUN_PIPELINE:
+        raise UsageError(
+            f"trigger task_run_id={task_run_id}: found {found!r}; "
+            "expected an existing RUN_PIPELINE ETL task run; dispatch that task's owned attempt"
+        )
+    return row
 
 
 def _end_trigger(conn: Connection, request: TriggerRequest, trigger: Trigger, run_id: int) -> None:

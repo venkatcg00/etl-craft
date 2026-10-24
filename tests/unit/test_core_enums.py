@@ -134,6 +134,8 @@ EXPECTED = {
     enums.GatePolicy: {"ENFORCE", "WARN", "OFF"},
     enums.AgentStatus: {"ACTIVE", "DRAINING", "GONE"},
     enums.AgentCommand: {"DRAIN", "RESUME", "STOP"},
+    enums.ObjectStoreAuth: {"KEYS", "DEFAULT"},
+    enums.ObjectUrlStyle: {"PATH", "VIRTUAL"},
     enums.SlotKind: {"python", "warehouse"},
     enums.DatabricksQueryStatus: {
         "QUEUED",
@@ -146,6 +148,7 @@ EXPECTED = {
         "FINISHED",
     },
     enums.AgentReport: {
+        "BUNDLE",
         "ITEMS",
         "ITEM_EVENT",
         "ITEM_PREPARE",

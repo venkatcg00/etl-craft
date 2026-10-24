@@ -14,23 +14,26 @@ from dataclasses import dataclass, replace
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import acting_as, sso_groups
+from etl_craft.core.definitions import using
 from etl_craft.core.enums import ActionName, ActionScope, ApiRole, Audit, HttpMethod, Placement
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.group_claims import token_groups
-from etl_craft.engine.repository.tasks import fetch_task_parameters
+from etl_craft.engine.repository.tasks import fetch_admitted_parameters
 from etl_craft.engine.schema import InitResult
 from etl_craft.services.catalog.gaps import GapSnapshot
 from etl_craft.services.config_files import ConfigExport, ConfigSync
 from etl_craft.services.operations import (
     accounts,
     agent_claims,
+    agent_doctor,
     agent_logs,
     agent_models,
     agent_reports,
     agents,
+    bundles,
     capabilities,
     catalog,
     config_files,
@@ -145,6 +148,10 @@ API = "/api/v1"
 HOST = Placement.CONTROLLER_HOST
 
 _ROWS = (
+    Action(ActionName.AGENT_DOCTOR, agent_doctor.inspect, agent_doctor.AgentDoctor,
+           agent_doctor.AgentImports, ApiRole.AGENT, POST, f"{API}/agent/doctor", REQUEST),
+    Action(ActionName.BUNDLE_PUBLISH, bundles.publish, bundles.PublishBundle, bundles.BundleView,
+           DEVELOPER, POST, f"{API}/bundles", REQUEST),
     Action(ActionName.AGENTS, agents.list_agents, NoInput, agents.AgentsView, VIEWER, GET,
            f"{API}/agents"),
     Action(ActionName.AGENT_CONTROL, agents.command, agent_models.AgentControl,
@@ -438,7 +445,7 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     ctx = _request_context(ctx, name, request)
     claims = sso_groups.set(ctx.sso_group_ids)
     try:
-        with admitted(ctx, name, request):
+        with using(None), admitted(ctx, name, request):
             result = call(ctx, request)
         return (
             visible_result(ctx, result) if ACTIONS[name].scope == ActionScope.PIPELINE else result
@@ -474,7 +481,9 @@ def _request_codes(conn: Connection, action: Action, request: object) -> list[st
         ).one_or_none()
         if row is None:
             return []
-        child = trigger_definition(conn, row.pipeline_id, fetch_task_parameters(conn, row.task_id))
+        child = trigger_definition(
+            conn, row.pipeline_id, fetch_admitted_parameters(conn, row.task_id, row.pipeline_run_id)
+        )
         return [child.pipeline_code]
     code = getattr(request, "pipeline_code", None)
     if code is not None:

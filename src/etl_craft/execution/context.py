@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import RunStateError
 from etl_craft.engine import run_scopes
@@ -34,25 +35,36 @@ def build_task_context(
         ).one_or_none()
         if row is None:
             raise RunStateError(f"no task run with task_run_id={task_run_id}")
-        detail = TaskExecutionDetail(
-            row.handler, row.task_code, row.pipeline_id, row.pipeline_code, row.refresh_type
-        )
-        params = fetch_task_parameters(conn, row.task_id)
-        selected = (
-            None
-            if row.task_selection is None
-            else run_scopes.TaskSelection.deserialize(row.task_selection)
-        )
-        run_scopes.check_task(
-            conn,
-            row.pipeline_run_id,
-            row.task_id,
-            definition=(detail, params),
-            selection=(selected, row.exclusive_run),
-        )
+        definition = Definition.read(row.metadata_snapshot, row.pipeline_run_id, row.bundle_id)
+        with using(definition):
+            task = definition.row("CFG_TASKS", "task_id", row.task_id)
+            pipeline = definition.row("CFG_PIPELINES", "pipeline_id", row.pipeline_id)
+            detail = TaskExecutionDetail(
+                str(task["handler"]),
+                str(task["task_code"]),
+                row.pipeline_id,
+                str(pipeline["pipeline_code"]),
+                str(pipeline["refresh_type"]),
+            )
+            params = fetch_task_parameters(conn, row.task_id)
+            selected = (
+                None
+                if row.task_selection is None
+                else run_scopes.TaskSelection.deserialize(row.task_selection)
+            )
+            run_scopes.check_task(
+                conn,
+                row.pipeline_run_id,
+                row.task_id,
+                definition=(detail, params),
+                selection=(selected, row.exclusive_run),
+            )
         event_data = run_event_data(conn, row.pipeline_run_id)
     return TaskContext(
         config=config,
+        bundle_id=row.bundle_id,
+        metadata_version=row.metadata_version,
+        _definition=definition,
         pipeline_id=detail.pipeline_id,
         pipeline_code=detail.pipeline_code,
         task_id=row.task_id,

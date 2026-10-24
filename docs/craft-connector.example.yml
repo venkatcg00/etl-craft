@@ -218,3 +218,18 @@ Cloning:
 #   Oidc_client_id: etl-craft            # value — public device-flow client, RS256 ID tokens
 
 #   Oidc_groups_claim: groups             # optional claim of group names; needs OIDC settings above
+
+# Optional immutable publications; omit Artifacts for local working-tree development.
+# Artifacts:
+#   Store: file:///srv/etl-craft/artifacts
+# Object_stores:
+#   artifacts:
+#     Endpoint: https://objects.example.com
+#     Region: us-east-1
+#     Url_style: PATH
+#     Auth_mode: KEYS
+#     Access_key_id: ARTIFACT_ACCESS_KEY
+#     Secret_access_key: ARTIFACT_SECRET_KEY
+# Artifacts:
+#   Store: s3://project-artifacts/production
+#   Profile: artifacts

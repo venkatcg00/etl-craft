@@ -57,7 +57,6 @@ def test_operator_cancel_confirms_long_query_ended(
     world.config = replace(world.config, engine=profile)
     with world.engine_db.begin() as conn:
         world.pipeline_id = add_pipeline(conn, "CANCEL_QUERY")
-        world.pipeline_run_id = start_run(conn, world.pipeline_id)
         params = (
             {
                 "SQL_ACTION": "CREATE_TABLE",
@@ -70,6 +69,7 @@ def test_operator_cancel_confirms_long_query_ended(
             else {"SCRIPT_FILE": "python_scripts/cancel.py"}
         )
         task = add_task(conn, world.pipeline_id, "slow", kind, **params)
+        world.pipeline_run_id = start_run(conn, world.pipeline_id)
     save_project(world)
     scripts = world.config.python_scripts_dir
     scripts.mkdir(exist_ok=True)

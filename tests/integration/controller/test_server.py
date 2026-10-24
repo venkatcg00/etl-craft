@@ -45,7 +45,7 @@ def test_only_one_leader_and_session_release_not_history_controls_restart(engine
         )
 
 
-def test_working_set_retains_only_active_graphs_and_refreshes_metadata(engine_db):
+def test_working_set_retains_admitted_graphs_across_edits_and_restart(engine_db):
     ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     with ctx.engine.begin() as conn:
         first = add_pipeline(conn, "P")
@@ -61,24 +61,26 @@ def test_working_set_retains_only_active_graphs_and_refreshes_metadata(engine_db
         )
     working = WorkingSet()
     assert [r.pipeline_run_id for r in working.refresh(ctx)] == [run]
-    assert set(working.graphs) == {first}
-    version = working.graphs[first][0]
+    assert set(working.graphs) == {run}
+    graph = working.graphs[run]
     with ctx.engine.begin() as conn:
         conn.execute(
             text("UPDATE CFG_PIPELINES SET PIPELINE_NAME='updated' WHERE PIPELINE_ID=:id"),
             {"id": first},
         )
     working.refresh(ctx)
-    assert working.graphs[first][0] != version
+    assert working.graphs[run] is graph
     with ctx.engine.begin() as conn:
         task = add_task(conn, first, "temporary", "PYTHON")
     working.refresh(ctx)
-    version = working.graphs[first][0]
+    assert working.graphs[run] is graph
     with ctx.engine.begin() as conn:
         conn.execute(text("DELETE FROM CFG_TASKS WHERE TASK_ID=:id"), {"id": task})
     working.refresh(ctx)
-    assert working.graphs[first][0] != version
-    assert working.graphs[first][1].tasks == []
+    assert working.graphs[run] is graph
+    assert working.graphs[run].tasks == []
+    restarted = WorkingSet()
+    assert restarted.refresh(ctx)[0].graph_data == graph
     with ctx.engine.begin() as conn:
         conn.execute(
             text(

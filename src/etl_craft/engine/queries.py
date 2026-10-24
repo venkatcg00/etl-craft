@@ -12,7 +12,17 @@ from etl_craft.dialects.engine import for_engine
 
 def statement(bind: Connection | Engine, name: str) -> TextClause:
     """Return catalog query ``name`` for the Engine DB ``bind`` is connected to."""
-    return text(for_engine(bind).query(name))
+    from etl_craft.core.definitions import current
+    from etl_craft.dialects.engine.definitions import QUERIES
+
+    dialect = for_engine(bind)
+    sql = dialect.query(name)
+    definition = current.get()
+    if definition is not None and name in QUERIES:
+        expanded = dialect.admitted_query(sql, definition, name=name)
+        if expanded != sql:
+            return text(expanded).bindparams(_admitted_metadata=definition.text)
+    return text(sql)
 
 
 def run_script(conn: Connection, statements: Iterable[str]) -> None:
