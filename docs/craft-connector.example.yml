@@ -235,3 +235,7 @@ Cloning:
 # Artifacts:
 #   Store: s3://project-artifacts/production
 #   Profile: artifacts
+
+# Managed Engine DB examples: docs/examples/lakebase-engine.yml and
+# docs/examples/snowflake-postgres-engine.yml. Add Managed_provider and issuer fields
+# inside the Engine profile; require TLS and keep Cloning.Enabled false.

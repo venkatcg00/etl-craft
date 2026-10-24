@@ -20,6 +20,7 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     EmailTransport,
     GatePolicy,
+    ManagedProvider,
     RetryOn,
     SecretsSource,
     TableFormat,
@@ -79,6 +80,11 @@ class ConnectionProfile:
     extra: dict[str, Any] = field(default_factory=dict)
     schema: str = ""
     listen_jdbc_url: str | None = None
+
+    @property
+    def managed_provider(self) -> ManagedProvider:
+        """Return the explicitly selected managed Engine DB platform."""
+        return ManagedProvider(self.extra.get("managed_provider", ManagedProvider.NONE))
 
     @property
     def secret_var(self) -> str:

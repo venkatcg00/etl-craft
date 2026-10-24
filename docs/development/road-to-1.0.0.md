@@ -154,7 +154,8 @@ item's text, or work done early under another item.
 | S5.F Pinned project bundles | Done | #239 | Immutable project publications and admitted metadata shared by local tasks, API-only agents, retries and controller recovery |
 | S5.G Projects in one Engine DB | Done | #245 | Project-scoped metadata, bundles, grants, lineage, migrations and admission |
 | S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
-| S5.I and later | Not started | | |
+| S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
+| S5.J and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -313,6 +314,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.I exercises initialization, migration, execution, reservation loss and a child exit after
+committed success through real CLI processes on local PostgreSQL. Unit checks cover both
+provider exchanges, fresh tokens, TLS, cloning, bound Snowflake arguments and secret-safe
+refusals. Live managed acceptance is unavailable: neither ETL_CRAFT_TEST_SNOWFLAKE_ENGINE_CONFIG
+nor ETL_CRAFT_TEST_DATABRICKS_ENGINE_CONFIG is configured. The two cloud cases are retained for
+live acceptance and do not add cloud work to pull-request CI.
 
 S5.H validates both Engine DB migrations, PostgreSQL live-session accounting, startup admission,
 shared UI task limits, ownership recovery and process death. Static/docs and unit checks pass;
@@ -679,6 +687,22 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S5.I derives completion from its bullets: provider-specific database credential issuance,
+  TLS, pooled recycling, cloning policy and managed Engine DB acceptance scenarios.
+- With owner approval, Managed_provider selects NONE (default), SNOWFLAKE or DATABRICKS.
+  Snowflake adds Account/Instance, Lakebase adds Workspace_url/Endpoint, and both reuse the
+  existing OAuth fields. Ordinary PostgreSQL/SQLite settings remain valid; no core dependency
+  or Engine DB migration is needed.
+- With owner approval, enabled cloning fails before work rather than warning or silently
+  switching it off. Retained bundles are checked against the host's managed Engine DB policy.
+- Provider database tokens are not ordinary platform OAuth tokens: Lakebase needs its database
+  credential API; Snowflake needs GENERATE_POSTGRES_ACCESS_TOKEN_FOR_USER through the existing
+  optional driver. Both feed the existing PostgreSQL connection creator and ten-minute recycle
+  ceiling; no second SQLAlchemy engine is created. Credential requests refuse redirects.
+- Managed acceptance uses a disposable schema and the common CLI procedure, including process
+  loss after reservation and a child exit after committing success. The same procedure runs on
+  local PostgreSQL so cloud unavailability cannot leave its harness untested.
 
 - S5.H derives completion from its bullets: shared deployment accounting, one engine per process,
   bounded local child connections, doctor reporting and documented PgBouncer session affinity.

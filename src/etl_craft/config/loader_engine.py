@@ -15,6 +15,7 @@ from etl_craft.config.loader_helpers import (
     profile_schema,
     reject_unknown,
 )
+from etl_craft.config.managed_engine import MANAGED_FIELDS, validate_managed_engine
 from etl_craft.config.model import ConnectionProfile
 from etl_craft.config.resolve import Resolver
 from etl_craft.core.enums import AuthMode
@@ -38,7 +39,9 @@ def parse_engine(
         path,
     )
     block = field_keys(block, where, path)
-    reject_unknown(block, CONNECTION_FIELDS | {"listen_jdbc_url"}, where, path, fields=True)
+    reject_unknown(
+        block, CONNECTION_FIELDS | {"listen_jdbc_url", *MANAGED_FIELDS}, where, path, fields=True
+    )
     fields = Fields(block, where, profiled.profile, resolver, path)
     jdbc_url = fields.value("jdbc_url", required=True) or ""
     try:
@@ -77,7 +80,8 @@ def parse_engine(
         if auth_mode != AuthMode.NONE
         else {}
     )
-    return ConnectionProfile(
+    extra.update({key: value for key in MANAGED_FIELDS if (value := fields.value(key))})
+    profile = ConnectionProfile(
         section="ENGINE",
         name=profiled.profile or "",
         jdbc_url=jdbc_url,
@@ -87,3 +91,6 @@ def parse_engine(
         schema=profile_schema(fields),
         listen_jdbc_url=listen_url,
     )
+
+    validate_managed_engine(profile)
+    return profile

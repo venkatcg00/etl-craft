@@ -8,6 +8,7 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.ManagedProvider: {"NONE", "SNOWFLAKE", "DATABRICKS"},
     enums.ItemAction: {"MARK", "RERUN", "CANCEL"},
     enums.ItemStatus: {
         "QUEUED",

@@ -1,0 +1,23 @@
+# All credential fields name variables; configure the instance and OAuth database role first.
+Secrets:
+  Source_type: ENVIRONMENT  # value
+Engine:
+  dev:
+    Jdbc_url: LAKEBASE_JDBC_URL  # variable — jdbc:postgresql://host/database?sslmode=verify-full
+    Schema: etl_craft  # value
+    User: LAKEBASE_POSTGRES_USER  # variable
+    Auth_mode: OAUTH  # value
+    Client_id: LAKEBASE_CLIENT_ID  # variable
+    Secret: LAKEBASE_CLIENT_SECRET  # variable
+    Token_url: LAKEBASE_TOKEN_URL  # variable — https://workspace/oidc/v1/token
+    Scope: all-apis  # value
+    Managed_provider: DATABRICKS  # value
+    Workspace_url: LAKEBASE_WORKSPACE_URL  # variable — https://workspace, with no path
+    Endpoint: LAKEBASE_ENDPOINT  # variable — projects/p/branches/b/endpoints/e
+Warehouse:
+  Name: duckdb  # value
+  dev:
+    Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
+    Schema: main  # value
+Cloning:
+  Enabled: False  # value

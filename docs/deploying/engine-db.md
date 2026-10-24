@@ -277,3 +277,54 @@ or delete it with a project migration and migrate again. Upgrade those merge tar
 Run admission stores `METADATA_VERSION` and `METADATA_SNAPSHOT`, plus `BUNDLE_ID` when
 artifact storage is configured. `AUD_PROJECT_BUNDLES` holds immutable manifests and publication
 actors. See [pinned project bundles](project-bundles.md) for storage and upgrade behaviour.
+
+## Managed PostgreSQL on Snowflake and Databricks
+
+Set `Engine.<profile>.Managed_provider` to `SNOWFLAKE` or `DATABRICKS`. Omission means
+`NONE`, preserving ordinary PostgreSQL and SQLite profiles. Managed engines use the same
+PostgreSQL schema, migrations, process reservations, leases and recovery paths. They require
+`Auth_mode: OAUTH` and `sslmode=require`, `verify-ca` or `verify-full` on both `Jdbc_url` and
+`Listen_jdbc_url` when supplied. Prefer `verify-full` with the provider's trusted certificate.
+The connection addresses must name the same Engine DB.
+
+Existing `Client_id`, `Secret` (a variable name), `Token_url` and optional `Scope` authenticate
+the issuing platform. Each new PostgreSQL connection obtains a fresh database token; pooled
+connections recycle after ten minutes. Long-lived authenticated sessions do not need a new
+password until they reconnect. Provider errors identify the profile without repeating token
+responses or secrets. Credential requests refuse redirects.
+
+For **Databricks Lakebase**, set `Workspace_url` to the workspace HTTPS origin and `Endpoint`
+to `projects/<project>/branches/<branch>/endpoints/<endpoint>`. Set `Token_url` to the workspace's
+`/oidc/v1/token` endpoint and `Scope: all-apis`. The client-credentials exchange uses HTTP Basic
+authentication; its workspace token is exchanged at `/api/2.0/postgres/credentials` for the
+Postgres password. Provision a Lakebase OAuth database role for the service principal named by
+`User`, with permission to use the endpoint and maintain the Engine DB schema. See the
+[Databricks API connection guide](https://docs.databricks.com/aws/en/oltp/projects/external-apps-manual-api).
+No Databricks SDK is required for this flow.
+
+For **Snowflake Postgres**, install `etl-craft[snowflake]` and set `Account` to the Snowflake
+account identifier and `Instance` to the Postgres instance name. `Token_url`, `Client_id`,
+`Secret` and `Scope` configure an OAuth client-credentials issuer accepted by the Snowflake
+account. The optional Snowflake driver presents that platform token, then executes
+`GENERATE_POSTGRES_ACCESS_TOKEN_FOR_USER(instance, user)` with bound arguments. The returned
+15-minute token becomes the PostgreSQL password. Enable Snowflake authorization on the
+instance, map the Postgres `User` to the issuing Snowflake identity, and grant instance access.
+The Snowflake platform OAuth token itself is **not** a Postgres password. See
+[Snowflake Postgres token authentication](https://docs.snowflake.com/en/user-guide/snowflake-postgres/postgres-token-auth).
+
+Keep `Cloning.Enabled: False`: managed-platform audit tables are directly accessible from the
+platform. Enabled cloning fails configuration validation and doctor, with the setting to fix;
+it is never silently disabled. The managed-provider choice and issuer credentials remain
+host-local when projects use published bundles.
+
+Complete examples are in [Lakebase](../examples/lakebase-engine.yml) and
+[Snowflake Postgres](../examples/snowflake-postgres-engine.yml). Standard
+[setup and migration commands](doctor-and-setup.md) apply; etl-craft does not provision cloud
+instances, roles or network policies.
+
+For live acceptance, set `ETL_CRAFT_TEST_DATABRICKS_ENGINE_CONFIG` or
+`ETL_CRAFT_TEST_SNOWFLAKE_ENGINE_CONFIG` to an absolute configuration path for the managed
+Engine DB. The tests create and drop a unique schema, so use a dedicated acceptance database
+with schema-creation permission. They run `init-db`, `migrate`, a Python task, process loss
+after reservation and a child exit after committing its outcome. Run the affected cloud
+marker with `-k managed_engine_db`; missing configuration is reported as unavailable.

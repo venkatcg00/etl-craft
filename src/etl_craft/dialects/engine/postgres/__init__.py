@@ -18,9 +18,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import NullPool
 
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
+from etl_craft.config.managed_engine import validate_managed_engine
 from etl_craft.core.actor import Actor
 from etl_craft.core.definitions import Definition
-from etl_craft.core.enums import AuthMode
+from etl_craft.core.enums import AuthMode, ManagedProvider
 from etl_craft.core.errors import ConfigurationError, EngineDbError, LockTimeoutError
 from etl_craft.core.outage import OutageBudget
 from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
@@ -136,6 +137,7 @@ class PostgresEngineDialect(EngineDialect):
         """
         from etl_craft.config import profile_secret
 
+        validate_managed_engine(profile)
         url = parse_postgres_url(profile.jdbc_url)
         creator = riding_out_outages(
             postgres_creator(profile, profile_secret(config, profile), url),
@@ -340,14 +342,19 @@ def postgres_creator(profile: ConnectionProfile, secret: str, url: JdbcUrl) -> C
     def connect() -> Any:
         import psycopg
 
-        auth = psycopg_auth_kwargs(
-            profile.auth_mode,
-            user=profile.user,
-            secret=secret,
-            extra=profile.extra,
-            host=url.host,
-            port=port,
-        )
+        if profile.managed_provider == ManagedProvider.NONE:
+            auth = psycopg_auth_kwargs(
+                profile.auth_mode,
+                user=profile.user,
+                secret=secret,
+                extra=profile.extra,
+                host=url.host,
+                port=port,
+            )
+        else:
+            from etl_craft.dialects.managed_postgres import database_token
+
+            auth = {"password": database_token(profile, secret)}
         # The URL's own query comes last, so a setting the team wrote (sslmode) wins.
         settings = {
             "host": url.host,

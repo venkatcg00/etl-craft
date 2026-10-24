@@ -18,6 +18,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Managed Snowflake Postgres and Databricks Lakebase Engine DB profiles mint a fresh database
+  token per connection through existing OAuth and PostgreSQL pooling. Set `Managed_provider`
+  and the provider's `Account`/`Instance` or `Workspace_url`/`Endpoint` fields. Managed profiles
+  require TLS and refuse enabled cloning. Ordinary PostgreSQL/SQLite profiles remain unchanged;
+  no core dependency is added. OAuth credential requests refuse redirects.
+
 - Projects share one Engine DB while retaining separate pipeline codes, warehouses,
   target contracts, lineage history, grants, migration ledgers and docs publications.
   Select `--project CODE` or `Orchestration.Project` (default `default`); project API

@@ -46,3 +46,6 @@ Auth:
 
 # SSO deployments may set Auth.Oidc_groups_claim: groups beside Oidc_issuer and Oidc_client_id.
 # Sessions and admitted runs retain group IDs; current account/group/grant restrictions apply.
+
+# For a managed PostgreSQL Engine DB, see docs/examples/lakebase-engine.yml or
+# docs/examples/snowflake-postgres-engine.yml; keep Cloning.Enabled false.

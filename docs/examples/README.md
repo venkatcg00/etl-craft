@@ -191,3 +191,12 @@ confirmation. Tags are current metadata labels, independent of schedules and per
 The [pipeline trigger configuration example](../guides/pipeline-triggers.md#configuration-file-example)
 adds an ETL `RUN_PIPELINE` task and its three parameters through the existing config CSV files.
 It covers controller execution, WAIT/DETACH modes and explicit rerun generations.
+
+## Managed PostgreSQL Engine DBs
+
+- `lakebase-engine.yml`: Lakebase OAuth database credentials, with a local DuckDB warehouse.
+- `snowflake-postgres-engine.yml`: Snowflake-issued Postgres tokens, with a local DuckDB warehouse.
+
+Both require TLS and keep cloning disabled. Replace the local Warehouse section with the team's
+warehouse definition as needed. See [managed Engine DB setup](../deploying/engine-db.md#managed-postgresql-on-snowflake-and-databricks)
+for provider permissions and live acceptance.

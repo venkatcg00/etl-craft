@@ -48,6 +48,7 @@ from etl_craft.config.loader_orchestration import (
     parse_retry_on,
 )
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
+from etl_craft.config.managed_engine import managed_cloning_problem
 from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectionProfile, ConnectorConfig
 from etl_craft.config.object_stores import ARTIFACT_KEYS, STORE_KEYS, with_artifacts
 from etl_craft.config.resolve import Resolver
@@ -260,13 +261,21 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         log_dir=relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path),
     )
     config = with_artifacts(config, raw, path, resolver)
-    if warehouse is not None:
-        # Every warehouse profile names the database the engine connects to and writes in.
+    _validate_connections(config, path)
+    return config
+
+
+def _validate_connections(config: ConnectorConfig, path: Path) -> None:
+    """Check the selected warehouse catalog and managed Engine DB cloning policy."""
+    if problem := managed_cloning_problem(config.engine, config.cloning):
+        raise ConfigurationError(f"{path}: {problem}")
+    if config.warehouse is not None:
         try:
             active_catalog(config)
         except ConfigurationError as error:
-            raise ConfigurationError(f"{path}: Warehouse.{warehouse.name}: {error}") from error
-    return config
+            raise ConfigurationError(
+                f"{path}: Warehouse.{config.warehouse.name}: {error}"
+            ) from error
 
 
 def _check_layout(raw: object, path: Path) -> dict[str, object]:
