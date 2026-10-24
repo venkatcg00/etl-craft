@@ -155,7 +155,8 @@ item's text, or work done early under another item.
 | S5.G Projects in one Engine DB | Done | #245 | Project-scoped metadata, bundles, grants, lineage, migrations and admission |
 | S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
 | S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
-| S5.J and later | Not started | | |
+| S5.J | Done | #248 | Shared local/queue contracts and a ten-project demo. |
+| S6.A and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -315,12 +316,20 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
+S5.J validates shared local/queue contracts on PostgreSQL, including process death, claim
+acknowledgement loss, cancellation, controller recovery and capacity. Both providers and the
+existing atomic limit cases pass twenty successive local rounds. The ten-project demo,
+existing real-agent/protocol checks, managed acceptance harness, unit suite and static/docs
+checks pass. No warehouse SQL changed; installed-wheel demos and the full platform matrix
+remain CI gates. S5.I native-password cloud results are recorded below.
+
 S5.I exercises initialization, migration, execution, reservation loss and a child exit after
-committed success through real CLI processes on local PostgreSQL. Unit checks cover both
-provider exchanges, fresh tokens, TLS, cloning, bound Snowflake arguments and secret-safe
-refusals. Live managed acceptance is unavailable: neither ETL_CRAFT_TEST_SNOWFLAKE_ENGINE_CONFIG
-nor ETL_CRAFT_TEST_DATABRICKS_ENGINE_CONFIG is configured. The two cloud cases are retained for
-live acceptance and do not add cloud work to pull-request CI.
+committed success through real CLI processes on local PostgreSQL, live Lakebase and live
+Snowflake Postgres with native password credentials. Unit checks cover both provider exchanges, fresh tokens, TLS, cloning,
+bound Snowflake arguments and secret-safe refusals. End-to-end automatic token issuance remains
+unverified because issuer credentials are not configured. Managed cloud setup uses a
+bounded deadline suited to WAN schema/catalog round trips; local command limits are unchanged.
+The cloud cases do not add work to pull-request CI.
 
 S5.H validates both Engine DB migrations, PostgreSQL live-session accounting, startup admission,
 shared UI task limits, ownership recovery and process death. Static/docs and unit checks pass;
@@ -687,6 +696,21 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S5.J shares submission, cancellation, resource admission, worker loss, stale completion and
+  controller restart checks across local and queue providers. Agent registration/version and
+  drain commands are queue-specific; claim-acknowledgement loss maps to the local owner dying
+  after binding and to one of two API copies dying after the queue claim commits.
+- S5.J extends coverage of existing implementations. Existing-correct behavior is checked by
+  mutation proofs rather than inventing product changes to make every test fail on old source.
+  The shared foreign-handle check exposed a queue status/cancellation defect and fails before
+  that fix. The internal agent.after_claim fault point makes lost acknowledgements reproducible.
+- The ten-project demo is a separate optional example, keeping normal installed-wheel demo
+  scenarios unchanged. Its automated test runs once in CI; the twenty-round contract gate runs
+  locally. No new CI job or repeated CI suite is added.
+- At the owner's request, S5.J carries S5.I's live native-password acceptance results and its
+  cloud-only deadline correction. Local command deadlines remain unchanged; automatic provider
+  token issuance still requires issuer credentials for end-to-end acceptance.
 
 - S5.I derives completion from its bullets: provider-specific database credential issuance,
   TLS, pooled recycling, cloning policy and managed Engine DB acceptance scenarios.

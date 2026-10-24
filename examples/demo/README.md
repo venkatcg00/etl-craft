@@ -258,3 +258,24 @@ working-tree execution needs no artifact store. See the pinned project bundles g
 `default`). Use `--project-dir` for a publication source directory. A shared Engine DB can
 hold another project with the same pipeline codes and its own approved Warehouse, Email and
 Cloning definitions; see the [project bundle guide](../../docs/deploying/project-bundles.md).
+
+## Ten projects on one Engine DB
+
+After setup, with an admin credential and the deployment's `default` pool active, run:
+
+```bash
+python examples/demo/ten_projects.py examples/demo/craft-connector.yml
+```
+
+The script creates `demo_team_01` through `demo_team_10`, each with a `POOL_DEMO` pipeline and
+one `pool_demo.py` task, then runs each pipeline through the normal CLI. All ten use the Engine
+DB from that configuration. Existing projects and deployment pools are preserved. The generated
+CSV files are temporary; the project definitions and execution history remain in the Engine DB.
+Use these demo project names only for this example: reapplying their files retires other rows
+inside those same demo namespaces.
+
+For another configuration path, copy `python_scripts/pool_demo.py` into that project's
+`python_scripts/` first. This example uses local execution without an artifact store; the
+[agent deployment guide](../../docs/deploying/agents.md) covers publishing projects for queue
+execution. The contract gate is `ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -m cluster`; it exercises both providers on
+PostgreSQL, with agent-only registration/drain/API-failover cases selected for queue execution.

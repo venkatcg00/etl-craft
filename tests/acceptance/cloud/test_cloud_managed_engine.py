@@ -9,6 +9,8 @@ from etl_craft.core.enums import ManagedProvider
 from fixtures.cloud import require_variables
 from fixtures.managed_postgres import managed_project, run_and_recover
 
+pytestmark = pytest.mark.timeout(1200)
+
 
 @pytest.mark.parametrize(
     "provider",
@@ -21,5 +23,5 @@ def test_managed_engine_db_initializes_migrates_runs_and_recovers(provider, tmp_
     require_variables(provider, ("ENGINE_CONFIG",))
     config = load_config(os.environ[f"ETL_CRAFT_TEST_{provider}_ENGINE_CONFIG"])
     assert config.engine.managed_provider == provider
-    with managed_project(config, tmp_path, monkeypatch) as project:
-        run_and_recover(project)
+    with managed_project(config, tmp_path, monkeypatch, timeout=900) as project:
+        run_and_recover(project, timeout=900)

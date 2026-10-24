@@ -163,6 +163,7 @@ addopts = ["--strict-markers", "--strict-config"]
 timeout = 120
 markers = [
     "unit: pure Python, no services",
+    "cluster: shared local/queue pool contracts on PostgreSQL",
     "engine_sqlite: Engine DB on SQLite",
     "engine_postgres: Engine DB on PostgreSQL",
     "warehouse_postgres: PostgreSQL warehouse",

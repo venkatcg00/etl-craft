@@ -140,7 +140,7 @@ class CliProject:
     task_id: int
     processes: list
 
-    def start(self, *arguments, fault=None):
+    def start(self, *arguments, fault=None, module="etl_craft"):
         log_path = self.config.project_dir / f"cli-{len(self.processes)}.log"
         env = {**os.environ, "ETL_CRAFT_CONFIG": str(self.config.config_path)}
         env.pop("ETL_CRAFT_FAULT", None)
@@ -148,7 +148,7 @@ class CliProject:
             env["ETL_CRAFT_FAULT"] = fault
         with log_path.open("wb") as output:
             process = subprocess.Popen(
-                [sys.executable, "-m", "etl_craft", *arguments],
+                [sys.executable, "-m", module, *arguments],
                 cwd=self.config.project_dir,
                 env=env,
                 stdout=output,
@@ -158,9 +158,9 @@ class CliProject:
         self.processes.append(command)
         return command
 
-    def run(self, *arguments, fault=None):
+    def run(self, *arguments, fault=None, timeout=30):
         command = self.start(*arguments, fault=fault)
-        return command.wait(), command.output
+        return command.wait(timeout=timeout), command.output
 
     def wait_for(self, sql, *, expected, timeout=10):
         deadline = time.monotonic() + timeout

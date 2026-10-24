@@ -53,6 +53,8 @@ class QueuePool:
 
     def status(self, handle: ExecutionHandle) -> HandleStatus:
         """Read the exact attempt; QUEUED is pending, never a reason for local fallback."""
+        if handle.pool != self.name:
+            return HandleStatus(handle, HandleState.UNKNOWN)
         with self.engine.connect() as conn:
             row = conn.execute(
                 statement(conn, "agent_work"), {"attempt_id": handle.attempt_id}
@@ -73,6 +75,8 @@ class QueuePool:
 
     def cancel(self, handle: ExecutionHandle, grace_seconds: float) -> None:
         """Request remote cancellation; only the owner acknowledges stopping its child."""
+        if handle.pool != self.name:
+            return
         with self.engine.begin() as conn:
             row = conn.execute(
                 statement(conn, "agent_work"), {"attempt_id": handle.attempt_id}
