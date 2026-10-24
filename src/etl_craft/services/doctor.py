@@ -202,17 +202,14 @@ def _connection_budget(config: ConnectorConfig, engine: Engine) -> list[Check]:
         limit = for_engine(engine).max_connections(conn)
         if limit is None:
             return []
-        if not for_engine(conn).has_table(conn, "AUD_CONNECTION_RESERVATIONS"):
-            return [
-                fail(
-                    "Engine DB connection budget",
-                    "reservation table is missing; run etl-craft migrate",
-                )
-            ]
-        live = reservations(conn, datetime.now(UTC))
-        agents = conn.execute(statement(conn, "connection_budget_agents")).scalar_one()
+        if for_engine(conn).has_table(conn, "AUD_CONNECTION_RESERVATIONS"):
+            live = reservations(conn, datetime.now(UTC))
+            agents = conn.execute(statement(conn, "connection_budget_agents")).scalar_one()
+        else:
+            live = None
+            agents = 0
     planned = footprint(config, ProcessRole.CONTROLLER)
-    budget = live if live.total else planned
+    budget = live if live is not None and live.total else planned
     detail = (
         f"{budget.total} of max_connections={limit}: "
         f"{budget.roles.count(ProcessRole.CONTROLLER)} controller(s), "
@@ -220,7 +217,11 @@ def _connection_budget(config: ConnectorConfig, engine: Engine) -> list[Check]:
         f"{budget.roles.count(ProcessRole.RUN)} local run(s); process pools {budget.pool} "
         f"+ dedicated sessions {budget.sessions} + one per task process ({budget.tasks}); "
         f"{agents} registered API-only agents add 0 connections; overflow 0; "
-        + ("registered deployment total" if live.total else "proposed controller")
+        + (
+            "registered deployment total"
+            if live is not None and live.total
+            else "proposed controller"
+        )
     )
     if budget.total * 5 > limit * 4:
         return [

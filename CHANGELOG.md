@@ -13,7 +13,8 @@ All notable changes are recorded here. The format follows
   actor-stamped process reservation history; ownership and notification sessions share the
   process engine and may use the existing direct `Listen_jdbc_url` address. Synchronous HTTP
   tasks share the UI process's reserved child allowance. Engine DB sessions use a process
-  `application_name` tag so orphaned children retain their connection reservation.
+  `application_name` tag so orphaned children retain their connection reservation. Fresh setup
+  checks the proposed budget before creating the reservation table.
 
 ### Added
 

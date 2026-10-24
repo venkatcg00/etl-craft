@@ -73,6 +73,8 @@ Local task children use `NullPool` and return each connection after use. API-onl
 task processes open zero Engine DB connections.
 
 `doctor` reports the registered deployment total, or a proposed controller when none is running.
+Before setup creates the reservation table, it checks that proposed footprint; missing tables
+and pending migrations remain separate doctor checks.
 A startup or doctor check fails above 80% of PostgreSQL `max_connections`, naming the total and
 remedy. Admission is serialized, so two replicas cannot spend the same remaining budget.
 
