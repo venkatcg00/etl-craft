@@ -10,14 +10,20 @@ from sqlalchemy.engine import Connection
 from etl_craft.core.errors import HandlerError
 from etl_craft.core.text import split_object_ref
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.pipelines import current_project_id
 
 
-def _key(target: str) -> dict[str, str]:
+def _key(target: str) -> dict[str, str | int]:
     """Split a resolved ``catalog.schema.table`` into its lowercased components."""
     catalog, schema, table = split_object_ref(target.lower())
     if catalog is None:
         raise HandlerError(f"{target!r} names no catalog; resolve it to catalog.schema.table")
-    return {"catalog": catalog, "schema": schema, "table": table}
+    return {
+        "project_id": current_project_id(),
+        "catalog": catalog,
+        "schema": schema,
+        "table": table,
+    }
 
 
 def fetch_hash_version(conn: Connection, target: str) -> int | None:

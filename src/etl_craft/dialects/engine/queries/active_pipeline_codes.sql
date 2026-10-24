@@ -1,5 +1,5 @@
 -- Every active pipeline code.
 SELECT PIPELINE_CODE AS pipeline_code
 FROM CFG_PIPELINES
-WHERE ACTIVE_FLAG = 'Y'
+WHERE ACTIVE_FLAG = 'Y' AND PROJECT_ID=:project_id
 ORDER BY PIPELINE_CODE

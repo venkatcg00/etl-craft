@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -14,7 +16,24 @@ from etl_craft.core.errors import MetadataError
 from etl_craft.core.tags import tag_problems
 from etl_craft.core.text import suggest
 from etl_craft.core.time import as_utc
-from etl_craft.engine.queries import statement
+from etl_craft.engine.queries import project_statement, statement
+
+_project_id: ContextVar[int | None] = ContextVar("etl_craft_project_id", default=None)
+
+
+@contextmanager
+def selected_project(project_id: int | None) -> Iterator[None]:
+    """Scope code-based pipeline lookups to one selected project."""
+    token = _project_id.set(project_id)
+    try:
+        yield
+    finally:
+        _project_id.reset(token)
+
+
+def current_project_id() -> int:
+    """Return the selected project, defaulting legacy local execution to its migrated project."""
+    return _project_id.get() or 1
 
 
 def with_suggestions(message: str, unknown: str, candidates: list[str]) -> str:
@@ -23,13 +42,22 @@ def with_suggestions(message: str, unknown: str, candidates: list[str]) -> str:
     return f"{message} — did you mean: {', '.join(hints)}" if hints else message
 
 
-def resolve_pipeline_id(conn: Connection, pipeline_code: str) -> int:
+def resolve_pipeline_id(
+    conn: Connection, pipeline_code: str, *, before_projects: bool = False
+) -> int:
     """Return the id of active pipeline ``pipeline_code``; ``MetadataError`` if there is none."""
+    query = project_statement if before_projects else statement
     pipeline_id = conn.execute(
-        statement(conn, "pipeline_id_by_code"), {"pipeline_code": pipeline_code}
+        query(conn, "pipeline_id_by_code"),
+        {"pipeline_code": pipeline_code, "project_id": current_project_id()},
     ).scalar_one_or_none()
     if pipeline_id is None:
-        known = list(conn.execute(statement(conn, "active_pipeline_codes")).scalars())
+        known = list(
+            conn.execute(
+                query(conn, "active_pipeline_codes"),
+                {"project_id": current_project_id()},
+            ).scalars()
+        )
         raise MetadataError(
             with_suggestions(
                 f"no active pipeline with PIPELINE_CODE={pipeline_code!r}", pipeline_code, known

@@ -142,12 +142,14 @@ def test_table_name_collision_refuses_before_an_earlier_pending_migration_writes
 def test_package_config_manifest_matches_the_current_schema():
     import re
 
+    from fixtures.scripts import load
+
     root = Path(__file__).parents[3] / "src/etl_craft/dialects/engine"
     for dialect in ("sqlite", "postgres"):
         declared = set(
             re.findall(
                 r"^CREATE TABLE (CFG_\w+)",
-                (root / dialect / "schema.sql").read_text(),
+                load("reference_pages").schema_text(root / dialect / "schema.sql"),
                 re.MULTILINE,
             )
         )

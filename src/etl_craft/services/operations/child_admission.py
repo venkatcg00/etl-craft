@@ -24,6 +24,8 @@ def initiating_context(conn: Connection, ctx: OperationContext, run_id: int) -> 
         role=ApiRole(account.role) if account and account.active_flag == YesNo.YES else None,
         sso_group_ids=decode_groups(row.sso_group_ids, f"run_id={run_id}"),
         credential_token_id=None,
+        project_id=row.project_id,
+        project=row.project_code,
     )
 
 

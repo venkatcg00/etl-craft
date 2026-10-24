@@ -538,8 +538,10 @@ def test_http_run_details_expose_parent_and_child_links(trigger_scene):
     child = invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with TestClient(create_app(ctx)) as client:
         headers = {"Authorization": f"Bearer {token}"}
-        parent = client.get(f"/api/v1/runs/{run}", headers=headers)
-        nested = client.get(f"/api/v1/runs/{child.pipeline_run_id}", headers=headers)
+        parent = client.get(f"/api/v1/projects/default/runs/{run}", headers=headers)
+        nested = client.get(
+            f"/api/v1/projects/default/runs/{child.pipeline_run_id}", headers=headers
+        )
     assert parent.status_code == nested.status_code == 200
     assert parent.json()["child_run_ids"] == [child.pipeline_run_id]
     assert nested.json()["parent_run_id"] == run
@@ -747,14 +749,16 @@ def test_child_failure_details_transfer_without_aggregating_counts(trigger_scene
 def test_trigger_request_refuses_missing_or_other_handler_attempt(trigger_scene, missing):
     from dataclasses import replace
 
-    from etl_craft.core.errors import UsageError
+    from etl_craft.core.errors import ResourceNotFoundError, UsageError
 
     scene = trigger_scene(handler=Handler.RUN_PIPELINE if missing else Handler.PYTHON)
     project, ctx, _, _, _ = scene
     request = owned(scene)
     if missing:
         request = replace(request, task_run_id=request.task_run_id + 1000)
-    with pytest.raises(UsageError, match="expected an existing RUN_PIPELINE"):
+    error = ResourceNotFoundError if missing else UsageError
+    message = "outside this project or missing" if missing else "expected an existing RUN_PIPELINE"
+    with pytest.raises(error, match=message):
         invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with project.engine.connect() as conn:
         assert (

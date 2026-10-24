@@ -123,6 +123,10 @@ def config_identity_problems(conn: Connection) -> list[str]:
         ("CFG_BUSINESS_RULES", "BUSINESS_RULE_ID", ("TASK_ID", "BUSINESS_RULE_NAME")),
     )
     for table, id_column, columns in identities:
+        if table == "CFG_PIPELINES" and "project_id" in {
+            name.lower() for name in for_engine(conn).column_names(conn, table)
+        }:
+            columns = ("PROJECT_ID", *columns)
         groups: dict[tuple[object, ...], list[str]] = defaultdict(list)
         selected = (
             f"{id_column} AS row_id",

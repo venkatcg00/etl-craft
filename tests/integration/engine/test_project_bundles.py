@@ -62,7 +62,9 @@ def test_publication_pins_bytes_and_admission_refuses_an_empty_store(engine_db, 
             conn.execute(text("SELECT count(*) AS count FROM AUD_PIPELINES_RUN_LOG")).scalar_one()
             == 0
         )
-    ctx = OperationContext(engine_db.engine, config, SYSTEM_ACTOR)
+    from etl_craft.core.enums import ApiRole
+
+    ctx = OperationContext(engine_db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     files = {
         "craft-connector.yml": b"Secrets:\n  Source_type: ENVIRONMENT\nEngine:\n "
         b" dev:\n    Jdbc_url: jdbc:sqlite:engine.db\n    Schema: main\n",

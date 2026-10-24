@@ -16,7 +16,7 @@ from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import transitions
 from etl_craft.services.operations import OperationContext, to_json, tokens
-from etl_craft.services.operations.actions import ACTIONS, invoke
+from etl_craft.services.operations.actions import ACTIONS, action_path, invoke
 from etl_craft.services.operations.requests import (
     AttemptId,
     HistoryInput,
@@ -67,25 +67,29 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
     selected = f"pipeline_code=P&run_id={run}"
     docs = {
         "/api/v1/health": {"schema": "etl-craft/health/1", "status": "ok"},
-        "/api/v1/pipelines": to_json(invoke(ctx, ActionName.PIPELINES, TagFilter())),
-        "/api/v1/pipelines/P": to_json(
+        "/api/v1/projects/default/pipelines": to_json(
+            invoke(ctx, ActionName.PIPELINES, TagFilter())
+        ),
+        "/api/v1/projects/default/pipelines/P": to_json(
             invoke(ctx, ActionName.PIPELINE, PipelineInput(pipeline_code="P"))
         ),
-        "/api/v1/history?pipeline_code=P&all=true": to_json(
+        "/api/v1/projects/default/history?pipeline_code=P&all=true": to_json(
             invoke(ctx, ActionName.HISTORY, HistoryInput(pipeline_code="P", all=True))
         ),
-        f"/api/v1/runs/{run}": to_json(invoke(ctx, ActionName.RUN_DETAIL, RunId(run_id=run))),
-        f"/api/v1/steps?{selected}": to_json(
+        f"/api/v1/projects/default/runs/{run}": to_json(
+            invoke(ctx, ActionName.RUN_DETAIL, RunId(run_id=run))
+        ),
+        f"/api/v1/projects/default/steps?{selected}": to_json(
             invoke(ctx, ActionName.STEPS, RunSelection(pipeline_code="P", run_id=run))
         ),
-        f"/api/v1/explanations?{selected}&task_code=T": to_json(
+        f"/api/v1/projects/default/explanations?{selected}&task_code=T": to_json(
             invoke(
                 ctx,
                 ActionName.EXPLAIN,
                 TaskSelection(pipeline_code="P", task_code="T", run_id=run),
             )
         ),
-        f"/api/v1/attempts/{attempt}": to_json(
+        f"/api/v1/projects/default/attempts/{attempt}": to_json(
             invoke(ctx, ActionName.ATTEMPT, AttemptId(attempt_id=attempt))
         ),
     }
@@ -98,12 +102,12 @@ def test_read_routes_require_token_and_share_cli_documents(api, role):
         client.get("/api/v1/health", headers={"Authorization": "Bearer unknown"}).status_code == 401
     )
 
-    assert client.get("/api/v1/runs/999999", headers=h).status_code == 404
-    assert client.get("/api/v1/attempts/999999", headers=h).status_code == 404
-    assert client.get("/api/v1/pipelines/missing", headers=h).status_code == 404
-    refused = client.get("/api/v1/history?pipeline_code=P&limit=101", headers=h)
+    assert client.get("/api/v1/projects/default/runs/999999", headers=h).status_code == 404
+    assert client.get("/api/v1/projects/default/attempts/999999", headers=h).status_code == 404
+    assert client.get("/api/v1/projects/default/pipelines/missing", headers=h).status_code == 404
+    refused = client.get("/api/v1/projects/default/history?pipeline_code=P&limit=101", headers=h)
     assert refused.status_code == 400 and "`limit`" in refused.json()["message"]
-    unknown = client.get("/api/v1/history?pipeline_code=P&unknown=1", headers=h)
+    unknown = client.get("/api/v1/projects/default/history?pipeline_code=P&unknown=1", headers=h)
     assert unknown.status_code == 400 and "`unknown`" in unknown.json()["message"]
     assert (
         client.get("/api/v1/openapi.json").json()["components"]["securitySchemes"]["HTTPBearer"][
@@ -129,8 +133,8 @@ def test_no_read_route_records_an_audit_row(api):
     for action in reads:
         names = {f.name for f in fields(action.request)}
         values = {k: v for k, v in given.items() if k in names}
-        path = action.path.format(**values)
-        query = {k: v for k, v in values.items() if "{" + k + "}" not in action.path}
+        path = action_path(action).format(project="default", **values)
+        query = {k: v for k, v in values.items() if "{" + k + "}" not in action_path(action)}
         response = client.get(path, params=query, headers=headers(creds[ApiRole.ADMIN]))
         answered[action.name] = response.status_code
         assert audit_counts(ctx.engine) == before, action.name
@@ -142,7 +146,7 @@ def test_no_read_route_records_an_audit_row(api):
 @pytest.mark.parametrize("role", ROLES)
 def test_catalog_gaps_require_viewer_and_do_not_publish_lineage(api, role):
     ctx, client, creds, _run, _attempt = api
-    assert client.get("/api/v1/catalog/gaps").status_code == 401
+    assert client.get("/api/v1/projects/default/catalog/gaps").status_code == 401
     with ctx.engine.begin() as conn:
         pipeline = conn.execute(
             text("SELECT PIPELINE_ID AS pipeline_id FROM CFG_PIPELINES WHERE PIPELINE_CODE='P'")
@@ -165,13 +169,15 @@ def test_catalog_gaps_require_viewer_and_do_not_publish_lineage(api, role):
         statements.append(statement)
 
     event.listen(ctx.engine, "before_cursor_execute", capture)
-    response = client.get("/api/v1/catalog/gaps", headers=headers(creds[role]))
+    response = client.get("/api/v1/projects/default/catalog/gaps", headers=headers(creds[role]))
     assert response.status_code == 200
     body = response.json()
     assert body["schema"] == "etl-craft/catalog-gaps/1"
     assert body["compared_at"] is None and body["contract_version"]
     assert any(r["table"] == "api.output" for r in body["records"])
-    compared = client.get("/api/v1/catalog/gaps?compare=true", headers=headers(creds[role]))
+    compared = client.get(
+        "/api/v1/projects/default/catalog/gaps?compare=true", headers=headers(creds[role])
+    )
     assert compared.status_code == 200 and compared.json()["compared_at"]
     event.remove(ctx.engine, "before_cursor_execute", capture)
     assert not any("AUD_LINEAGE_VERSION" in sql.upper() for sql in statements)
@@ -184,7 +190,9 @@ def test_catalog_gaps_require_viewer_and_do_not_publish_lineage(api, role):
 
 def test_empty_catalog_does_not_claim_a_warehouse_check(api):
     _ctx, client, creds, _run, _attempt = api
-    response = client.get("/api/v1/catalog/gaps?compare=true", headers=headers(creds["viewer"]))
+    response = client.get(
+        "/api/v1/projects/default/catalog/gaps?compare=true", headers=headers(creds["viewer"])
+    )
     assert response.status_code == 200
     assert response.json()["records"] == []
     assert response.json()["compared_at"] is None
@@ -244,8 +252,12 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
     for name, body in cases:
         action = ACTIONS[name]
         monkeypatch.setitem(ACTIONS, name, replace(action, call=done))
-        assert client.post(action.path, json=body).status_code == 401
-        response = client.post(action.path, json=body, headers=headers(creds[role]))
+        assert (
+            client.post(action_path(action).format(project="default"), json=body).status_code == 401
+        )
+        response = client.post(
+            action_path(action).format(project="default"), json=body, headers=headers(creds[role])
+        )
         assert response.status_code == (403 if role == "viewer" else 200), response.text
         if role != "viewer":
             caller, request = calls[-1]
@@ -255,7 +267,7 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
     if role == "viewer":
         assert calls == []
     response = client.post(
-        "/api/v1/controls",
+        "/api/v1/projects/default/controls",
         json={"pipeline_code": "P", "action": "PAUSE", "reason": " "},
         headers=headers(creds["operator"]),
     )
@@ -316,12 +328,14 @@ def test_tokens_store_hash_only_expiry_validation_and_audit(api):
     with pytest.raises(UsageError):
         invoke(ctx, ActionName.TOKEN_REVOKE, tokens.TokenRevoke(token_id=999999))
     pause = {"pipeline_code": "P", "action": "PAUSE", "reason": "maintenance"}
-    response = client.post("/api/v1/controls", headers=headers(creds["operator"]), json=pause)
+    response = client.post(
+        "/api/v1/projects/default/controls", headers=headers(creds["operator"]), json=pause
+    )
     assert response.status_code == 200, response.text
     assert response.json()["pipeline"]["paused"]["paused_by"] == "operator"
     assert (
         client.post(
-            "/api/v1/controls",
+            "/api/v1/projects/default/controls",
             headers=headers(creds["operator"]),
             json={**pause, "reason": "again"},
         ).status_code
@@ -339,7 +353,7 @@ def test_log_streaming_offsets_and_path_boundaries(api, tmp_path):
     path = ctx.config.log_dir / "P" / f"run-{run}" / "T.attempt-1.log"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"first\nsecond\n")
-    url = f"/api/v1/attempts/{attempt}/log"
+    url = f"/api/v1/projects/default/attempts/{attempt}/log"
     for role in ROLES:
         assert client.get(url, headers=headers(creds[role])).status_code == 404
     with ctx.engine.begin() as conn:
@@ -371,11 +385,14 @@ def test_run_history_cursor_is_bounded_and_exact(api):
         ).scalar_one()
         second = start_run(conn, pipeline)
     h = headers(creds["viewer"])
-    first = client.get("/api/v1/history?pipeline_code=P&all=true&limit=1", headers=h).json()
+    first = client.get(
+        "/api/v1/projects/default/history?pipeline_code=P&all=true&limit=1", headers=h
+    ).json()
     assert first["entries"][0]["pipeline_run_id"] == second
     assert first["before"] == second
     last = client.get(
-        f"/api/v1/history?pipeline_code=P&all=true&limit=1&before={second}", headers=h
+        f"/api/v1/projects/default/history?pipeline_code=P&all=true&limit=1&before={second}",
+        headers=h,
     ).json()
     assert last["entries"][0]["pipeline_run_id"] == run
     assert last["before"] is None
@@ -466,7 +483,7 @@ def test_live_http_trigger_is_executed_by_controller_and_shutdown_is_clean(cli_p
             time.sleep(0.02)
     with urlopen(
         Request(
-            base + "/runs",
+            base + "/projects/default/runs",
             data=b'{"pipeline_code":"P","reason":"HTTP refresh"}',
             headers={"Authorization": "Bearer " + credential, "Content-Type": "application/json"},
         ),
@@ -545,7 +562,7 @@ def test_watermark_reset_validates_and_audits_the_api_actor(api):
     client = TestClient(create_app(replace(ctx, config=config)))
     with ctx.engine.begin() as conn:
         task = conn.execute(text("SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='T'")).scalar_one()
-    path = "/api/v1/marks"
+    path = "/api/v1/projects/default/marks"
     h = headers(creds["operator"])
     selected = {"pipeline_code": "P", "task_code": "T", "run_id": run}
     for body in (
@@ -595,16 +612,20 @@ def test_run_refuses_unknown_fields_and_host_only_options(api):
     _ctx, client, creds, _run, _attempt = api
     h = headers(creds["operator"])
     task = {"pipeline_code": "P", "task_code": "T", "standalone": True}
-    unknown = client.post("/api/v1/runs", json={**task, "unexpected": True}, headers=h)
+    unknown = client.post(
+        "/api/v1/projects/default/runs", json={**task, "unexpected": True}, headers=h
+    )
     assert unknown.status_code == 400 and "`unexpected`" in unknown.json()["message"]
-    forced = client.post("/api/v1/runs", json={"pipeline_code": "P", "force": True}, headers=h)
+    forced = client.post(
+        "/api/v1/projects/default/runs", json={"pipeline_code": "P", "force": True}, headers=h
+    )
     assert forced.status_code == 400
     assert "`force` works only on the controller's host" in forced.json()["message"]
 
 
 def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
     _, client, creds, run, attempt = api
-    path = "/api/v1/controls"
+    path = "/api/v1/projects/default/controls"
     body = {
         "pipeline_code": "P",
         "action": "HOLD",
@@ -624,7 +645,8 @@ def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
     repeated = client.post(path, json=body, headers=headers(creds["operator"]))
     assert repeated.json()["control_id"] == document["control_id"]
     read = client.get(
-        f"/api/v1/control-requests/{document['control_id']}", headers=headers(creds["viewer"])
+        f"/api/v1/projects/default/control-requests/{document['control_id']}",
+        headers=headers(creds["viewer"]),
     )
     assert read.status_code == 200 and read.json() == document
     assert (
@@ -646,7 +668,9 @@ def test_scoped_control_routes_share_durable_identity_and_role_policy(api):
 def test_recovery_capabilities_and_bulk_routes_share_exact_requests(api):
     _, client, creds, run, _ = api
     viewer, operator = headers(creds["viewer"]), headers(creds["operator"])
-    caps = client.get(f"/api/v1/capabilities?pipeline_code=P&run_id={run}", headers=viewer)
+    caps = client.get(
+        f"/api/v1/projects/default/capabilities?pipeline_code=P&run_id={run}", headers=viewer
+    )
     assert caps.status_code == 200 and caps.json()["schema"] == "etl-craft/capabilities/1"
     assert all(not a["available"] for a in caps.json()["actions"])
     body = {
@@ -668,19 +692,22 @@ def test_recovery_capabilities_and_bulk_routes_share_exact_requests(api):
             },
         ]
     }
-    assert client.post("/api/v1/controls/bulk", json=body, headers=viewer).status_code == 403
-    result = client.post("/api/v1/controls/bulk", json=body, headers=operator)
+    assert (
+        client.post("/api/v1/projects/default/controls/bulk", json=body, headers=viewer).status_code
+        == 403
+    )
+    result = client.post("/api/v1/projects/default/controls/bulk", json=body, headers=operator)
     assert result.status_code == 200, result.text
     outcomes = result.json()["outcomes"]
     assert outcomes[0]["control"]["task_code"] == "T"
     assert outcomes[1]["control"] is None and outcomes[1]["error"]
-    repeated = client.post("/api/v1/controls/bulk", json=body, headers=operator)
+    repeated = client.post("/api/v1/projects/default/controls/bulk", json=body, headers=operator)
     assert (
         repeated.json()["outcomes"][0]["control"]["control_id"]
         == outcomes[0]["control"]["control_id"]
     )
     rejected = client.post(
-        "/api/v1/controls/bulk",
+        "/api/v1/projects/default/controls/bulk",
         json={"requests": [{**body["requests"][0], "unexpected": True}]},
         headers=operator,
     )
@@ -704,7 +731,9 @@ def test_attempt_endpoint_retains_failure_evidence_and_retry_policy(api):
             conn, attempt, Failure(FailureClass.PERMANENT, "ProgrammingError", "42P01")
         )
         transitions.finish_attempt(conn, attempt, "FAILED", current_actor(), owner="test")
-    response = client.get(f"/api/v1/attempts/{attempt}", headers=headers(creds[ApiRole.VIEWER]))
+    response = client.get(
+        f"/api/v1/projects/default/attempts/{attempt}", headers=headers(creds[ApiRole.VIEWER])
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["failure_class"] == "PERMANENT"
@@ -713,3 +742,73 @@ def test_attempt_endpoint_retains_failure_evidence_and_retry_policy(api):
     assert body["retry_on"] == "TRANSIENT"
     assert not body["retryable"]
     assert "RETRY_ON=TRANSIENT" in body["retry_reason"]
+
+
+def test_an_exact_run_id_cannot_cross_the_route_project_even_for_admin(api):
+    ctx, client, creds, _run, _attempt = api
+    with ctx.engine.begin() as conn:
+        other = conn.execute(
+            text(
+                "INSERT INTO CFG_PROJECTS (PROJECT_CODE,PROJECT_NAME,DEFAULT_POOL) "
+                "VALUES ('other','Other','default') RETURNING PROJECT_ID AS project_id"
+            )
+        ).scalar_one()
+        pipeline = conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINES (PROJECT_ID,PIPELINE_CODE,PIPELINE_NAME,REFRESH_TYPE) "
+                "VALUES (:id,'P','Other P','FULL') RETURNING PIPELINE_ID AS pipeline_id"
+            ),
+            {"id": other},
+        ).scalar_one()
+        foreign_run = start_run(conn, pipeline)
+    credential = headers(creds[ApiRole.ADMIN])
+    assert (
+        client.get(f"/api/v1/projects/default/runs/{foreign_run}", headers=credential).status_code
+        == 404
+    )
+    assert (
+        client.get(f"/api/v1/projects/other/runs/{foreign_run}", headers=credential).status_code
+        == 200
+    )
+    response = client.get("/api/v1/projects/other/pipelines", headers=credential)
+    assert [row["pipeline_id"] for row in response.json()["pipelines"]] == [pipeline]
+    from etl_craft.services.operations.requests import NoInput
+
+    invoke(ctx, ActionName.DOCS_VERSION, NoInput())
+    invoke(replace(ctx, project="other"), ActionName.DOCS_VERSION, NoInput())
+    audit = client.get("/api/v1/projects/other/audit", headers=credential).json()
+    with ctx.engine.connect() as conn:
+        foreign_actions = set(
+            conn.execute(
+                text("SELECT ACTION_ID AS action_id FROM AUD_ACTIONS WHERE PROJECT_ID=1")
+            ).scalars()
+        )
+    assert foreign_actions and not foreign_actions.intersection(
+        row["action_id"] for row in audit["actions"]
+    )
+    owned_pipeline_changes = [
+        row for row in audit["changes"] if row["table_name"] == "CFG_PIPELINES"
+    ]
+    assert owned_pipeline_changes
+    assert all(row["after_json"]["project_id"] == other for row in owned_pipeline_changes)
+
+
+def test_foreign_project_prefix_cannot_masquerade_as_a_local_pipeline_grant(api):
+    from etl_craft.services.operations.status import DependencyView
+    from etl_craft.services.operations.visibility import visible_result
+
+    ctx, _client, _creds, _run, _attempt = api
+    with ctx.engine.begin() as conn:
+        add_pipeline(conn, "foreign")
+    value = DependencyView(
+        "foreign.secret",
+        "SUCCESS",
+        "SUCCESS",
+        True,
+        "private status",
+        selected_pipeline_run_id=777,
+        pipeline_dependency_id=1,
+    )
+    redacted = visible_result(replace(ctx, role=ApiRole.VIEWER, project_id=1), value)
+    assert redacted.selected_pipeline_run_id is None
+    assert redacted.status is None and "private" not in redacted.reason

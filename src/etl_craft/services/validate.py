@@ -32,7 +32,7 @@ from etl_craft.core.graph import build_graph, cycles
 from etl_craft.core.placement import ResourceRequest, resource_request
 from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.dialects.engine import for_engine
-from etl_craft.engine.queries import statement
+from etl_craft.engine.queries import project_statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
 from etl_craft.engine.repository.normalization import normalization_problems
@@ -171,7 +171,11 @@ def validate_on(
 ) -> Report:
     """``validate`` on an open connection, including any changes it has not committed yet."""
     if pipeline_code is not None:
-        resolve_pipeline_id(conn, pipeline_code)
+        resolve_pipeline_id(
+            conn,
+            pipeline_code,
+            before_projects=not for_engine(conn).has_table(conn, "CFG_PROJECTS"),
+        )
     tasks = fetch_active_tasks(conn)
     pipeline_parameters = fetch_pipeline_parameters(conn)
     data = _Metadata(
@@ -205,7 +209,7 @@ def validate_on(
         problem = definition_problem(definition, dialect)
         if problem:
             report.fail(f"source {definition.table_name}.{definition.column_name}", problem)
-    for schedule in conn.execute(statement(conn, "active_schedule_definitions")):
+    for schedule in conn.execute(project_statement(conn, "active_schedule_definitions")):
         zone = (
             schedule.schedule_timezone
             if schedule.schedule_timezone is not None
@@ -255,14 +259,16 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
                 "remove the unknown key or replace it with an allowed key",
             )
         try:
-            pipeline_id = resolve_pipeline_id(conn, code)
+            pipeline_id = resolve_pipeline_id(
+                conn, code, before_projects=not for_engine(conn).has_table(conn, "CFG_PROJECTS")
+            )
             graph = fetch_pipeline_graph(conn, pipeline_id)
             build_graph(graph.tasks, graph.same_pipeline_edges)
         except EtlCraftError as error:
             report.fail(code, str(error))
             continue
     for edge in data.pipeline_edges:
-        if not edge.depends_on_pipeline_active:
+        if edge.pipeline_code in data.pipeline_codes and not edge.depends_on_pipeline_active:
             report.fail(
                 edge.pipeline_code,
                 f"depends on pipeline {edge.depends_on_pipeline_code}, which is inactive and "
@@ -276,8 +282,10 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
             if edge.depends_on_pipeline_active
         }
     ):
+        if not any(code in data.pipeline_codes for code in cycle):
+            continue
         report.fail(
-            cycle[0],
+            next(code for code in cycle if code in data.pipeline_codes),
             f"pipeline dependencies form a cycle ({' -> '.join([*cycle, cycle[0]])}), so none "
             "of these pipelines can start",
         )
@@ -390,7 +398,7 @@ def _task(
         data.placement.check(
             where,
             ResourceRequest(0, 0) if task.handler == Handler.EVENT_WAIT else request,
-            params.get("POOL", "default"),
+            params.get("POOL", data.placement.default_pool),
         )
         task_timeout_seconds(params, config)
         task_retry_policy(params, config)

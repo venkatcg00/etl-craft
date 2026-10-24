@@ -139,9 +139,17 @@ def migration_streams(
     return streams
 
 
+def _project_ledger(conn: Connection) -> bool:
+    """Read released ledgers until the packaged project migration adds their scope."""
+    return "project_id" in {
+        name.lower() for name in for_engine(conn).column_names(conn, "SCHEMA_MIGRATIONS")
+    }
+
+
 def _load_ledger(conn: Connection) -> dict[tuple[str, str], str]:
     try:
-        rows = conn.execute(statement(conn, "applied_migrations")).all()
+        query = "scoped_applied_migrations" if _project_ledger(conn) else "applied_migrations"
+        rows = conn.execute(statement(conn, query)).all()
     except SQLAlchemyError as error:
         raise MigrationError(
             f"could not read SCHEMA_MIGRATIONS — is this an Engine DB? Run `etl-craft init-db` "
@@ -177,7 +185,12 @@ def verify_ledger(ledger: dict[tuple[str, str], str], streams: list[Stream]) -> 
 
 def _record(conn: Connection, migration: MigrationFile) -> None:
     conn.execute(
-        statement(conn, "record_migration"),
+        statement(
+            conn,
+            "record_project_migration"
+            if migration.source == PROJECT and _project_ledger(conn)
+            else "record_migration",
+        ),
         {"source": migration.source, "version": migration.version, "checksum": migration.checksum},
     )
 

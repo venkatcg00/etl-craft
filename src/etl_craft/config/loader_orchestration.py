@@ -8,6 +8,7 @@ from etl_craft.config.loader_helpers import Profiled, flag, whole_number
 from etl_craft.config.model import ExecutionLimits
 from etl_craft.core.enums import GatePolicy, RetryOn, enum_value
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.text import is_metadata_code
 
 ORCHESTRATION_KEYS = frozenset(
     {
@@ -19,6 +20,7 @@ ORCHESTRATION_KEYS = frozenset(
         "Local_python_slots",
         "Local_warehouse_slots",
         "Timezone",
+        "Project",
         "Enforce_sla",
         "Gate_wait_minutes",
         "Retries",
@@ -29,6 +31,17 @@ ORCHESTRATION_KEYS = frozenset(
         "Email",
     }
 )
+
+
+def parse_project(settings: Profiled, path: Path) -> str:
+    """Read the project code used when a command does not pass ``--project``."""
+    code = settings.text("Project") or "default"
+    if not is_metadata_code(code):
+        raise ConfigurationError(
+            f"{path}: Orchestration.Project={code!r}; expected a letter followed by at most "
+            "127 letters, numbers or underscores; correct the project code"
+        )
+    return code
 
 
 def parse_dependency_gates(orchestration: Profiled, path: Path) -> GatePolicy:

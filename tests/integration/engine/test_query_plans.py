@@ -47,7 +47,7 @@ def test_catalog_queries_do_not_scan_growing_tables(postgres_database):
             explained.add(name)
             for node in full_scans(plan, partial):
                 table = node.get("Relation Name")
-                if table in growing and (name, table) not in FULL_READS:
+                if table in growing and (name.removesuffix("_legacy"), table) not in FULL_READS:
                     failures.append(f"{name}: {table}: {node['Node Type']} {node}")
         assert explained | UTILITIES.keys() == db.dialect.query_names()
         assert not failures, "\n".join(failures)

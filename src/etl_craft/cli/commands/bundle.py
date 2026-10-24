@@ -16,20 +16,20 @@ def configure(parser: argparse.ArgumentParser) -> None:
     """Resolve the project directory without loading its Engine credentials."""
     parser.add_argument("operation", choices=["publish"])
     parser.add_argument(
-        "--project", type=Path, help="Project directory containing craft-connector.yml."
+        "--project-dir", type=Path, help="Project directory containing craft-connector.yml."
     )
     configure_output(parser)
 
 
 def run(args: argparse.Namespace, out: Output) -> int:
     """Read upload inputs, then let the action validate and publish the manifest."""
-    if args.project is not None and args.config is not None:
+    if args.project_dir is not None and args.config is not None:
         raise UsageError(
-            "bundle publish: --project and --config both given; expected one source; choose one"
+            "bundle publish: --project-dir and --config both given; expected one source; choose one"
         )
     path = (
-        (args.project / "craft-connector.yml")
-        if args.project is not None
+        (args.project_dir / "craft-connector.yml")
+        if args.project_dir is not None
         else resolve_config_path(args.config)
     )
     args.config = path

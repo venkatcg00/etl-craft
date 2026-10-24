@@ -18,7 +18,7 @@ from etl_craft.core.enums import ActionName, HttpMethod
 from etl_craft.core.errors import ServerError, UsageError
 from etl_craft.core.http_client import open_request
 from etl_craft.services import credentials
-from etl_craft.services.operations.actions import ACTIONS
+from etl_craft.services.operations.actions import ACTIONS, action_path
 from etl_craft.services.operations.serialization import decode, encode
 from etl_craft.services.operations.sessions import Session, TokenInput
 
@@ -26,9 +26,10 @@ from etl_craft.services.operations.sessions import Session, TokenInput
 class ApiClient:
     """One API endpoint, and the credential that proves who calls it."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, project: str = "default") -> None:
         """Use ``ETL_CRAFT_TOKEN`` for a service account, else this person's stored session."""
         self.url = server_url(url)
+        self.project = project
         self._service_token = os.environ.get("ETL_CRAFT_TOKEN")
 
     def invoke(self, name: ActionName, request: object) -> object:
@@ -38,8 +39,14 @@ class ApiClient:
             raise UsageError(f"`{name}` runs on the controller's host only: {action.remedy}")
         fields = encode(request)
         assert isinstance(fields, dict)
-        path = action.path.format(
-            **{key: quote(str(fields.pop(key)), safe="") for key in _path_fields(action.path)}
+        route = action_path(action)
+        path = route.format(
+            project=quote(self.project, safe=""),
+            **{
+                key: quote(str(fields.pop(key)), safe="")
+                for key in _path_fields(route)
+                if key != "project"
+            },
         )
         query, body = (fields, None) if action.method == HttpMethod.GET else (None, fields)
         signed_in = action.role is not None

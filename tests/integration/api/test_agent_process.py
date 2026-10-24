@@ -110,7 +110,7 @@ def test_agent_runs_its_pinned_bundle_without_engine_or_store_credentials(
     assert code == 0, output
     p.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="QUEUED")
     monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
-    agent = p.start("agent", "--api", url, "--project", str(agent_dir), "--drain-seconds", "0")
+    agent = p.start("agent", "--api", url, "--project-dir", str(agent_dir), "--drain-seconds", "0")
     try:
         p.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="SUCCESS", timeout=20)
         with p.engine.connect() as conn:
@@ -174,7 +174,7 @@ def test_a_lost_agent_stops_its_writer_before_a_second_holder(cluster, monkeypat
     code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", failure)
     assert code == 0, output
     monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
-    agent = p.start("agent", "--api", url, "--project", str(agent_dir), "--drain-seconds", "0")
+    agent = p.start("agent", "--api", url, "--project-dir", str(agent_dir), "--drain-seconds", "0")
     deadline = time.monotonic() + 20
     while not (agent_dir / "writing").exists():
         assert time.monotonic() < deadline, agent.output
@@ -249,7 +249,7 @@ def test_agent_cancel_is_acknowledged_by_notification_or_renewal(
     code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "cancel")
     assert code == 0, output
     monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
-    agent = p.start("agent", "--api", url, "--project", str(agent_dir), "--drain-seconds", "0")
+    agent = p.start("agent", "--api", url, "--project-dir", str(agent_dir), "--drain-seconds", "0")
     wait_for(lambda: (agent_dir / "ready").exists())
     if lost_notification:
         monkeypatch.setattr(resource_locks, "notify", lambda *args: None)

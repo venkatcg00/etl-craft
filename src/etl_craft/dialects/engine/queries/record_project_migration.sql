@@ -1,0 +1,2 @@
+INSERT INTO SCHEMA_MIGRATIONS (SOURCE,VERSION,CHECKSUM,PROJECT_ID)
+VALUES (:source,:version,:checksum,:project_id)

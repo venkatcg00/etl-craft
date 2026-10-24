@@ -1,5 +1,6 @@
 SELECT r.STARTED_BY AS started_by, r.STARTED_BY_KIND AS started_by_kind,
 r.SSO_GROUP_IDS AS sso_group_ids, r.TRIGGER_KIND AS trigger_kind,
-p.PIPELINE_CODE AS pipeline_code
+p.PROJECT_ID AS project_id, project.PROJECT_CODE AS project_code, p.PIPELINE_CODE AS pipeline_code
 FROM AUD_PIPELINES_RUN_LOG r JOIN CFG_PIPELINES p ON p.PIPELINE_ID=r.PIPELINE_ID
+JOIN CFG_PROJECTS project ON project.PROJECT_ID=p.PROJECT_ID
 WHERE r.PIPELINE_RUN_ID=:run_id

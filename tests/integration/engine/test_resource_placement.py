@@ -34,7 +34,7 @@ def test_pipeline_limit_default_matches_the_configuration_constant(engine_db):
         assert history.current_flag == "Y" and history.operation == "INSERT"
 
 
-@pytest.mark.parametrize("bound", ["pipeline", "warehouse", "cpu", "memory", "kind"])
+@pytest.mark.parametrize("bound", ["pipeline", "project", "warehouse", "cpu", "memory", "kind"])
 def test_two_local_claims_atomically_observe_one_limit(engine_db, bound):
     from datetime import UTC, datetime, timedelta
 
@@ -49,6 +49,8 @@ def test_two_local_claims_atomically_observe_one_limit(engine_db, bound):
         pipelines.append(pipelines[0] if bound == "pipeline" else add_pipeline(conn, "SECOND"))
         if bound == "pipeline":
             conn.execute(text("UPDATE CFG_PIPELINES SET MAX_PARALLEL_TASKS=1"))
+        if bound == "project":
+            conn.execute(text("UPDATE CFG_PROJECTS SET MAX_RUNNING_TASKS=1"))
         attempts = []
         for index, pipeline in enumerate(pipelines):
             run = start_run(conn, pipeline)

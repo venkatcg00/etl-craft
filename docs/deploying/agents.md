@@ -26,11 +26,11 @@ Install the same package version as the API and controller, publish a
 
 ```sh
 export ETL_CRAFT_TOKEN="$HOST_A_AGENT_TOKEN"
-etl-craft agent --api https://craft.example.com --project /srv/project \
+etl-craft agent --api https://craft.example.com --project-dir /srv/project \
   --pool default --python-slots 4 --warehouse-slots 16
 ```
 
-`--project` resolves `craft-connector.yml` in that directory. Without it, the normal config
+`--project-dir` resolves `craft-connector.yml` in that directory. Without it, the normal config
 resolution applies, including `--config` and `ETL_CRAFT_CONFIG`.
 Execution files are downloaded from the run's pinned publication through the API. The agent
 ignores the bootstrap Engine section, which may be absent. Warehouse, Email and Cloning

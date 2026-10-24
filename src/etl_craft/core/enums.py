@@ -186,6 +186,7 @@ class ActionScope(StrEnum):
     """Whether authorization uses deployment or pipeline roles."""
 
     DEPLOYMENT = "deployment"
+    PROJECT = "project"
     PIPELINE = "pipeline"
 
 

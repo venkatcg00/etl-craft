@@ -111,7 +111,7 @@ that damages the package is not helpful; saying so, with a better option, is.
   targets publish hash version 2 after creation; existing targets need `etl-craft rehash` before
   merging. Never publish a hash version before its warehouse update commits. Target mutations
   and rehashing hold the same Engine DB target lock.
-- One warehouse per deployment. Third-party SQLAlchemy dialects are optional extras and never
+- One warehouse per project; projects may share an Engine DB. Third-party SQLAlchemy dialects are optional extras and never
   imported by engine code; DuckDB's, the default local warehouse, is the one core dependency.
 - `craft-connector.yml` is written by the team and only read by the engine. Secrets are always
   variable names, never values. Its directory is the project directory, holding `sql_scripts/`,

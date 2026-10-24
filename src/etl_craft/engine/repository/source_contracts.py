@@ -185,7 +185,13 @@ def resolve_project_sources(
     plans = []
     changes = []
     keys: dict[ObjectIdentity, list[int]] = defaultdict(list)
-    for row in conn.execute(statement(conn, "source_contract_select_cfg_tables")):
+    query = (
+        "source_contract_select_cfg_tables"
+        if "project_id"
+        in {name.lower() for name in for_engine(conn).column_names(conn, "CFG_TABLES")}
+        else "source_contract_select_cfg_tables_legacy"
+    )
+    for row in conn.execute(statement(conn, query)):
         try:
             identity = resolve_source_identity(
                 row.catalog_name, row.schema_name, row.table_name, catalog, dialect

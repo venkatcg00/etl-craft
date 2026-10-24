@@ -39,6 +39,7 @@ Secrets:
                                        # write ETL_CRAFT_PROFILE to set it per environment
 
 Orchestration:
+  Project: default  # Metadata namespace in the shared Engine DB.
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed
   # Profile: prod                 # overrides Secrets.Profile for this section only
   # Log_dir: logs                 # where each task attempt's log file goes; relative to this file

@@ -44,6 +44,7 @@ from etl_craft.config.loader_orchestration import (
     ORCHESTRATION_KEYS,
     parse_dependency_gates,
     parse_limits,
+    parse_project,
     parse_retry_on,
 )
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
@@ -175,6 +176,17 @@ def load_config(path: str | Path, *, agent: bool = False) -> ConnectorConfig:
     return parse_config(read_config(path), Path(path), agent=agent)
 
 
+def load_project(path: Path) -> str:
+    """Read only project selection so API clients need no Engine or warehouse credentials."""
+    raw = _check_layout(read_config(path), path)
+    secrets = mapping(raw, "Secrets", path, required=True)
+    environment = Resolver(values=os.environ, origin="the process environment", path=path)
+    source = parse_source(secrets, path, environment)
+    resolver = Resolver.for_source(source, path)
+    profile = resolver.text(secrets.get("Profile"), "Secrets.Profile")
+    return parse_project(profiled_settings("Orchestration", raw, profile, path, resolver), path)
+
+
 def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorConfig:
     """Validate an already-loaded ``craft-connector.yml`` mapping; ``path`` is where it came from.
 
@@ -227,6 +239,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         deployment=deployment,
         api_address=api_address,
         timezone=project_timezone,
+        project=parse_project(orchestration, path),
         source=source,
         engine=engine,
         auth=parse_auth(raw, global_profile, path, resolver),

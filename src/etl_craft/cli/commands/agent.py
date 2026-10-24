@@ -22,7 +22,7 @@ from etl_craft.services.operations.requests import NoInput
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("operation", choices=("drain", "resume", "stop"), nargs="?")
     parser.add_argument("--agent-id", type=int)
-    parser.add_argument("--project", type=Path, help="This agent's project directory.")
+    parser.add_argument("--project-dir", type=Path, help="This agent's project directory.")
     parser.add_argument("--pool", default="default")
     parser.add_argument("--python-slots", type=int)
     parser.add_argument("--warehouse-slots", type=int)
@@ -57,10 +57,10 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             text=lambda: out.rows((("Agent", args.agent_id, args.operation),)),
         )
         return ExitCode.SUCCESS
-    if args.project is not None and args.config is not None:
-        raise UsageError("choose --project or --config, not both")
+    if args.project_dir is not None and args.config is not None:
+        raise UsageError("choose --project-dir or --config, not both")
     path = resolve_config_path(
-        args.config if args.project is None else args.project / "craft-connector.yml"
+        args.config if args.project_dir is None else args.project_dir / "craft-connector.yml"
     )
     config = load_config(path, agent=True)
     selected = ceilings(config)

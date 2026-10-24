@@ -152,7 +152,8 @@ item's text, or work done early under another item.
 | S5.E Slots, limits and priorities | Done | #237 | Active pools, priority and fair atomic claims, pipeline/warehouse limits and resource placement without over-reservation |
 | S5.AK Item fan-out inside Python tasks | Done | #238 | Durable item execution, retries, controls and shared progress; interactive graph/grid visuals follow in S7.A |
 | S5.F Pinned project bundles | Done | #239 | Immutable project publications and admitted metadata shared by local tasks, API-only agents, retries and controller recovery |
-| S5.G and later | Not started | | |
+| S5.G Projects in one Engine DB | Done | #245 | Project-scoped metadata, bundles, grants, lineage, migrations and admission |
+| S5.H and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -311,6 +312,15 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.G validates project metadata, same-code pipelines, cross-project dependency files, scoped
+hash/lineage/audit state, grants, bundle approvals, project pools/quotas, project migrations
+and docs publication on both Engine DBs. Released-schema upgrades compare fresh schema and
+retained rows; local claim and agent completion/limit races pass twenty rounds. Static/docs,
+API/CLI, controller, retained-bundle execution and local service checks pass. Security review
+covers the changed source, with regression checks for scoped clones, profile selection,
+serialized approvals and dependency visibility. Cloud acceptance is unavailable because no
+cloud usage budget was made available; installed-wheel demos remain the required CI gate.
 
 S5.F (#239) validates immutable file/S3-compatible publications, real API-only agent execution,
 run-pinned metadata, retries/recovery and controller restart on both Engine DBs. Released-schema
@@ -662,6 +672,25 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S5.G derives completion from its Change and Tests: project selection on CLI/API, distinct
+  warehouses and same-code pipelines, cross-project dependencies, pause/default pools/quotas,
+  approved bundle connections and lossless upgrades on both Engine DBs.
+- S5.G uses the owner-approved one-warehouse-per-project rule. `--project` selects a code;
+  directory options become `--project-dir`, without a compatibility alias. Roles remain
+  deployment-wide until S7.B; pipeline grants retain project scope.
+- With owner approval, PROJECT_ID also scopes CFG_TABLES, CFG_PIPELINE_GRANTS, target hash/view
+  state, AUD_ACTIONS, AUD_PROJECT_BUNDLES, AUD_LINEAGE_VERSIONS, project SCHEMA_MIGRATIONS and
+  AUD_DOCS_PUBLICATION. Existing rows belong to default; ENGINE migrations remain deployment-wide.
+- Bundle connection hashes and approval flags require an admin to publish changed Warehouse,
+  Email or Cloning definitions. Developers may publish only the exact approved contract;
+  each bundle also records MAX_WAREHOUSE_QUERIES. Infrastructure credentials remain host-local.
+- `projects.csv` contains exactly the selected row. Apply/export preserve other projects;
+  pools remain deployment-wide. Both dependency files accept DEPENDS_ON_PROJECT_CODE.
+  Project and pipeline codes reserve inactive identities, matching the other config keys.
+- Admitted images without project fields are read as default-project images without rewriting
+  immutable history. Pre-project lineage upgrade comparisons use captured query shapes for
+  their before-upgrade oracle; the after-upgrade side uses the current package.
 
 - S5.F has no separate Done when: completion is derived from its Change and Tests—local/API
   publication, verified agent/local execution, retained files and graphs across retries and

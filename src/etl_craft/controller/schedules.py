@@ -49,13 +49,14 @@ class Schedules:
             signature = (
                 row.run_schedule,
                 row.schedule_timezone,
+                row.project_timezone,
                 row.schedule_start_date,
                 row.last_run_key,
             )
             cached = self.deadlines.get(row.pipeline_id)
             if cached is not None and cached[0] == signature and cached[1] > now:
                 continue
-            zone, cursor = _cursor(row._mapping, ctx.config.timezone, now)
+            zone, cursor = _cursor(row._mapping, row.project_timezone, now)
             tick = next_after(row.run_schedule, cursor, zone)
             retained: deque[datetime] = deque()
             count = row.max_catchup_runs if row.catchup == YesNo.YES else 1
