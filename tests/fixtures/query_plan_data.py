@@ -15,6 +15,12 @@ DAY = f"({STAMP}+(d-1)*INTERVAL '1 day')"
 # Every run has its own task/attempt identity; completed days dominate the live working set.
 SEEDS = [
     (
+        "AUD_CONNECTION_RESERVATIONS",
+        "RESERVATION_ID,ROLE,HOST,PID,BIRTH_TIME,POOL_CONNECTIONS,SESSION_CONNECTIONS,LOCAL_TASK_CONNECTIONS,BACKEND_PID,BACKEND_STARTED_AT,STARTED_AT,HEARTBEAT_AT,EXPIRES_AT,STOPPED_AT,ACTOR,ACTOR_KIND",
+        f"p::text,'UI','plan',p,1,10,2,0,p,{STAMP},{STAMP},{STAMP},{STAMP},{STAMP},'plan','SYSTEM'",
+        "generate_series(1,:pipelines) p",
+    ),
+    (
         "AUD_PROJECT_BUNDLES",
         "BUNDLE_ID,MANIFEST,CREATED_BY,CREATED_AT,CONNECTIONS_APPROVED_FLAG",
         f"lpad(p::text,64,'0'),'{{}}','plan',{STAMP},'Y'",

@@ -153,6 +153,7 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         _host_config_path=bootstrap,
         source=host.source,
         engine=host.engine,
+        db_pool_size=host.db_pool_size,
         warehouse=pinned.warehouse,
         warehouse_table_format=pinned.warehouse_table_format,
         email=pinned.email,

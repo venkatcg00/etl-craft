@@ -19,7 +19,6 @@ from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import RunStatus, YesNo
 from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError
 from etl_craft.core.outage import OutageBudget
-from etl_craft.engine.notifications import listener_engine
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import controllers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
@@ -183,9 +182,8 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
         )
     supervisor = _Supervisor(ctx, stop, create_pool(ctx.engine, ctx.config, ctx.child))
     outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
-    notifications = listener_engine(ctx.config)
     try:
-        with acting_as(ctx.actor), leadership(notifications) as leader:
+        with acting_as(ctx.actor), leadership(ctx.engine, ctx.config) as leader:
             controller_id = controllers.start(ctx.engine)
             logger.info("controller_id=%s: controller active", controller_id)
             if not ctx.config.allow_schedule:
@@ -210,6 +208,5 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             f"controller lost its Engine DB connection: {error}; restore it and restart controller"
         ) from error
     finally:
-        notifications.dispose()
         supervisor.schedules.catalog.close()
         supervisor.pool.close()

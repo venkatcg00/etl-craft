@@ -121,6 +121,20 @@ VALUES = {
 
 def bindings(sql, name=""):
     overrides = {
+        "connection_reservation_insert": {
+            "pool": 10,
+            "sessions": 2,
+            "tasks": 0,
+            "backend": 1,
+            "backend_started": MOMENT,
+            "birth": 1.0,
+            "expires": MOMENT,
+        },
+        "connection_reservation_heartbeat": {
+            "expires": MOMENT,
+            "backend": 1,
+            "backend_started": MOMENT,
+        },
         "latest_finished_pipeline_run": {"ended_by": MOMENT},
         "pipeline_run_history": {"before": 1000000000},
         "task_run_history": {"before": 1000000000},
@@ -280,6 +294,7 @@ FULL_READS = {
     ): "Enumerates all configuration rows for plan, apply and export.",
     ("agent_host_lock", "aud_agents"): REGISTRY,
     ("agent_list", "aud_agents"): REGISTRY,
+    ("connection_budget_agents", "aud_agents"): REGISTRY,
     ("agent_usage", "aud_agents"): REGISTRY,
     ("placement_agents", "aud_agents"): REGISTRY,
     ("reconcile_attempts", "aud_agents"): REGISTRY,

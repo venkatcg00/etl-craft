@@ -39,6 +39,7 @@ Secrets:
                                        # write ETL_CRAFT_PROFILE to set it per environment
 
 Orchestration:
+  Db_pool_size: 10  # Maximum pooled Engine DB connections in each controller, ui or local run.
   Project: default  # Metadata namespace in the shared Engine DB.
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed
   # Profile: prod                 # overrides Secrets.Profile for this section only

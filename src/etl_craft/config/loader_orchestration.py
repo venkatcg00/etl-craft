@@ -21,6 +21,7 @@ ORCHESTRATION_KEYS = frozenset(
         "Local_warehouse_slots",
         "Timezone",
         "Project",
+        "Db_pool_size",
         "Enforce_sla",
         "Gate_wait_minutes",
         "Retries",

@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.pool import NullPool
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError
@@ -19,10 +20,13 @@ from etl_craft.engine.audit import register_engine
 def engine_db(config: ConnectorConfig, **engine_kwargs: Any) -> Engine:
     """Build the active Engine profile and record a scoped command request when present.
 
-    A role sized from its ``Deployment.Profile`` keeps the derived pool size.
+    Parent processes use the declared pool ceiling; supervised children use NullPool.
     """
-    if config.sizing is not None:
-        engine_kwargs.setdefault("pool_size", config.sizing.engine_pool.value)
+    if engine_kwargs.get("supervised"):
+        engine_kwargs.setdefault("poolclass", NullPool)
+    elif "poolclass" not in engine_kwargs:
+        engine_kwargs.setdefault("pool_size", config.db_pool_size)
+        engine_kwargs.setdefault("max_overflow", 0)
     engine = build_engine(config, **engine_kwargs)
     try:
         register_engine(engine)

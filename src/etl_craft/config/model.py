@@ -251,6 +251,7 @@ class ConnectorConfig:
     api_address: str = "127.0.0.1:8730"
     timezone: str = "UTC"
     project: str = "default"
+    db_pool_size: int = 10
     dependency_gates: GatePolicy = GatePolicy.ENFORCE
     settings: tuple[SettingSource, ...] = ()
     log_dir: Path = Path(DEFAULT_LOG_DIR)

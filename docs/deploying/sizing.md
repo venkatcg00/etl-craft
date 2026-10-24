@@ -1,9 +1,10 @@
 # Deployment profiles and sizing
 
 etl-craft measures the CPU and memory its process may use. With a declared deployment profile,
-`run` and `CONTROLLER` size their task slots, HTTP server threads and Engine DB pool from that
-measurement. Without one, nothing changes: the sizes come from the `Orchestration` settings, as
-before, and the measurement is only logged and shown by `doctor`.
+`run`, `controller` and `ui` size task slots and HTTP server threads from that
+measurement; `Orchestration.Db_pool_size` sets their Engine DB pool ceiling. Without a profile,
+sizes come from the `Orchestration` settings and the measurement is only logged and shown by
+`doctor`.
 
 ## Choose a profile
 
@@ -50,8 +51,8 @@ choose `CONTROLLER` for a dedicated host.
 4. **Cap.** `Local_python_slots` and `Local_warehouse_slots`, when written, are ceilings:
    a measured size never exceeds them. `CFG_PIPELINES.MAX_PARALLEL_TASKS` separately caps
    each pipeline; raising it never raises the machine's measured capacity.
-5. **Pool.** The process's Engine DB pool holds 2 connections, one more per 8 task slots, and
-   one per server thread. Task processes open one connection each.
+5. **Pool.** `Orchestration.Db_pool_size` defaults to 10 connections per process, with no
+   overflow. Profile sizing does not independently enlarge that declared ceiling.
 
 `doctor` shows each step's result and the constraint that bound it, for example
 `26 (CPU: 6.7 free at 0.25 each)`.
@@ -66,5 +67,43 @@ choose `CONTROLLER` for a dedicated host.
 
 ## Connection budget
 
-On a PostgreSQL Engine DB, `doctor` adds the server's pool, the pool's overflow (10) and one
-connection per task slot, and warns when that exceeds 80% of `max_connections`.
+PostgreSQL controller, `ui` and local `run` processes reserve their maximum connection footprint
+before starting work. `Orchestration.Db_pool_size` defaults to 10 (minimum 1), with no overflow.
+Local task children use `NullPool` and return each connection after use. API-only agents and their
+task processes open zero Engine DB connections.
+
+`doctor` reports the registered deployment total, or a proposed controller when none is running.
+Before setup creates the reservation table, it checks that proposed footprint; missing tables
+and pending migrations remain separate doctor checks.
+A startup or doctor check fails above 80% of PostgreSQL `max_connections`, naming the total and
+remedy. Admission is serialized, so two replicas cannot spend the same remaining budget.
+
+The total is the sum of each process's pool, dedicated sessions and local task slots. Dedicated
+sessions include ownership renewal (one per process), controller leadership/LISTEN (one per
+controller), and API claim notifications (one per API copy, including an integrated controller), plus the bounded probes below.
+Thus a controller reserves `pool + 4 + local slots`, a standalone `ui` reserves
+`pool + 4 + local slots`, and a local `run` reserves `pool + 2 + local slots`. Session allowances are conservative even before the
+first claim subscription. UI task slots cover synchronous HTTP task selections. A shared process
+ceiling applies across API callers and controller pool instances; excess work stays queued before
+claiming an attempt or starting its child. One separately bounded SQL gate-probe connection
+is included in each role, without retaining an agent slot during gate waits. A standalone `ui`
+also reserves one independent readiness-probe connection, so health checks do not wait behind
+a busy request pool or a gate query. Sessions use the same SQLAlchemy engine and independent
+unpooled connections; no second engine is created for LISTEN.
+
+Reservations renew every 15 seconds for the configured Engine DB outage budget plus 60 seconds. Clean shutdown closes work before releasing
+capacity. An expired reservation stays charged while its owning PostgreSQL session is alive;
+a missing heartbeat alone never proves its connections stopped. Tagged child sessions also
+retain the reservation if the parent dies. Engine DB sessions carry
+`application_name=etl-craft-process-<reservation id>` for this ownership check. Ownership loss stops the process,
+and expired owners cannot reopen pooled connections or renew an ended reservation. A crashed
+process's capacity becomes available after its sessions end and its reservation expires.
+
+PgBouncer transaction mode may front `ui` request pools. Set `Engine.<profile>.Listen_jdbc_url`
+to the same Engine DB's direct/session-mode address for ownership and LISTEN. The controller
+connects directly because its leadership and advisory locks require session affinity. Engine DB
+credentials remain host-local and use the existing profile authentication settings.
+
+`publish-docs` serves static files and releases its idle Engine DB pool before waiting for HTTP
+requests. Short provisioning/inspection commands use the remaining server headroom rather than
+holding a long-lived process reservation.

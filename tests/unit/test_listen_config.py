@@ -2,12 +2,13 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from etl_craft.config import parse_config
 from etl_craft.core.errors import ConfigurationError
-from etl_craft.engine.notifications import listener_engine
+from etl_craft.dialects.engine import for_name
 
 pytestmark = pytest.mark.unit
 
@@ -38,16 +39,22 @@ def test_listener_reuses_authentication_and_defaults_to_the_regular_url(monkeypa
     cfg = config(**({} if listen is None else {"Listen_jdbc_url": listen}))
     seen = []
 
-    def build(actual_config, profile, **kwargs):
-        seen.append((actual_config, profile, kwargs))
-        return "not-connected"
+    def creator(profile, secret, url):
+        seen.append((profile, secret, url))
+        return lambda: None
 
-    monkeypatch.setattr("etl_craft.engine.notifications.build_engine", build)
-    assert listener_engine(cfg) == "not-connected"
-    assert seen[0][0] is cfg
-    assert seen[0][1] == replace(cfg.engine, jdbc_url=listen or cfg.engine.jdbc_url)
-    assert seen[0][1].user == "etl"
-    assert seen[0][1].secret_var == "ENGINE_PASSWORD"
+    module = "etl_craft.dialects.engine.postgres"
+    monkeypatch.setattr(module + ".postgres_creator", creator)
+    monkeypatch.setattr(
+        module + ".NullPool", lambda **kwargs: SimpleNamespace(connect=lambda: "raw")
+    )
+    monkeypatch.setattr(module + ".Connection", lambda engine, connection: (engine, connection))
+    engine = SimpleNamespace(dialect=SimpleNamespace(default_isolation_level="READ COMMITTED"))
+    assert for_name("postgresql").session_connection(engine, cfg) == (engine, "raw")
+    assert seen[0][0] == replace(cfg.engine, jdbc_url=listen or cfg.engine.jdbc_url)
+    assert seen[0][0].user == "etl"
+    assert seen[0][0].secret_var == "ENGINE_PASSWORD"
+    assert seen[0][1] == "not-a-real-password"
 
 
 def test_sqlite_refuses_a_listen_url_naming_the_setting():

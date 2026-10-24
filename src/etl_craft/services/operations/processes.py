@@ -1,15 +1,26 @@
 """Admission checks for the long-running controller and stateless API roles."""
 
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from importlib.util import find_spec
 
+from sqlalchemy.engine import Connection
+
 from etl_craft import __version__
-from etl_craft.core.actor import SYSTEM_ACTOR
-from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.enums import ActionName, ApiRole, ConnectionUse, ProcessRole
 from etl_craft.core.errors import ConfigurationError, MigrationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.notifications import check_notifications
+from etl_craft.engine.process_reservations import (
+    Allocation,
+    connection_slot,
+    reserve_process,
+    task_capacity,
+)
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import Health
 from etl_craft.services.operations.requests import NoInput
@@ -38,10 +49,12 @@ def ui(ctx: OperationContext, request: NoInput) -> None:
     check_notifications(ctx.config, ctx.engine)
 
 
-def check_package_schema(ctx: OperationContext) -> None:
+def check_package_schema(ctx: OperationContext, connection: Connection | None = None) -> None:
     """Require the existing migration ledger to match this package before using it."""
     try:
-        pending = pending_migrations(ctx.engine, project_default=ctx.config.migrations_dir)
+        pending = pending_migrations(
+            ctx.engine, project_default=ctx.config.migrations_dir, connection=connection
+        )
     except MigrationError as error:
         raise MigrationError(
             f"Engine DB does not match etl-craft package version {__version__}: {error}; "
@@ -67,14 +80,37 @@ def probe(ctx: OperationContext) -> Health:
 
 
 def readiness(ctx: OperationContext) -> Health:
-    """Check the Engine DB afresh, without reusing an outage-retrying connection pool."""
-    from sqlalchemy.pool import NullPool
-
-    from etl_craft.engine.connection import engine_db
-
-    engine = engine_db(replace(ctx.config, sizing=None), poolclass=NullPool)
-    try:
-        check_package_schema(replace(ctx, engine=engine))
+    """Probe promptly on one dedicated session without creating another Engine."""
+    with connection_slot(ctx.engine, ConnectionUse.HEALTH) as available:
+        if not available:
+            raise ConfigurationError(
+                "readiness connection is busy; expected a free probe session; retry another UI copy"
+            )
+        with for_engine(ctx.engine).session_connection(ctx.engine, ctx.config) as conn:
+            check_package_schema(ctx, connection=conn)
         return probe(ctx)
-    finally:
-        engine.dispose()
+
+
+@contextmanager
+def connection_process(ctx: OperationContext, role: ProcessRole) -> Iterator[OperationContext]:
+    """Reserve process capacity until its requests and local children have stopped."""
+    if not for_engine(ctx.engine).supports_api_replicas:
+        yield ctx
+        return
+    if role == ProcessRole.RUN and (capacity := task_capacity(ctx.engine)) is not None:
+        yield replace(ctx, child=replace(ctx.child, cancel=ctx.child.cancel or capacity[1]))
+        return
+    from etl_craft.engine.connection_budget import footprint
+
+    budget = footprint(ctx.config, role)
+    cancel = ctx.child.cancel or threading.Event()
+    updated = replace(ctx, shutdown=ctx.shutdown or cancel, child=replace(ctx.child, cancel=cancel))
+    with (
+        acting_as(ctx.actor),
+        reserve_process(
+            ctx.engine,
+            ctx.config,
+            Allocation(role, budget, cancel, 60 + ctx.config.limits.engine_db_outage_seconds),
+        ),
+    ):
+        yield updated

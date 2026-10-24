@@ -8,6 +8,7 @@ Secrets:
   Source_type: ENVIRONMENT             # value
 
 Orchestration:
+  Db_pool_size: 10
   Project: default                    # value — metadata namespace in the shared Engine DB
   # Api_address: 127.0.0.1:8730  # all-in-one API; controller --no-ui exposes only /health
   Retry_on: TRANSIENT                 # value; retry only failures that can succeed

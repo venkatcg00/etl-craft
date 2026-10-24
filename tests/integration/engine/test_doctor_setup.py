@@ -70,6 +70,23 @@ def test_setup_creates_the_engine_db_then_changes_nothing(config, empty_engine_d
     assert not again.created_tables and again.applied_migrations == []
 
 
+def test_setup_checks_the_proposed_budget_before_creating_tables(
+    config, empty_engine_db, monkeypatch
+):
+    from etl_craft.dialects.engine import for_engine
+
+    monkeypatch.setattr(for_engine(empty_engine_db.engine), "max_connections", lambda _: 10)
+    result = setup(config)
+    budget = found(result.checks)["Engine DB connection budget"]
+    assert budget[0] == Status.FAIL
+    assert "max_connections=10" in budget[1]
+    assert "proposed controller" in budget[1]
+    assert "expected at most 80%" in budget[1]
+    assert "lower Db_pool_size" in budget[1]
+    assert not result.created_tables
+    assert existing_engine_tables(empty_engine_db.engine) == []
+
+
 def test_a_project_migration_is_pending_until_setup_applies_it(config, tmp_path):
     setup(config)
     (tmp_path / "migrations").mkdir()

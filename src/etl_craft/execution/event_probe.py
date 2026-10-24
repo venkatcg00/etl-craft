@@ -84,7 +84,7 @@ def _query(
     engine = None
     try:
         # Metadata validation may hold uncommitted edits; its probe reads only the warehouse.
-        engine = build_engine(config) if event.task_id else None
+        engine = build_engine(config, supervised=True) if event.task_id else None
         tag = holder_tag(holder.holder_id)
         with acting_as(actor), holder_scope(holder), cancellation_scope(config, tag):
             evidence, _ = probe(

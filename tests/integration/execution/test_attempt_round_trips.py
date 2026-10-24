@@ -68,6 +68,13 @@ def test_sql_attempt_round_trips_include_supervisor_and_child(
     assert result.status == RunStatus.SUCCESS, result.message
     events = [json.loads(line) for line in records.read_text().splitlines()]
     assert len({row["pid"] for row in events}) == 2
+    active = peak = 0
+    for row in events:
+        if row["pid"] != os.getpid() and row["kind"] == "engine":
+            active += (row["measure"] == "checked_out") - (row["measure"] == "checked_in")
+            peak = max(peak, active)
+    assert active == 0
+    assert peak == 1
     counts = Counter(f"{row['kind']}_{row['measure']}" for row in events)
     observed = {
         name: counts[name]

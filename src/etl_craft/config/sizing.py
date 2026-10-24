@@ -15,6 +15,7 @@ from etl_craft.core.resources import (
     Allocation,
     Ceilings,
     Host,
+    Size,
     Sizing,
     describe,
     discover,
@@ -34,6 +35,11 @@ def ceilings(config: ConnectorConfig) -> Ceilings:
     )
 
 
+def engine_pool(config: ConnectorConfig) -> Size:
+    """Use the team's per-process connection ceiling in both startup and doctor reports."""
+    return Size(config.db_pool_size, "Orchestration.Db_pool_size")
+
+
 def start_role(
     config: ConnectorConfig, *, server: bool, host: Host | None = None
 ) -> ConnectorConfig:
@@ -48,6 +54,7 @@ def start_role(
     if config.deployment is None:
         return config
     sizing = size(allocation, config.deployment, ceilings(config))
+    sizing = replace(sizing, engine_pool=engine_pool(config))
     if server or config.deployment != DeploymentProfile.CONTROLLER_AGENTS:
         _refuse_unaffordable(allocation, sizing, server=server)
     logger.info(

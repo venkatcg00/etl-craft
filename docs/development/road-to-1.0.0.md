@@ -153,7 +153,8 @@ item's text, or work done early under another item.
 | S5.AK Item fan-out inside Python tasks | Done | #238 | Durable item execution, retries, controls and shared progress; interactive graph/grid visuals follow in S7.A |
 | S5.F Pinned project bundles | Done | #239 | Immutable project publications and admitted metadata shared by local tasks, API-only agents, retries and controller recovery |
 | S5.G Projects in one Engine DB | Done | #245 | Project-scoped metadata, bundles, grants, lineage, migrations and admission |
-| S5.H and later | Not started | | |
+| S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
+| S5.I and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -312,6 +313,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S5.H validates both Engine DB migrations, PostgreSQL live-session accounting, startup admission,
+shared UI task limits, ownership recovery and process death. Static/docs and unit checks pass;
+controller, API, gate and local execution checks pass. Admission and local child races run
+twenty rounds. Warehouse SQL is unchanged, so cloud acceptance is not required; installed-wheel
+demos remain the required CI gate.
 
 S5.G validates project metadata, same-code pipelines, cross-project dependency files, scoped
 hash/lineage/audit state, grants, bundle approvals, project pools/quotas, project migrations
@@ -672,6 +679,20 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S5.H derives completion from its bullets: shared deployment accounting, one engine per process,
+  bounded local child connections, doctor reporting and documented PgBouncer session affinity.
+- With owner approval, startup and doctor fail above 80% rather than warn. Migration 0055 adds
+  AUD_CONNECTION_RESERVATIONS with process identity, role, footprint and ownership timestamps.
+  Runtime reservations renew every 15 seconds with the configured outage allowance plus 60 seconds;
+  expired or stopped rows remain charged while tagged PostgreSQL sessions are alive.
+- With owner approval, synchronous HTTP task selections remain local. UI callers share a child
+  allowance; excess attempts stay queued. Controller and UI reserve pool + 4 + local slots;
+  local run reserves pool + 2 + local slots. These totals include bounded gate probes and the
+  UI readiness probe as well as ownership, leadership and notification sessions. Agents add zero.
+- Local task NullPool uses six sequential physical opens instead of one retained connection in
+  the attempt budget; peak simultaneous connections stays one, with the same 84 SQL statements
+  and 22 transactions. Static docs serving releases its idle Engine DB pool before waiting.
 
 - S5.G derives completion from its Change and Tests: project selection on CLI/API, distinct
   warehouses and same-code pipelines, cross-project dependencies, pause/default pools/quotas,

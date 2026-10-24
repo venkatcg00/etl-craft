@@ -17,11 +17,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.counts import Counts
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums import ConnectionUse, RunStatus
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError, RunRefusedError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
 from etl_craft.engine import controls, locks, transitions
+from etl_craft.engine.process_reservations import connection_slot
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.events import consumed_files, record_event
@@ -198,12 +199,14 @@ def _probe(
     started = time.monotonic()
     with suppress(LockTimeoutError):
         if event.sql:
-            evidence = probe_sql(
-                wait.config,
-                event,
-                30 if deadline is None else max(0.001, (deadline - now).total_seconds()),
-                wait.cancel,
-            )
+            with connection_slot(wait.engine, ConnectionUse.PROBE) as available:
+                if available:
+                    evidence = probe_sql(
+                        wait.config,
+                        event,
+                        30 if deadline is None else max(0.001, (deadline - now).total_seconds()),
+                        wait.cancel,
+                    )
         else:
             evidence, observations = probe(
                 event, wait.config, wait.engine, now, observations, consumed

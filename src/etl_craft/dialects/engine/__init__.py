@@ -7,6 +7,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.pool import NullPool
 
 from etl_craft.config.auth import engine_for_jdbc_url
 from etl_craft.core.errors import ConfigurationError
@@ -75,6 +76,8 @@ def build_engine(
         raise ConfigurationError(
             "agent project: direct Engine DB access is forbidden; use the task's API service"
         )
+    if supervised:
+        engine_kwargs.setdefault("poolclass", NullPool)
     profile = profile or config.engine
     engine = for_jdbc_url(profile.jdbc_url).build_engine(
         config, profile, supervised=supervised, **engine_kwargs
