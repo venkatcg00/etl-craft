@@ -1,4 +1,4 @@
-WITH scope AS NOT MATERIALIZED (
+WITH scope AS not materialized (
  SELECT a.ATTEMPT_ID AS attempt_id,p.PROJECT_ID AS project_id,
         project.MAX_RUNNING_TASKS AS project_limit,
         CASE WHEN r.BUNDLE_ID IS NULL THEN CAST(:warehouse_limit AS integer)
