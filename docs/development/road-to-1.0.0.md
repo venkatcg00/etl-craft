@@ -156,7 +156,8 @@ item's text, or work done early under another item.
 | S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
 | S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
 | S5.J | Done | #248 | Shared local/queue contracts and a ten-project demo. |
-| S6.A and later | Not started | | |
+| S6.A Retention | Planned | #249 | Three implementation slices: Engine DB/logs, recoverable archives, warehouse maintenance. |
+| S6.B and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -696,6 +697,12 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.A is split into three ordered implementation pull requests: Engine DB/log retention,
+  crash-safe warehouse archiving, and warehouse auxiliary-data retention. The owner authorized
+  the recommended approach to conflicts. Separate deletion and recovery boundaries keep each
+  change reviewable; no original acceptance criterion is removed. The million-attempt timing
+  benchmark runs in manual/release validation rather than adding minutes to every PR's CI.
 
 - S5.J shares submission, cancellation, resource admission, worker loss, stale completion and
   controller restart checks across local and queue providers. Agent registration/version and
@@ -5748,6 +5755,40 @@ Branch: `feat/engine-retention`.
 - *Tests.* Purge keeps referenced rows; a dry run deletes nothing and reports counts; purge of
   1 million synthetic attempt rows on PostgreSQL finishes within 5 minutes and doesn't block a
   concurrent run.
+
+**Implementation slices.** Ship the following in order, one cohesive pull request per slice.
+The bullets above remain the full acceptance contract; S6.A is Done only after all three slices.
+
+1. **Engine DB history and attempt files.** Add the five named retention periods and `Daily_at`,
+   the shared actor-scoped purge operation, CLI/API access, dry-run counts and controller scheduling.
+   Preserve existing installs when periods are unset. Apply the 10,000-row transaction bound,
+   project scope, terminal-history selection and reference protection to both Engine DBs.
+   Enumerate foreign-key and logical references before deleting: retained consumption, gate
+   decisions, active attempts, bundles and recovery state must remain usable. Keep deployment-wide
+   history outside a project purge unless its ownership is proven. File cleanup follows committed
+   row deletion and resumes after a crash; retained attempt log views can distinguish retention
+   from a missing or unreadable file. Any durable cleanup or removal evidence ships with matching
+   migrations and released-schema upgrade tests. Include setup recommendations, doctor checks,
+   docs/examples, real process-loss tests and the million-attempt PostgreSQL benchmark. Keep that
+   large benchmark in manual/release validation; ordinary correctness and bounded-batch tests run
+   in existing CI suites. Do not expose `--archive-to` until slice 2 provides its full contract.
+2. **Recoverable warehouse archives.** Add `--archive-to` to the same purge operation. Archive
+   immutable batches under source primary keys, evolve the archive schema, record its Engine DB
+   schema version and verify the complete batch before deleting any source rows. A retry after a
+   warehouse commit or lost acknowledgement must neither overwrite different source data nor
+   duplicate rows. Engine DB deletion and its `AUD_ACTIONS` record commit together. Keep files
+   until their source history is deleted under that verified archive decision. Test real crashes
+   between the warehouse write and Engine DB commit and within both steps, schema evolution,
+   reference protection and unchanged dry-run behavior on both Engine DBs and supported warehouses.
+3. **Warehouse-owned auxiliary data.** Add the config-file periods and setup/doctor behavior for
+   rejects, business-rule mirrors, cloned mirrors and supported Iceberg snapshot/orphan cleanup.
+   Use the existing target locks and dialect implementations; never delete target business rows.
+   Test old/new row boundaries and concurrent merge exclusion on every local warehouse. Run each
+   affected cloud once when available, recording unavailable acceptance separately from failures.
+
+Each slice records its actual public fields, migrations and validation in its own pull request.
+No slice adds a repeated CI suite or relaxes the full item's acceptance criteria. S6.B follows
+completed S6.A; it does not move into the first slice to redesign log transport.
 
 ### S6.B Logs outside the Engine DB
 
