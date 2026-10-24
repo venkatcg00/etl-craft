@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import psycopg
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Connection, Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.pool import NullPool
 
 from etl_craft.config.auth import POSTGRES_AUTH_FIELDS, engine_for_jdbc_url
 from etl_craft.core.actor import Actor
@@ -22,6 +26,7 @@ from etl_craft.core.outage import OutageBudget
 from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine.base import EngineDialect
+from etl_craft.dialects.engine.connections import SerialConnections
 from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
 
 if TYPE_CHECKING:
@@ -137,6 +142,9 @@ class PostgresEngineDialect(EngineDialect):
             config.limits.engine_db_outage_seconds,
             reached=supervised,
         )
+        serial = SerialConnections() if supervised else None
+        if serial is not None:
+            creator = serial.creator(creator)
         engine_kwargs.setdefault("pool_pre_ping", True)
         if profile.auth_mode in credentials.MINTED_AUTH_MODES:
             engine_kwargs.setdefault(
@@ -150,7 +158,39 @@ class PostgresEngineDialect(EngineDialect):
             database=url.database,
             query=public_url_query(url.query),
         )
-        return create_engine(sqlalchemy_url, creator=creator, **engine_kwargs)
+        engine = create_engine(sqlalchemy_url, creator=creator, **engine_kwargs)
+        if serial is not None:
+            serial.attach(engine)
+        return engine
+
+    def tag_process_connection(self, driver: DBAPIConnection, identity: str) -> None:
+        """Retain capacity while the owner or an orphaned local task still has a session."""
+        cursor = driver.cursor()
+        try:
+            cursor.execute(
+                "SELECT set_config('application_name', %s, false) AS application_name",
+                (f"etl-craft-process-{identity}",),
+            )
+            driver.commit()
+        finally:
+            cursor.close()
+
+    def session_connection(self, engine: Engine, config: ConnectorConfig) -> Connection:
+        """Use the direct session address for ownership and LISTEN, outside the request pool."""
+        from etl_craft.config import profile_secret
+
+        if getattr(engine.dialect, "default_isolation_level", None) is None:
+            with engine.connect():
+                pass
+        profile = config.engine
+        profile = replace(profile, jdbc_url=profile.listen_jdbc_url or profile.jdbc_url)
+        creator = postgres_creator(
+            profile, profile_secret(config, profile), parse_postgres_url(profile.jdbc_url)
+        )
+        try:
+            return Connection(engine, connection=NullPool(creator=creator).connect())
+        except psycopg.OperationalError as error:
+            raise OperationalError(None, None, error, connection_invalidated=True) from error
 
     def max_connections(self, conn: Connection) -> int | None:
         """Return the server's ``max_connections``."""
@@ -317,6 +357,8 @@ def postgres_creator(profile: ConnectionProfile, secret: str, url: JdbcUrl) -> C
             **auth,
             **url.query,
         }
+        if identity := os.environ.get("ETL_CRAFT_PROCESS_RESERVATION"):
+            settings["application_name"] = f"etl-craft-process-{identity}"
         if profile.schema:
             # Every Engine DB table is created and read in the profile's schema.
             options = f"{settings.get('options', '')} -c search_path={profile.schema}"

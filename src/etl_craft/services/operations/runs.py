@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 
-from etl_craft.core.enums import RunStatus, Transport
+from etl_craft.core.enums import ProcessRole, RunStatus, Transport
 from etl_craft.core.errors import UsageError
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
@@ -54,13 +55,17 @@ def execute_run(ctx: OperationContext, request: RunRequest) -> OperationResult |
     Over HTTP a whole-pipeline run is admitted for the controller, which runs it; the options in
     ``HOST_ONLY`` are refused there, except ``ignore_dependencies`` with ``standalone``.
     """
-    if ctx.transport == Transport.HTTP:
-        request = _over_http(request)
-    if request.backfill is not None:
-        from etl_craft.services.operations import backfills
+    from etl_craft.services.operations.processes import connection_process
 
-        return backfills.run_backfill(ctx, request)
-    return _execute(ctx, request)
+    local = ctx.transport == Transport.LOCAL and not request.init_only
+    with connection_process(ctx, ProcessRole.RUN) if local else nullcontext(ctx) as scoped:
+        if ctx.transport == Transport.HTTP:
+            request = _over_http(request)
+        if request.backfill is not None:
+            from etl_craft.services.operations import backfills
+
+            return backfills.run_backfill(scoped, request)
+        return _execute(scoped, request)
 
 
 def _over_http(request: RunRequest) -> RunRequest:

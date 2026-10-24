@@ -215,7 +215,6 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         timezone(project_timezone)
     except MetadataError as error:
         raise ConfigurationError(f"{path}: Orchestration.Timezone: {error}") from error
-    log_dir = relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path)
     email = parse_email(orchestration, path, resolver)
     engine = (
         ConnectionProfile("ENGINE", "api-only", "api-only:", "", AuthMode.NONE)
@@ -240,6 +239,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         api_address=api_address,
         timezone=project_timezone,
         project=parse_project(orchestration, path),
+        db_pool_size=int(whole_number(orchestration, "Db_pool_size", 10, path, minimum=1)),
         source=source,
         engine=engine,
         auth=parse_auth(raw, global_profile, path, resolver),
@@ -257,7 +257,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         config_path=path,
         dependency_gates=dependency_gates,
         settings=tuple(resolver.sources),
-        log_dir=log_dir,
+        log_dir=relative_to_config(orchestration.text("Log_dir") or DEFAULT_LOG_DIR, path),
     )
     config = with_artifacts(config, raw, path, resolver)
     if warehouse is not None:

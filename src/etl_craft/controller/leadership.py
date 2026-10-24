@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import psycopg
 from sqlalchemy.engine import Connection, Engine
 
+from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import LockTimeoutError, RunRefusedError
 from etl_craft.core.filelock import file_lock
 from etl_craft.dialects.engine import for_engine
@@ -28,6 +29,7 @@ class Leadership:
     connection: Connection | None = None
     engine: Engine | None = None
     key: int = 0
+    config: ConnectorConfig | None = None
 
     def hold(self) -> None:
         """Take the PostgreSQL session lock again when a dropped connection took it away.
@@ -35,7 +37,7 @@ class Leadership:
         Refuse when another controller took it meanwhile. SQLite's file lock never drops.
         """
         if self.engine is not None and self.connection is None:
-            self.connection = _acquire(self.engine, self.key, retaking=True)
+            self.connection = _acquire(self.engine, self.key, retaking=True, config=self.config)
 
     def wait(self, stop: threading.Event) -> None:
         """Wake on a committed execution notification or at the one-second poll.
@@ -56,9 +58,15 @@ class Leadership:
             self.hold()
 
 
-def _acquire(engine: Engine, key: int, *, retaking: bool = False) -> Connection:
+def _acquire(
+    engine: Engine, key: int, *, retaking: bool = False, config: ConnectorConfig | None = None
+) -> Connection:
     """Hold the deployment's session lock and listen for execution notifications."""
-    conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+    conn = (
+        engine.connect()
+        if config is None
+        else for_engine(engine).session_connection(engine, config)
+    ).execution_options(isolation_level="AUTOCOMMIT")
     try:
         held = conn.execute(statement(conn, "controller_try_lock"), {"key": key}).scalar_one()
         if not held:
@@ -77,7 +85,7 @@ def _acquire(engine: Engine, key: int, *, retaking: bool = False) -> Connection:
 
 
 @contextmanager
-def leadership(engine: Engine) -> Iterator[Leadership]:
+def leadership(engine: Engine, config: ConnectorConfig | None = None) -> Iterator[Leadership]:
     """Hold a deployment-specific lock until all local agents have stopped."""
     path = for_engine(engine).controller_lock_path(engine)
     if path is not None:
@@ -96,7 +104,7 @@ def leadership(engine: Engine) -> Iterator[Leadership]:
     with engine.connect() as conn:
         schema = str(conn.execute(statement(conn, "controller_schema")).scalar_one())
     key = advisory_key(f"etl-craft:controller:{schema}")
-    leader = Leadership(_acquire(engine, key), engine, key)
+    leader = Leadership(_acquire(engine, key, config=config), engine, key, config)
     try:
         yield leader
     except BaseException:

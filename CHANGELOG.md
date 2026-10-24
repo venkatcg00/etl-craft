@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- PostgreSQL processes reserve deployment-wide Engine DB capacity before startup and fail above
+  80% of `max_connections`. `Orchestration.Db_pool_size` defaults to 10 with no overflow;
+  API-only agents contribute zero connections and local task children use `NullPool`. Doctor
+  reports registered pools, dedicated sessions and local task allowances. Migration 0055 adds
+  actor-stamped process reservation history; ownership and notification sessions share the
+  process engine and may use the existing direct `Listen_jdbc_url` address. Synchronous HTTP
+  tasks share the UI process's reserved child allowance. Engine DB sessions use a process
+  `application_name` tag so orphaned children retain their connection reservation.
+
 ### Added
 
 - Projects share one Engine DB while retaining separate pipeline codes, warehouses,

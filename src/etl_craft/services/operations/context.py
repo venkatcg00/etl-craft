@@ -15,7 +15,7 @@ from etl_craft.execution.attempt_types import ChildOptions
 
 @dataclass(frozen=True)
 class OperationContext:
-    """Resources owned by the caller; operations never dispose the Engine DB.
+    """Resources owned by the caller; process lifecycles close their pools after draining work.
 
     ``actor`` scopes requests and dispatched work; automatic transitions retain their system
     actor. ``transport`` says how the request arrived, so an operation can refuse an option that

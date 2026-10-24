@@ -73,6 +73,7 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         ) as site:
             out.line(f"publish-docs: serving {folder} at {site.url} (Ctrl-C to stop)")
             out.stdout.flush()
+            ctx.engine.dispose()
             wait_until_stopped()
     out.line("publish-docs: stopped")
     return ExitCode.SUCCESS

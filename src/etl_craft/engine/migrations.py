@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import tomllib
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -256,6 +257,7 @@ def pending_migrations(
     project_dir: Path | str | None = None,
     *,
     project_default: Path | None = None,
+    connection: Connection | None = None,
 ) -> list[str]:
     """Return the migrations ``migrate`` would apply, without applying any.
 
@@ -263,7 +265,7 @@ def pending_migrations(
     edited.
     """
     streams = migration_streams(engine, project_dir, project_default)
-    with engine.connect() as conn:
+    with nullcontext(connection) if connection is not None else engine.connect() as conn:
         ledger = _load_ledger(conn)
     verify_ledger(ledger, streams)
     return [

@@ -111,3 +111,16 @@ def test_api_project_selection_does_not_resolve_connection_credentials(tmp_path,
         "Engine:\n  dev:\n    Jdbc_url: MISSING_CONNECTION_SECRET\n"
     )
     assert load_project(path) == "sales"
+
+
+def test_pool_size_is_explicit_and_defaults_to_ten(tmp_path):
+    from etl_craft.config import parse_config
+
+    raw = {
+        "Secrets": {"Source_type": "ENVIRONMENT"},
+        "Orchestration": {},
+        "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
+    }
+    assert parse_config(raw, tmp_path / "craft-connector.yml").db_pool_size == 10
+    raw["Orchestration"]["Db_pool_size"] = 3
+    assert parse_config(raw, tmp_path / "craft-connector.yml").db_pool_size == 3

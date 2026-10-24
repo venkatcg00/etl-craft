@@ -3,21 +3,19 @@
 import asyncio
 import logging
 import threading
-from dataclasses import replace
 from hashlib import sha256
 from uuid import uuid4
 from weakref import WeakKeyDictionary
 
 import psycopg
 from sqlalchemy import event
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.pool import NullPool
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import mask_arguments
-from etl_craft.dialects.engine import build_engine, for_engine
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.queries import statement
 
 logger = logging.getLogger(__name__)
@@ -36,14 +34,9 @@ def agent_channel(agent_id: int) -> str:
     return f"etl_craft_agent_{agent_id}"
 
 
-def listener_engine(config: ConnectorConfig) -> Engine:
-    """Reuse Engine authentication with the independently resolved session address."""
-    profile = config.engine
-    return build_engine(
-        config,
-        replace(profile, jdbc_url=profile.listen_jdbc_url or profile.jdbc_url),
-        poolclass=NullPool,
-    )
+def listener_connection(config: ConnectorConfig, engine: Engine) -> Connection:
+    """Use the process engine with a separately authenticated, unpooled session."""
+    return for_engine(engine).session_connection(engine, config)
 
 
 def check_notifications(config: ConnectorConfig, sender: Engine) -> None:
@@ -53,10 +46,10 @@ def check_notifications(config: ConnectorConfig, sender: Engine) -> None:
     profile = config.engine
     setting = "Listen_jdbc_url" if profile.listen_jdbc_url is not None else "Jdbc_url"
     address = mask_arguments({"url": profile.listen_jdbc_url or profile.jdbc_url})["url"]
-    engine = None
     try:
-        engine = listener_engine(config)
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as listener:
+        with listener_connection(config, sender).execution_options(
+            isolation_level="AUTOCOMMIT"
+        ) as listener:
             listener.execute(statement(listener, "controller_listen"))
             payload = uuid4().hex
             with sender.begin() as conn:
@@ -69,9 +62,6 @@ def check_notifications(config: ConnectorConfig, sender: Engine) -> None:
         detail = f"no matching notification arrived within {PROBE_SECONDS:g} seconds"
     except (ConfigurationError, SQLAlchemyError, psycopg.Error) as error:
         detail = f"notification connection failed ({type(error).__name__})"
-    finally:
-        if engine is not None:
-            engine.dispose()
     raise ConfigurationError(
         f"Engine.{profile.name}.{setting}={address!r}: {detail}; "
         "point it at a direct PostgreSQL connection or a session-mode pool, "
@@ -90,7 +80,8 @@ class NotificationHub:
         self.waiters: set[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
         self.stop = threading.Event()
         self.thread: threading.Thread | None = None
-        self.engine = listener_engine(config) if for_engine(sender).supports_api_replicas else None
+        self.config = config
+        self.engine = sender if for_engine(sender).supports_api_replicas else None
         if self.engine is not None:
             self.thread = threading.Thread(target=self._listen, name="engine-listen", daemon=True)
             self.thread.start()
@@ -99,7 +90,9 @@ class NotificationHub:
         assert self.engine is not None
         while not self.stop.is_set():
             try:
-                with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                with listener_connection(self.config, self.engine).execution_options(
+                    isolation_level="AUTOCOMMIT"
+                ) as conn:
                     subscribed: set[str] = set()
                     while not self.stop.is_set():
                         with self.changed:
@@ -168,8 +161,6 @@ class NotificationHub:
         self.wake()
         if self.thread is not None:
             self.thread.join(timeout=2)
-        if self.engine is not None:
-            self.engine.dispose()
 
 
 _hubs: WeakKeyDictionary[Engine, NotificationHub] = WeakKeyDictionary()

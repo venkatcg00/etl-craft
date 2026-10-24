@@ -21,6 +21,7 @@ from etl_craft.core.enums import (
     ControlAcknowledgement,
     ControlAction,
     ControlStatus,
+    ProcessRole,
 )
 from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
@@ -230,6 +231,15 @@ def seeded_tables(db):
             "target_schema_name": "s",
             "target_table_name": "t",
             "recomputed_at": datetime.now(UTC),
+            "reservation_id": "test-process",
+            "birth_time": 1.0,
+            "pool_connections": 10,
+            "session_connections": 1,
+            "local_task_connections": 0,
+            "backend_pid": 1,
+            "backend_started_at": datetime.now(UTC),
+            "heartbeat_at": datetime.now(UTC),
+            "expires_at": datetime.now(UTC),
         }
         inspector = inspect(conn)
         schema = None if engine.dialect.name == "sqlite" else inspector.default_schema_name
@@ -265,6 +275,8 @@ def seeded_tables(db):
                         value = datetime.now(UTC)
                     else:
                         value = 1 if "INT" in type_name or "NUMERIC" in type_name else "sample"
+                if table.upper() == "AUD_CONNECTION_RESERVATIONS" and lower == "role":
+                    value = ProcessRole.UI
                 if table.upper() == "AUD_CONTROL_REQUESTS":
                     value = {"status": ControlStatus.REQUESTED, "action": ControlAction.HOLD}.get(
                         lower, value

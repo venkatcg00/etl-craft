@@ -21,11 +21,7 @@ from etl_craft.services.operations.context import OperationContext
 
 
 def serve_http(ctx: OperationContext, stop: threading.Event, *, controller: bool = True) -> None:
-    """Run HTTP in the main thread, optionally sharing the controller shutdown lifecycle.
-
-    The address is bound first, so a port in use refuses the server before it takes leadership
-    or supervises anything.
-    """
+    """Bind HTTP before taking leadership, then share the process shutdown lifecycle."""
     host, port = parse_api_address(ctx.config.api_address)
     listener = bind_api_address(host, port)
     errors: list[BaseException] = []
@@ -36,6 +32,10 @@ def serve_http(ctx: OperationContext, stop: threading.Event, *, controller: bool
         draining: asyncio.Task[None] | None = None
 
         async def on_tick(self, counter: int) -> bool:
+            if gateway is not None and stop.is_set() and self.draining is None:
+                gateway.begin_shutdown(ctx.config.limits.shutdown_grace_seconds)
+                self.should_exit = False
+                self.draining = asyncio.create_task(self.drain_ui())
             return (controller and stop.is_set()) or await super().on_tick(counter)
 
         def handle_exit(self, sig: int, frame: FrameType | None) -> None:

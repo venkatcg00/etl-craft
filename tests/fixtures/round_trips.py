@@ -69,6 +69,7 @@ class RoundTrips:
         self.catalog = catalog_queries()
         self.listeners = [
             (Pool, "connect", self.connected),
+            (Pool, "checkin", self.checked_in),
             (Engine, "engine_connect", self.checked_out),
             (Engine, "before_cursor_execute", self.statement),
             (Engine, "begin", self.begin),
@@ -105,8 +106,16 @@ class RoundTrips:
     def checked_out(self, conn):
         if not self.accepts(conn):
             return
+        kind = self.kind(conn)
+        conn.info["budget_counter"] = (id(self), kind)
+        self.record(kind, "checked_out")
         if conn.info.pop("budget_new_connection", False):
-            self.record(self.kind(conn), "connections")
+            self.record(kind, "connections")
+
+    def checked_in(self, connection, record):
+        counter, kind = record.info.get("budget_counter", (None, None))
+        if counter == id(self):
+            self.record(kind, "checked_in")
 
     def statement(self, conn, cursor, sql, parameters, context, many):
         if not self.accepts(conn):

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -25,13 +26,17 @@ from etl_craft.config.auth import EMAIL_VERIFIED_AUTH_MODES, engine_for_jdbc_url
 from etl_craft.config.loader_helpers import shown
 from etl_craft.config.model import ConnectionProfile, EmailProfile
 from etl_craft.config.resolve import resolve_named_secret, source_values
-from etl_craft.config.sizing import ceilings
-from etl_craft.core.enums import CloningScope, DeploymentProfile, EmailTransport, GatePolicy
+from etl_craft.config.sizing import ceilings, engine_pool
+from etl_craft.core.enums import (
+    CloningScope,
+    DeploymentProfile,
+    EmailTransport,
+    GatePolicy,
+    ProcessRole,
+)
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.resources import (
-    DEFAULT_POOL_SIZE,
     MIB,
-    POOL_OVERFLOW,
     Host,
     Measurement,
     describe,
@@ -41,8 +46,10 @@ from etl_craft.core.resources import (
 from etl_craft.core.text import quote_identifier
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
+from etl_craft.engine.connection_budget import footprint, reservations
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.notifications import check_notifications
+from etl_craft.engine.queries import statement
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
 from etl_craft.handlers.mail import email_tls_problem
@@ -175,7 +182,7 @@ def resource_checks(config: ConnectorConfig, host: Host | None = None) -> list[C
                 ("python slots", sizing.python_slots),
                 ("warehouse slots", sizing.warehouse_slots),
                 ("server threads", sizing.server_threads),
-                ("Engine DB pool", sizing.engine_pool),
+                ("Engine DB pool", engine_pool(config)),
             )
         ),
         *(warn("Sizing: fallback", fallback) for fallback in sizing.fallbacks),
@@ -190,26 +197,37 @@ def _measured(name: str, measurement: Measurement, unit: str, fallback: str) -> 
 
 
 def _connection_budget(config: ConnectorConfig, engine: Engine) -> list[Check]:
-    """Compare the processes' Engine DB connections with the server's limit."""
+    """Report registered process reservations, or the proposed first controller footprint."""
     with engine.connect() as conn:
         limit = for_engine(engine).max_connections(conn)
-    if limit is None:
-        return []
-    if config.deployment in (DeploymentProfile.LAPTOP, DeploymentProfile.CONTROLLER):
-        sizing = size(discover(), config.deployment, ceilings(config))
-        pool, tasks = sizing.engine_pool.value, sizing.task_slots.value
-    else:
-        pool, tasks = DEFAULT_POOL_SIZE, config.limits.max_parallel_tasks
-    budget = pool + POOL_OVERFLOW + tasks
+        if limit is None:
+            return []
+        if not for_engine(conn).has_table(conn, "AUD_CONNECTION_RESERVATIONS"):
+            return [
+                fail(
+                    "Engine DB connection budget",
+                    "reservation table is missing; run etl-craft migrate",
+                )
+            ]
+        live = reservations(conn, datetime.now(UTC))
+        agents = conn.execute(statement(conn, "connection_budget_agents")).scalar_one()
+    planned = footprint(config, ProcessRole.CONTROLLER)
+    budget = live if live.total else planned
     detail = (
-        f"{budget} of max_connections={limit}: server pool {pool} + overflow {POOL_OVERFLOW} "
-        f"+ one per task process ({tasks})"
+        f"{budget.total} of max_connections={limit}: "
+        f"{budget.roles.count(ProcessRole.CONTROLLER)} controller(s), "
+        f"{budget.roles.count(ProcessRole.UI)} ui copy/copies, "
+        f"{budget.roles.count(ProcessRole.RUN)} local run(s); process pools {budget.pool} "
+        f"+ dedicated sessions {budget.sessions} + one per task process ({budget.tasks}); "
+        f"{agents} registered API-only agents add 0 connections; overflow 0; "
+        + ("registered deployment total" if live.total else "proposed controller")
     )
-    if budget > limit * 0.8:
+    if budget.total * 5 > limit * 4:
         return [
-            warn(
+            fail(
                 "Engine DB connection budget",
-                f"{detail}; over 80%: raise max_connections or lower the task slots",
+                f"{detail}; expected at most 80%; "
+                "lower Db_pool_size/local slots or raise max_connections",
             )
         ]
     return [ok("Engine DB connection budget", detail)]

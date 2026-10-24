@@ -39,6 +39,7 @@ from etl_craft.core.errors import (
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import build_graph
 from etl_craft.engine import run_scopes, runlog, transitions
+from etl_craft.engine.process_reservations import connection_slot
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.dependencies import (
@@ -520,6 +521,20 @@ def try_execute_attempt(
         from etl_craft.execution.pools.queue import wait_attempt
 
         return wait_attempt(engine, config, spec, child)
+    with connection_slot(engine) as available:
+        if not available:
+            return None
+        return _try_local_attempt(engine, config, spec, child, candidates)
+
+
+def _try_local_attempt(
+    engine: Engine,
+    config: ConnectorConfig,
+    spec: AttemptSpec,
+    child: ChildOptions,
+    candidates: tuple[int, ...] | None,
+) -> TaskOutcome | None:
+    """Hold the shared process allowance through claim, child exit and outcome recording."""
     owner = leases.owner_id()
     with engine.begin() as conn:
         from etl_craft.engine.agent_transitions import claim_with_capacity

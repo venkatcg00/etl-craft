@@ -29,6 +29,7 @@ from etl_craft.core.errors import (
 from etl_craft.core.filelock import file_lock
 from etl_craft.core.text import is_only_comments
 from etl_craft.dialects.engine.base import EngineDialect
+from etl_craft.dialects.engine.connections import SerialConnections
 from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
 
 if TYPE_CHECKING:
@@ -113,13 +114,17 @@ class SqliteEngineDialect(EngineDialect):
                 f"so auth_mode must be 'none', got {profile.auth_mode!r}"
             )
         database = resolve_sqlite_path(profile.jdbc_url, config.config_path)
+        serial = SerialConnections() if supervised else None
+        creator = sqlite_creator(database)
         engine = create_engine(
             URL.create("sqlite", database=database),
-            creator=sqlite_creator(database),
+            creator=serial.creator(creator) if serial is not None else creator,
             # The connection already returns datetimes; SQLAlchemy must not parse them again.
             native_datetime=True,
             **engine_kwargs,
         )
+        if serial is not None:
+            serial.attach(engine)
         event.listen(engine, "begin", _begin_immediate)
         return engine
 

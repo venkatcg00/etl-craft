@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import TextClause, bindparam, inspect, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 
 from etl_craft.config.auth import EngineSpec
 from etl_craft.core.actor import Actor
@@ -83,6 +84,14 @@ class EngineDialect(ABC):
     @abstractmethod
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install metadata capture and write guards for the current table definitions."""
+
+    def tag_process_connection(self, driver: DBAPIConnection, identity: str) -> None:
+        """Identify all sessions that still spend a process's reserved capacity."""
+        return None
+
+    def session_connection(self, engine: Engine, config: ConnectorConfig) -> Connection:
+        """Open one session without creating another SQLAlchemy engine."""
+        return engine.connect()
 
     def listen(self, conn: Connection, channels: tuple[str, ...]) -> None:
         """Subscribe a dedicated session to the requested notification channels."""

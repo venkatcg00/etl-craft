@@ -165,6 +165,22 @@ class AccountKind(StrEnum):
     SERVICE = "SERVICE"
 
 
+class ConnectionUse(StrEnum):
+    """Separately bounded Engine DB sessions in one serving process."""
+
+    TASK = "TASK"
+    PROBE = "PROBE"
+    HEALTH = "HEALTH"
+
+
+class ProcessRole(StrEnum):
+    """Processes that reserve Engine DB capacity; API-only agents reserve none."""
+
+    CONTROLLER = "CONTROLLER"
+    UI = "UI"
+    RUN = "RUN"
+
+
 class ApiRole(StrEnum):
     """A deployment account role, each including the ones before it."""
 

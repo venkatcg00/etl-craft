@@ -210,7 +210,7 @@ def test_doctor_reports_measurements_recommendation_and_sizes_without_a_profile(
     assert checks["Resources: CPU"].detail == "8 CPUs from CPU affinity (8 CPUs)"
     assert "Recommended: LAPTOP" in checks["Deployment profile"].detail
     assert checks["Sizing: task slots"].detail.startswith("14 (CPU")
-    assert checks["Sizing: Engine DB pool"].detail.startswith("8 (")
+    assert checks["Sizing: Engine DB pool"].detail == "10 (Orchestration.Db_pool_size)"
     blind = {c.name: c for c in resource_checks(load_config(path), host())}
     assert blind["Resources: memory"].status is Status.WARN
     assert "no automatic task-memory admission" in blind["Resources: memory"].detail
