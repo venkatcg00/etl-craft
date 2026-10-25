@@ -22,7 +22,7 @@ BEGIN
                 RAISE EXCEPTION 'AUD_TASK_ATTEMPTS terminal rows are immutable; queue a new attempt';
             ELSIF OLD.STATUS NOT IN ('QUEUED','CLAIMED','RUNNING') AND NOT (
                 TG_OP = 'UPDATE'
-                AND (OLD.LOG_PATH IS NULL OR NEW.LOG_PATH IS NOT DISTINCT FROM OLD.LOG_PATH)
+                AND (OLD.LOG_PATH IS NULL AND NEW.LOG_PATH IS NOT NULL)
                 AND to_jsonb(NEW) - 'log_path' = to_jsonb(OLD) - 'log_path'
             ) THEN
                 RAISE EXCEPTION 'AUD_TASK_ATTEMPTS terminal rows are immutable; queue a new attempt';

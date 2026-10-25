@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.faults import fault_point
-from etl_craft.engine.logs import log_key, log_location, remove_log
+from etl_craft.engine.logs import log_key, log_location, read_log_attempt, remove_log
 from etl_craft.engine.queries import statement
 from etl_craft.execution.attempt_records import attempt_log_path
 
@@ -51,9 +51,7 @@ def retire_log_rows(
     """Queue file cleanup and removal evidence in the caller's source transaction."""
     for row in rows:
         conn.execute(statement(conn, "log_lock"), {"attempt_id": row.attempt_id})
-        current = conn.execute(
-            statement(conn, "log_attempt"), {"attempt_id": row.attempt_id}
-        ).one_or_none()
+        current = read_log_attempt(conn, row.attempt_id)
         if current is None or current.log_removed_at is not None:
             continue
         path_value = current.log_path
@@ -179,11 +177,12 @@ def cleanup_files(engine: Engine, config: ConnectorConfig) -> int:
     while True:
         with engine.connect() as conn:
             rows = conn.execute(statement(conn, "retention_files")).all()
+            engine_id = conn.execute(statement(conn, "archive_origin")).scalar_one()
         if not rows:
             return count
         for row in rows:
             if "://" in row.log_path:
-                remove_log(config, row.log_path, row.project_id, row.attempt_id, row.engine_id)
+                remove_log(config, row.log_path, row.project_id, row.attempt_id, engine_id)
             else:
                 remove_file(config, Path(row.log_path))
             fault_point("retention.after_file_delete")

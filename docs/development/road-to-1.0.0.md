@@ -322,7 +322,9 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 S6.B validates full local/agent logs, live-to-stored byte continuity, configured UTF-8 tails,
 file/MinIO storage, exact identity and role/path refusals, pending/removed/inaccessible reports,
-and bounded file/chunk memory. Both Engine DBs cover publication/retention crash recovery and
+and bounded file/chunk memory. Terminal guards refuse no-op rewrites, and the complete query
+plan gate verifies bounded reads without additional scan exemptions. Both Engine DBs cover
+publication/retention crash recovery and
 real-row upgrades from every released schema, preserving oversized legacy text. Real PostgreSQL
 agents cover upload interruption and controller restart; publication/retention and duplicate
 endings run twenty local race rounds. The built-in security-review tool was unavailable;

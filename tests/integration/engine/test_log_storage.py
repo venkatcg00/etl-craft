@@ -15,7 +15,14 @@ from etl_craft.core.enums import ActionName, ApiRole, AttemptStatus
 from etl_craft.core.errors import ConfigurationError, ResourceNotFoundError
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import transitions
-from etl_craft.engine.logs import log_key, log_location, publish_log, shared_log, stored_log
+from etl_craft.engine.logs import (
+    log_key,
+    log_location,
+    publish_log,
+    read_log_attempt,
+    shared_log,
+    stored_log,
+)
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import invoke
@@ -71,7 +78,9 @@ def finish(ctx, attempt):
 
 def state(ctx, attempt):
     with ctx.engine.connect() as conn:
-        return conn.execute(statement(conn, "log_attempt"), {"attempt_id": attempt}).one()
+        row = read_log_attempt(conn, attempt)
+        assert row is not None
+        return row
 
 
 def read(ctx, attempt, offset=0):
@@ -396,3 +405,19 @@ def test_log_offset_is_bounded_before_a_query_or_file_seek(log_scene):
     ctx, attempt, _, _ = log_scene
     with pytest.raises(UsageError, match="expected 0"):
         read(ctx, attempt, 2**63)
+
+
+def test_published_log_acknowledgments_are_idempotent_without_rewriting_terminal_rows(log_scene):
+    ctx, attempt, _, _ = log_scene
+    append(ctx, attempt, 0, "immutable published log")
+    finish(ctx, attempt)
+    publish(ctx, attempt)
+    location = state(ctx, attempt).log_path
+    with pytest.raises(DBAPIError, match=r"immutable|append-only"), ctx.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LOG_PATH=LOG_PATH WHERE ATTEMPT_ID=:id"),
+            {"id": attempt},
+        )
+    publish(ctx, attempt)
+    assert state(ctx, attempt).log_path == location
+    assert read(ctx, attempt) == b"immutable published log"

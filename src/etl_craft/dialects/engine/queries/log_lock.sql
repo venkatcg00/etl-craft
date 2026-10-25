@@ -1,1 +1,2 @@
-UPDATE AUD_TASK_ATTEMPTS SET LOG_PATH=LOG_PATH WHERE ATTEMPT_ID=:attempt_id
+-- SQLite serializes the transaction with BEGIN IMMEDIATE; PostgreSQL overrides with FOR UPDATE.
+SELECT ATTEMPT_ID AS attempt_id FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:attempt_id

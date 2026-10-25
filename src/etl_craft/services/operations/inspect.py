@@ -19,6 +19,7 @@ from etl_craft.engine.logs import (
     LogAttempt,
     log_key,
     log_location,
+    read_log_attempt,
     shared_log,
     stored_log,
 )
@@ -327,12 +328,9 @@ def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
     """Stream a stored attempt's canonical log in bounded chunks from a byte offset."""
     attempt_id = request.attempt_id
     with ctx.engine.connect() as conn:
-        found = conn.execute(
-            statement(conn, "log_attempt"), {"attempt_id": attempt_id}
-        ).one_or_none()
-        if found is None:
+        row = read_log_attempt(conn, attempt_id)
+        if row is None:
             raise ResourceNotFoundError(f"attempt_id={attempt_id}: attempt does not exist")
-        row = LogAttempt(**found._mapping)
         if row.log_removed_at is not None:
             return iter([f"removed by retention on {row.log_removed_at}\n".encode()])
         shared = conn.execute(

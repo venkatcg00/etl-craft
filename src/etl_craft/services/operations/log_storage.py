@@ -12,7 +12,14 @@ from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import byte_tail, sha256_hex
 from etl_craft.engine.audit import ActionRequest
-from etl_craft.engine.logs import LIVE_ATTEMPTS, log_key, log_location, publish_log, shared_log
+from etl_craft.engine.logs import (
+    LIVE_ATTEMPTS,
+    log_key,
+    log_location,
+    publish_log,
+    read_log_attempt,
+    shared_log,
+)
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext
 
@@ -26,7 +33,7 @@ def tail(conn: Connection, attempt_id: int, maximum: int) -> str:
     chunk = 0
     while budget > 0:
         content = conn.execute(
-            statement(conn, "log_tail"), {"attempt_id": attempt_id, "chunk": chunk}
+            statement(conn, "log_tail"), {"attempt_id": attempt_id, "chunk_number": chunk}
         ).scalar_one_or_none()
         if content is None:
             break
@@ -43,9 +50,7 @@ def publish(ctx: OperationContext, attempt_id: int) -> None:
         _publish(ctx, attempt_id)
     except EtlCraftError as error:
         with ctx.engine.begin() as conn:
-            row = conn.execute(
-                statement(conn, "log_attempt"), {"attempt_id": attempt_id}
-            ).one_or_none()
+            row = read_log_attempt(conn, attempt_id)
             ActionRequest(
                 ActionName.AGENT_LOG,
                 {"attempt_id": attempt_id, "error": str(error)},
@@ -62,7 +67,7 @@ def _publish(ctx: OperationContext, attempt_id: int) -> None:
     """Serialize publication with retirement; LOG_PATH acknowledges a complete external file."""
     with ctx.engine.begin() as conn:
         conn.execute(statement(conn, "log_lock"), {"attempt_id": attempt_id})
-        row = conn.execute(statement(conn, "log_attempt"), {"attempt_id": attempt_id}).one_or_none()
+        row = read_log_attempt(conn, attempt_id)
         if (
             row is None
             or row.log_path is not None
@@ -97,7 +102,7 @@ def publish_pending(ctx: OperationContext) -> None:
     with acting_as(SYSTEM_ACTOR):
         while True:
             with ctx.engine.connect() as conn:
-                rows = conn.execute(statement(conn, "log_pending"), {"after": after}).all()
+                rows = conn.execute(statement(conn, "log_pending"), {"after_id": after}).all()
             if not rows:
                 return
             for row in rows:

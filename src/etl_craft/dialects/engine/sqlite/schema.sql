@@ -2075,7 +2075,7 @@ CREATE TRIGGER trg_actor_guard_aud_task_attempts_update BEFORE UPDATE ON AUD_TAS
 BEGIN
     SELECT CASE WHEN etl_craft_actor() IS NULL THEN RAISE(ABORT, 'AUD_TASK_ATTEMPTS is written only by etl-craft; use etl-craft mark, cancel or run, or a project migration (etl-craft migrate)') END;
     SELECT CASE WHEN etl_craft_purpose() <> 'retention' AND OLD.STATUS NOT IN ('QUEUED','CLAIMED','RUNNING') AND NOT (
-        (OLD.LOG_PATH IS NULL OR NEW.LOG_PATH IS OLD.LOG_PATH)
+        (OLD.LOG_PATH IS NULL AND NEW.LOG_PATH IS NOT NULL)
         AND NEW.ATTEMPT_ID IS OLD.ATTEMPT_ID
         AND NEW.TASK_RUN_ID IS OLD.TASK_RUN_ID
         AND NEW.ATTEMPT_NUMBER IS OLD.ATTEMPT_NUMBER

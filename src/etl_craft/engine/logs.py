@@ -41,6 +41,16 @@ class LogAttempt:
     log_removed_at: datetime | None
 
 
+def read_log_attempt(conn: Connection, attempt_id: int) -> LogAttempt | None:
+    """Read the exact attempt and reuse the bounded deployment identity lookup."""
+    row = conn.execute(statement(conn, "log_attempt"), {"attempt_id": attempt_id}).one_or_none()
+    if row is None:
+        return None
+    return LogAttempt(
+        engine_id=conn.execute(statement(conn, "archive_origin")).scalar_one(), **row._mapping
+    )
+
+
 def shared_log(engine: Engine | Connection, attempt_id: int, offset: int = 0) -> Iterator[bytes]:
     """Read bounded batches; relay callers release connections before sending bytes."""
     sequence = -1
