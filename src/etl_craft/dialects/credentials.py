@@ -22,7 +22,8 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from etl_craft.core.enums import AuthMode, ObjectStoreAuth
 
@@ -253,3 +254,53 @@ class S3Objects:
                     f"failed ({type(error).__name__}); expected delete access; "
                     "fix prefix permissions"
                 ) from None
+
+    def stream(self, bucket: str, key: str, offset: int) -> Iterator[bytes]:
+        """Close a ranged response even if the caller cancels its download."""
+        try:
+            if offset >= self.client.head_object(Bucket=bucket, Key=key)["ContentLength"]:
+                return
+            response = self.client.get_object(Bucket=bucket, Key=key, Range=f"bytes={offset}-")
+            with response["Body"] as stream:
+                while data := stream.read(65536):
+                    yield data
+        except Exception as error:
+            # The provider boundary never exposes signed URLs or credential-bearing messages.
+            raise ConfigurationError(
+                f"Object_stores.{self.name}, s3://{bucket}/{key}: log read failed "
+                f"({type(error).__name__}); expected a readable stored log; "
+                "restore the object and profile permissions"
+            ) from None
+
+    def upload(self, bucket: str, key: str, stream: BinaryIO) -> None:
+        """Upload a seekable log using bounded multipart buffers without worker threads."""
+        import boto3
+
+        try:
+            self.client.upload_fileobj(
+                stream,
+                bucket,
+                key,
+                Config=boto3.s3.transfer.TransferConfig(
+                    multipart_chunksize=5 * 1024 * 1024, use_threads=False
+                ),
+            )
+        except Exception as error:
+            # Pending chunks remain the durable retry source after provider failures.
+            raise ConfigurationError(
+                f"Object_stores.{self.name}, s3://{bucket}/{key}: log upload failed "
+                f"({type(error).__name__}); expected a writable log store; "
+                "restore store access and retry the ending report or restart the controller"
+            ) from None
+
+    def remove(self, bucket: str, key: str) -> None:
+        """Delete an exact engine-built key; a repeated deletion is harmless."""
+        try:
+            self.client.delete_object(Bucket=bucket, Key=key)
+        except Exception as error:
+            # Retention retains its durable cleanup row until provider deletion succeeds.
+            raise ConfigurationError(
+                f"Object_stores.{self.name}, s3://{bucket}/{key}: log removal failed "
+                f"({type(error).__name__}); expected delete access; "
+                "restore store permissions and rerun purge"
+            ) from None

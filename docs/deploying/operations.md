@@ -31,12 +31,34 @@ See [Engine DB setup and upgrades](engine-db.md).
 
 ## Logs and history
 
-- Each task attempt writes its log to `<Log_dir>/<PIPELINE>/run-<id>/<TASK>.attempt-<n>.log`
-  (see [Running a task](../guides/running-tasks.md#logs)). etl-craft never deletes them: remove
-  old run folders on your own schedule, for example with `find logs -mindepth 2 -maxdepth 2
-  -type d -mtime +30 -exec rm -rf {} +`.
-- `AUD_TASK_RUN_LOG.TASK_LOG` keeps the end of each attempt's log, and the `AUD_` tables keep
-  every run, attempt, rule result and intervention, so the Engine DB grows with every run.
+Local attempts keep complete files under
+`<Log_dir>/<PIPELINE>/run-<id>/<TASK>.attempt-<n>.log`. Agent logs are published by the API to
+`Logs.Store`, defaulting to `file://<Log_dir>/agents`; S3 locations require an explicit
+`Logs.Profile` naming an `Object_stores` profile. Configure the same host-owned store and
+credentials on every API and controller copy. Agents require neither credentials nor a mount.
+`doctor` probes explicitly configured log stores using the existing safe storage probe.
+Back up this store alongside the Engine DB. Keep the original store configuration while its
+logs or pending retention cleanup remain; a changed prefix fails rather than guessing a new
+location. For S3, configure the bucket's lifecycle to abort incomplete multipart uploads left
+by an abruptly terminated API process.
+
+`AUD_TASK_RUN_LOG.TASK_LOG` holds reported values plus at most `Logs.Tail_bytes` captured output
+bytes (8192 by default). Upgrades preserve old, larger values in their original rows. Full
+files, these summaries and uploaded chunk rows follow `Retention.Attempt_log_days`; an omitted
+period keeps them forever. `etl-craft purge --dry-run` previews cleanup. The committed removal
+timestamp distinguishes removal by retention from a missing or inaccessible file, and durable
+cleanup work retries interrupted file/object deletion, including unacknowledged destination
+files and unfinished file staging when retention wins before an upload retry.
+
+An agent ending first commits its outcome, summary, checkpoint and consumption. A store upload
+failure cannot change that result. Its message and exit code are recorded separately in
+`AUD_ACTIONS` as a failed `agent log` action with the exact attempt/project identity; controller
+maintenance also logs the failure. Restore access and repeat the same ending report, or let
+controller maintenance retry within a minute, including after controller restart. Chunks remain
+the durable source until retention, including when publication was interrupted after writing
+the file but before acknowledgment. A killed agent is reconciled as `LOST` before its available
+partial chunks are published; bytes never acknowledged by the API cannot be recovered from a
+lost agent host.
 
 ## Watching it run
 

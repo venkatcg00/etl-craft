@@ -128,3 +128,34 @@ def test_an_agent_can_load_profiles_without_artifact_credentials(tmp_path, monke
 
     with pytest.raises(ConfigurationError, match="ABSENT_BUNDLE_KEY"):
         S3Objects(config, config.object_stores["artifacts"])
+
+
+@pytest.mark.parametrize("budget", [0, 11, 8192])
+def test_log_settings_use_explicit_profiles_and_byte_budgets(tmp_path, budget):
+    raw = deepcopy(RAW)
+    raw["Logs"] = {"Store": "s3://logs/attempts", "Profile": "artifacts", "Tail_bytes": budget}
+    config = parse_config(raw, tmp_path / "craft-connector.yml")
+    assert config.logs.store == "s3://logs/attempts"
+    assert config.logs.profile == "artifacts"
+    assert config.logs.tail_bytes == budget
+    raw.pop("Logs")
+    assert parse_config(raw, tmp_path / "craft-connector.yml").logs.tail_bytes == 8192
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"Store": "s3://logs/attempts", "Profile": "missing"},
+        {"Store": "file:///logs", "Profile": "artifacts"},
+        {"Profile": "artifacts"},
+        {"Tail_bytes": -1},
+        {"Tail_bytes": True},
+        {"Tail_bytes": 1.5},
+    ],
+)
+def test_bad_log_settings_fail_before_any_store_access(tmp_path, values):
+    raw = deepcopy(RAW)
+    raw["Logs"] = values
+    with pytest.raises(ConfigurationError) as caught:
+        parse_config(raw, tmp_path / "craft-connector.yml")
+    assert "Logs." in str(caught.value)

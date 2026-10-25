@@ -28,6 +28,7 @@ from etl_craft.execution.run_types import PipelineOutcome
 from etl_craft.handlers.run_pipeline import Trigger
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.log_storage import ensure_source
 from etl_craft.services.operations.requests import Request, RunRequest
 from etl_craft.services.trigger_validation import trigger_definition, trigger_graph_problems
 
@@ -150,6 +151,7 @@ def _trigger_row(conn: Connection, task_run_id: int) -> Row[tuple[object, ...]]:
 def _end_trigger(conn: Connection, request: TriggerRequest, trigger: Trigger, run_id: int) -> None:
     """Commit the child reference, handoff budget and attempt ending together."""
     assert request.attempt_id is not None and request.owner is not None
+    ensure_source(conn, request.attempt_id)
     now = datetime.now(UTC)
     row = conn.execute(
         statement(conn, "trigger_context"), {"task_run_id": request.task_run_id}

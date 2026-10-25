@@ -11,6 +11,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.faults import fault_point
+from etl_craft.engine.logs import log_key, log_location, remove_log
 from etl_craft.engine.queries import statement
 from etl_craft.execution.attempt_records import attempt_log_path
 
@@ -49,7 +50,38 @@ def retire_log_rows(
 ) -> None:
     """Queue file cleanup and removal evidence in the caller's source transaction."""
     for row in rows:
-        if row.log_path is not None:
+        conn.execute(statement(conn, "log_lock"), {"attempt_id": row.attempt_id})
+        current = conn.execute(
+            statement(conn, "log_attempt"), {"attempt_id": row.attempt_id}
+        ).one_or_none()
+        if current is None or current.log_removed_at is not None:
+            continue
+        path_value = current.log_path
+        expected_location = log_location(
+            config,
+            log_key(
+                current.engine_id,
+                current.project_id,
+                current.pipeline_run_id,
+                current.task_run_id,
+                row.attempt_id,
+            ),
+        )
+        if (
+            path_value is None
+            and conn.execute(
+                statement(conn, "agent_chunk_last"), {"attempt_id": row.attempt_id}
+            ).first()
+            is not None
+        ):
+            path_value = expected_location
+        if path_value is not None and "://" in path_value:
+            if path_value != expected_location:
+                raise ConfigurationError(
+                    f"attempt_id={row.attempt_id}: LOG_PATH={path_value!r}; expected "
+                    f"{expected_location!r}; restore Logs.Store before purge"
+                )
+        elif path_value is not None:
             expected = attempt_log_path(
                 config,
                 row.pipeline_code,
@@ -57,18 +89,20 @@ def retire_log_rows(
                 row.task_code,
                 row.attempt_number,
             )
-            path = Path(row.log_path)
+            path = Path(path_value)
             if path.absolute() != expected.absolute():
                 raise ConfigurationError(
-                    f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected "
+                    f"attempt_id={row.attempt_id}: LOG_PATH={path_value!r}; expected "
                     f"{str(expected)!r}; restore the canonical attempt path before purge"
                 )
             checked_relative(config, path)
+            path_value = str(path.absolute())
+        if path_value is not None:
             conn.execute(
                 statement(conn, "retention_file_insert"),
                 {
                     "attempt_id": row.attempt_id,
-                    "path": str(path.absolute()),
+                    "path": path_value,
                     "now": now,
                 },
             )
@@ -148,7 +182,10 @@ def cleanup_files(engine: Engine, config: ConnectorConfig) -> int:
         if not rows:
             return count
         for row in rows:
-            remove_file(config, Path(row.log_path))
+            if "://" in row.log_path:
+                remove_log(config, row.log_path, row.project_id, row.attempt_id, row.engine_id)
+            else:
+                remove_file(config, Path(row.log_path))
             fault_point("retention.after_file_delete")
             with engine.begin() as conn:
                 conn.execute(

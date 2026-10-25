@@ -4,9 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
-from etl_craft.config.loader_helpers import mapping, reject_unknown
+from etl_craft.config.loader_helpers import bounded_number, mapping, reject_unknown
 from etl_craft.config.model import ConnectorConfig
-from etl_craft.config.object_models import Artifacts, ObjectStore
+from etl_craft.config.object_models import Artifacts, Logs, ObjectStore
 from etl_craft.config.resolve import Resolver
 from etl_craft.core.enums import ObjectStoreAuth, ObjectUrlStyle
 from etl_craft.core.errors import ConfigurationError
@@ -16,6 +16,7 @@ STORE_KEYS = frozenset(
     {"Endpoint", "Region", "Url_style", "Auth_mode", "Access_key_id", "Secret_access_key"}
 )
 ARTIFACT_KEYS = frozenset({"Store", "Profile"})
+LOG_KEYS = ARTIFACT_KEYS | {"Tail_bytes"}
 
 
 def parse_stores(raw: dict[str, object], path: Path, resolver: Resolver) -> dict[str, ObjectStore]:
@@ -80,26 +81,24 @@ def parse_stores(raw: dict[str, object], path: Path, resolver: Resolver) -> dict
     return result
 
 
-def parse_artifacts(
-    raw: dict[str, object], stores: dict[str, ObjectStore], path: Path
+def parse_location(
+    values: dict[str, object], stores: dict[str, ObjectStore], path: Path, section: str
 ) -> Artifacts:
     """S3 locations name an explicit profile; file locations are absolute local paths."""
-    values = mapping(raw, "Artifacts", path, required=False)
-    reject_unknown(values, ARTIFACT_KEYS, "Artifacts", path)
     store, profile = values.get("Store"), values.get("Profile")
     if store is None:
         if profile is not None:
             raise ConfigurationError(
-                f"{path}: Artifacts.Profile={profile!r} without Store; expected a store "
+                f"{path}: {section}.Profile={profile!r} without Store; expected a store "
                 f"location; set Store or remove Profile"
             )
         return Artifacts()
     if not isinstance(store, str) or (profile is not None and not isinstance(profile, str)):
         raise ConfigurationError(
-            f"{path}: Artifacts={mask_arguments(values)!r}; expected text Store and Profile; "
+            f"{path}: {section}={mask_arguments(values)!r}; expected text Store and Profile; "
             "correct the fields"
         )
-    parsed = _address(store, "Artifacts.Store", path)
+    parsed = _address(store, f"{section}.Store", path)
     valid = not (parsed.query or parsed.fragment or parsed.username or parsed.password)
     if parsed.scheme == "file":
         valid = valid and not parsed.netloc and Path(parsed.path).is_absolute() and profile is None
@@ -110,7 +109,7 @@ def parse_artifacts(
     if not valid:
         address = mask_arguments({"store": store})["store"]
         raise ConfigurationError(
-            f"{path}: Artifacts.Store={address!r}, Profile={profile!r}; expected "
+            f"{path}: {section}.Store={address!r}, Profile={profile!r}; expected "
             f"file:///absolute/path or s3://bucket/prefix with an Object_stores profile; "
             f"correct the location/profile"
         )
@@ -120,9 +119,25 @@ def parse_artifacts(
 def with_artifacts(
     config: ConnectorConfig, raw: dict[str, object], path: Path, resolver: Resolver
 ) -> ConnectorConfig:
-    """Attach object stores after the connection profiles have been validated."""
+    """Attach host-owned object stores, artifact locations and log settings."""
     stores = parse_stores(raw, path, resolver)
-    return replace(config, object_stores=stores, artifacts=parse_artifacts(raw, stores, path))
+    artifacts = mapping(raw, "Artifacts", path, required=False)
+    reject_unknown(artifacts, ARTIFACT_KEYS, "Artifacts", path)
+    logs = mapping(raw, "Logs", path, required=False)
+    reject_unknown(logs, LOG_KEYS, "Logs", path)
+    location = parse_location(logs, stores, path, "Logs")
+    try:
+        tail = bounded_number(logs.get("Tail_bytes", 8192), "Logs.Tail_bytes", path, minimum=0)
+    except ConfigurationError as error:
+        raise ConfigurationError(
+            f"{error}; set Logs.Tail_bytes to a nonnegative whole byte count"
+        ) from error
+    return replace(
+        config,
+        object_stores=stores,
+        artifacts=parse_location(artifacts, stores, path, "Artifacts"),
+        logs=Logs(location.store, location.profile, tail),
+    )
 
 
 def _address(value: str, where: str, path: Path) -> SplitResult:

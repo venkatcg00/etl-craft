@@ -435,13 +435,13 @@ def test_gate_wait_batch_counts_distinct_wait_kinds(scene, engine_db, monkeypatc
                 for kind in (WaitKind.DEPENDENCY, WaitKind.EVENT)
             ],
         )
-    original = engine_db.dialect.query
+    original = type(engine_db.dialect).query
 
-    def one_row(name):
-        sql = original(name)
+    def one_row(dialect, name):
+        sql = original(dialect, name)
         return sql.replace("LIMIT 10000", "LIMIT 1") if name == "retention_aud_gate_waits" else sql
 
-    monkeypatch.setattr(engine_db.dialect, "query", one_row)
+    monkeypatch.setattr(type(engine_db.dialect), "query", one_row)
     batches = []
 
     def observed(conn, cursor, sql, parameters, context, executemany):

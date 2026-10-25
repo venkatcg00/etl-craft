@@ -38,6 +38,7 @@ from etl_craft.core.errors import (
 )
 from etl_craft.core.faults import fault_point
 from etl_craft.core.graph import build_graph
+from etl_craft.core.text import byte_tail
 from etl_craft.engine import run_scopes, runlog, transitions
 from etl_craft.engine.process_reservations import connection_slot
 from etl_craft.engine.queries import statement
@@ -659,6 +660,7 @@ def _start_and_record(
                     "ETL_CRAFT_ATTEMPT_OWNER": owner,
                 },
             ),
+            tail_bytes=config.logs.tail_bytes,
             kill_grace_seconds=child.kill_grace_seconds,
             cancel=stop,
             on_started=lambda pid: attempt_started(engine, spec.attempt_id, owner, pid),
@@ -674,7 +676,11 @@ def _start_and_record(
         queries_ended = query_error is None
         with log_path.open("a", encoding="utf-8") as output:
             output.write((query_error or "warehouse queries confirmed stopped") + "\n")
-    result = replace(result, queries_ended=queries_ended)
+    result = replace(
+        result,
+        queries_ended=queries_ended,
+        output_tail=byte_tail(result.output_tail, config.logs.tail_bytes),
+    )
     outcome = retrying(
         f"recording how {spec.task_code} ended",
         lambda: record_attempt(

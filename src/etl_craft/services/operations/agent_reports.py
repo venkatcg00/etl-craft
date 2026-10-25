@@ -28,6 +28,7 @@ from etl_craft.core.errors import (
     StaleTransitionError,
     UsageError,
 )
+from etl_craft.core.faults import fault_point
 from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.text import qualify, sha256_hex
 from etl_craft.core.time import as_utc
@@ -48,6 +49,7 @@ from etl_craft.execution.bundle_files import prepare_task
 from etl_craft.execution.context import build_task_context
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.resources import LocalLocker
+from etl_craft.services.operations import log_storage
 from etl_craft.services.operations.agent_models import AgentReply, AgentTask
 from etl_craft.services.operations.agents import check_agent
 from etl_craft.services.operations.bundles import bundle_report
@@ -282,6 +284,14 @@ def _start(ctx: OperationContext, task: TaskContext, request: AgentTask) -> Agen
 
 
 def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
+    """Commit the independent task result before trying external log publication."""
+    _commit_end(ctx, request)
+    fault_point("logs.after_outcome")
+    log_storage.publish(ctx, request.attempt_id)
+    return AgentReply()
+
+
+def _commit_end(ctx: OperationContext, request: AgentTask) -> AgentReply:
     """Commit outcome, summary, checkpoint, consumption and its idempotency receipt together."""
     status = required(request.status, "status")
     if status not in {
@@ -320,10 +330,19 @@ def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
             owner=owner,
             counts=request.counts or NO_COUNTS,
             error_message=request.error_message,
-            task_log=request.task_log,
+            task_log="\n\n".join(
+                part
+                for part in (
+                    request.task_log,
+                    log_storage.tail(conn, request.attempt_id, ctx.config.logs.tail_bytes),
+                )
+                if part
+            )
+            or None,
             exit_code=request.exit_code,
             offset=request.offset,
         )
+        log_storage.ensure_source(conn, request.attempt_id)
         if status == AttemptStatus.CANCELLED:
             controls.observe_exit(conn, request.attempt_id, queries_ended=request.queries_ended)
         ActionRequest(

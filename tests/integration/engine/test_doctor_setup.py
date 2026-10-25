@@ -289,3 +289,16 @@ def test_doctor_reports_unset_reject_lifetimes_and_refuses_unsupported_maintenan
         check.status is Status.FAIL and "expire_snapshots unsupported" in check.detail
         for check in checks
     )
+
+
+def test_doctor_probes_the_configured_log_store_before_any_attempt(config, tmp_path):
+    from etl_craft.config.object_models import Logs
+
+    root = tmp_path / "log-store"
+    root.write_text("not a directory")
+    configured = replace(config, logs=Logs(root.as_uri()))
+    status, message = found(run_checks(configured, engine_state=False))["Log store"]
+    assert status is Status.FAIL
+    assert str(root) in message and "expected" in message
+    root.unlink()
+    assert found(run_checks(configured, engine_state=False))["Log store"][0] is Status.OK

@@ -10,6 +10,9 @@ Warehouse:
   dev:
     Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
     Schema: main  # value
+Logs:
+  Tail_bytes: 8192  # captured output bytes, in addition to reported values
+  # Agent Store defaults to file://<Log_dir>/agents; local logs remain under Log_dir.
 Retention:
   Run_history_days: 90  # value
   Attempt_log_days: 30  # value

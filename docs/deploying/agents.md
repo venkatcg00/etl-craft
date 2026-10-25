@@ -120,11 +120,22 @@ and API claim listener use this address. At startup, and in `doctor`, a bounded 
 trip proves delivery. Failure refuses startup with the masked address and a direct/session-pool
 remedy; successfully accepting `LISTEN` alone is insufficient with transaction pooling.
 
-Agents upload bounded ordered log chunks through the API. For now their text and hashes are
-stored in the Engine DB so any API copy can serve a live log, including after another copy
+Agents upload bounded ordered log chunks through the API. Their text and hashes remain in the
+Engine DB while the attempt runs, so any API copy can serve the live log after another copy
 restarts. Identical retries are acknowledged once; changed or out-of-order chunks fail by
-attempt and sequence. Every upload is fenced by live attempt ownership. Logs and their chunk
-rows are subject to the retention policy when configured retention is available.
+attempt and sequence. Every upload is fenced by live attempt ownership. After the outcome
+commits, the API publishes these chunks as a file to `Logs.Store` and acknowledges its location
+in `LOG_PATH`. Configure `Logs.Profile` explicitly for an S3 store. File stores must be shared
+by API/controller copies; agents use only HTTP and need no store credentials.
+
+A `RUN_PIPELINE` handoff has no task-script output: its empty log source commits atomically
+with the handoff and can be published while the task waits for its child. Child/control events
+remain in the audit run log.
+
+Publication and retention serialize on the exact attempt. A failed upload is a separate audited
+failure and leaves the task result and chunks intact; controller maintenance retries even when
+daily purge is disabled. Files and chunk rows follow `Retention.Attempt_log_days`. See
+[operations](operations.md#logs-and-history) for recovery and backup requirements.
 
 Target writes, target maintenance and the single-writer warehouse queue use one shared durable
 resource lock. Its database key is unique; expired or ended holders are replaced atomically.

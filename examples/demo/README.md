@@ -298,3 +298,9 @@ on the intended `tables.csv` rows. Apply the files, review `etl-craft purge --dr
 purge. Empty periods keep rows forever. Set snapshot/orphan periods only with the supported
 Trino Iceberg maintenance dialect; the other demo warehouses must leave those fields empty.
 Business rows and active business-rule findings are retained.
+
+
+Attempt logs remain complete files under `logs/`; the task summary keeps reported values plus
+an 8 KiB output tail. Set `Logs.Tail_bytes` in `craft-connector.yml` to change that byte budget.
+For agents, the API publishes full logs to `Logs.Store` (default `file://<Log_dir>/agents`),
+with an explicit `Logs.Profile` for S3; see the deployment logging guide.

@@ -139,7 +139,7 @@ with the reason.
 
 ## Logs
 
-Each attempt writes to its own log file:
+Each local attempt writes to its own log file:
 
 ```
 <Log_dir>/<PIPELINE_CODE>/run-<pipeline_run_id>/<TASK_CODE>.attempt-<n>.log
@@ -155,6 +155,20 @@ Every etl-craft record in it names the pipeline, task, run and attempt:
 
 `--log-format json` writes the same records as one JSON object per line, with those names as
 fields. `--log-level DEBUG` adds the detail: for example, the SQL each action runs.
+
+Agents write to a temporary local file and send ordered UTF-8 chunks through the existing agent
+API. After committing the task outcome, the API publishes the complete acknowledged chunks to
+`Logs.Store` and records the location in `AUD_TASK_ATTEMPTS.LOG_PATH`. No agent opens a port or
+needs log-store credentials. The default store is `file://<Log_dir>/agents`; clustered API and
+controller copies must share that directory, or configure a shared S3 store with `Logs.Profile`.
+Keys use immutable identities:
+`engine-<Engine DB identity>/project-<id>/run-<id>/task-run-<id>/attempt-<id>.log`.
+The existing Engine DB identity separates deployments sharing one store prefix.
+
+`Logs.Tail_bytes` caps captured output in the task summary to 8192 UTF-8 bytes by default;
+reported `NAME = value` lines are additional. Zero keeps reported values only. Incomplete UTF-8
+characters at the boundary are omitted. Existing larger `TASK_LOG` values are preserved during
+upgrade and stay in their existing audit rows until retention expires them.
 
 `AUD_TASK_RUN_LOG` keeps the outcome of the latest attempt:
 
@@ -174,8 +188,9 @@ log shows what it was doing. A task process writes its output unbuffered, so the
 everything it printed up to the end. Once the outcome is recorded the process exits at once:
 threads a script left running end with it, and are named in the log.
 
-The immutable attempt keeps the handler's reported values. The supervisor appends the captured
-output tail to the task summary once the process ends; the complete output remains in that
-attempt's log file. Supervisors renew attempt leases every 15 seconds.
+Local immutable attempts keep the handler's reported values; their supervisor appends captured
+output to the task summary after the process ends. Agents commit reported values and the
+bounded chunk tail in both attempt and task summary. Full output remains in the attempt file.
+Supervisors renew attempt leases every 15 seconds.
 Expired leases are reconciled before the next run or by `etl-craft reconcile`; see
 [recovery and run controls](run-control.md#mark-a-task).

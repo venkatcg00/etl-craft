@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Store complete agent attempt logs outside the Engine DB through `Logs.Store` (`file://`
+  or profiled `s3://`) and `Logs.Profile`. Local attempts retain their existing `Log_dir` files.
+  `Logs.Tail_bytes` defaults to 8192 output bytes plus reported values; legacy `TASK_LOG` text
+  is preserved unchanged. The existing log API serves bounded byte-offset streams from live
+  chunks or acknowledged files, distinguishes pending, retained removal and inaccessible logs,
+  and never substitutes chunks for a missing acknowledged file. Upload failures are audited
+  separately from committed attempt outcomes and retried from durable chunks by the controller.
+  Retention removes full files and chunk rows together. Migration 0059 permits only a terminal
+  attempt's one-time `LOG_PATH` acknowledgment, keeping its outcome immutable.
+
 - Add nullable per-target `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS` and
   `ORPHAN_RETENTION_DAYS` to `tables.csv` and the Engine contract (migration 0058).
   Purge expires project-owned rejects by ingestion time under target/ledger locks; Trino
