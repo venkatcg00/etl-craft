@@ -730,14 +730,15 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 - Owner decisions, 2026-10-25 (#253, one combined docs(plan) PR): Alpha/Beta retain
   15-minute SKIP schedules, Beta uses one ingestion slot and partition fan-out (2 readers,
-  4-item cap), Gamma uses a settled-file wait with a 55-minute SKIP deadline and one slot.
+  4-item cap), Gamma uses a keyed signal-row wait with a 55-minute SKIP deadline and one slot.
   Three ingestion plus nine warehouse agents preserve twelve 256 MiB agents and the RAM estimate.
-  MinIO deliveries use an identical-byte filesystem inbox because existing S5.M does not list buckets.
+  Gamma uses the documented bucket pattern (MinIO bucket notification -> signal row ->
+  keyed `EVENT_SQL`), since S5.M does not list buckets; no filesystem copy of client objects.
 - Owner decision, 2026-10-25: clients finish at ODS; SI_DM is independent every six hours.
   The detailed bounded timestamp-window decision supersedes the preliminary run-ID offset
   sketch; IDs remain provenance. S7.X extends the existing offset tracker without new tables,
   and plans a common Engine DB clock/fence because current merge stamps use the agent clock.
-  Strict stamp-after-start precision is required for the inclusive high boundary. Completed
+  Managed writes stamp the attempt's Engine DB start time and windows are half-open. Completed
   write attempts rather than whole-run completion prevent stranded timestamps.
 - Owner decision, 2026-10-25: S7.A.0 wireframes are reviewed during S6, before log/metrics read
   contracts settle. No S7.A page code precedes owner approval; merging the wireframe PR is
@@ -7062,14 +7063,16 @@ The detailed timestamp-window decision supersedes the earlier sketch “offset =
 run id processed”. Run IDs remain provenance/inspection fields, never the ordered DM cursor:
 completion order and repairs do not follow run-ID order.
 
-- **Window.** For bounded TIMESTAMP mode the managed SELECT uses
-  `<ts> > $$watermark AND <ts> <= $$watermark_max`. The first admission of a task run freezes
+- **Window.** For bounded TIMESTAMP mode the managed SELECT reads a half-open window,
+  `<ts> >= $$watermark AND <ts> < $$watermark_max`. The first admission of a task run freezes
   both marks before executing SQL; all its attempts reuse exactly that window. On success,
-  advance to the admitted high mark, not MAX of returned rows. An empty window succeeds with
-  zero rows and still advances. `AUD_TASK_RUN_LOG.WATERMARK_FROM/WATERMARK_TO` retain the
-  per-run evidence, including empty and failed windows; backfills never advance the live cursor.
-  Existing scalar lower-bound behavior remains compatible; bounded mode requires TIMESTAMP
-  and the max token, refusing incomplete definitions rather than silently changing old SELECTs.
+  advance to the admitted high mark, not MAX of returned rows; the next window starts at it,
+  so a row stamped exactly at a boundary belongs to exactly one window. An empty window
+  succeeds with zero rows and still advances. `AUD_TASK_RUN_LOG.WATERMARK_FROM/WATERMARK_TO`
+  retain the per-run evidence, including empty and failed windows; backfills never advance the
+  live cursor. Existing scalar lower-bound behavior remains compatible; bounded mode requires
+  TIMESTAMP and the max token, refusing incomplete definitions rather than silently changing
+  old SELECTs.
 - **Column and clock, checked against code.** Current `handlers/sql/__init__.py` passes
   `datetime.now(UTC)` from the task process to `ActionContext`; `handlers/sql/actions.py` binds
   it as `:now` for `UPDATE_DATE` on SCD1/SCD2 writes. It is not warehouse CURRENT_TIMESTAMP.
@@ -7077,34 +7080,35 @@ completion order and repairs do not follow run-ID order.
   project ODS `UPDATE_DATE AS ods_changed_at` and set WATERMARK_COLUMN=ods_changed_at;
   filter on the physical ODS UPDATE_DATE. The projected source watermark is distinct from
   the DM target's engine-written UPDATE_DATE and must not be compared as a business column.
-  Admission times and these agent clocks are not a proven single clock. The implementation
-  must use Engine DB UTC server time for both attempt start fences, task admission bounds and
-  managed update stamps; warehouses receive that checked literal. Do not compare independent
-  agent/warehouse clocks or add a silent skew allowance. Require monotonic fence/stamp ordering
-  in Engine DB transactions: refuse a clock moving behind a recorded fence/committed mark,
-  name the timestamps and require clock repair before admitting writes. A row stamp must be
-  strictly later than its attempt start at the warehouse's preserved timestamp precision; if
-  equality/precision collapse occurs, wait for a later Engine clock tick and recheck before
-  writes, or refuse. “At or after” alone is insufficient for the inclusive high bound.
+  Agent clocks are not one clock, so the stamp moves to the Engine DB: a managed write stamps
+  `UPDATE_DATE` with its attempt's recorded start time, taken from the Engine DB's UTC clock
+  when the attempt starts and handed to the task (through the agent API for agents), instead
+  of the task process's `now`. A row's stamp then equals its attempt's start by construction:
+  no agent or warehouse clock is compared, no skew allowance exists, and no precision or
+  same-tick rule is needed beyond flooring the high mark to the target column's timestamp
+  precision. Every row one attempt writes shares one stamp; document that `UPDATE_DATE` means
+  "written by the attempt that started at". Refuse an Engine DB clock that moves behind a
+  committed mark, naming both timestamps.
 - **Attempt-based high fence.** Optional `WATERMARK_SOURCE_PIPELINES` is a list of existing,
   unambiguous project pipeline codes, encoded as a JSON array of strings in the task
-  parameter and validated before admission (duplicates/unknown codes are refused). In the same admission/fence
-  serialization used by source attempt starts, freeze the minimum of the reader's own task
-  start and all running source attempts' start times. With none running (or without the
-  parameter), use the reader's start. Resolve expired/LOST owners before calculating the
-  fence; CLAIMED attempts cannot write until their RUNNING fence is recorded. New writers
-  admitted after the fence get strictly later stamps. Use attempts, never pipeline run start:
-  Gamma may sit in EVENT_WAIT for hours holding no running ingestion/merge attempt. Reject a
-  high below the committed low (clock/ownership inconsistency), never rewind or guess.
-- **Concurrency and completed data.** A running merge commits after its start fence, with
-  row stamps strictly later than that fence, so the inclusive high excludes its uncommitted
-  output. Successful source attempts' committed writes may enter a window even if another
-  task still keeps their pipeline run open; do not add a “whole run completed” eligibility
-  filter that would drop these older timestamps after the mark advances. SI_DM reads committed
-  ODS from completed write attempts, not run-ID order. A crashed source may have a warehouse
-  commit before its Engine acknowledgement; reconciliation/fencing and idempotent source
-  retry must settle that write before releasing its fence. A later retry/repair of an old run
-  uses a fresh current write stamp after the committed mark and needs no special repair rule.
+  parameter and validated before admission (duplicates/unknown codes are refused). In the same
+  admission/fence serialization used by source attempt starts, freeze the high as the minimum
+  of the reader's own start and the start times of all running source attempts. With none
+  running (or without the parameter), use the reader's start. Resolve expired/LOST owners
+  before calculating the fence; CLAIMED attempts cannot write until their start is recorded.
+  Use attempts, never pipeline run start: Gamma may sit in EVENT_WAIT for hours holding no
+  running ingestion/merge attempt. Reject a high below the committed low (clock/ownership
+  inconsistency), never rewind or guess.
+- **Concurrency and completed data.** A running merge's rows carry its start time, which is at
+  or above the frozen high, so the half-open window excludes them; the next window, starting at
+  that high, includes them once they commit. Successful source attempts' committed writes may
+  enter a window even if another task still keeps their pipeline run open; do not add a "whole
+  run completed" eligibility filter that would drop these older timestamps after the mark
+  advances. SI_DM reads committed ODS from completed write attempts, not run-ID order. A
+  crashed source may have a warehouse commit before its Engine acknowledgement;
+  reconciliation/fencing and idempotent source retry must settle that write before releasing
+  its fence. A later retry/repair of an old run starts a new attempt, so its rows carry a stamp
+  after the committed mark and need no special repair rule.
 - **One store, no new table.** `AUD_TASK_OFFSET_TRACKER` already stores one row per TASK_ID,
   OFFSET_TYPE (NUMBER/TEXT/TIMESTAMP/PARTITIONS), OFFSET_VALUE (JSON for PARTITIONS) and update
   time. `engine/repository/offsets.py` fetches/saves it; `engine/transitions.py` commits returned
@@ -7142,8 +7146,8 @@ completion order and repairs do not follow run-ID order.
   `tests/integration/engine/test_watermarks.py`: `test_failed_ranges_and_success_offsets_are_atomic`,
   `test_stale_owners_cannot_record_ranges`, `test_reset_refuses_active_attempts_and_records_old_and_new`,
   `test_cli_watermark_reset_does_not_change_run_status`, `test_real_task_processes_commit_each_sql_watermark`.
-  Add empty-window advancement, retry-stable high, repairs of old runs, same-timestamp boundary,
-  clock rollback/precision refusal, admissions racing source starts and abandoned-run cleanup.
+  Add empty-window advancement, retry-stable high, repairs of old runs, a row stamped exactly at
+  the boundary read once, Engine clock rollback refusal, target-precision flooring, admissions racing source starts and abandoned-run cleanup.
   Offset agent and warehouse clocks independently in tests: neither may change stamps/windows
   taken from Engine DB time; a backward Engine clock must refuse rather than infer safety.
   Race oracle: hold Alpha's merge open, let Beta finish, admit DM, then commit Alpha. DM excludes
@@ -7221,12 +7225,11 @@ Supports-Insights-Docker/
 
 **Layout.** k3d on one laptop: 16 GB RAM, six cores, swap allowed; slow is acceptable.
 One job per container. SQLite wherever a component needs a database, except the Engine DB.
-The generator publishes Gamma's immutable object to `minio-gamma`, then atomically publishes
-identical bytes to a shared delivery inbox mounted read-only at `/deliveries/minio-gamma/`
-on the controller and ingestion agents. Keep per-file hashes/object keys in the generator's
-existing SQLite state; acceptance verifies byte identity and publication order. This is a demo
-filesystem projection, not package bucket listing or direct access to MinIO's internal storage.
-No sidecar/extra agent or new RAM allocation is introduced.
+Gamma uses the bucket pattern in docs/guides/event-waits.md, not a filesystem copy: MinIO's
+bucket notification on `minio-gamma` (`s3:ObjectCreated:*`, suffix `.csv.gz`) calls a webhook
+served by the existing `generator` container, which inserts one row per object into the
+warehouse signal table `lnd.gamma_object_events` (object key, ETag, size, event time) with an
+INSERT-only account. No sidecar, extra agent or new RAM allocation is introduced.
 
 - **Engine DB:** a three-instance CloudNativePG cluster, with one synchronous replica
   required. A PgBouncer Pooler in transaction mode serves the `ui` copies; the controller
@@ -7281,8 +7284,8 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | | `alpha_preods_to_ods` (one task per ODS table, depending on the rules) | SQL `SCD1_MERGE` into the normalized ODS: one table per entity (interactions, customers, agents, support areas and the like), each keyed on its own business key and referring to the others by key, excluding rejected keys | the normalized half of `client_alpha_predm_to_dm` |
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
 | `SI_CLIENT_BETA` (every 15 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `beta_source_to_lnd`, then Beta-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS tasks as Alpha; ends at ODS | One PYTHON `kafka_to_lnd.py` task, S5.AK `task.fan_out`, one item per Kafka partition; S5.AH PARTITIONS offsets | `Client_Beta_ETL_Task_Flow` |
-| `SI_CLIENT_GAMMA` (every 5 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `gamma_wait_files` at the head | EVENT_WAIT, `EVENT_FILE=/deliveries/minio-gamma/*.csv.gz`, settle 30 s, `EVENT_TIMEOUT_MINUTES=55`, `EVENT_ON_TIMEOUT=SKIP` | event-driven Gamma delivery |
-| | `gamma_source_to_lnd` with `SUCCESS` dependency on wait; then Gamma-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS; ends at ODS | PYTHON `minio_to_lnd.py`, `INPUT_PARAMS={"files":"$$event_files"}`; reads exactly saved paths, no bucket scan or second TEXT cursor | `Client_Gamma_ETL_Task_Flow` |
+| `SI_CLIENT_GAMMA` (every 5 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `gamma_wait_objects` at the head | EVENT_WAIT, S5.AI keyed `EVENT_SQL` on `lnd.gamma_object_events` with `EVENT_KEY_COLUMN=object_key`, `EVENT_TIMEOUT_MINUTES=55`, `EVENT_ON_TIMEOUT=SKIP` | event-driven Gamma delivery |
+| | `gamma_source_to_lnd` with `SUCCESS` dependency on wait; then Gamma-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS; ends at ODS | PYTHON `minio_to_lnd.py`: reads exactly the consumed object keys from `task.event_keys` (ETag and size from `task.event_rows`) through the S3 API; no bucket listing or second TEXT cursor | `Client_Gamma_ETL_Task_Flow` |
 | `SI_DM` (`0 */6 * * *`; no client pipeline dependency gate) | `ods_to_dm` | SQL `SCD2_MERGE` into flattened `dm.customer_support_fact`; S7.X bounded UPDATE_DATE window over committed ODS writes | all former per-client ODS-to-DM tasks |
 | `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per stewarded `ds` table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
 | | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads every file in `task.uploads` into the table's landing table, each row with its `UPLOAD_ID` | |
@@ -7338,7 +7341,7 @@ Rules for building them:
    `WATERMARK_TYPE=TIMESTAMP`, `WATERMARK_COLUMN=ods_changed_at` (the SELECT aliases the
    source engine UPDATE_DATE to avoid the reserved target column), a defined UTC WATERMARK_START,
    and `WATERMARK_SOURCE_PIPELINES=["SI_CLIENT_ALPHA","SI_CLIENT_BETA","SI_CLIENT_GAMMA"]`.
-   Filter `UPDATE_DATE > $$watermark AND UPDATE_DATE <= $$watermark_max`; use S7.X's shared
+   Filter `UPDATE_DATE >= $$watermark AND UPDATE_DATE < $$watermark_max`; use S7.X's shared
    clock and admitted fence, not MAX of data or last pipeline run ID. It has no
    CFG_PIPELINE_DEPENDENCY on clients: requiring fresh upstream success would stall behind
    Gamma. Keep source run/task IDs as provenance. Changed ODS lookup entities must expand
@@ -7445,7 +7448,7 @@ In the Support Insights repository's `.github/workflows/`:
 `tests/` in the example repository (run by `e2e.yml`):
 
 1. Alpha/Beta run every 15 minutes with SKIP overlap outside maintenance; Gamma schedules
-   every five minutes and waits for settled files. A delivered baseline ends SUCCESS; an idle
+   every five minutes and waits for MinIO object signal rows. A delivered baseline ends SUCCESS; an idle
    Gamma deadline ends SKIPPED with no failure alert. SI_DM runs every six hours independently,
    including an empty window that advances successfully. Explicit SI_REFERENCE and maintenance runs end SUCCESS; `etl-craft status` shows
    no unexplained failed or lost attempt. Injected failure scenarios state their expected failure
@@ -7484,8 +7487,9 @@ In the Support Insights repository's `.github/workflows/`:
    Beta pod memory under 256 MiB with max_parallel=2/max_items=4; stack remains about 13 GB.
 9. Beta: inject one partition failure; AUD_TASK_ITEMS and PARTITIONS offsets prove successful
    partitions are not reread, all landing rows carry item keys, and the retry completes only
-   failed partitions. Gamma: verify MinIO/inbox hashes, one settled file consumed once through
-   $$event_files, and no-file timeout has no failure status or Mailpit error.
+   failed partitions. Gamma: each new object produces one signal row, its key is consumed once through
+   `task.event_keys` with matching ETag/size, and a no-object timeout has no failure status or
+   Mailpit error.
 
 ### S8.H Messy sources
 

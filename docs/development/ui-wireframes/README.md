@@ -37,8 +37,10 @@ assets out of the published product documentation. The roadmap links this source
 
 - Every navigation target is a real link. Cross-object links have a visible ↗ icon,
   `target="_blank" rel="noopener"` and hidden “(opens in a new tab)” text. Same-run task
-  selection, filters and page tabs stay in the tab. Primary sidebar destinations select a
-  console view in the existing tab; they are not object-reference links.
+  selection, filters and page tabs stay in the tab. The sidebar (console views and the
+  pipeline tree), breadcrumbs, search results and the first column of a list are navigation:
+  they select the object and stay in the tab, so Back works. New tabs are for links from one
+  object's page to another object.
 - Buttons are native form controls, never anchors disguised as actions. Prototype forms use
   **GET to an acknowledgement HTML file** so they work from disk. Each displays the **actual
   POST action route intended by the real UI**. They send no API request, execute no command,
@@ -62,7 +64,7 @@ assets out of the published product documentation. The roadmap links this source
 The names, pools and topology are the Support Insights design, with **illustrative review
 fixtures**, not measurements from a running deployment. Do not use the sample counts as release
 evidence. The date is 2026-10-25 UTC; Beta run 419 retries partition 2 while 0/1/3 succeed;
-Gamma run 417 waits for settled files; Alpha run 418 holds an ODS merge open from 05:59;
+Gamma run 417 waits for an unconsumed object signal row; Alpha run 418 holds an ODS merge open from 05:59;
 SI_DM run 420 freezes 00:00 → 05:59 and succeeds at 06:01:22. Alpha commits at 06:02 and
 appears in the next DM window. Beta historical runs 415 and 416 have distinct global Engine DB IDs from Alpha run 418.
 Historical links retain their exact run identity. No run-ID ordering is the DM offset. ODS UPDATE_DATE is projected as `ods_changed_at` to
