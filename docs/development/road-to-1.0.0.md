@@ -161,9 +161,12 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
-| S7.A.0 Wireframes | In review | #253 | Owner approval by merging the plan/wireframe PR gates all S7.A page code. |
+| S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
+| S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; projects and pools become admin commands; direct `CFG_` SQL edits in RELAXED projects |
+| S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
+| S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -200,6 +203,12 @@ The approved local recovery boundary is interactive `setup` with Engine DB write
 when no active admin remains, never an HTTP route. Remote Airflow exports require the approved
 `Auth.Airflow_connection_id`; pipeline action reasons carry the triggering user URL-encoded,
 while the service account remains the actor.
+
+**UI plan, 2026-10-25 (owner).** S7.Y, S7.Z, S7.AA and S7.AB come before S7.A page code, after
+S6 completes. `GOVERNANCE` (`STRICT`/`RELAXED`) is the single switch for relaxed rules; the
+owner asked for one setting covering config edits, reasons and confirmations, and production
+cannot be relaxed. Admin settings (projects, pools, environments, access) never live in config
+files.
 
 S5.R is complete; execution shares `run_types.PipelineRun` and frozen `run_start.StartOptions`,
 and loader helpers live in `config/loader_helpers.py`.
@@ -6131,6 +6140,88 @@ not pipeline metadata: nobody gains access because a config change was merged.
 *Done when:* all access changes use the command/API actions, project config cannot confer access,
 existing grant rows/history survive, and S7.B starts from the same command names.
 
+### S7.Z Environments, governance and admin-managed projects
+
+Owner decisions, 2026-10-25. Branch: `feat/engine-environments`. Before S7.A; after S7.Y,
+whose removal of `grants.csv` this item repeats for projects and pools. The design is
+[Environments and governance](metadata-and-ui.md#environments-and-governance) and
+[Direct config edits](metadata-and-ui.md#direct-config-edits).
+
+- `CFG_PROJECTS` gains `ENVIRONMENT_TYPE` (`DEV`, `SIT`, `UAT`, `PROD`, `SANDBOX`, `CUSTOM`),
+  an optional `ENVIRONMENT_NAME` and `GOVERNANCE` (`STRICT` default, or `RELAXED`), with a check
+  constraint refusing `PROD` with `RELAXED`. Existing projects upgrade as `CUSTOM`/`STRICT`.
+  Migrations in both dialects, with the upgrade test from every released schema.
+- Projects and pools leave the config files: remove `projects.csv` and `pools.csv` from
+  `config plan`, `apply` and `export`; a project that still has them fails plan and apply with
+  the path and the remedy. Add audited admin actions and routes for
+  `etl-craft project add|set|list|disable` and `etl-craft pool add|set|list|disable`, each with a
+  required reason. Repoint the messages that tell people to edit `pools.csv` (placement wait
+  reasons, `engine/placement.py`).
+- `RELAXED` relaxes exactly the list in the design: direct `CFG_` edits, empty reasons on
+  interventions and plain confirmations instead of typed ones. The check lives in the
+  `services/operations` actions; the CLI's `--reason` stops being parser-required, and a
+  refusal in a `STRICT` project names the project, environment and remedy.
+- Direct edits: the actor-guard triggers allow outside insert, update and `ACTIVE_FLAG`
+  retirement of a `RELAXED` project's package `CFG_` rows, fill `sql:<database user>`
+  (`sql:direct` on SQLite) and write the typed history rows; everything else stays refused.
+  `config plan` lists drift from files; `config export` writes it back. Update the AGENTS.md
+  Engine DB write rule and `docs/deploying/security.md` in this PR.
+- S7.Y's access commands take a project scope, so roles differ per environment.
+- Doctor and the admin project page note projects that share a warehouse database and schema;
+  nothing blocks it.
+- Tests: the constraint refuses `PROD`/`RELAXED`; old `projects.csv`/`pools.csv` refused with
+  the remedy; admin commands attributed and role-checked; empty reason accepted in `RELAXED`
+  and refused in `STRICT` for every intervention in the list, by CLI, API and console; direct
+  SQL edits in `RELAXED` stamped and historied, refused in `STRICT`, refused on `AUD_`, history
+  and admin tables, and on hard deletes; constraint violations refused at once; drift listed
+  and exported; upgrade with real rows.
+
+*Done when:* environments and governance are admin settings on every project, no config file
+holds projects, pools or access, and each relaxed rule has a test in both governance levels.
+
+### S7.AA Pipeline refresh
+
+Owner decision, 2026-10-25. Branch: `feat/engine-pipeline-refresh`. Before S7.A, after S7.Z.
+The design is [Pipeline refresh](metadata-and-ui.md#pipeline-refresh).
+
+- One `PIPELINE_REFRESH` action (CLI `etl-craft pipelines refresh [--pipeline P]`, an API route,
+  the UI button)
+  re-reads metadata, SQL and scripts and runs `validate`, the lineage check and the bundle check.
+  `config apply` ends with it; the controller runs it for a project whose `CFG_` rows changed
+  directly since its last refresh.
+- Results are recorded (actor, version checked, findings with file, line, value and remedy), and
+  a read action returns the latest result and history per pipeline.
+- Admission pins the last version that passed refresh, not the current rows. Check what S5.F's
+  run-pinned metadata uses today and record the difference under Handover notes.
+- A failing pipeline stays listed with its findings. `BLOCK_ON_REFRESH_ERROR` (`pipelines.csv`,
+  `N` by default) refuses new runs until a refresh passes, with a message naming the findings.
+- Tests: a broken SQL file, a missing script, a cycle and a bad parameter each keep the
+  pipeline listed with the finding; the last good version runs; the block setting refuses;
+  a direct edit is picked up; refresh records survive restart.
+
+*Done when:* no metadata error removes a pipeline from any view, the last good version runs
+unless blocked, and every finding names its file and remedy.
+
+### S7.AB Standing task controls
+
+Owner decision, 2026-10-25. Branch: `feat/engine-standing-controls`. Before S7.A.2. The design
+is [Standing task controls](metadata-and-ui.md#standing-task-controls).
+
+- A standing task pause and a standing outcome (`SKIPPED`, `SUCCESS`, `FAILED`) per task, as
+  `CONTROL` actions with their opposites, stored in the audited control store with actor,
+  reason (optional in `RELAXED`), start and optional expiry. Never a `CFG_` row or config file.
+  Reuse an existing control or intervention table if one fits; a new table is a stop-and-ask.
+- Runs record the control applied to each task run. An overridden `SUCCESS` publishes no data
+  and no fresh output for `HAS_DATA` and consumers.
+- `explain`, `status`, the metadata read and the graph read return the effective behaviour and
+  the control; `config plan`/`apply` note tasks with one.
+- Tests (with `test-run-state`): each outcome's downstream effect; pause holds only that task;
+  expiry; removal; a run started before the control is not changed; consumers see no fresh
+  output for an overridden success; concurrent set and run.
+
+*Done when:* an operator can pause a task or fix its outcome for future runs without a config
+change, and every view shows the override.
+
 ### S7.A Web UI
 
 Branch: `feat/ui-*`, one per area. Served by `etl-craft ui` (S5.AE), and by
@@ -6230,6 +6321,24 @@ lists each element, its source and its data.
 - *Tests.* Browser tests open each view from a link, select through each view and act from the
   menu and the side panel; page tests compare each view's rows with the matching CLI JSON.
 
+
+**S7.A.5 Every action has a place (owner, 2026-10-25).** Databricks sets the layout and
+PowerCenter the capability; no button is missed. The [capability matrix](metadata-and-ui.md#ui-capability-coverage)
+gives every action-table action its UI place, or console-only with a reason. A test generated
+from the action table fails when a non-host, non-agent action has neither, so a new action
+cannot ship without one. S7.A also builds the views the matrix lists that the wireframes lack:
+task-run statistics, scheduled runs, system health, held and paused work, admin and maintenance
+pages, the user menu, and run filters by agent, pool and failure class. The wireframes are not
+annotated and do not show every control; where they and the matrix differ, the matrix holds.
+
+**S7.A.6 Usability rules (owner, 2026-10-25).** Every page follows the
+[usability rules](metadata-and-ui.md#usability-rules), drawn from the problems Airflow's UI is
+known for: failure summary first in logs, an exact scope preview for every action, selection
+that stays, bounded reads with per-view budgets, plain-language waits and summaries, timezones
+on every time, findings on the object, keyboard search, and WCAG AA. Browser tests check the
+preview, the disabled-with-reason state, the stale-state warning and keyboard-only use.
+Every page also shows the project's environment badge (S7.Z), with production clearly marked.
+
 - *Technology.* One package and one language for contributors. The UI is served by
   `etl-craft controller` from the `server` extra, with no Node toolchain for users, contributors or
   CI.
@@ -6279,7 +6388,11 @@ lists each element, its source and its data.
     and a link to its CSV file in the project repository. Groups/grants are read-only access
     records with command/audit provenance, never a grants.csv link (S7.Y). The UI does not edit metadata. Changes
     are made in the config files and deployed by `etl-craft config apply`, so the UI and the
-    reviewed files cannot drift apart.
+    reviewed files cannot drift apart. Rows changed by direct SQL in a `RELAXED` project carry a
+    drift badge (S7.Z); standing task controls carry an override badge (S7.AB).
+  - Admin (S7.Z, S7.Y, S7.B): projects with environment and governance, pools, accounts,
+    groups, access and tokens, and a maintenance page for purge, rehash, upgrade targets and
+    clone with a dry-run preview first.
   - Uploads (S7.M): a drop-down of the stewardable pipelines the signed-in steward is assigned
     to, a single-file upload, the outcome with validation failures or rejected rows and
     reasons, and the upload history.
@@ -6297,7 +6410,8 @@ lists each element, its source and its data.
       prints the JSON). Tab completes commands and flags from the action table; a refused
       command prints the same message and exit code as the CLI.
     - Mark, force, abort, rerun and offset resets prompt inside the console for a typed reason
-      and a typed confirmation, as the CLI does interactively. A history panel shows the
+      and a typed confirmation, as the CLI does interactively; in a `RELAXED` project both are
+      optional (S7.Z). A history panel shows the
       person's own commands from `AUD_ACTIONS`; every command is audited like any API call.
 - *Tests.* Page tests with the API test client; an end-to-end browser test of the main operator flows
   (Playwright in a separate CI job). The command center lists exactly the actions each role and
