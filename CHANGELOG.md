@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Add administrator-only, project-scoped `purge` and its API with a read-only `--dry-run`
+  snapshot, explicit `Retention` lifetimes and optional daily controller maintenance. Batches
+  preserve live work and retained references; attempt logs expire with durable removal evidence
+  and restartable canonical-file cleanup. Existing configuration keeps history forever. Setup
+  shows recommended periods without editing team-owned YAML; doctor reports unset PostgreSQL
+  retention. Engine DB migration 0056 adds cleanup state, removal evidence and retention indexes.
+  Warehouse archiving and auxiliary-data retention remain later S6.A slices.
+
 - Queue execution now treats handles belonging to another provider as unknown and refuses to
   cancel their attempts. Shared local/queue contract tests cover submission, ownership loss,
   retries, fencing, cancellation and admission limits; the demo includes ten project namespaces

@@ -239,3 +239,13 @@ Cloning:
 # Managed Engine DB examples: docs/examples/lakebase-engine.yml and
 # docs/examples/snowflake-postgres-engine.yml. Add Managed_provider and issuer fields
 # inside the Engine profile; require TLS and keep Cloning.Enabled false.
+
+# Optional host-owned retention; omit periods to keep existing history forever.
+# Retention:
+#   Run_history_days: 90                # terminal run/attempt history and project action records
+#   Attempt_log_days: 30                # attempt files, log chunks and stored tails
+#   Consumption_days: 90                # recorded consumption and gate decisions
+#   Interventions_days: 365             # operator interventions and completed pauses
+#   Config_history_days: 365            # closed project metadata versions; current rows survive
+#   Daily_at: "03:00"                    # optional daily purge in each project's time zone
+# Periods are whole days from 1 to 36500; review purge --dry-run before enabling.

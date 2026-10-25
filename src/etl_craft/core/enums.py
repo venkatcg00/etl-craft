@@ -288,6 +288,7 @@ class ActionName(StrEnum):
     REHASH_PLAN = "rehash plan"
     REHASH = "rehash"
     UPGRADE_TARGETS = "upgrade-targets"
+    PURGE = "purge"
     CLONE = "clone"
     SETUP_GRANTS = "setup grants"
     SETUP = "setup"

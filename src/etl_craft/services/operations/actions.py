@@ -61,6 +61,7 @@ from etl_craft.services.operations import (
     maintenance,
     models,
     processes,
+    retention,
     runs,
     sessions,
     status,
@@ -337,6 +338,8 @@ _ROWS = (
            ADMIN, POST, f"{API}/tokens/revoke", REQUEST),
     Action(ActionName.REHASH, maintenance.rehash_target, maintenance.RehashInput, RehashResult,
            ADMIN, POST, f"{API}/rehash", REQUEST, scope=ActionScope.PROJECT),
+    Action(ActionName.PURGE, retention.purge, retention.PurgeInput, retention.PurgeView,
+           ADMIN, POST, f"{API}/purge", REQUEST, scope=ActionScope.PROJECT),
     Action(ActionName.UPGRADE_TARGETS, maintenance.upgrade_audit_columns,
            maintenance.UpgradeInput, maintenance.TargetUpgrades, ADMIN, POST,
            f"{API}/targets/upgrade", REQUEST, scope=ActionScope.PROJECT),
@@ -563,7 +566,12 @@ def _project_context(ctx: OperationContext, action: Action) -> OperationContext:
     if row is None or (
         row.active_flag == YesNo.NO
         and action.name
-        not in {ActionName.CONFIG_PLAN, ActionName.CONFIG_APPLY, ActionName.CONFIG_EXPORT}
+        not in {
+            ActionName.CONFIG_PLAN,
+            ActionName.CONFIG_APPLY,
+            ActionName.CONFIG_EXPORT,
+            ActionName.PURGE,
+        }
     ):
         if action.name in (ActionName.CONFIG_PLAN, ActionName.CONFIG_APPLY):
             return ctx

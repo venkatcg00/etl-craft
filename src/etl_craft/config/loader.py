@@ -52,6 +52,8 @@ from etl_craft.config.managed_engine import managed_cloning_problem
 from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectionProfile, ConnectorConfig
 from etl_craft.config.object_stores import ARTIFACT_KEYS, STORE_KEYS, with_artifacts
 from etl_craft.config.resolve import Resolver
+from etl_craft.config.retention import KEYS as RETENTION_KEYS
+from etl_craft.config.retention import parse_retention
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, MetadataError
@@ -67,6 +69,7 @@ SECTIONS = (
     "Auth",
     "Object_stores",
     "Artifacts",
+    "Retention",
 )
 
 
@@ -94,6 +97,7 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Auth": AUTH_KEYS,
         "Object_stores": STORE_KEYS,
         "Artifacts": ARTIFACT_KEYS,
+        "Retention": RETENTION_KEYS,
     }
 
 
@@ -236,6 +240,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         api_address=api_address,
     )
     config = ConnectorConfig(
+        retention=parse_retention(raw, global_profile, path, resolver),
         deployment=deployment,
         api_address=api_address,
         timezone=project_timezone,

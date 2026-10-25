@@ -37,6 +37,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         out.line("setup: nothing changed; fix the failed check(s) and run setup again")
         return ExitCode.FAILURE
     if result.created_tables:
+        out.line(
+            "setup: recommended Retention days: Run_history_days 90, Attempt_log_days 30, "
+            "Consumption_days 90, Interventions_days 365, Config_history_days 365; "
+            "add the section to team-owned craft-connector.yml, then review purge --dry-run"
+        )
         out.line("setup: created the Engine DB tables")
     for version in result.applied_migrations:
         out.line(f"setup: applied {version}")

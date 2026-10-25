@@ -317,6 +317,15 @@ def get_attempt(ctx: OperationContext, request: AttemptId) -> AttemptView:
 def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
     """Stream a stored attempt's canonical log in bounded chunks from a byte offset."""
     attempt_id = request.attempt_id
+    with ctx.engine.connect() as conn:
+        removed = conn.execute(
+            statement(conn, "retention_log_removed"),
+            {
+                "attempt_id": attempt_id,
+            },
+        ).scalar_one_or_none()
+    if removed is not None:
+        return iter([f"removed by retention on {removed}\n".encode()])
     attempt = get_attempt(ctx, request)
     with ctx.engine.connect() as conn:
         shared = conn.execute(

@@ -107,6 +107,7 @@ class Expected:
 
 
 EXPECTED = {
+    "retention.yml": Expected("sqlite", "duckdb"),
     "lakebase-engine.yml": Expected("postgresql", "duckdb"),
     "snowflake-postgres-engine.yml": Expected("postgresql", "duckdb"),
     "minimal-local.yml": Expected("sqlite", "duckdb"),

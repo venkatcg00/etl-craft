@@ -225,6 +225,44 @@ class AuthConfig:
 
 
 @dataclass(frozen=True)
+class Retention:
+    """Periods in days; daily execution is opt-in, in the selected project's time zone."""
+
+    run_history_days: int | None = None
+    attempt_log_days: int | None = None
+    consumption_days: int | None = None
+    interventions_days: int | None = None
+    config_history_days: int | None = None
+    daily_at: str | None = None
+
+    def __post_init__(self) -> None:
+        """Protect programmatic configuration from invalid deletion cutoffs too."""
+        for name in (
+            "run_history_days",
+            "attempt_log_days",
+            "consumption_days",
+            "interventions_days",
+            "config_history_days",
+        ):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 36500
+            ):
+                raise ConfigurationError(
+                    f"Retention.{name.capitalize()}={value!r}; expected whole days 1..36500 "
+                    "or None; set a valid period or omit it to keep history"
+                )
+        if self.daily_at is not None and (
+            not isinstance(self.daily_at, str)
+            or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", self.daily_at)
+        ):
+            raise ConfigurationError(
+                f"Retention.Daily_at={self.daily_at!r}; expected HH:MM; "
+                "set a quoted 24-hour time or omit it for manual purge"
+            )
+
+
+@dataclass(frozen=True)
 class ConnectorConfig:
     """Everything ``craft-connector.yml`` configures.
 
@@ -268,6 +306,7 @@ class ConnectorConfig:
 
     artifacts: Artifacts = field(default_factory=Artifacts)
     object_stores: dict[str, ObjectStore] = field(default_factory=dict)
+    retention: Retention = field(default_factory=Retention)
     retry_on: RetryOn = RetryOn.TRANSIENT
 
     @property

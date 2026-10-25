@@ -352,6 +352,23 @@ def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
             if for_engine(engine).supports_api_replicas:
                 checks.append(ok("Engine DB notifications", "LISTEN/NOTIFY round trip delivered"))
         checks += _connection_budget(config, engine)
+        if spec.name == "postgresql" and all(
+            getattr(config.retention, key) is None
+            for key in (
+                "run_history_days",
+                "attempt_log_days",
+                "consumption_days",
+                "interventions_days",
+                "config_history_days",
+            )
+        ):
+            checks.append(
+                ok(
+                    "Retention",
+                    "history is kept forever; configure Retention periods "
+                    "and review `etl-craft purge --dry-run` to bound PostgreSQL history",
+                )
+            )
         if engine_state:
             checks += _engine_state(config, engine)
     finally:

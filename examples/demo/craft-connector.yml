@@ -49,3 +49,12 @@ Auth:
 
 # For a managed PostgreSQL Engine DB, see docs/examples/lakebase-engine.yml or
 # docs/examples/snowflake-postgres-engine.yml; keep Cloning.Enabled false.
+
+# Optional Retention follows all other sections. Existing projects keep history forever.
+# Retention:
+#   Run_history_days: 90
+#   Attempt_log_days: 30
+#   Consumption_days: 90
+#   Interventions_days: 365
+#   Config_history_days: 365
+#   Daily_at: "03:00"
