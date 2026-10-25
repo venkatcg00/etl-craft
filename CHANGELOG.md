@@ -6,13 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Add `purge --archive-to <schema>` through the existing administrator operation and API.
+  Durable snapshots, full-value verification and source revalidation make interrupted archives
+  restartable without duplicate content or premature deletion. Archives evolve added columns
+  and retain schema versions and Engine DB identities; incompatible destinations fail with
+  `ArchiveError` (exit 30). Migration 0057 adds deployment identity and pending archive state.
+
 - Add administrator-only, project-scoped `purge` and its API with a read-only `--dry-run`
   snapshot, explicit `Retention` lifetimes and optional daily controller maintenance. Batches
   preserve live work and retained references; attempt logs expire with durable removal evidence
   and restartable canonical-file cleanup. Existing configuration keeps history forever. Setup
   shows recommended periods without editing team-owned YAML; doctor reports unset PostgreSQL
   retention. Engine DB migration 0056 adds cleanup state, removal evidence and retention indexes.
-  Warehouse archiving and auxiliary-data retention remain later S6.A slices.
+  Warehouse auxiliary-data retention remains a later S6.A slice.
 
 - Queue execution now treats handles belonging to another provider as unknown and refuses to
   cancel their attempts. Shared local/queue contract tests cover submission, ownership loss,

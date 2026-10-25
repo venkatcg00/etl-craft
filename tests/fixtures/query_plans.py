@@ -36,6 +36,9 @@ INTEGER_NAMES = frozenset(
 )
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
+    "batch_id": "batch",
+    "body": "{}",
+    "destination": "destination",
     "bundle_id": "a" * 64,
     "connections": "a" * 64,
     "approved": "Y",
@@ -470,5 +473,16 @@ FULL_READS.update(
             "retention_tick",
             "aud_retention_ticks",
         ): "One daily completion cursor per project, independent of run volume.",
+    }
+)
+
+FULL_READS.update(
+    {
+        (
+            "archive_origin",
+            "aud_engine_identity",
+        ): "One deployment identity, independent of history volume.",
+        ("archive_pending", "aud_retention_archives"): "At most one pending snapshot per project.",
+        ("archive_finish", "aud_retention_archives"): "At most one pending snapshot per project.",
     }
 )

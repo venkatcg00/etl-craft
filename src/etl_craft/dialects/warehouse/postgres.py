@@ -66,6 +66,13 @@ class PostgresWarehouse(WarehouseDialect):
     replace_strategy: ReplaceStrategy = "transactional"
     identifier_case = "lower"
 
+    def archive_type_matches(self, actual: str, expected: str) -> bool:
+        """PostgreSQL reports VARCHAR through its SQL-standard spelling."""
+        aliases = {"CHARACTER VARYING": "VARCHAR", "TIMESTAMP WITH TIME ZONE": "TIMESTAMPTZ"}
+        actual = aliases.get(actual.upper(), actual.upper())
+        expected = aliases.get(expected.upper(), expected.upper())
+        return self.same_column_type(actual, expected)
+
     def describe_select(self, conn: Connection, sql: str) -> list[tuple[str, str]] | None:
         """Use protocol sizes for scalar types; extensions and nested types need the catalog."""
         if not declarable_source(sql, self.sqlglot_dialect):

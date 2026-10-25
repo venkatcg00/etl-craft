@@ -17,3 +17,8 @@ Retention:
   Interventions_days: 365  # value
   Config_history_days: 365  # value
   Daily_at: "03:00"  # value
+
+# Optional manual archive: create a dedicated warehouse schema first, then run
+# etl-craft purge --archive-to history --dry-run
+# etl-craft purge --archive-to history
+# Retry the same destination after interruption. Full local log files are not archived.

@@ -15,6 +15,12 @@ DAY = f"({STAMP}+(d-1)*INTERVAL '1 day')"
 # Every run has its own task/attempt identity; completed days dominate the live working set.
 SEEDS = [
     (
+        "AUD_RETENTION_ARCHIVES",
+        "PROJECT_ID,BATCH_ID,DESTINATION,SCHEMA_NAME,BODY,CREATED_AT",
+        f"1,'batch','destination','history','{{}}',{STAMP}",
+        "generate_series(1,1) p",
+    ),
+    (
         "AUD_RETENTION_TICKS",
         "PROJECT_ID,PURGED_ON",
         f"1,{STAMP}::date",

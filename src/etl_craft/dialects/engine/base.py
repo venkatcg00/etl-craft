@@ -42,6 +42,7 @@ class EngineDialect(ABC):
     """One Engine DB: how to connect, lock, split scripts, and which SQL to run."""
 
     supports_api_replicas = False
+    archive_lock_suffix = ""
 
     spec: EngineSpec
     directory: Path

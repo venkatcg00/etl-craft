@@ -8,6 +8,18 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.ArchiveKind: {
+        "TEXT",
+        "INTEGER",
+        "BOOLEAN",
+        "TIMESTAMP",
+        "DATE",
+        "DECIMAL",
+        "FLOAT",
+        "JSON",
+        "BINARY",
+    },
+    enums.ArchiveStep: {"LOGS", "DELETE"},
     enums.ManagedProvider: {"NONE", "SNOWFLAKE", "DATABRICKS"},
     enums.ItemAction: {"MARK", "RERUN", "CANCEL"},
     enums.ItemStatus: {

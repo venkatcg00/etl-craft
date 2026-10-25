@@ -158,3 +158,14 @@ def test_team_configuration_is_not_read_or_mirrored(sql_world):
     assert "CFG_TEAM" not in {table.table for table in copied}
     assert "cfg_team" not in world.tables()
     assert "CFG_PIPELINES" in {table.table for table in copied}
+
+
+def test_clone_refuses_to_truncate_an_archive_table(sql_world):
+    world = sql_world
+    world.execute(f"CREATE TABLE {world.name('AUD_ACTIONS')} (_ETL_ARCHIVE_ENGINE_ID VARCHAR)")
+    world.execute(f"INSERT INTO {world.name('AUD_ACTIONS')} VALUES ('original')")
+    with pytest.raises(CloningError, match="immutable archive table"):
+        clone(world.engine_db, cloning(world, CloningScope.AUD))
+    assert world.rows(f"SELECT _ETL_ARCHIVE_ENGINE_ID FROM {world.name('AUD_ACTIONS')}") == [
+        ("original",)
+    ]

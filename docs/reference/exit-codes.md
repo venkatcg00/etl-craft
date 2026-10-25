@@ -37,3 +37,4 @@ error class has its own status; every error etl-craft raises on purpose belongs 
 | `27` | `SERVER` | A command run with `--api` could not reach the server, or the server answered with something that is not etl-craft JSON (`ServerError`). Check the URL, the network and that the server runs the same etl-craft version. |
 | `28` | `TRANSIENT` | A script explicitly raised `etl_craft.scripting.TransientError`; retries follow its recorded policy and budget. |
 | `29` | `PERMANENT` | A script explicitly raised `etl_craft.scripting.PermanentError`; correct its input or configuration before retrying, or explicitly select `RETRY_ON=ANY`. |
+| `30` | `ARCHIVE` | The archive destination or stored snapshot cannot be verified; restore the named schema or values, then retry the original archive destination. Source rows are retained. |

@@ -10,6 +10,7 @@ from etl_craft.core.errors import EtlCraftError, ExitCode
 from etl_craft.engine.audit import ActionRequest
 from etl_craft.engine.locks import EngineLock, advisory_key
 from etl_craft.engine.queries import statement
+from etl_craft.services.archives import archive_session
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.requests import Request
 from etl_craft.services.retention import purge_history
@@ -20,6 +21,7 @@ class PurgeInput(Request):
     """A read-only eligibility snapshot, or committed history/file cleanup."""
 
     dry_run: bool = False
+    archive_to: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,7 @@ def purge(ctx: OperationContext, request: PurgeInput) -> PurgeView:
     )
     completion = ActionRequest(
         ActionName.PURGE,
-        {"dry_run": request.dry_run},
+        {"dry_run": request.dry_run, "archive_to": request.archive_to},
         datetime.now(UTC),
         actor=ctx.actor,
         engine=ctx.engine,
@@ -47,7 +49,15 @@ def purge(ctx: OperationContext, request: PurgeInput) -> PurgeView:
         exit_code=ExitCode.UNEXPECTED,
     )
     try:
-        with lock.hold(ctx.engine):
+        with (
+            lock.hold(ctx.engine),
+            archive_session(
+                ctx.engine,
+                ctx.config,
+                request.archive_to,
+                dry_run=request.dry_run,
+            ) as archive,
+        ):
             now = datetime.now(UTC)
             result = PurgeView(
                 request.dry_run,
@@ -56,6 +66,7 @@ def purge(ctx: OperationContext, request: PurgeInput) -> PurgeView:
                     ctx.config,
                     now,
                     dry_run=request.dry_run,
+                    archive=archive,
                 ),
             )
             if not request.dry_run:

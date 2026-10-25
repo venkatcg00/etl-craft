@@ -14,6 +14,7 @@ from etl_craft.engine.audit import ActionRequest
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.engine.retention_tables import TABLES
+from etl_craft.services.archives import ArchiveSession
 from etl_craft.services.retention_files import cleanup_files, expire_logs
 
 
@@ -28,6 +29,23 @@ def retaining() -> Iterator[None]:
 
 
 def purge_history(
+    engine: Engine,
+    config: ConnectorConfig,
+    now: datetime,
+    *,
+    dry_run: bool,
+    archive: ArchiveSession | None = None,
+) -> dict[str, int]:
+    """Use the same category policy with verified snapshots when archiving is requested."""
+    with retaining():
+        return (
+            plain_history(engine, config, now, dry_run=dry_run)
+            if archive is None
+            else archive.run(now)
+        )
+
+
+def plain_history(
     engine: Engine, config: ConnectorConfig, now: datetime, *, dry_run: bool
 ) -> dict[str, int]:
     """Count currently removable rows, or drain bounded batches until no progress is possible."""
