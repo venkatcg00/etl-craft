@@ -271,7 +271,9 @@ def seeded_tables(db):
                 value = values.get(lower)
                 if value is None:
                     type_name = str(column["type"]).upper()
-                    if "TIMESTAMP" in type_name or "DATETIME" in type_name:
+                    if type_name == "DATE":
+                        value = datetime.now(UTC).date()
+                    elif "TIMESTAMP" in type_name or "DATETIME" in type_name:
                         value = datetime.now(UTC)
                     else:
                         value = 1 if "INT" in type_name or "NUMERIC" in type_name else "sample"

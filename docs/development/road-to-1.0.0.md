@@ -319,7 +319,8 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 S6.A slice 1 validates project history/log retention and released-schema upgrades on SQLite
 and PostgreSQL, CLI process death at each new commit boundary, administrator API access and
-reference protection. Its manual PostgreSQL volume gate removes one million attempts within
+reference protection. Populated query-plan checks cover indexed deletion/reference probes,
+with complete-category dry-run counts identified explicitly as maintenance reads. Its manual PostgreSQL volume gate removes one million attempts within
 the five-minute budget while a concurrent real pipeline finishes. Static/docs and unit checks
 pass; concurrent purge callers are repeated locally. No warehouse SQL changes in this slice;
 archiving and warehouse retention remain open, so S6.A is not Done.
@@ -7379,6 +7380,22 @@ and the endurance run on the example passed. A partial coverage matrix cannot pa
 - [ ] The 72-hour endurance run passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
+
+## Post-1.0.0 possibilities
+
+These are possible enhancements, not commitments or requirements for 1.0.0.
+
+- **Business-row retention with explicit eligibility.** Consider project-scoped table policies
+  in `CFG_TABLES`/`tables.csv`: a nullable retention period (`NULL` keeps rows forever) plus a
+  read-only eligibility SELECT returning stable row identities. Age alone must not authorize
+  deletion. Use trusted system insertion/material-change timestamps, never business dates;
+  late corrections to old records restart the clock, while unchanged reloads do not. Preserve
+  current SCD2 versions and rows needed by retained business relationships: an unchanged customer
+  may still have recent orders. Relationship/lifecycle eligibility must be explicit, not inferred
+  from lineage or assumed enforced by warehouse foreign keys. Any implementation needs target
+  locking, revalidation before deletion, dry-run counts and crash/concurrency tests. S6.A keeps
+  its existing scope and never deletes target business rows; no fields or runtime behavior are
+  introduced for this possibility now.
 
 ## Appendix A: Defect traceability
 

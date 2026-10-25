@@ -450,3 +450,44 @@ def test_empty_attempt_does_not_pin_an_expired_summary_tail(scene):
             ).scalar_one()
             is None
         )
+
+
+def test_gate_wait_batch_counts_distinct_wait_kinds(scene, engine_db, monkeypatch):
+    from sqlalchemy import event
+
+    from etl_craft.core.enums import WaitKind
+
+    ctx, _, task, run, _, _ = scene
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_GATE_WAITS "
+                "(PIPELINE_RUN_ID,TASK_ID,FIRST_CHECK_AT,LOOKS,WAIT_UNTIL,WAIT_KIND) "
+                "VALUES (:run,:task,:old,1,:old,:kind)"
+            ),
+            [
+                {"run": run, "task": task, "old": OLD, "kind": kind}
+                for kind in (WaitKind.DEPENDENCY, WaitKind.EVENT)
+            ],
+        )
+    original = engine_db.dialect.query
+
+    def one_row(name):
+        sql = original(name)
+        return sql.replace("LIMIT 10000", "LIMIT 1") if name == "retention_aud_gate_waits" else sql
+
+    monkeypatch.setattr(engine_db.dialect, "query", one_row)
+    batches = []
+
+    def observed(conn, cursor, sql, parameters, context, executemany):
+        if sql.startswith("DELETE FROM AUD_GATE_WAITS"):
+            batches.append(cursor.rowcount)
+
+    event.listen(ctx.engine, "after_cursor_execute", observed)
+    try:
+        invoke(ctx, ActionName.PURGE, PurgeInput())
+    finally:
+        event.remove(ctx.engine, "after_cursor_execute", observed)
+    assert max(batches) == 1
+    assert sum(batches) == 2
+    assert count(ctx, "AUD_GATE_WAITS") == 0

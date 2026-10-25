@@ -360,7 +360,9 @@ writes request/completion audit records but changes no history or files. Parents
 by their children are absent from its counts; a real purge makes repeated passes as children
 are removed. Concurrent work can also change eligibility after the snapshot. The real result
 reports rows actually removed. Each history batch deletes at most 10,000 rows and commits its
-row count and actor to `AUD_ACTIONS` in the same transaction.
+row count and actor to `AUD_ACTIONS` in the same transaction. PostgreSQL uses bounded
+candidate arrays for indexed deletion and correlated ownership/reference probes. Exact dry-run
+counts visit the complete eligible category as an explicit maintenance operation.
 
 Only terminal, old project-owned history is eligible. Live work, retained gate decisions,
 recorded consumption and incoming references prevent parent deletion. Current metadata,

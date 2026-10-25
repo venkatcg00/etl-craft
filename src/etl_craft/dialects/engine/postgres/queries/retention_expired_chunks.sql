@@ -1,0 +1,28 @@
+-- Keep the bounded candidate array as an initplan for indexed target lookups.
+DELETE FROM AUD_ATTEMPT_LOG_CHUNKS WHERE ctid = ANY(ARRAY(
+SELECT
+  c.ctid
+FROM AUD_ATTEMPT_LOG_CHUNKS AS c
+WHERE
+  EXISTS(
+    SELECT
+      1
+    FROM AUD_TASK_ATTEMPTS AS a
+    JOIN AUD_TASK_RUN_LOG AS t
+      ON t.TASK_RUN_ID = a.TASK_RUN_ID
+    JOIN AUD_PIPELINES_RUN_LOG AS r
+      ON r.PIPELINE_RUN_ID = t.PIPELINE_RUN_ID
+    JOIN CFG_PIPELINES AS p
+      ON p.PIPELINE_ID = r.PIPELINE_ID
+    WHERE
+      a.ATTEMPT_ID = c.ATTEMPT_ID
+      AND p.PROJECT_ID = :project_id
+      AND NOT a.LOG_REMOVED_AT IS NULL
+    LIMIT 1
+    OFFSET 0
+  )
+ORDER BY
+  c.ATTEMPT_ID,
+  c.SEQUENCE_NUMBER
+LIMIT 10000
+))

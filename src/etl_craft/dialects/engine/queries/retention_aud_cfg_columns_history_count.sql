@@ -1,1 +1,17 @@
-SELECT COUNT(*) AS count FROM AUD_CFG_COLUMNS_HISTORY t WHERE (EXISTS (SELECT 1 FROM CFG_TABLES q WHERE q.TABLE_ID=t.TABLE_ID AND q.PROJECT_ID=:project_id)) AND t.CURRENT_FLAG='N' AND t.VALID_TO < :cutoff
+SELECT
+  COUNT(*) AS count
+FROM AUD_CFG_COLUMNS_HISTORY AS t
+WHERE
+  (
+    EXISTS(
+      SELECT
+        1
+      FROM CFG_TABLES AS q
+      WHERE
+        q.TABLE_ID = t.TABLE_ID AND q.PROJECT_ID = :project_id
+      LIMIT 1
+      OFFSET 0
+    )
+  )
+  AND t.CURRENT_FLAG = 'N'
+  AND t.VALID_TO < :cutoff

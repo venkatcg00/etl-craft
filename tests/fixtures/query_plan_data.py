@@ -15,6 +15,18 @@ DAY = f"({STAMP}+(d-1)*INTERVAL '1 day')"
 # Every run has its own task/attempt identity; completed days dominate the live working set.
 SEEDS = [
     (
+        "AUD_RETENTION_TICKS",
+        "PROJECT_ID,PURGED_ON",
+        f"1,{STAMP}::date",
+        "generate_series(1,1) p",
+    ),
+    (
+        "AUD_RETENTION_FILES",
+        "ATTEMPT_ID,PROJECT_ID,LOG_PATH,RECORDED_AT",
+        f"p,1,'/plan/log-'||p,{STAMP}",
+        "generate_series(1,:pipelines) p",
+    ),
+    (
         "AUD_CONNECTION_RESERVATIONS",
         "RESERVATION_ID,ROLE,HOST,PID,BIRTH_TIME,POOL_CONNECTIONS,SESSION_CONNECTIONS,LOCAL_TASK_CONNECTIONS,BACKEND_PID,BACKEND_STARTED_AT,STARTED_AT,HEARTBEAT_AT,EXPIRES_AT,STOPPED_AT,ACTOR,ACTOR_KIND",
         f"p::text,'UI','plan',p,1,10,2,0,p,{STAMP},{STAMP},{STAMP},{STAMP},{STAMP},'plan','SYSTEM'",
