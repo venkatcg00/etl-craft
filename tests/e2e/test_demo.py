@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.enums import EmailFlavour, RunStatus
 from etl_craft.engine.connection import engine_db
 from fixtures.demo import Demo, demos, installed_cli
 
@@ -194,10 +195,26 @@ def check_the_warehouse(demo: Demo) -> None:
     ]
 
 
-def check_the_emails(demo: Demo, *, failed: bool, outcome: str = "SUCCESS") -> None:
+def check_the_emails(demo: Demo, *, failed: bool) -> None:
+    run_id, status = demo.latest_run("SUPPORT_DM")
+    assert status == RunStatus.SUCCESS
+    tasks = demo.engine_rows(
+        "SELECT t.TASK_CODE AS task_code,r.STATUS AS status,r.ATTEMPT_COUNT AS attempts,"
+        "r.ERROR_MESSAGE AS error FROM AUD_TASK_RUN_LOG r JOIN CFG_TASKS t ON t.TASK_ID=r.TASK_ID "
+        "WHERE r.PIPELINE_RUN_ID=:run AND t.HANDLER<>'EMAIL_ALERT'",
+        run=run_id,
+    )
+    assert tasks and all(
+        status == RunStatus.SUCCESS and not error for _, status, _, error in tasks
+    ), tasks
+    outcome = (
+        EmailFlavour.COMPLETED_WITH_ERRORS
+        if any(attempts > 1 for _, _, attempts, _ in tasks)
+        else EmailFlavour.SUCCESS
+    )
     expected = f"SUPPORT_DM: {outcome}"
     subjects = demo.wait_for_email(expected)
-    assert expected in subjects
+    assert expected in subjects, (tasks, subjects)
     if failed:
         assert {
             "SUPPORT_DM: FAILED",

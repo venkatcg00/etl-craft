@@ -137,6 +137,7 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         "Artifacts",
         "Deployment",
         "Docs_site",
+        "Retention",
     ):
         raw.pop(name, None)
     bootstrap = host._host_config_path or host.config_path
@@ -160,6 +161,7 @@ def project_config(host: ConnectorConfig, path: Path) -> ConnectorConfig:
         email=pinned.email,
         cloning=pinned.cloning,
         auth=host.auth,
+        retention=host.retention,
         deployment=host.deployment,
         sizing=host.sizing,
         api_address=host.api_address,

@@ -1,0 +1,19 @@
+Secrets:
+  Source_type: ENVIRONMENT  # value
+Engine:
+  dev:
+    Jdbc_url: jdbc:sqlite:engine.db  # value
+    Schema: main  # value
+    Auth_mode: NONE  # value
+Warehouse:
+  Name: duckdb  # value
+  dev:
+    Jdbc_url: jdbc:duckdb:warehouse.duckdb  # value
+    Schema: main  # value
+Retention:
+  Run_history_days: 90  # value
+  Attempt_log_days: 30  # value
+  Consumption_days: 90  # value
+  Interventions_days: 365  # value
+  Config_history_days: 365  # value
+  Daily_at: "03:00"  # value

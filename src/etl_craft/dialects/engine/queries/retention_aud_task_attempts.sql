@@ -1,0 +1,91 @@
+DELETE FROM AUD_TASK_ATTEMPTS
+WHERE
+  ATTEMPT_ID IN (
+    SELECT
+      t.ATTEMPT_ID AS row_id
+    FROM AUD_TASK_ATTEMPTS AS t
+    WHERE
+      (
+        EXISTS(
+          SELECT
+            1
+          FROM AUD_TASK_RUN_LOG AS tr
+          JOIN AUD_PIPELINES_RUN_LOG AS r
+            ON r.PIPELINE_RUN_ID = tr.PIPELINE_RUN_ID
+          JOIN CFG_PIPELINES AS p
+            ON p.PIPELINE_ID = r.PIPELINE_ID
+          WHERE
+            tr.TASK_RUN_ID = t.TASK_RUN_ID
+            AND p.PROJECT_ID = :project_id
+            AND r.STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
+            AND r.END_DATE < :cutoff
+          LIMIT 1
+          OFFSET 0
+        )
+      )
+      AND NOT t.STATUS IN ('QUEUED', 'CLAIMED', 'RUNNING')
+      AND (
+        NOT t.LOG_REMOVED_AT IS NULL OR (
+          t.LOG_PATH IS NULL AND t.TASK_LOG IS NULL
+        )
+      )
+      AND NOT EXISTS(
+        SELECT
+          1
+        FROM AUD_CONTROL_REQUESTS AS c
+        JOIN AUD_TASK_RUN_LOG AS tr
+          ON tr.PIPELINE_RUN_ID = c.PIPELINE_RUN_ID
+        WHERE
+          tr.TASK_RUN_ID = t.TASK_RUN_ID
+        LIMIT 1
+        OFFSET 0
+      )
+      AND NOT EXISTS(
+        SELECT
+          1
+        FROM AUD_ATTEMPT_ACKNOWLEDGEMENTS AS incoming
+        WHERE
+          incoming.ATTEMPT_ID = t.ATTEMPT_ID
+        LIMIT 1
+        OFFSET 0
+      )
+      AND NOT EXISTS(
+        SELECT
+          1
+        FROM AUD_ATTEMPT_LOG_CHUNKS AS incoming
+        WHERE
+          incoming.ATTEMPT_ID = t.ATTEMPT_ID
+        LIMIT 1
+        OFFSET 0
+      )
+      AND NOT EXISTS(
+        SELECT
+          1
+        FROM AUD_GATE_DECISIONS AS incoming
+        WHERE
+          incoming.ATTEMPT_ID = t.ATTEMPT_ID
+        LIMIT 1
+        OFFSET 0
+      )
+      AND NOT EXISTS(
+        SELECT
+          1
+        FROM AUD_RESOURCE_LOCKS AS incoming
+        WHERE
+          incoming.ATTEMPT_ID = t.ATTEMPT_ID
+        LIMIT 1
+        OFFSET 0
+      )
+      AND NOT EXISTS(
+        SELECT
+          1
+        FROM AUD_TASK_ITEMS AS incoming
+        WHERE
+          incoming.ATTEMPT_ID = t.ATTEMPT_ID
+        LIMIT 1
+        OFFSET 0
+      )
+    ORDER BY
+      t.ATTEMPT_ID
+    LIMIT 10000
+  )

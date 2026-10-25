@@ -279,3 +279,11 @@ For another configuration path, copy `python_scripts/pool_demo.py` into that pro
 [agent deployment guide](../../docs/deploying/agents.md) covers publishing projects for queue
 execution. The contract gate is `ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -m cluster`; it exercises both providers on
 PostgreSQL, with agent-only registration/drain/API-failover cases selected for queue execution.
+
+## History retention
+
+The demo leaves retention disabled. To bound its history, add the commented `Retention`
+section from its connector file, review `etl-craft purge --dry-run --format json`, then run
+`etl-craft purge` as an administrator. Files expire separately from run history; retained
+consumption and recovery evidence can keep old run skeletons. See the
+[retention guide](../../docs/deploying/engine-db.md#retaining-project-history).

@@ -1,0 +1,31 @@
+DELETE FROM AUD_ATTEMPT_ACKNOWLEDGEMENTS
+WHERE
+  ATTEMPT_ID IN (
+    SELECT
+      t.ATTEMPT_ID AS row_id
+    FROM AUD_ATTEMPT_ACKNOWLEDGEMENTS AS t
+    WHERE
+      (
+        EXISTS(
+          SELECT
+            1
+          FROM AUD_TASK_ATTEMPTS AS a
+          JOIN AUD_TASK_RUN_LOG AS tr
+            ON tr.TASK_RUN_ID = a.TASK_RUN_ID
+          JOIN AUD_PIPELINES_RUN_LOG AS r
+            ON r.PIPELINE_RUN_ID = tr.PIPELINE_RUN_ID
+          JOIN CFG_PIPELINES AS p
+            ON p.PIPELINE_ID = r.PIPELINE_ID
+          WHERE
+            a.ATTEMPT_ID = t.ATTEMPT_ID
+            AND p.PROJECT_ID = :project_id
+            AND r.STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
+            AND r.END_DATE < :cutoff
+          LIMIT 1
+          OFFSET 0
+        )
+      )
+    ORDER BY
+      t.ATTEMPT_ID
+    LIMIT 10000
+  )

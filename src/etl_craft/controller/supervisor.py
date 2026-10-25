@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.controller.leadership import leadership
+from etl_craft.controller.retention import RetentionSchedule
 from etl_craft.controller.schedules import Schedules
 from etl_craft.core.actor import ActorKind, acting_as
 from etl_craft.core.definitions import Definition, using
@@ -95,6 +96,7 @@ class _Supervisor:
     pool: LocalPool | QueuePool
     working: WorkingSet = field(default_factory=WorkingSet)
     schedules: Schedules = field(default_factory=Schedules)
+    retention: RetentionSchedule = field(default_factory=RetentionSchedule)
     jobs: Jobs = field(default_factory=dict)
     next_heartbeat: float = 0.0
 
@@ -120,6 +122,7 @@ class _Supervisor:
         cascade_children(self.ctx)
         settle_ended_parent_waits(self.ctx.engine, datetime.now(UTC))
         self.schedules.refresh(self.ctx, datetime.now(UTC), self.stop)
+        self.retention.refresh(self.ctx, datetime.now(UTC), self.stop)
         for run_id in list(self.jobs):
             self.advance(run_id)
         for run in self.working.refresh(self.ctx):
@@ -203,10 +206,12 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                     supervisor.drain(controller_id)
                 finally:
                     supervisor.schedules.catalog.close()
+                    supervisor.retention.close()
     except SQLAlchemyError as error:
         raise EngineDbError(
             f"controller lost its Engine DB connection: {error}; restore it and restart controller"
         ) from error
     finally:
         supervisor.schedules.catalog.close()
+        supervisor.retention.close()
         supervisor.pool.close()

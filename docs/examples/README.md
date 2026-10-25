@@ -200,3 +200,10 @@ It covers controller execution, WAIT/DETACH modes and explicit rerun generations
 Both require TLS and keep cloning disabled. Replace the local Warehouse section with the team's
 warehouse definition as needed. See [managed Engine DB setup](../deploying/engine-db.md#managed-postgresql-on-snowflake-and-databricks)
 for provider permissions and live acceptance.
+
+## Project history retention
+
+[`retention.yml`](retention.yml) shows explicit history lifetimes and optional daily maintenance
+with a local SQLite Engine DB and DuckDB warehouse. Omit the section to keep history forever.
+Review `etl-craft purge --dry-run --format json` as an administrator before enabling deletion.
+See the [retention guide](../deploying/engine-db.md#retaining-project-history).

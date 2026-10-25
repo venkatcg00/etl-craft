@@ -1,0 +1,83 @@
+SELECT
+  COUNT(*) AS count
+FROM AUD_TASK_RUN_LOG AS t
+WHERE
+  (
+    EXISTS(
+      SELECT
+        1
+      FROM AUD_PIPELINES_RUN_LOG AS r
+      JOIN CFG_PIPELINES AS p
+        ON p.PIPELINE_ID = r.PIPELINE_ID
+      WHERE
+        p.PROJECT_ID = :project_id
+        AND r.STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
+        AND r.END_DATE < :cutoff
+        AND r.PIPELINE_RUN_ID = t.PIPELINE_RUN_ID
+      LIMIT 1
+      OFFSET 0
+    )
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_BUSINESS_RULES_RUN_LOG AS incoming
+    WHERE
+      incoming.TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_DEPENDENCY_CONSUMPTION AS incoming
+    WHERE
+      incoming.CONSUMED_TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_GATE_DECISIONS AS incoming
+    WHERE
+      incoming.SELECTED_TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_PIPELINES_RUN_LOG AS incoming
+    WHERE
+      incoming.TRIGGERED_BY_TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_TASK_ATTEMPTS AS incoming
+    WHERE
+      incoming.TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_TASK_EVENTS AS incoming
+    WHERE
+      incoming.TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )
+  AND NOT EXISTS(
+    SELECT
+      1
+    FROM AUD_TASK_ITEMS AS incoming
+    WHERE
+      incoming.TASK_RUN_ID = t.TASK_RUN_ID
+    LIMIT 1
+    OFFSET 0
+  )

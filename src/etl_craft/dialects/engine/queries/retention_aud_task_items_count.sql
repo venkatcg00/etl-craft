@@ -1,0 +1,24 @@
+SELECT
+  COUNT(*) AS count
+FROM AUD_TASK_ITEMS AS t
+WHERE
+  (
+    EXISTS(
+      SELECT
+        1
+      FROM AUD_TASK_RUN_LOG AS tr
+      JOIN AUD_PIPELINES_RUN_LOG AS r
+        ON r.PIPELINE_RUN_ID = tr.PIPELINE_RUN_ID
+      JOIN CFG_PIPELINES AS p
+        ON p.PIPELINE_ID = r.PIPELINE_ID
+      WHERE
+        tr.TASK_RUN_ID = t.TASK_RUN_ID
+        AND p.PROJECT_ID = :project_id
+        AND r.STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
+        AND r.END_DATE < :cutoff
+      LIMIT 1
+      OFFSET 0
+    )
+  )
+  AND t.STATUS IN ('SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')
+  AND t.ENDED_AT < :cutoff

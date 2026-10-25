@@ -93,6 +93,8 @@ VALUES = {
     "now": MOMENT,
     "since": MOMENT,
     "run_date": MOMENT.date(),
+    "date": MOMENT.date(),
+    "cutoff": MOMENT,
     "create_date": MOMENT,
     "end_date": MOMENT,
     "updated_date": MOMENT,
@@ -360,3 +362,113 @@ FULL_READS = {
         "aud_target_view_statement",
     ): "Normalizes every legacy target name once during migration.",
 }
+
+# Exact dry-run counts visit the complete eligible category during explicit maintenance.
+FULL_READS.update(
+    {
+        (
+            "retention_aud_gate_waits_count",
+            "aud_gate_waits",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_dependency_consumption_count",
+            "aud_dependency_consumption",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_gate_decisions_count",
+            "aud_gate_decisions",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_run_interventions_count",
+            "aud_run_interventions",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_pipeline_pauses_count",
+            "aud_pipeline_pauses",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_actions_count",
+            "aud_actions",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_control_requests_count",
+            "aud_control_requests",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_task_items_count",
+            "aud_task_items",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_business_rules_results_count",
+            "aud_business_rules_results",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_business_rules_run_log_count",
+            "aud_business_rules_run_log",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_attempt_acknowledgements_count",
+            "aud_attempt_acknowledgements",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_task_attempts_count",
+            "aud_task_attempts",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_task_run_log_count",
+            "aud_task_run_log",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_pipelines_run_log_count",
+            "aud_pipelines_run_log",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_business_rules_history_count",
+            "aud_cfg_business_rules_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_columns_history_count",
+            "aud_cfg_columns_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_pipelines_history_count",
+            "aud_cfg_pipelines_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_pipeline_dependency_history_count",
+            "aud_cfg_pipeline_dependency_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_pipeline_grants_history_count",
+            "aud_cfg_pipeline_grants_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_projects_history_count",
+            "aud_cfg_projects_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_tables_history_count",
+            "aud_cfg_tables_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_tasks_history_count",
+            "aud_cfg_tasks_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_task_dependency_history_count",
+            "aud_cfg_task_dependency_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_aud_cfg_task_parameters_history_count",
+            "aud_cfg_task_parameters_history",
+        ): "Counts all eligible rows for the explicit retention snapshot.",
+        (
+            "retention_logs_count",
+            "aud_task_attempts",
+        ): "Counts all eligible attempt logs for explicit retention.",
+        (
+            "retention_tick",
+            "aud_retention_ticks",
+        ): "One daily completion cursor per project, independent of run volume.",
+    }
+)

@@ -330,3 +330,72 @@ after reservation and a child exit after committing its outcome. Run the affecte
 marker with `-k managed_engine_db`; missing configuration is reported as unavailable.
 Cloud lifecycle commands allow up to 15 minutes for the schema and audit catalog round trips,
 within a 20-minute test deadline. The local procedure retains its 30-second command limit.
+
+## Retaining project history
+
+Retention is opt-in and administered on the host. Add `Retention` after the other sections
+of `craft-connector.yml`; each period is an integer from 1 to 36500 days. An omitted period
+keeps that category forever. See the [complete example](../examples/retention.yml).
+
+```yaml
+Retention:
+  Run_history_days: 90
+  Attempt_log_days: 30
+  Consumption_days: 90
+  Interventions_days: 365
+  Config_history_days: 365
+  Daily_at: "03:00"
+```
+
+An administrator can inspect and purge one selected project through the same operation on
+its host or through `--api`:
+
+```bash
+etl-craft --project default purge --dry-run --format json
+etl-craft --project default purge
+```
+
+`--dry-run` reports a read-only snapshot of currently removable rows and eligible logs. It
+writes request/completion audit records but changes no history or files. Parents still blocked
+by their children are absent from its counts; a real purge makes repeated passes as children
+are removed. Concurrent work can also change eligibility after the snapshot. The real result
+reports rows actually removed. Each history batch deletes at most 10,000 rows and commits its
+row count and actor to `AUD_ACTIONS` in the same transaction. PostgreSQL uses bounded
+candidate arrays for indexed deletion and correlated ownership/reference probes. Exact dry-run
+counts visit the complete eligible category as an explicit maintenance operation.
+
+Only terminal, old project-owned history is eligible. Live work, retained gate decisions,
+recorded consumption and incoming references prevent parent deletion. Current metadata,
+checkpoints, consumed event keys/files, active business-rule results, bundles and the latest
+scheduled run cursor remain. This can deliberately retain an old run's skeleton. Unscoped
+account, token, pool and other deployment history is outside a project purge. Set the separate
+consumption and intervention periods when those retained records would otherwise pin history.
+
+Attempt logs expire separately from run history. Until their configured period expires, log
+content pins its attempt. Purge retires stored tails/chunks and commits removal evidence plus
+pending file work before unlinking a canonical file beneath `Orchestration.Log_dir`. A retained
+attempt's log endpoint then shows `removed by retention on <date>`. A missing file during an
+ordinary read remains an error. Symlinks and noncanonical paths are refused. Rerunning purge
+completes committed cleanup after a crash, including when the period has since been disabled;
+no shared artifact or bundle bytes are deleted. Current agents store shared chunks in the
+Engine DB; external `Logs.Store` transport belongs to S6.B and is not configured by this change.
+
+`Daily_at` is optional, quoted 24-hour `HH:MM`. The leader checks each project's time
+zone and runs maintenance in a background worker, so purges do not stop lease renewal. A
+successful manual purge also satisfies that day's schedule. Completion survives controller
+restarts; a failed or interrupted day retries, without replaying every missed day. Periods are
+host-controlled and are not accepted from developer publications. `setup` shows recommended
+periods for a newly created Engine DB; it never rewrites the team-owned YAML. `doctor` reports
+when PostgreSQL history is configured to be kept forever.
+
+Warehouse archiving (`--archive-to`) and warehouse auxiliary-data retention are the next S6.A
+slices. This command currently purges Engine DB history and local/shared attempt log content.
+
+The manual/release volume gate is deliberately outside ordinary test discovery:
+
+```bash
+ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q tests/acceptance/retention_volume.py
+```
+
+It purges one million PostgreSQL attempts within five minutes and finishes a real pipeline
+while the first deletion transaction is still open.

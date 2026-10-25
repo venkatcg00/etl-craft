@@ -156,7 +156,7 @@ item's text, or work done early under another item.
 | S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
 | S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
 | S5.J | Done | #248 | Shared local/queue contracts and a ten-project demo. |
-| S6.A Retention | Planned | #249 | Three implementation slices: Engine DB/logs, recoverable archives, warehouse maintenance. |
+| S6.A Retention | In progress | #249, #250 | Slice 1: project history/log purge and daily maintenance; archive and warehouse slices remain. |
 | S6.B and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -316,6 +316,14 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S6.A slice 1 validates project history/log retention and released-schema upgrades on SQLite
+and PostgreSQL, CLI process death at each new commit boundary, administrator API access and
+reference protection. Populated query-plan checks cover indexed deletion/reference probes,
+with complete-category dry-run counts identified explicitly as maintenance reads. Its manual PostgreSQL volume gate removes one million attempts within
+the five-minute budget while a concurrent real pipeline finishes. Static/docs and unit checks
+pass; concurrent purge callers are repeated locally. No warehouse SQL changes in this slice;
+archiving and warehouse retention remain open, so S6.A is not Done.
 
 S5.J validates shared local/queue contracts on PostgreSQL, including process death, claim
 acknowledgement loss, cancellation, controller recovery and capacity. Both providers and the
@@ -697,6 +705,20 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.A slice 1 keeps retention policy on the host, so developer-published bundles cannot shorten
+  another project's history. Manual purge selects one project; daily maintenance uses the host
+  policy with each project's own time zone, including inactive projects. Periods accept 1 to
+  36500 whole days; omitted periods preserve their category. Setup shows recommendations without
+  rewriting team-owned YAML, as required by AGENTS.md's configuration ownership rule.
+- A dry run counts currently removable rows without simulating writes. Parents still blocked
+  by children are absent from that snapshot; committed purge makes repeated bounded passes.
+  Existing event-consumption state, active BR results, bundles and the last scheduled run cursor
+  remain protected. Attempt logs retain their attempts until the separate log period expires.
+- Slice 1's migration adds a removal timestamp, pending canonical-file cleanup and a per-project
+  completed-day cursor. Files follow committed log retirement, and cleanup resumes even after
+  periods are disabled. Shared agent chunks use their existing Engine DB transport; S6.B later
+  applies the same lifecycle to external log stores. Warehouse archives are not exposed yet.
 
 - S6.A is split into three ordered implementation pull requests: Engine DB/log retention,
   crash-safe warehouse archiving, and warehouse auxiliary-data retention. The owner authorized
@@ -7358,6 +7380,22 @@ and the endurance run on the example passed. A partial coverage matrix cannot pa
 - [ ] The 72-hour endurance run passed.
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
+
+## Post-1.0.0 possibilities
+
+These are possible enhancements, not commitments or requirements for 1.0.0.
+
+- **Business-row retention with explicit eligibility.** Consider project-scoped table policies
+  in `CFG_TABLES`/`tables.csv`: a nullable retention period (`NULL` keeps rows forever) plus a
+  read-only eligibility SELECT returning stable row identities. Age alone must not authorize
+  deletion. Use trusted system insertion/material-change timestamps, never business dates;
+  late corrections to old records restart the clock, while unchanged reloads do not. Preserve
+  current SCD2 versions and rows needed by retained business relationships: an unchanged customer
+  may still have recent orders. Relationship/lifecycle eligibility must be explicit, not inferred
+  from lineage or assumed enforced by warehouse foreign keys. Any implementation needs target
+  locking, revalidation before deletion, dry-run counts and crash/concurrency tests. S6.A keeps
+  its existing scope and never deletes target business rows; no fields or runtime behavior are
+  introduced for this possibility now.
 
 ## Appendix A: Defect traceability
 
