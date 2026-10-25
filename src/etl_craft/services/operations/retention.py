@@ -14,6 +14,7 @@ from etl_craft.services.archives import archive_session
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.requests import Request
 from etl_craft.services.retention import purge_history
+from etl_craft.services.warehouse_retention import auxiliary_session
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -57,6 +58,7 @@ def purge(ctx: OperationContext, request: PurgeInput) -> PurgeView:
                 request.archive_to,
                 dry_run=request.dry_run,
             ) as archive,
+            auxiliary_session(ctx.engine, ctx.config, archive) as auxiliary,
         ):
             now = datetime.now(UTC)
             result = PurgeView(
@@ -69,6 +71,8 @@ def purge(ctx: OperationContext, request: PurgeInput) -> PurgeView:
                     archive=archive,
                 ),
             )
+            if auxiliary is not None:
+                result.counts.update(auxiliary.run(now, dry_run=request.dry_run))
             if not request.dry_run:
                 with ctx.engine.begin() as conn:
                     conn.execute(

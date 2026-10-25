@@ -32,6 +32,7 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     EmailTransport,
     GatePolicy,
+    IcebergMaintenance,
     ProcessRole,
 )
 from etl_craft.core.errors import EtlCraftError
@@ -376,6 +377,63 @@ def _engine(config: ConnectorConfig, *, engine_state: bool) -> list[Check]:
     return checks
 
 
+def _warehouse_retention(config: ConnectorConfig, engine: Engine) -> list[Check]:
+    with engine.connect() as conn:
+        project = conn.execute(
+            statement(conn, "project_by_code"), {"code": config.project}
+        ).one_or_none()
+        if project is None:
+            return []
+        tables = conn.execute(
+            statement(conn, "config_rows_tables"), {"project_id": project.project_id}
+        ).all()
+    checks = []
+    for table in tables:
+        if table.object_kind == "VIEW":
+            continue
+        name = f"{table.schema_name}.{table.table_name}"
+        if table.reject_retention_days is None:
+            checks.append(
+                ok(
+                    "Warehouse retention",
+                    f"{name} rejects are kept forever; "
+                    "set REJECT_RETENTION_DAYS in tables.csv to bound them",
+                )
+            )
+        for action, days in (
+            (IcebergMaintenance.EXPIRE_SNAPSHOTS, table.snapshot_retention_days),
+            (IcebergMaintenance.REMOVE_ORPHAN_FILES, table.orphan_retention_days),
+        ):
+            if (
+                days is None
+                and config.warehouse is not None
+                and (warehouse_dialect(config).retention_maintenance(name, action, 7) is not None)
+            ):
+                setting = (
+                    "SNAPSHOT_RETENTION_DAYS"
+                    if action == IcebergMaintenance.EXPIRE_SNAPSHOTS
+                    else "ORPHAN_RETENTION_DAYS"
+                )
+                checks.append(
+                    ok(
+                        "Warehouse retention",
+                        f"{name}: {setting} is unset; "
+                        "files are kept forever by package maintenance; configure tables.csv",
+                    )
+                )
+            if days is not None and (
+                config.warehouse is None
+                or warehouse_dialect(config).retention_maintenance(name, action, days) is None
+            ):
+                checks.append(
+                    fail(
+                        "Warehouse retention",
+                        f"{name}: {action} unsupported; unset the policy or use Trino over Iceberg",
+                    )
+                )
+    return checks
+
+
 def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
     try:
         if not existing_engine_tables(engine):
@@ -395,7 +453,7 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
                 f"{len(pending)} pending: {', '.join(pending)}; run `etl-craft migrate`",
             )
         ]
-    checks = [ok("Engine DB migrations", "up to date")]
+    checks = [ok("Engine DB migrations", "up to date"), *_warehouse_retention(config, engine)]
     checks.append(
         ok("Active admin", "an active administrator exists")
         if has_admin(engine)

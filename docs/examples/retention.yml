@@ -22,3 +22,8 @@ Retention:
 # etl-craft purge --archive-to history --dry-run
 # etl-craft purge --archive-to history
 # Retry the same destination after interruption. Full local log files are not archived.
+
+# Warehouse policies belong in config/tables.csv, not this YAML section:
+# REJECT_RETENTION_DAYS: 30; SNAPSHOT_RETENTION_DAYS: 7; ORPHAN_RETENTION_DAYS: 7.
+# Empty cells keep forever. Snapshot/orphan policies currently require Trino Iceberg.
+# Business rows and active business-rule findings are never aged out by purge.

@@ -7,11 +7,11 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from sqlalchemy import text
+from sqlalchemy import TextClause, text
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.auth import warehouse_by_key
-from etl_craft.core.enums import AuthMode, FailureClass
+from etl_craft.core.enums import AuthMode, FailureClass, IcebergMaintenance
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.failures import Failure
 from etl_craft.dialects.failure_evidence import driver_error
@@ -33,6 +33,12 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     session_fencing = True
+
+    def retention_maintenance(
+        self, table: str, action: IcebergMaintenance, days: int
+    ) -> TextClause | None:
+        """Keep the catalog's own retention floor in force for file maintenance."""
+        return text(f"ALTER TABLE {table} EXECUTE {action}(retention_threshold => '{days}d')")
 
     def archive_type_matches(self, actual: str, expected: str) -> bool:
         """Iceberg reports microsecond precision explicitly for archive timestamps."""

@@ -8,6 +8,7 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.IcebergMaintenance: {"expire_snapshots", "remove_orphan_files"},
     enums.ArchiveKind: {
         "TEXT",
         "INTEGER",

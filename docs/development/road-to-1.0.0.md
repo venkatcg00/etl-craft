@@ -156,7 +156,7 @@ item's text, or work done early under another item.
 | S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
 | S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
 | S5.J | Done | #248 | Shared local/queue contracts and a ten-project demo. |
-| S6.A Retention | In progress | #249, #250, #251 | History/log purge and recoverable warehouse archives; warehouse auxiliary retention remains. |
+| S6.A Retention | Done | #249, #250, #251, #252 | Project history/log archives, scoped reject lifetimes and supported Iceberg maintenance; current mirrors follow retained source state. |
 | S6.B and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -317,13 +317,21 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
+S6.A slice 3 validates old/new/foreign reject boundaries and real merge exclusion on all four
+local warehouses, plus real process-loss recovery on both Engine DBs. Released-schema upgrades,
+config/history round trips, doctor/setup behavior and administrator API/archive regressions pass.
+Trino snapshot/orphan procedures execute without changing current data; unsupported adapters
+refuse configured file-maintenance policies. Native Databricks and Snowflake reject checks pass.
+Snapshot/orphan counts are planned/executed operations, not estimated deleted files. The complete
+platform matrix and installed-wheel demos remain CI checks.
+
 S6.A slice 2 validates immutable archive delivery, complete-value verification and added-column
 schema evolution on DuckDB, PostgreSQL, Trino/Iceberg and DuckDB/Iceberg. Databricks native/UniForm and
 Snowflake native archive checks pass; Snowflake Iceberg storage is not configured for this acceptance.
 Both Engine DBs pass process-loss recovery at every archive commit boundary, reference-safe
 retention, log/file protection, administrator HTTP access and released-schema upgrades.
 Concurrent archive purges are repeated locally. The full platform matrix and installed-wheel
-demos remain CI checks; warehouse auxiliary retention is still open.
+demos remain CI checks; slice 3 completes the auxiliary retention behavior.
 
 S6.A slice 1 validates project history/log retention and released-schema upgrades on SQLite
 and PostgreSQL, CLI process death at each new commit boundary, administrator API access and
@@ -331,7 +339,7 @@ reference protection. Populated query-plan checks cover indexed deletion/referen
 with complete-category dry-run counts identified explicitly as maintenance reads. Its manual PostgreSQL volume gate removes one million attempts within
 the five-minute budget while a concurrent real pipeline finishes. Static/docs and unit checks
 pass; concurrent purge callers are repeated locally. No warehouse SQL changes in this slice;
-warehouse auxiliary retention remains open, so S6.A is not Done.
+slice 3 completes the warehouse auxiliary behavior.
 
 S5.J validates shared local/queue contracts on PostgreSQL, including process death, claim
 acknowledgement loss, cancellation, controller recovery and capacity. Both providers and the
@@ -713,6 +721,25 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.A slice 3 adds nullable `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS` and
+  `ORPHAN_RETENTION_DAYS` to `CFG_TABLES`, its history and optional CSV columns. Empty values keep
+  forever; rejects accept 1–36500 whole days and file maintenance 7–36500. Setup shows
+  recommendations without rewriting team-owned files. Reject age uses ingestion `CREATE_DATE`,
+  and project pipeline ownership restricts deletion. Policies remain on retired metadata until cleared.
+- Cloning already replaces the complete mirror; business-rule findings are Engine DB history,
+  with active flags protected by existing retention. There is no independent accumulating
+  mirror ledger to age out. Retained source state governs the next clone refresh, so no separate
+  mirror-row lifetime is added and current metadata/findings are preserved. Business-row
+  retention and immutable archive-row deletion remain outside S6.A.
+- File maintenance is implemented for Trino Iceberg, through the existing dialect/target-lock
+  boundary, retaining provider safety floors. Other adapters refuse configured snapshot/orphan
+  policies rather than silently skipping them. Registered business-object collisions are refused;
+  reject cleanup holds both target and ledger locks and rechecks ownership before writes.
+- Warehouse admission counts/periods are audited before remote writes; acknowledged commits
+  get a separate success record. Process loss can leave an unacknowledged request, and retry
+  repeats idempotent cleanup without inventing a completion count. Dry runs report reject rows
+  and maintenance-operation counts without warehouse writes. S6.B follows completed S6.A.
 
 - S6.A slice 2 keeps immutable content versions under source keys, deployment identity and
   schema version: repaired runs and retired logs may legitimately change an existing key.

@@ -264,3 +264,28 @@ def test_organization_catalog_hosting_needs_no_tunnel_sdk_or_credentials(config,
         "organization URL https://docs.example.com/catalog/; no ngrok required",
     )
     assert "Docs site authtoken" not in checks
+
+
+def test_doctor_reports_unset_reject_lifetimes_and_refuses_unsupported_maintenance(
+    config, empty_engine_db
+):
+    from sqlalchemy import text
+
+    result = setup(config)
+    assert result.created_tables
+    with empty_engine_db.engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO CFG_TABLES (SCHEMA_NAME,TABLE_NAME) VALUES ('main','operational')")
+        )
+    checks = run_checks(config)
+    assert any(
+        check.name == "Warehouse retention" and "rejects are kept forever" in check.detail
+        for check in checks
+    )
+    with empty_engine_db.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_TABLES SET SNAPSHOT_RETENTION_DAYS=7"))
+    checks = run_checks(config)
+    assert any(
+        check.status is Status.FAIL and "expire_snapshots unsupported" in check.detail
+        for check in checks
+    )

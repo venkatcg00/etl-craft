@@ -42,6 +42,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
             "Consumption_days 90, Interventions_days 365, Config_history_days 365; "
             "add the section to team-owned craft-connector.yml, then review purge --dry-run"
         )
+        out.line(
+            "setup: recommended tables.csv days: REJECT_RETENTION_DAYS 30; "
+            "SNAPSHOT_RETENTION_DAYS 7 and ORPHAN_RETENTION_DAYS 7 on supported Iceberg "
+            "maintenance dialects; empty cells retain forever. Review purge --dry-run"
+        )
         out.line("setup: created the Engine DB tables")
     for version in result.applied_migrations:
         out.line(f"setup: applied {version}")

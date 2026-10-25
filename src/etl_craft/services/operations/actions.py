@@ -512,12 +512,16 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
 
 def _project_settings(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
     """Use approved project connections for operations that inspect warehouse resources."""
+    if ctx.transport == Transport.LOCAL and not ctx.config.artifacts.store:
+        return ctx
     if (
         name == ActionName.PURGE
         and isinstance(request, retention.PurgeInput)
         and request.archive_to is None
     ):
-        return ctx
+        with ctx.engine.connect() as conn:
+            if conn.execute(statement(conn, "retention_warehouse_targets")).first() is None:
+                return ctx
     if name not in {
         ActionName.PURGE,
         ActionName.RUN,
@@ -533,7 +537,7 @@ def _project_settings(ctx: OperationContext, name: ActionName, request: object) 
         ActionName.DATA_EDIT,
         ActionName.DATA_UNLOCK,
         ActionName.DATA_PROVENANCE,
-    } or (ctx.transport == Transport.LOCAL and not ctx.config.artifacts.store):
+    }:
         return ctx
     from etl_craft.config.project import project_config
     from etl_craft.engine.bundles import Bundle

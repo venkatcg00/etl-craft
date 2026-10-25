@@ -274,3 +274,38 @@ def test_narrowed_archive_column_refuses_source_deletion(archived):
         invoke(ctx, ActionName.PURGE, PurgeInput(archive_to="history"))
     assert count(ctx, "AUD_TASK_ATTEMPTS") == 1
     assert count(ctx, "AUD_RETENTION_ARCHIVES") == 1
+
+
+def test_archives_and_auxiliary_cleanup_share_the_warehouse_reservation(archived):
+    from datetime import UTC, datetime
+
+    ctx, warehouse, ids = archived
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TABLES (SCHEMA_NAME,TABLE_NAME,OBJECT_KIND,REJECT_RETENTION_DAYS) "
+                "VALUES ('main','owned_aux','TABLE',1)"
+            )
+        )
+    with warehouse.begin() as conn:
+        conn.execute(text("CREATE TABLE owned_aux (id BIGINT)"))
+        conn.execute(text("INSERT INTO owned_aux VALUES (42)"))
+        conn.execute(
+            text(
+                "CREATE TABLE owned_aux__rejects (id BIGINT,PIPELINE_ID BIGINT,"
+                "PIPELINE_RUN_ID BIGINT,TASK_RUN_ID BIGINT,CREATE_DATE TIMESTAMPTZ,"
+                "CREATED_BY VARCHAR,REJECT_REASON VARCHAR,REJECT_COLUMN VARCHAR)"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO owned_aux__rejects VALUES (1,:pipeline,1,1,:old,'test','bad','id')"),
+            {"pipeline": ids[0], "old": datetime(2000, 1, 1, tzinfo=UTC)},
+        )
+    result = invoke(ctx, ActionName.PURGE, PurgeInput(archive_to="history"))
+    assert result.counts["archive.main.owned_aux__rejects"] == 1
+    assert count(ctx, "AUD_TASK_ATTEMPTS") == 0
+    with warehouse.connect() as conn:
+        assert conn.execute(text("SELECT id AS id FROM owned_aux")).scalar_one() == 42
+        assert (
+            conn.execute(text("SELECT COUNT(*) AS count FROM owned_aux__rejects")).scalar_one() == 0
+        )
