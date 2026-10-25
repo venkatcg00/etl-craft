@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recover run 405 · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs" data-section>Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-dm.html">SI_DM</a></li><li><a href="run-405.html" aria-current="page">Run 405</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-run" aria-hidden="true"></span>Run 405<span class="st st-ok">SUCCESS</span></h1></div><div class="actions"><a class="btn" href="run-405-recover.html">Rerun…</a></div></div><nav class="tabs" aria-label="Views"><a href="run-405.html" aria-current="page">Graph</a><a href="run-405-timeline.html">Timeline</a><a href="run-405-list.html">List</a></nav><div class="canvas" role="group" aria-label="Task graph"><div class="dag" style="width:220px;height:172px"><svg class="edges" width="220" height="172" aria-hidden="true"><defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z"/></marker></defs></svg><div class="node n-ok" style="left:12px;top:12px;width:180px;height:44px" role="img" aria-label="ods_to_dm, SQL, SUCCESS"><span class="n-name">ods_to_dm</span><span class="n-sub">SQL · SCD2_MERGE · window</span></div><div class="node n-skip" style="left:12px;top:86px;width:180px;height:44px" role="img" aria-label="dm_failure_alert, EMAIL_ALERT, SKIPPED"><span class="n-name">dm_failure_alert</span><span class="n-sub">EMAIL_ALERT · on FAILURE · any task</span></div></div></div>
+</main>
+
+</div>
+</div>
+<div class="scrim"></div><section class="dialog" role="dialog" aria-labelledby="dlg-r"><h2 id="dlg-r">Rerun run 405</h2><p>These task runs will be retried; tasks already SUCCESS or SKIPPED are kept:</p><ul class="affected"><li class="mono">ods_to_dm</li><li class="mono">dm_failure_alert</li><li>…</li></ul><form action="run-419-ack.html" method="get" class="stack"><input type="hidden" name="action" value="RECOVER"><label for="why">Reason</label><textarea id="why" name="reason" required>Broker recovered</textarea><p class="muted small">Equivalent: <code>etl-craft control --pipeline-code SI_DM --run-id 405 --action RECOVER --reason "…"</code></p><div class="row-end"><a class="btn" href="run-405.html">Cancel</a><button class="btn primary" type="submit">Recover</button></div></form></section>
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>The affected tasks are shown before confirmation (S7.A.4 repair and rerun).</li></ul></details>
+</div>
+</body>
+</html>

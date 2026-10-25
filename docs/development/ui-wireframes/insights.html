@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Insights · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart" aria-current="page">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+
+<div class="page-head"><div><h1>Insights</h1><p class="sub">Pipeline Insights · built-in engine metrics</p></div><div class="actions"></div></div><form class="filters" action="insights.html"><label for="ir" class="sr-only">Range</label><select id="ir"><option>Last 24 hours</option><option>Last 7 days</option></select><label for="ip" class="sr-only">Pipeline</label><select id="ip"><option>All pipelines</option></select><label for="it" class="sr-only">Tag</label><select id="it"><option>Tag: all</option></select><button class="btn" type="submit">Apply</button></form><div class="tiles"><div class="tile"><span class="t-label">Logical runs</span><span class="t-val">96</span><span class="t-sub">last 24 h · +4 vs prior</span></div><div class="tile"><span class="t-label">Success rate</span><span class="t-val">97.9 %</span><span class="t-sub">94 of 96 · prior 96.9 %</span></div><div class="tile"><span class="t-label">Retries</span><span class="t-val">3</span><span class="t-sub">attempts, not runs · −2</span></div><div class="tile"><span class="t-label">SLA misses</span><span class="t-val">0</span><span class="t-sub">last 24 h</span></div><div class="tile"><span class="t-label">Median duration</span><span class="t-val">8m 40s</span><span class="t-sub">client pipelines</span></div><div class="tile"><span class="t-label">Rows to ODS</span><span class="t-val">41,207</span><span class="t-sub">sum of merge inserts + updates</span></div></div><div class="cols2"><section class="card"><h2>Runs per hour</h2><p class="legend"><span class="lg s-ok"></span>success <span class="lg s-bad"></span>failed <span class="lg s-run"></span>running</p><div class="stacks" role="img" aria-label="Runs per hour by status"><div class="sbar" aria-label="23:00, 4 success, 0 failed, 0 running"><span class="sg s-ok" style="--h:4"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:0"></span><em>23</em></div><div class="sbar" aria-label="00:00, 4 success, 0 failed, 0 running"><span class="sg s-ok" style="--h:4"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:0"></span><em>00</em></div><div class="sbar" aria-label="01:00, 4 success, 1 failed, 0 running"><span class="sg s-ok" style="--h:4"></span><span class="sg s-bad" style="--h:1"></span><span class="sg s-run" style="--h:0"></span><em>01</em></div><div class="sbar" aria-label="02:00, 4 success, 0 failed, 0 running"><span class="sg s-ok" style="--h:4"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:0"></span><em>02</em></div><div class="sbar" aria-label="03:00, 3 success, 0 failed, 1 running"><span class="sg s-ok" style="--h:3"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:1"></span><em>03</em></div><div class="sbar" aria-label="04:00, 4 success, 0 failed, 0 running"><span class="sg s-ok" style="--h:4"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:0"></span><em>04</em></div><div class="sbar" aria-label="05:00, 4 success, 0 failed, 0 running"><span class="sg s-ok" style="--h:4"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:0"></span><em>05</em></div><div class="sbar" aria-label="06:00, 2 success, 0 failed, 2 running"><span class="sg s-ok" style="--h:2"></span><span class="sg s-bad" style="--h:0"></span><span class="sg s-run" style="--h:2"></span><em>06</em></div></div></section><section class="card"><h2>Failures by class</h2><div class="tbl"><table><caption class="sr-only">Failures</caption><thead><tr><th scope="col">Class</th><th scope="col">Attempts</th><th scope="col">Pipelines</th></tr></thead><tbody><tr><td>TRANSIENT</td><td>2</td><td>SI_CLIENT_BETA</td></tr><tr><td>DATA</td><td>1</td><td>SI_CLIENT_BETA (beta_rules)</td></tr><tr><td>CONFIG</td><td>0</td><td>—</td></tr></tbody></table></div></section></div><section class="card"><h2>Slowest tasks</h2><div class="tbl"><table><caption class="sr-only">Slow tasks</caption><thead><tr><th scope="col">Task</th><th scope="col">Pipeline</th><th scope="col">p50</th><th scope="col">p95</th></tr></thead><tbody><tr><td><span class="mono">alpha_ods_interactions</span></td><td>SI_CLIENT_ALPHA</td><td>4m 10s</td><td>9m 02s</td></tr><tr><td><span class="mono">beta_source_to_lnd</span></td><td>SI_CLIENT_BETA</td><td>2m 05s</td><td>7m 40s</td></tr></tbody></table></div></section>
+</main>
+
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (2)</summary><ul><li>S7.A.1: same service calculations as the generated docs snapshots; logical runs and retries are counted apart.</li><li>Pending S6.F: bounded windows, units, denominators and 'not measured' states.</li></ul></details>
+</div>
+</body>
+</html>

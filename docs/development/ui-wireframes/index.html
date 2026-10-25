@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app login-bg">
+<main class="login" id="content">
+<p class="brand big">etl-craft</p>
+<h1>Sign in</h1>
+<p class="sub">ops.support-insights.example · deployment v1.0.0</p>
+<a class="btn wide" href="home.html">Continue with SSO</a>
+<p class="or"><span>or with a local account</span></p>
+<form action="home.html" method="get" class="stack">
+<label for="u">Account</label>
+<input id="u" name="u" autocomplete="username" value="ops.oncall">
+<label for="p">Password</label>
+<input id="p" name="p" type="password" autocomplete="current-password" value="sample">
+<button type="submit" class="btn primary wide">Sign in</button>
+</form>
+<p class="fine">Sessions use short-lived tokens with refresh. Accounts and roles are managed with
+<code>etl-craft account</code> and <code>etl-craft access</code>; the console never edits pipeline definitions.</p>
+<label for="theme" class="theme-btn floating"><span class="sr-only">Switch theme</span></label>
+</main>
+<details class="wf-notes"><summary>Design notes (2)</summary><ul>
+<li>Read: LOGIN_METHODS <code>/api/v1/login/methods</code> decides which buttons show (SSO only, local only or both).</li>
+<li>POST: LOGIN <code>/api/v1/login</code>, LOGIN_SSO + LOGIN_SSO_POLL for OIDC device/redirect flows; both buttons land on Home.</li>
+</ul></details>
+</div>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run SI_DM · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe" data-section>Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-dm.html" aria-current="page">SI_DM</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-pipe" aria-hidden="true"></span>SI_DM<span class="chip">mart</span></h1></div><div class="actions"><a class="btn primary" href="pipeline-dm-run-now.html">Run now</a><form action="ack.html" method="get" class="inline"><input type="hidden" name="action" value="PAUSE"><input type="hidden" name="pipeline" value="SI_DM"><button type="submit" class="btn">Pause schedule</button></form><a class="btn icon" href="console.html" aria-label="More actions in the console">⋯</a></div></div><nav class="tabs" aria-label="Views"><a href="pipeline-dm.html" aria-current="page">Runs</a><a href="pipeline-dm-matrix.html">Matrix</a><a href="pipeline-dm-tasks.html">Tasks</a><a href="pipeline-dm-access.html">Permissions</a></nav><figure class="durchart"><figcaption>Run duration · last 3 runs · bar height is duration relative to the longest (max 1m 49s)</figcaption><div class="bars"><a href="run-399.html" class="vbar v-ok" style="--h:66" aria-label="Run 399, SUCCESS, 1m 37s"><span>399</span></a><a href="run-405.html" class="vbar v-ok" style="--h:75" aria-label="Run 405, SUCCESS, 1m 49s"><span>405</span></a><a href="run-420.html" class="vbar v-ok" style="--h:56" aria-label="Run 420, SUCCESS, 1m 22s"><span>420</span></a></div></figure><div class="tbl"><table><caption class="sr-only">Runs</caption><thead><tr><th scope="col">Start (UTC)</th><th scope="col">Run</th><th scope="col">Run key</th><th scope="col">Trigger</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody><tr><td><a href="run-420.html">10-25 06:00</a></td><td><a href="run-420.html" class="mono">420</a></td><td><span class="mono small">schedule:2026-10-25T06:00Z</span></td><td>SCHEDULE</td><td>1m 22s</td><td><span class="st st-ok">SUCCESS</span></td></tr><tr><td><a href="run-405.html">10-25 00:00</a></td><td><a href="run-405.html" class="mono">405</a></td><td><span class="mono small">schedule:2026-10-25T00:00Z</span></td><td>SCHEDULE</td><td>1m 49s</td><td><span class="st st-ok">SUCCESS</span></td></tr><tr><td><a href="run-399.html">10-24 18:00</a></td><td><a href="run-399.html" class="mono">399</a></td><td><span class="mono small">schedule:2026-10-24T18:00Z</span></td><td>SCHEDULE</td><td>1m 37s</td><td><span class="st st-ok">SUCCESS</span></td></tr></tbody></table></div>
+</main>
+
+</div>
+</div>
+<div class="scrim"></div><section class="dialog" role="dialog" aria-labelledby="dlg-t"><h2 id="dlg-t">Run SI_DM now</h2><form action="ack.html" method="get" class="stack"><input type="hidden" name="action" value="RUN"><label for="rk">Run key</label><input id="rk" name="key" value="manual:2026-10-25T06:07Z"><label for="rd">Run date</label><input id="rd" name="date" type="date" value="2026-10-25"><fieldset><legend>Scope</legend><label class="check"><input type="radio" name="scope" checked> Whole pipeline</label><label class="check"><input type="radio" name="scope"> One task only</label></fieldset><label for="rr">Reason</label><textarea id="rr" name="reason" required>Re-run after source replay</textarea><p class="muted small">Equivalent: <code>etl-craft run --pipeline-code SI_DM --run-key manual:2026-10-25T06:07Z</code></p><div class="row-end"><a class="btn" href="pipeline-dm.html">Cancel</a><button class="btn primary" type="submit">Run</button></div></form></section>
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>POST: RUN <code>/runs</code>. One-off parameter overrides are an S7.A.2 request-contract gap, so the dialog offers none.</li></ul></details>
+</div>
+</body>
+</html>

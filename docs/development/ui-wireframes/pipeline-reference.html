@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SI_REFERENCE · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe" data-section>Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work with-panel">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-reference.html" aria-current="page">SI_REFERENCE</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-pipe" aria-hidden="true"></span>SI_REFERENCE<span class="chip">reference</span></h1></div><div class="actions"><a class="btn primary" href="pipeline-reference-run-now.html">Run now</a><form action="ack.html" method="get" class="inline"><input type="hidden" name="action" value="PAUSE"><input type="hidden" name="pipeline" value="SI_REFERENCE"><button type="submit" class="btn">Pause schedule</button></form><a class="btn icon" href="console.html" aria-label="More actions in the console">⋯</a></div></div><nav class="tabs" aria-label="Views"><a href="pipeline-reference.html" aria-current="page">Runs</a><a href="pipeline-reference-matrix.html">Matrix</a><a href="pipeline-reference-tasks.html">Tasks</a><a href="pipeline-reference-access.html">Permissions</a></nav><figure class="durchart"><figcaption>Run duration · last 1 runs · bar height is duration relative to the longest (max 1m 10s)</figcaption><div class="bars"><a href="run-410.html" class="vbar v-ok" style="--h:40" aria-label="Run 410, SUCCESS, 1m 10s"><span>410</span></a></div></figure><div class="tbl"><table><caption class="sr-only">Runs</caption><thead><tr><th scope="col">Start (UTC)</th><th scope="col">Run</th><th scope="col">Run key</th><th scope="col">Trigger</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody><tr><td><a href="run-410.html">10-25 04:12</a></td><td><a href="run-410.html" class="mono">410</a></td><td><span class="mono small">upload:74</span></td><td>TRIGGER</td><td>1m 10s</td><td><span class="st st-ok">SUCCESS</span></td></tr></tbody></table></div>
+</main>
+<aside class="panel" aria-label="Details"><h2>Pipeline details</h2><dl class="kv"><dt>Pipeline</dt><dd><span class="mono">SI_REFERENCE</span></dd><dt>Project</dt><dd>support_insights</dd><dt>Trigger</dt><dd>Manual / trigger task</dd><dt>Schedule</dt><dd><span class="mono">—</span> UTC</dd><dt>Overlap</dt><dd>SKIP</dd><dt>Catch-up</dt><dd>off</dd><dt>Max parallel tasks</dt><dd>4</dd><dt>Priority</dt><dd>50</dd><dt>SLA</dt><dd>—</dd><dt>Email on failure</dt><dd>support-data@example.com</dd><dt>Tags</dt><dd><span class="tag">reference</span></dd><dt>Upstream</dt><dd>triggered by SI_STEWARD_DS_* uploads</dd><dt>Downstream</dt><dd>none</dd><dt>Your role</dt><dd>operator (group support-ops, tag ingestion)</dd><dt>Definition</dt><dd><span class="mono">config/pipelines.csv</span> · read-only</dd></dl><p class="muted small">Reference tables copied to dwh with SCD2 history.</p></aside>
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (3)</summary><ul><li>Reads: PIPELINE <code>/pipelines/{code}</code>, HISTORY <code>/history</code>, CAPABILITIES <code>/capabilities</code>.</li><li>Run now opens the run dialog; Pause posts CONTROL <code>/controls</code> (definition pause, no run id).</li><li>Pending S6.F: the duration series with terminal/live semantics and units.</li></ul></details>
+</div>
+</body>
+</html>

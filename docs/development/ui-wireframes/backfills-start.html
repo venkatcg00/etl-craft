@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Start backfill · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back" data-section>Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+
+<div class="page-head"><div><h1>Backfills</h1></div><div class="actions"><a class="btn primary" href="backfills-start.html">Start backfill</a></div></div><div class="tbl"><table><caption class="sr-only">Backfills</caption><thead><tr><th scope="col">Backfill</th><th scope="col">Pipeline</th><th scope="col">Dates</th><th scope="col">Progress</th><th scope="col">Status</th><th scope="col">Started by</th></tr></thead><tbody><tr><td>bf-12</td><td>SI_CLIENT_ALPHA</td><td>2026-10-18 → 2026-10-21</td><td><span class="meter" style="--v:75" aria-label="3 of 4 dates"></span> 3 / 4</td><td><span class="st st-run">IN-PROGRESS</span></td><td>ops.oncall</td></tr><tr><td>bf-11</td><td>SI_DM</td><td>2026-10-10 → 2026-10-12</td><td><span class="meter" style="--v:100" aria-label="3 of 3 dates"></span> 3 / 3</td><td><span class="st st-ok">SUCCESS</span></td><td>ops.oncall</td></tr></tbody></table></div>
+</main>
+
+</div>
+</div>
+<div class="scrim"></div><section class="dialog" role="dialog" aria-labelledby="bf"><h2 id="bf">Start backfill</h2><form action="ack.html" method="get" class="stack"><label for="bp">Pipeline</label><select id="bp"><option>SI_CLIENT_ALPHA</option></select><label for="b1">From</label><input id="b1" type="date" value="2026-10-18"><label for="b2">To</label><input id="b2" type="date" value="2026-10-21"><label for="b3">Reason</label><textarea id="b3" required>Source replay for 18–21 Oct</textarea><div class="row-end"><a class="btn" href="backfills.html">Cancel</a><button class="btn primary" type="submit">Start</button></div></form></section>
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>POST: RUN <code>/runs</code> with backfill dates.</li></ul></details>
+</div>
+</body>
+</html>

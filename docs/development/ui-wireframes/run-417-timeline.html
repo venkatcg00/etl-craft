@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run 417 timeline · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs" data-section>Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work with-panel">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-gamma.html">SI_CLIENT_GAMMA</a></li><li><a href="run-417.html" aria-current="page">Run 417</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-run" aria-hidden="true"></span>Run 417<span class="st st-run">IN-PROGRESS</span></h1></div><div class="actions"><span class="live" title="Live updates paused in this static wireframe">Live · paused</span><a class="btn" href="run-417-recover.html">Recover…</a><form action="run-419-ack.html" method="get" class="inline"><input type="hidden" name="action" value="STOP"><button type="submit" class="btn">Stop</button></form><form action="run-419-ack.html" method="get" class="inline"><input type="hidden" name="action" value="ABORT"><button type="submit" class="btn danger">Abort</button></form></div></div><nav class="tabs" aria-label="Views"><a href="run-417.html">Graph</a><a href="run-417-timeline.html" aria-current="page">Timeline</a><a href="run-417-list.html">List</a></nav><p class="legend"><span class="lg s-queue"></span>queued <span class="lg s-ok"></span>success <span class="lg s-run"></span>running <span class="lg s-bad"></span>failed <span class="lg s-wait"></span>gate / event wait</p><div class="gantt" role="img" aria-label="Task timeline of run 417"><div class="gl axis"><span>Task</span><div class="gtrack ticks"><span>+0</span><span>+2m</span><span>+4m</span><span>+6m</span><span>+8m</span></div></div><div class="gl"><span class="mono">gamma_wait_objects</span><div class="gtrack"><span class="seg s-queue" style="--a:0;--w:2" aria-label="gamma_wait_objects, queued 10 s"></span><span class="seg s-wait" style="--a:2;--w:30" aria-label="gamma_wait_objects, IN-PROGRESS">event wait</span></div></div><div class="gl"><span class="mono">gamma_source_to_lnd</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_source_to_lnd, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_lnd_to_prs</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_lnd_to_prs, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_prs_to_cdc</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_prs_to_cdc, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_preods_delete</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_preods_delete, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_cdc_to_preods</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_cdc_to_preods, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_rules</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_rules, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_ods_interactions</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_ods_interactions, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_ods_customers</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_ods_customers, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_ods_agents</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_ods_agents, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_ods_support_areas</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_ods_support_areas, QUEUED">QUEUED</span></div></div><div class="gl"><span class="mono">gamma_failure_alert</span><div class="gtrack"><span class="seg s-idle" style="--a:32;--w:6" aria-label="gamma_failure_alert, QUEUED">QUEUED</span></div></div></div>
+</main>
+<aside class="panel" aria-label="Details"><h2>Run details</h2><dl class="kv"><dt>Run</dt><dd><span class="mono">417</span></dd><dt>Pipeline</dt><dd><a href="pipeline-gamma.html">SI_CLIENT_GAMMA</a></dd><dt>Run key</dt><dd><span class="mono small">schedule:2026-10-25T05:55Z</span></dd><dt>Trigger</dt><dd>SCHEDULE</dd><dt>Started</dt><dd>2026-10-25 05:55:00 UTC</dd><dt>Duration</dt><dd>15m 00s so far</dd><dt>Status</dt><dd><span class="st st-run">IN-PROGRESS</span></dd><dt>Launched by</dt><dd>controller (schedule)</dd><dt>Output revision</dt><dd>1</dd></dl></aside>
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (2)</summary><ul><li>Queue, gate and event-wait segments are drawn apart from execution (S7.A.4).</li><li>Pending S6.F: phase timestamps per attempt.</li></ul></details>
+</div>
+</body>
+</html>

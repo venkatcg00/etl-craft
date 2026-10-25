@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run 419 log · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs" data-section>Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-beta.html">SI_CLIENT_BETA</a></li><li><a href="run-419.html">Run 419</a></li><li><a href="run-419-log.html" aria-current="page">Run log</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-run" aria-hidden="true"></span>Run 419 · pipeline run log</h1></div><div class="actions"><a class="btn" href="run-419.txt" download>Download run log</a><button class="btn" type="button" disabled aria-describedby="zipwhy">Download run zip</button></div></div><p class="muted small" id="zipwhy">The run zip (run log, every attempt log, status/explain JSON and a manifest) needs the S7.A.3 route; disabled until it exists.</p><div class="tbl"><table><caption class="sr-only">Run log</caption><thead><tr><th scope="col">Time (UTC)</th><th scope="col">Code</th><th scope="col">Task</th><th scope="col">Actor</th><th scope="col">Detail</th></tr></thead><tbody><tr><td><span class="mono">06:00:04</span></td><td><span class="mono">RUN_CREATED</span></td><td><span class="mono">—</span></td><td>controller</td><td>schedule tick 06:00Z, key schedule:2026-10-25T06:00Z</td></tr><tr><td><span class="mono">06:00:04</span></td><td><span class="mono">TASK_QUEUED</span></td><td><span class="mono">beta_source_to_lnd</span></td><td>—</td><td>pool ingestion</td></tr><tr><td><span class="mono">06:00:04</span></td><td><span class="mono">ATTEMPT_STARTED</span></td><td><span class="mono">beta_source_to_lnd</span></td><td>—</td><td>attempt 811 on ingestion-02</td></tr><tr><td><span class="mono">06:03:41</span></td><td><span class="mono">ATTEMPT_FAILED</span></td><td><span class="mono">beta_source_to_lnd</span></td><td>—</td><td>TRANSIENT; retry due 06:04:41</td></tr><tr><td><span class="mono">06:04:41</span></td><td><span class="mono">ATTEMPT_STARTED</span></td><td><span class="mono">beta_source_to_lnd</span></td><td>—</td><td>attempt 812 on ingestion-02</td></tr><tr><td><span class="mono">06:07:12</span></td><td><span class="mono">CONTROL_REQUESTED</span></td><td><span class="mono">—</span></td><td>ops.oncall</td><td>RECOVER · reason: broker recovered</td></tr></tbody></table></div>
+</main>
+
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>S7.A.3: rendered from the audit tables, not a second log stream; the same operation backs <code>etl-craft logs</code>.</li></ul></details>
+</div>
+</body>
+</html>

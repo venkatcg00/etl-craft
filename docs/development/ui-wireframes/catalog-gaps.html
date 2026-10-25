@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Schema gaps · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat" data-section>Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+
+<div class="split"><nav class="folders cat" aria-label="Catalog"><h2>Catalog</h2><label for="cf" class="sr-only">Filter catalog</label><input id="cf" placeholder="Filter tables"><ul><li><details open><summary><span class="cat-i"></span><a href="catalog.html">lake</a></summary><ul><li><details><summary><span class="sch-i"></span><a href="catalog.html">lnd</a></summary><ul><li><span class="tbl-i muted">client_alpha_cs_data</span></li><li><span class="tbl-i muted">client_beta_cs_data</span></li><li><span class="tbl-i muted">client_gamma_cs_data</span></li><li><span class="tbl-i muted">gamma_object_events</span></li></ul></details></li><li><details><summary><span class="sch-i"></span><a href="catalog.html">prs</a></summary></details></li><li><details><summary><span class="sch-i"></span><a href="catalog.html">cdc</a></summary></details></li><li><details><summary><span class="sch-i"></span><a href="catalog.html">pre_ods</a></summary><ul><li><span class="tbl-i muted">customer_support_stage</span></li></ul></details></li><li><details open><summary><span class="sch-i"></span><a href="schema-ods.html">ods</a></summary><ul><li><a href="table-ods-interactions.html" class="tbl-i">interactions</a></li><li><span class="tbl-i muted">customers</span></li><li><span class="tbl-i muted">agents</span></li><li><span class="tbl-i muted">support_areas</span></li></ul></details></li><li><details open><summary><span class="sch-i"></span><a href="schema-dm.html">dm</a></summary><ul><li><a href="table-dm-fact.html" class="tbl-i">customer_support_fact</a></li></ul></details></li><li><details><summary><span class="sch-i"></span><a href="catalog.html">ds</a></summary></details></li><li><details><summary><span class="sch-i"></span><a href="catalog.html">dwh</a></summary></details></li><li><details><summary><span class="sch-i"></span><a href="catalog.html">info</a></summary></details></li></ul></details></li></ul></nav><section><div class="page-head"><div><h1><span class="obj-icon oi-cat" aria-hidden="true"></span>lake</h1><p class="sub">Compared 2026-10-25 05:40 UTC against config at bundle 31</p></div><div class="actions"></div></div><nav class="tabs" aria-label="Views"><a href="catalog.html">Schemas</a><a href="catalog-gaps.html" aria-current="page">Schema gaps</a></nav><form class="filters" action="catalog-gaps.html"><label for="gk" class="sr-only">Gap kind</label><select id="gk"><option>Kind: all</option><option>Type mismatch</option><option>Config only</option><option>Deployed only</option></select><button class="btn" type="submit">Apply</button></form><div class="tbl"><table><caption class="sr-only">Schema gaps</caption><thead><tr><th scope="col">Table</th><th scope="col">Column</th><th scope="col">State</th><th scope="col">Declared</th><th scope="col">Deployed</th><th scope="col">Affected tasks</th></tr></thead><tbody><tr><td><a href="table-ods-interactions.html">ods.interactions</a></td><td>handle_time_sec</td><td><span class="st st-odd">Type mismatch</span></td><td>DECIMAL(10,2)</td><td>BIGINT</td><td>alpha_ods_interactions, beta_ods_interactions</td></tr><tr><td>ods.customers</td><td>loyalty_band</td><td><span class="st st-bad">Config only</span></td><td>VARCHAR(16)</td><td>—</td><td>*_ods_customers</td></tr><tr><td><a href="table-dm-fact.html">dm.customer_support_fact</a></td><td>legacy_flag</td><td><span class="st st-wait">Deployed only</span></td><td>—</td><td>BOOLEAN</td><td>ods_to_dm</td></tr><tr><td>lnd.client_gamma_cs_data</td><td>—</td><td><span class="st st-idle">Unchecked</span></td><td>—</td><td>—</td><td>warehouse unreachable at 05:40</td></tr></tbody></table></div><p class="muted small">Unchecked is never counted as matched; the row says why the check did not run.</p></section></div>
+</main>
+
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>Read: CATALOG_GAPS <code>/catalog/gaps</code>; states and colours follow metadata-and-ui.md.</li></ul></details>
+</div>
+</body>
+</html>
