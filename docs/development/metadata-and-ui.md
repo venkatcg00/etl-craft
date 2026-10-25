@@ -301,7 +301,7 @@ use the configured warehouse connection and read schema metadata only, not busin
 | Table detail | Side-by-side column contract/deployment grid, warning row styles, audit fields, upstream/downstream links; current lineage version and its history, with the column sources each version added and removed |
 | Lineage tab | Warning nodes and affected edges; selected-column trace, unresolved reason, link to table comparison |
 | Run detail | Attempts, row counts, rejects, wait duration and errors; links back to pipeline trends and table gaps |
-| Metadata view | Table contracts grouped by catalog/schema, with child column contracts; read-only, with creation fields, actor/history, `validate` findings and the source config file; changes go through the config files and `etl-craft config apply` |
+| Metadata view | Table contracts grouped by catalog/schema, with child column contracts; read-only, with creation fields, actor/history, `validate` findings, the source config file, a drift badge for direct edits and standing-control badges; changes go through the config files and `etl-craft config apply`, or direct SQL edits in a `RELAXED` project ([Direct config edits](#direct-config-edits)) |
 
 Project documentation needs both a summary gaps page and the per-column warnings, not only
 console output. Static pages say when generated and when compared, and link each gap to its
@@ -348,8 +348,179 @@ only way to act.
 Per-pipeline permissions are S5.AD's group grants on pipelines and tags, the PowerCenter
 folder permission in Databricks' per-job form: every view shows only what the account may see,
 and every menu only what it may do. Left out: Databricks' job and task editors, "Run as" and
-compute settings. Definitions change through the config files, and agents and pools have their
-own page.
+compute settings. Definitions change through the config files (or direct SQL edits in a
+`RELAXED` project), and agents and pools have their own page.
+
+## Environments and governance
+
+Owner decisions, 2026-10-25. Several environments may share one Engine DB (S5.G), one project
+each: `support_insights_dev`, `support_insights_uat` and `support_insights_prod` can run on the
+same engine with different roles and access. A project's environment and its rules are admin
+settings, never developer configuration: a merged config change cannot make production easier
+to change.
+
+`CFG_PROJECTS` gains three columns:
+
+| Column | Values | Meaning |
+| --- | --- | --- |
+| `ENVIRONMENT_TYPE` | `DEV`, `SIT`, `UAT`, `PROD`, `SANDBOX`, `CUSTOM` (an enum in `core.enums`) | What the project is for; shown as a badge on every page |
+| `ENVIRONMENT_NAME` | Optional label, for example `perf` or `dr` | Names a `CUSTOM` environment, or refines another type |
+| `GOVERNANCE` | `STRICT` (default) or `RELAXED` | Which interactive rules apply (below) |
+
+A check constraint refuses `ENVIRONMENT_TYPE = 'PROD'` with `GOVERNANCE = 'RELAXED'`. Existing
+projects upgrade as `CUSTOM` and `STRICT`: the upgrade does not guess what an environment is.
+
+**What `RELAXED` relaxes.** This is the one switch for rapid development; nothing else changes it.
+
+- *Direct config edits.* People may edit the package `CFG_` tables of that project with SQL in
+  the Engine DB (next section).
+- *Reasons.* Interventions accept an empty reason: marks, standing overrides, task pauses,
+  holds and releases, stops and aborts, recover and restart, run with current inputs, offset
+  and watermark resets, item controls, pipeline pause and resume, data edits and unlocks. The
+  audit row records the actor, time and scope as always, with no reason.
+- *Confirmations.* A typed confirmation (typing the run id or the table name) becomes a plain
+  confirm. The scope preview is still shown before a data-changing action.
+
+**What no setting relaxes.** Role and grant checks; the audit record of every action, with its
+actor; Engine DB constraints; fail rather than guess; leases, fencing and target locks;
+recorded consumption decisions; human data locks; secret handling; retention. Admin actions
+on projects, environments, pools and access always need a reason, in every environment.
+
+**Where it is checked.** In the `services/operations` action, which reads the selected
+project's `GOVERNANCE`; the CLI's `--reason` becomes optional at the parser so the service
+decides, and the API and the console use the same check. A refusal in a `STRICT` project names
+the project, its environment and the remedy (`--reason`), never "argument required".
+
+**Admin, not config.** Projects and pools leave the config files. `projects.csv` and
+`pools.csv` are removed from `config plan`, `apply` and `export`, as S7.Y removes `grants.csv`;
+a project that still contains them fails plan and apply with the path and the remedy. Admin
+commands manage them (`etl-craft project add|set|list|disable`, `etl-craft pool
+add|set|list|disable`), each an audited `services/operations` action with an API route and an
+admin page. Developer config files left: `pipelines`, `tasks`, `task_parameters`,
+`task_dependencies` always; `pipeline_dependencies`, `tables`, `columns`, `business_rules` when
+used.
+
+**Shared warehouses are allowed.** Environments may share one warehouse. Doctor and the admin
+project page show an informational note when two projects' warehouse connections resolve to
+the same database and schema; nothing blocks it.
+
+**Access per environment.** S7.Y's access commands and S7.B's role bindings take a project
+scope, so a developer can be an operator in DEV and a viewer in PROD.
+
+## Direct config edits
+
+Owner decision, 2026-10-25, for rapid testing. In a `RELAXED` project, a developer may change
+package `CFG_` rows with SQL in the Engine DB, as some people find editing rows faster than
+editing files. This is the one exception to "every write to etl-craft's Engine DB tables goes
+through etl-craft"; the AGENTS.md rule changes with the implementation.
+
+- *Triggers.* The actor-guard triggers allow an outside insert, update or soft retirement
+  (`ACTIVE_FLAG = 'N'`) of a package `CFG_` row only when the row's project is `RELAXED`.
+  They fill `CREATED_BY` and `UPDATED_BY` with `sql:<database user>` (`sql:direct` on SQLite,
+  which has no users), stamp `UPDATED_DATE`, and write the typed `CFG_` history row exactly as
+  `config apply` does. Hard deletes, `AUD_` tables, history tables and admin tables (projects,
+  pools, accounts, groups, grants, tokens) stay refused everywhere.
+- *Constraints.* Keys, foreign keys, allowed values and NOT NULL still refuse a bad row at once.
+- *Candidate, not live.* A direct edit changes the definition the next pipeline refresh reads
+  (below); runs keep using the last good version until refresh validates the change.
+- *Drift.* Rows changed directly since the last apply from files carry a "changed in the Engine
+  DB" badge on the metadata view; `config plan` lists the drift per row, and `config export`
+  writes the current rows back to the CSV files. Drift is an accepted cost of rapid
+  development (owner).
+- *UI editing* is optional and, if built, uses the same switch and the same history.
+
+## Pipeline refresh
+
+Owner decision, 2026-10-25: a refresh like Airflow's DAG parser, except a broken pipeline never
+disappears.
+
+- One **Refresh** action per pipeline and per project re-reads its metadata rows, SQL files and
+  scripts, then runs `validate`, the lineage check and the bundle check (S5.F). Config apply
+  ends with a refresh of what it changed; the controller refreshes a project whose `CFG_` rows
+  changed directly since its last refresh, so a SQL edit shows up without another step.
+- A pipeline that fails refresh stays listed with an error badge. Its graph shows the broken
+  tasks and edges in red, each finding with its file, line, value found and remedy, and the
+  findings are listed on the pipeline page.
+- The last good version stays active and runnable, labelled with its time, until a refresh
+  passes. A per-pipeline setting, `BLOCK_ON_REFRESH_ERROR` (`N` by default), blocks new runs
+  instead; this column lives in `pipelines.csv` because it is pipeline behaviour.
+- Refresh results are recorded with the actor, the version checked and the findings, so the UI
+  shows "last refreshed" and the history of refreshes.
+
+## Standing task controls
+
+Owner decision, 2026-10-25: operators change a task's behaviour without a config change. These
+are controls, not metadata: they live in an audited control store, never in `CFG_` tables or
+the config files, and they take precedence over the definition wherever the definition is shown.
+
+- **Task pause.** A standing pause of one task across runs, like pipeline pause: runs reach the
+  task and wait there, held, until it is resumed; other branches continue.
+- **Standing outcome.** "Treat this task as `SKIPPED`, `SUCCESS` or `FAILED`" for every new run
+  until removed. The task does not run; its downstream sees the chosen outcome. An overridden
+  `SUCCESS` produces no data: `HAS_DATA` conditions see no data and consumers see no fresh output.
+- Each has an actor, a reason (unless the project is `RELAXED`), a start and an optional expiry,
+  and is removed by its opposite action. Runs record the control they applied.
+- Views show the effective behaviour with an override badge: the metadata view, the pipeline
+  graph, `explain` and the run that applied it. Home shows an "active overrides" count.
+  `config plan` and `apply` note tasks with a standing control, so a definition change does not
+  hide one.
+
+## UI capability coverage
+
+Owner, 2026-10-25: the UI is Databricks in layout and PowerCenter in capability, and must not
+miss a button. Every action in the S5.AA action table has a place in the UI, or is listed as
+console-only with its reason. The wireframes show the layout; this matrix is the record of
+coverage, and an S7.A test generated from the action table fails when a non-host, non-agent
+action has neither.
+
+| Action | Object | UI place |
+| --- | --- | --- |
+| `RUN`, `TRIGGER_PIPELINE` | Pipeline, task | Pipeline header Run now and Run with parameters; task menu Run task only and Run from here |
+| `CONTROL`: `HOLD`, `RELEASE`, `STOP`, `ABORT`, `RECOVER`, `RESTART`, `RUN_PAUSED`, `PAUSE`, `RESUME` | Pipeline, run, task run | Run header and task menu, each with its opposite next to it; pipeline header Pause and Resume, with the catch-up count; `RUN_PAUSED` as Run once while paused |
+| `CONTROL_BULK` | Selected pipelines, runs or tasks | Bulk bar over multi-select in lists, matrix and graph, with per-object results |
+| `MARK` | Task run | Task menu Mark as, with a scope preview |
+| `ITEM_CONTROL` | Fan-out item | Items view row menu |
+| `RECONCILE` | Run, attempt | Run header Reconcile when an attempt's lease expired |
+| Standing task controls | Task | Task page and task menu: Pause task, Set standing outcome, Remove |
+| Offset and watermark reset | Task | Task page Offsets panel, with the stored value and the new one |
+| Pipeline refresh | Pipeline, project | Pipeline header Refresh; project page Refresh all |
+| `DATA_PROVENANCE`, `DATA_EDIT`, `DATA_UNLOCK` | Table row and column | Catalog table Data tab, lock symbols, Edit and Unlock |
+| `LINEAGE_REFRESH`, `GENERATE_DOCS`, `DOCS_VERSION`, `VALIDATE` | Project, pipeline | Catalog header and pipeline page |
+| `AGENT_CONTROL` | Agent | Agents page row menu |
+| Groups, accounts, tokens, access, projects, pools | Admin objects | Admin pages, one per object, with list, add, change and disable |
+| `PURGE`, `REHASH`, upgrade targets, `CLONE` | Project, table | Admin maintenance page, each with a dry-run preview first |
+| `WHOAMI`, `LOGOUT`, `REFRESH` | Session | User menu in the top bar |
+| Read actions (`STATUS`, `EXPLAIN`, `HISTORY`, `AUDIT`, `ATTEMPT`, `LOGS`, `ITEMS`, `HEALTH`, `CAPABILITIES`, …) | Their object | The view that renders them |
+
+Views the wireframes lack and S7.A builds: task-run statistics (rows in, inserted, updated,
+deleted and rejected, throughput, `SQL_SCRIPT` statements); scheduled runs (what runs next and
+when); system health (controller lease, Engine DB, warehouses, agents); held and paused work;
+runs filtered by agent, pool and failure class; admin and maintenance pages.
+
+## Usability rules
+
+Drawn from the problems Airflow users report most (log failures, the Clear dialog, the grid
+losing selection, slow pages, missing overviews), as rules for every S7.A page:
+
+- **Logs.** A failure summary first, with jump to the error; never a bare "not found": say
+  pending, removed by retention or unreadable, with the reason (S6.B).
+- **Actions.** Every action previews its exact scope before it runs, in words and counts, with
+  no flag checkboxes to combine. Actions the role lacks are hidden; actions the state forbids
+  are disabled with the reason. Each action sits next to its opposite. Requests show
+  requested, acknowledged, completed or refused. A "changed since you opened this" warning
+  stops acting on stale state. Every action shows its CLI line.
+- **Selection.** A click selects and the selection stays through refresh and scrolling; sticky
+  headers; full names on hover and in the panel, never only truncated.
+- **Speed.** Reads are bounded and paged, with a performance budget per view.
+- **Plain words.** Why a run or task is waiting, in one sentence; a one-line run summary;
+  pause and resume show how many runs will catch up; every time shows its timezone, and the
+  run date is labelled apart from the start time; fan-out items appear by key.
+- **Findings on the object.** Validation and refresh findings appear on the pipeline, task or
+  table they concern.
+- **Finding things.** Global search with `/` and Ctrl+K, pins, saved filters.
+- **Status.** System health and maintenance banners; inline help on each page.
+- **Personal settings** are limited to theme, timezone, default project, pins and filters.
+- **Accessible.** WCAG AA contrast and keyboard-only operation.
 
 ## Built-in dashboard calculations
 
