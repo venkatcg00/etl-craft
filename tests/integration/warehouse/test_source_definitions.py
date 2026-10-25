@@ -58,6 +58,13 @@ def test_export_seeds_sources_and_validate_names_all_drift(sql_world, tmp_path):
     folder = tmp_path / "seed"
     result = export_config(world.engine_db, folder, config=world.config)
     assert result.rows["columns.csv"] == 3
+    seeded_files = read_config_files(folder)
+    source_rows = seeded_files.rows["tables.csv"]
+    assert source_rows
+    for row in source_rows.values():
+        assert row.values["REJECT_RETENTION_DAYS"] is None
+        assert row.values["SNAPSHOT_RETENTION_DAYS"] is None
+        assert row.values["ORPHAN_RETENTION_DAYS"] is None
     loaded = sync_config(world.engine_db, world.config, read_config_files(folder), apply=True)
     assert not loaded.failed
     assert len([change for change in loaded.changes if change.file == "columns.csv"]) == 3

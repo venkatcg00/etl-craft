@@ -146,7 +146,18 @@ def _warehouse_rows(
         names: dict[str, Value] = dict(zip(OBJECT_TABLES.key, identity, strict=True))
         parent = current[OBJECT_TABLES.file].get(identity)
         if parent is None:
-            parent = StoredRow(index, True, (), True, names | {"OBJECT_KIND": column.object_kind})
+            parent = StoredRow(
+                index,
+                True,
+                (),
+                True,
+                names
+                | {
+                    c.name: column.object_kind if c.name == "OBJECT_KIND" else c.default
+                    for c in OBJECT_TABLES.columns
+                    if c.name not in names and c.name != ACTIVE_FLAG.name
+                },
+            )
         parent = StoredRow(
             parent.row_id,
             True,

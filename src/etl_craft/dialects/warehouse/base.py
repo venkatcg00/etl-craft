@@ -16,12 +16,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from sqlalchemy import text
+from sqlalchemy import TextClause, text
 from sqlalchemy.engine import Connection, CursorResult, Engine
 from sqlalchemy.engine.interfaces import DBAPIConnection
 
 from etl_craft.config.auth import WarehouseSpec
-from etl_craft.core.enums import AuthMode, TableFormat
+from etl_craft.core.enums import AuthMode, IcebergMaintenance, TableFormat
 from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.failures import Failure
 from etl_craft.core.text import as_subquery
@@ -551,6 +551,12 @@ class WarehouseDialect:
             self.evolution_column_type(source).strip().casefold()
             == self.evolution_column_type(target).strip().casefold()
         )
+
+    def retention_maintenance(
+        self, table: str, action: IcebergMaintenance, days: int
+    ) -> TextClause | None:
+        """Return supported Iceberg maintenance SQL, or refuse it through the caller."""
+        return None
 
     def archive_type_matches(self, actual: str, expected: str) -> bool:
         """Compare the lossless archive types against physical warehouse metadata."""

@@ -135,7 +135,7 @@ be left out of the header, which gives every row their default.
 | `pipeline_dependencies.csv` | **`PIPELINE_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
 | `business_rules.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`BUSINESS_RULE_NAME`**, **`SEQUENCE_NUMBER`**, **`BUSINESS_RULE_TYPE`**, **`BUSINESS_RULE_KEY_COLUMN`**, `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`BUSINESS_RULE_SQL`**, `ACTIVE_FLAG` | |
 
-| `tables.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, `OBJECT_KIND`, `ACTIVE_FLAG` | Empty catalog means absent; empty kind means undeclared |
+| `tables.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, `OBJECT_KIND`, `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS`, `ORPHAN_RETENTION_DAYS`, `ACTIVE_FLAG` | Empty catalog means absent; empty kind means undeclared; empty retention cells keep their category forever |
 | `columns.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`COLUMN_NAME`**, **`DATA_TYPE`**, **`COLUMN_POSITION`**, `IS_NULLABLE`, `ACTIVE_FLAG` | Empty nullability means undeclared |
 
 Every file's `ACTIVE_FLAG` defaults to `Y`. The columns mean what they mean in the tables:
@@ -159,6 +159,13 @@ column file retires its active columns. Retire those columns before retiring the
 `OBJECT_KIND` accepts `TABLE`/`VIEW`; `IS_NULLABLE` accepts `Y`/`N`. Components are stored
 separately, and column rows hold a `TABLE_ID` foreign key rather than a repeated object name. Rules use
 `TARGET_TABLE_ID` on the existing rule row; changing the target keeps the rule ID.
+
+The optional retention fields apply to operational auxiliary data, never target business rows.
+`REJECT_RETENTION_DAYS` accepts 1–36500 whole days and expires only this project's old reject
+rows by their ingestion `CREATE_DATE`. Snapshot and orphan periods accept 7–36500 days and
+require a supported Iceberg maintenance dialect (currently Trino). Unsupported policies fail;
+empty or omitted columns preserve existing behavior. Policies remain on retired table rows
+until explicitly cleared. See [warehouse retention](../deploying/engine-db.md#warehouse-auxiliary-retention).
 
 Task targets live on the task row as an optional `TARGET_TABLE_ID` foreign key. In `tasks.csv`,
 set `TARGET_SCHEMA_NAME` and `TARGET_TABLE_NAME` together, with optional `TARGET_CATALOG_NAME`;

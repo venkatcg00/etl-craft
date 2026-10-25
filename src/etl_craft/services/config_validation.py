@@ -28,22 +28,16 @@ from etl_craft.engine.repository.config_rows import (
 
 def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
     """Return the remedy for an invalid row, before writing any config rows."""
-    if table in (PROJECTS, PIPELINE_GRANTS):
-        return {PROJECTS.file: _project_problem, PIPELINE_GRANTS.file: _grant_problem}[table.file](
-            values
-        )
-    if table in (OBJECT_TABLES, SOURCE_COLUMNS, BUSINESS_RULES, TASKS):
-        names = (
-            ("TARGET_CATALOG_NAME", "TARGET_SCHEMA_NAME", "TARGET_TABLE_NAME")
-            if table is TASKS
-            else ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME")
-        )
-        for name in names:
-            if name not in values or values[name] is None:
-                continue
-            value = str(values[name])
-            if not is_safe_identifier(value):
-                return f"{name}={value!r}: expected a separate unquoted SQL identifier"
+    if table in (PROJECTS, PIPELINE_GRANTS, OBJECT_TABLES):
+        return {
+            PROJECTS.file: _project_problem,
+            PIPELINE_GRANTS.file: _grant_problem,
+            OBJECT_TABLES.file: _table_problem,
+        }[table.file](values)
+    if table in (SOURCE_COLUMNS, BUSINESS_RULES, TASKS) and (
+        problem := _identifier_problem(table, values)
+    ):
+        return problem
     if (
         table is TASK_PARAMETERS
         and str(values["PARAMETER_NAME"]).strip().upper() == "TARGET_OBJECT"
@@ -82,6 +76,27 @@ def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
         and values["PIPELINE_CODE"] == values["DEPENDS_ON_PIPELINE_CODE"]
     ):
         return f"pipeline {values['PIPELINE_CODE']} depends on itself"
+    return None
+
+
+def _table_problem(values: dict[str, Value]) -> str | None:
+    for name in ("REJECT_RETENTION_DAYS", "SNAPSHOT_RETENTION_DAYS", "ORPHAN_RETENTION_DAYS"):
+        days = values.get(name)
+        if days is not None and (int(str(days)) > 36500 or values.get("OBJECT_KIND") == "VIEW"):
+            return f"{name}={days!r}: expected at most 36500 days on a TABLE; correct tables.csv"
+    return _identifier_problem(OBJECT_TABLES, values)
+
+
+def _identifier_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
+    names = (
+        ("TARGET_CATALOG_NAME", "TARGET_SCHEMA_NAME", "TARGET_TABLE_NAME")
+        if table is TASKS
+        else ("CATALOG_NAME", "SCHEMA_NAME", "TABLE_NAME", "COLUMN_NAME")
+    )
+    for name in names:
+        value = values.get(name)
+        if value is not None and not is_safe_identifier(str(value)):
+            return f"{name}={str(value)!r}: expected a separate unquoted SQL identifier"
     return None
 
 

@@ -647,3 +647,105 @@ def test_pool_files_apply_history_and_retire_by_name(exported):
             .all()
         )
         assert "large" in history and "larger" in history
+
+
+def test_auxiliary_retention_is_optional_and_roundtrips_with_history(exported):
+    from sqlalchemy import text
+
+    path = exported.config_dir / "tables.csv"
+    edit(
+        path,
+        lambda rows: [
+            {
+                **row,
+                "REJECT_RETENTION_DAYS": "30",
+                "SNAPSHOT_RETENTION_DAYS": "7",
+                "ORPHAN_RETENTION_DAYS": "7",
+            }
+            if index == 0
+            else row
+            for index, row in enumerate(rows)
+        ],
+    )
+    assert not sync(exported).failed
+    with exported.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT REJECT_RETENTION_DAYS AS rejects,SNAPSHOT_RETENTION_DAYS AS snapshots,"
+                "ORPHAN_RETENTION_DAYS AS orphans FROM CFG_TABLES "
+                "WHERE REJECT_RETENTION_DAYS IS NOT NULL"
+            )
+        ).one()
+        assert (row.rejects, row.snapshots, row.orphans) == (30, 7, 7)
+        history = conn.execute(
+            text(
+                "SELECT REJECT_RETENTION_DAYS AS rejects FROM AUD_CFG_TABLES_HISTORY "
+                "WHERE CURRENT_FLAG='Y' AND REJECT_RETENTION_DAYS IS NOT NULL"
+            )
+        ).scalar_one()
+        assert history == 30
+    export_config(exported.engine, exported.config_dir, overwrite=True)
+    assert not sync(exported, apply=False).changes
+    edit(
+        path,
+        lambda rows: [
+            {
+                **row,
+                "REJECT_RETENTION_DAYS": "",
+                "SNAPSHOT_RETENTION_DAYS": "",
+                "ORPHAN_RETENTION_DAYS": "",
+            }
+            for row in rows
+        ],
+    )
+    assert not sync(exported).failed
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("REJECT_RETENTION_DAYS", "0"),
+        ("REJECT_RETENTION_DAYS", "36501"),
+        ("SNAPSHOT_RETENTION_DAYS", "1"),
+        ("ORPHAN_RETENTION_DAYS", "-1"),
+    ],
+)
+def test_invalid_auxiliary_retention_names_the_file_column_and_remedy(exported, column, value):
+    path = exported.config_dir / "tables.csv"
+    edit(path, lambda rows: [{**row, column: value} for row in rows])
+    with pytest.raises(MetadataFileError, match=column):
+        read_config_files(exported.config_dir)
+
+
+def test_execution_snapshot_contains_complete_table_policy_rows(engine_db):
+    from sqlalchemy import text
+
+    from etl_craft.core.definitions import current
+    from etl_craft.engine.run_definitions import for_run
+    from fixtures.metadata import add_pipeline, add_task, start_run
+
+    with engine_db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "SNAPSHOT_POLICY")
+        add_task(
+            conn,
+            pipeline,
+            "load",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="main.policy",
+            SELECT_QUERY="SELECT 1 AS id",
+        )
+        conn.execute(
+            text(
+                "UPDATE CFG_TABLES SET REJECT_RETENTION_DAYS=30,SNAPSHOT_RETENTION_DAYS=7,"
+                "ORPHAN_RETENTION_DAYS=14 WHERE TABLE_NAME='policy'"
+            )
+        )
+        run = start_run(conn, pipeline)
+    with for_run(engine_db.engine, run):
+        snapshot = current.get()
+        assert snapshot is not None
+        row = next(row for row in snapshot.rows["CFG_TABLES"] if row["table_name"] == "policy")
+        assert row["reject_retention_days"] == 30
+        assert row["snapshot_retention_days"] == 7
+        assert row["orphan_retention_days"] == 14
+        assert set(row) == set(snapshot.columns["CFG_TABLES"])

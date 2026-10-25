@@ -711,3 +711,10 @@ class ArchiveStep(StrEnum):
 
     LOGS = "LOGS"
     DELETE = "DELETE"
+
+
+class IcebergMaintenance(StrEnum):
+    """Supported table-file maintenance procedures; never business-row deletion."""
+
+    EXPIRE_SNAPSHOTS = "expire_snapshots"
+    REMOVE_ORPHAN_FILES = "remove_orphan_files"

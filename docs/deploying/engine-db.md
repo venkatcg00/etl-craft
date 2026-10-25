@@ -419,8 +419,50 @@ retirement; local full log files are removed only after that decision commits. F
 are not copied to the warehouse. Daily maintenance uses plain purge; pending archives require an
 explicit `--archive-to` retry before daily maintenance can continue.
 
-Warehouse auxiliary-data retention remains the next S6.A slice. Target business rows are never
-subject to this command.
+### Warehouse auxiliary retention
+
+Set optional periods on the intended rows of `config/tables.csv`, then run `config apply`:
+
+| Column | Whole days | What it expires |
+|---|---|---|
+| `REJECT_RETENTION_DAYS` | 1–36500 | Old rows of `<target>__rejects`, using ingestion `CREATE_DATE` and this project's pipeline IDs |
+| `SNAPSHOT_RETENTION_DAYS` | 7–36500 | Old Iceberg snapshots and files no longer needed by retained snapshots |
+| `ORPHAN_RETENTION_DAYS` | 7–36500 | Old files not referenced by Iceberg metadata |
+
+The same daily purge handles these policies when `Retention.Daily_at` is configured; otherwise
+run purge manually. An empty cell is SQL `NULL`, meaning forever; older CSV headers may omit
+all three columns.
+Policies apply to registered table rows, including retired metadata, until cleared. Setup shows
+recommended values (rejects 30 days, supported Iceberg maintenance 7 days); doctor reports
+unset applicable lifetimes and unsupported maintenance policies. Neither edits team-owned files.
+
+`purge --dry-run` also reports the eligible warehouse reject count and planned maintenance
+operations without issuing warehouse writes. Rejects with recent ingestion times remain even
+when their business dates are decades old. Another project's rejects remain untouched. The
+target and its reject object share mutation exclusion with managed SQL writers; registered
+business objects cannot be treated as reject ledgers. Schema, ownership and supported-policy
+checks run before Engine history cleanup, then ownership is rechecked under the target locks.
+
+The package currently implements file maintenance through Trino's
+[`expire_snapshots` and `remove_orphan_files`](https://trino.io/docs/current/connector/iceberg.html#expire_snapshots).
+It leaves the provider's retention floors in force: a catalog may require longer than seven
+days, in which case increase the table period. Unsupported dialects refuse configured snapshot
+or orphan policies; they do not silently skip them. Current snapshots and their referenced
+files remain under the provider's protection, regardless of the business rows' age. These
+operations never execute a target-row DELETE. Procedure keys in the result's `counts`, such
+as `catalog.schema.table:expire_snapshots`, count operations, not estimated deleted files.
+
+Admission records the intended row counts and periods in `AUD_ACTIONS` before warehouse writes;
+acknowledged commits get a separate success record. A killed process can leave an unacknowledged
+request rather than a fabricated success count. Rerunning purge safely repeats the predicate or
+provider maintenance; earlier committed work remains committed if a later provider operation
+fails. No Engine DB transaction stays open during warehouse maintenance.
+
+Cloned mirrors are complete replacements of their source snapshot, rather than an independent
+history ledger. Engine history retention bounds their historical content when the next clone
+refreshes them; current metadata and active business-rule findings remain. They have no separate
+row-age deletion policy. Immutable archive content is preserved. Target business rows are never
+subject to purge.
 
 The manual/release volume gate is deliberately outside ordinary test discovery:
 

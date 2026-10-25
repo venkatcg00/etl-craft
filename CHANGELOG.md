@@ -6,6 +6,14 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Add nullable per-target `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS` and
+  `ORPHAN_RETENTION_DAYS` to `tables.csv` and the Engine contract (migration 0058).
+  Purge expires project-owned rejects by ingestion time under target/ledger locks; Trino
+  Iceberg supports snapshot/orphan maintenance with provider safety floors retained. Dry runs
+  report plans, unsupported policies fail before cleanup, and admitted counts are distinguished
+  from acknowledged warehouse commits. Setup/doctor show applicable recommendations and gaps.
+  Current metadata, active business-rule findings, immutable archives and business rows remain.
+
 - Add `purge --archive-to <schema>` through the existing administrator operation and API.
   Durable snapshots, full-value verification and source revalidation make interrupted archives
   restartable without duplicate content or premature deletion. Archives evolve added columns

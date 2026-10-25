@@ -292,3 +292,9 @@ For a verified history archive, create a separate schema in the configured wareh
 `etl-craft purge --archive-to history --dry-run` and `etl-craft purge --archive-to history`.
 Rerun the same destination after interruption; pending archive work blocks plain purge.
 See [history retention](../../docs/deploying/engine-db.md#retaining-project-history).
+
+To expire operational rejects, export the configuration and set `REJECT_RETENTION_DAYS=30`
+on the intended `tables.csv` rows. Apply the files, review `etl-craft purge --dry-run`, then
+purge. Empty periods keep rows forever. Set snapshot/orphan periods only with the supported
+Trino Iceberg maintenance dialect; the other demo warehouses must leave those fields empty.
+Business rows and active business-rule findings are retained.
