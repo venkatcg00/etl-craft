@@ -29,6 +29,7 @@ from etl_craft.core.enums import (
     SlotKind,
 )
 from etl_craft.core.errors import ConfigurationError, EtlCraftError, RunStateError, ServerError
+from etl_craft.core.faults import fault_point
 from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.resources import Ceilings
 from etl_craft.core.text import sha256_hex
@@ -288,7 +289,11 @@ class AgentLoop:
         with self.lock:
             self.tasks[attempt_id] = task
             task.future = self.executor.submit(
-                run_child, spec, cancel=task.cancel, kill_grace_seconds=1
+                run_child,
+                spec,
+                tail_bytes=self.config.logs.tail_bytes,
+                cancel=task.cancel,
+                kill_grace_seconds=1,
             )
 
     def _heartbeats(self) -> None:
@@ -398,6 +403,7 @@ class AgentLoop:
                     content=task.pending,
                 ),
             )
+            fault_point("agent.after_log_upload")
             task.sequence += 1
             task.pending = ""
         output = task.folder / "output"

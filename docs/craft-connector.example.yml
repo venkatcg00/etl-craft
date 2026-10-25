@@ -240,6 +240,17 @@ Cloning:
 # docs/examples/snowflake-postgres-engine.yml. Add Managed_provider and issuer fields
 # inside the Engine profile; require TLS and keep Cloning.Enabled false.
 
+# Full agent logs are published by the API; agents need no object-store credentials.
+# Logs:
+#   Store: file:///srv/etl-craft/logs     # default: file://<Log_dir>/agents
+#   Tail_bytes: 8192                     # nonnegative output bytes, plus reported values
+# For S3, use a named Object_stores profile (as above):
+# Logs:
+#   Store: s3://project-logs/production
+#   Profile: artifacts                   # explicit Object_stores profile; independent of Artifacts
+#   Tail_bytes: 8192
+# API/controller copies must share the same store, profile and Log_dir configuration.
+
 # Optional host-owned retention; omit periods to keep existing history forever.
 # Retention:
 #   Run_history_days: 90                # terminal run/attempt history and project action records

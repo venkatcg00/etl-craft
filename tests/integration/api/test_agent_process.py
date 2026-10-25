@@ -228,3 +228,55 @@ def test_api_publication_needs_only_project_files_and_a_person_token(cluster, mo
             text("SELECT BUNDLE_ID AS bundle_id FROM AUD_PROJECT_BUNDLES")
         ).scalar_one()
     assert bundle in output
+
+
+@pytest.mark.chaos
+def test_agent_killed_after_upload_leaves_chunks_for_a_restarted_controller(cluster, monkeypatch):
+    import os
+    from datetime import UTC, datetime, timedelta
+
+    from etl_craft.core.actor import acting_as
+    from etl_craft.execution.reconcile import reconcile
+    from etl_craft.services.operations.requests import LogInput
+
+    p, url, token, agent_dir = cluster
+    controller_token = os.environ["ETL_CRAFT_TOKEN"]
+    publish_project(p, agent_dir)
+    controller = p.start("controller", "--no-ui")
+    code, output = p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "log-loss")
+    assert code == 0, output
+    p.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="QUEUED")
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
+    agent = p.start(
+        "agent", "--api", url, "--project-dir", str(agent_dir), fault="agent.after_log_upload:kill"
+    )
+    assert agent.wait(timeout=20) == 137, agent.output
+    controller.signal(signal.SIGKILL)
+    assert controller.wait(timeout=20) == -signal.SIGKILL, controller.output
+    with acting_as(SYSTEM_ACTOR), p.engine.begin() as conn:
+        before = conn.execute(
+            text("SELECT CONTENT AS content FROM AUD_ATTEMPT_LOG_CHUNKS ORDER BY SEQUENCE_NUMBER")
+        ).all()
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:past"),
+            {"past": datetime.now(UTC) - timedelta(seconds=1)},
+        )
+    assert before
+    reconcile(p.engine)
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", controller_token)
+    restarted = p.start("controller", "--no-ui")
+    p.wait_for(
+        "SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE LOG_PATH IS NOT NULL", expected=1, timeout=20
+    )
+    with p.engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT ATTEMPT_ID AS attempt_id, STATUS AS status FROM AUD_TASK_ATTEMPTS")
+        ).one()
+    assert row.status == "LOST"
+    ctx = OperationContext(p.engine, p.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    assert (
+        b"".join(invoke(ctx, ActionName.LOGS, LogInput(attempt_id=row.attempt_id)))
+        == "".join(r.content for r in before).encode()
+    )
+    restarted.signal(signal.SIGTERM)
+    assert restarted.wait(timeout=20) == 0, restarted.output

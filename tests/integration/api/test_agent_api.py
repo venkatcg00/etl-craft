@@ -35,7 +35,10 @@ def agent_scene(engine_db, tmp_path):
         "WAREHOUSE", "test", f"jdbc:duckdb:{tmp_path / 'w.duckdb'}", "", "NONE", schema="main"
     )
     config = replace(
-        engine_db.config, deployment=DeploymentProfile.CONTROLLER_AGENTS, warehouse=warehouse
+        engine_db.config,
+        deployment=DeploymentProfile.CONTROLLER_AGENTS,
+        warehouse=warehouse,
+        log_dir=tmp_path / "logs",
     )
     ctx = OperationContext(engine_db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     agent = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="agent-a", role=ApiRole.AGENT))
@@ -1189,3 +1192,198 @@ def test_streamed_upload_limits_apply_before_parsing_or_action_dispatch(
     assert "request body" in response.text and "at most 64" in response.text
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) AS n FROM AUD_PROJECT_BUNDLES")).scalar_one() == 0
+
+
+@pytest.mark.parametrize("budget", [0, 11, 8192])
+def test_agent_ending_keeps_reported_values_and_only_the_configured_output_tail(
+    agent_scene, budget
+):
+    from etl_craft.config.object_models import Logs
+    from etl_craft.core.enums import AgentReport, AttemptStatus
+    from etl_craft.core.text import byte_tail
+    from etl_craft.services.operations.agent_models import AgentTask
+
+    db, _, _, _, owner, config = agent_scene
+    attempt = claim(agent_scene)
+    content = "é" * 9000 + "tail output\n"
+    assert (
+        post(agent_scene, "log", attempt_id=attempt, sequence=0, content=content).status_code == 200
+    )
+    ctx = OperationContext(
+        db.engine,
+        replace(config, logs=Logs(tail_bytes=budget)),
+        SYSTEM_ACTOR,
+        credential_token_id=owner,
+    )
+    # The public HTTP path uses its host's default 8192-byte budget.
+    if budget == 8192:
+        response = post(
+            agent_scene,
+            "report",
+            attempt_id=attempt,
+            operation="END",
+            status="SUCCESS",
+            task_log="ROWS = 7",
+        )
+        assert response.status_code == 200, response.text
+    else:
+        from etl_craft.services.operations.agent_reports import report
+
+        report(
+            ctx,
+            AgentTask(
+                version=__version__,
+                attempt_id=attempt,
+                operation=AgentReport.END,
+                status=AttemptStatus.SUCCESS,
+                task_log="ROWS = 7",
+            ),
+        )
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT a.TASK_LOG AS attempt_log, t.TASK_LOG AS summary_log, a.LOG_PATH AS "
+                "log_path FROM AUD_TASK_ATTEMPTS a JOIN AUD_TASK_RUN_LOG t ON "
+                "t.TASK_RUN_ID=a.TASK_RUN_ID WHERE a.ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+    expected = "\n\n".join(p for p in ("ROWS = 7", byte_tail(content, budget)) if p)
+    assert row.attempt_log == row.summary_log == expected
+    assert row.log_path is not None
+    assert len(byte_tail(content, budget).encode()) <= budget
+
+
+def test_failed_external_publication_is_audited_without_changing_the_committed_agent_outcome(
+    agent_scene, tmp_path
+):
+    db, client, _, person, _, _ = agent_scene
+    attempt = claim(agent_scene)
+    assert (
+        post(agent_scene, "log", attempt_id=attempt, sequence=0, content="complete\n").status_code
+        == 200
+    )
+    root = tmp_path / "logs" / "agents"
+    root.parent.mkdir(exist_ok=True)
+    root.write_text("unavailable store")
+    ending = {"attempt_id": attempt, "operation": "END", "status": "SUCCESS"}
+    response = post(agent_scene, "report", **ending)
+    assert response.status_code == 409, response.text
+    for part in (str(root), "upload failed", "expected a writable", "restore permissions"):
+        assert part in response.text
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, LOG_PATH AS log_path FROM AUD_TASK_ATTEMPTS WHERE "
+                "ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+        failed = conn.execute(
+            text(
+                "SELECT COUNT(*) AS n FROM AUD_ACTIONS WHERE COMMAND='agent log' AND "
+                "OUTCOME='FAILURE'"
+            )
+        ).scalar_one()
+    assert row.status == "SUCCESS" and row.log_path is None
+    assert failed == 1
+    url = f"/api/v1/projects/default/attempts/{attempt}/log"
+    assert client.get(url, headers=person).content == b"complete\n"
+    root.unlink()
+    assert post(agent_scene, "report", **ending).status_code == 200
+    assert client.get(url + "?offset=3", headers=person).content == b"plete\n"
+
+
+def test_agent_credential_cannot_read_a_human_log_endpoint_or_supply_a_path(agent_scene):
+    db, client, agent, person, _, _ = agent_scene
+    attempt = claim(agent_scene)
+    response = client.get(f"/api/v1/projects/default/attempts/{attempt}/log", headers=agent)
+    assert response.status_code == 403
+    assert "role=agent" in response.text
+    refused = post(
+        agent_scene, "log", attempt_id=attempt, sequence=0, content="bytes", log_path="../../secret"
+    )
+    assert refused.status_code == 400
+    with db.engine.connect() as conn:
+        assert (
+            conn.execute(text("SELECT COUNT(*) AS n FROM AUD_ATTEMPT_LOG_CHUNKS")).scalar_one() == 0
+        )
+        assert (
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM AUD_ACTIONS "
+                    "WHERE COMMAND='logs' AND OUTCOME='REFUSED'"
+                )
+            ).scalar_one()
+            == 1
+        )
+
+    assert (
+        post(
+            agent_scene, "log", attempt_id=attempt, sequence=0, content="stored private log"
+        ).status_code
+        == 200
+    )
+    assert (
+        post(
+            agent_scene, "report", attempt_id=attempt, operation="END", status="SUCCESS"
+        ).status_code
+        == 200
+    )
+    with db.engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT LOG_PATH AS log_path FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"),
+                {"id": attempt},
+            ).scalar_one()
+            is not None
+        )
+    url = f"/api/v1/projects/default/attempts/{attempt}/log"
+    assert client.get(url, headers=person).content == b"stored private log"
+    assert client.get(url, headers=agent).status_code == 403
+
+
+def test_agent_control_handoff_publishes_an_empty_log_after_the_child_settles(agent_scene):
+    from etl_craft.core.actor import Actor, ActorKind
+    from etl_craft.core.enums import RunStatus
+    from etl_craft.execution.trigger_waits import check_trigger_waits
+    from etl_craft.services.operations.log_storage import publish_pending
+    from fixtures.auth import service_token
+
+    db, client, _, person, _, config = agent_scene
+    service_token(db.engine, "trigger-owner")
+    actor = Actor("trigger-owner", ActorKind.SERVICE)
+    with db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "PARENT")
+        add_pipeline(conn, "CHILD")
+        task = add_task(conn, pipeline, "trigger", "RUN_PIPELINE", TRIGGER_PIPELINE_CODE="CHILD")
+        run = transitions.create_run(conn, pipeline, actor)
+        summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
+        attempt = transitions.queue_attempt(conn, summary, actor)
+    assert claim_available(agent_scene).data["task"]["attempt_id"] == attempt
+    response = post(agent_scene, "report", attempt_id=attempt, operation="START", pid=123)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["trigger"]
+    with db.engine.begin() as conn:
+        child = conn.execute(
+            text(
+                "SELECT PIPELINE_RUN_ID AS run_id FROM AUD_PIPELINES_RUN_LOG "
+                "WHERE TRIGGERED_BY_TASK_RUN_ID=:summary"
+            ),
+            {"summary": summary},
+        ).scalar_one()
+        transitions.admit_run(conn, child, actor)
+        transitions.finalize_pipeline_run(conn, child, RunStatus.SUCCESS)
+    check_trigger_waits(db.engine, run, datetime.now(UTC))
+    publish_pending(OperationContext(db.engine, config, SYSTEM_ACTOR))
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status, LOG_PATH AS log_path "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+    assert row.status == "HANDED_OFF" and row.log_path is not None
+    response = client.get(f"/api/v1/projects/default/attempts/{attempt}/log", headers=person)
+    assert response.status_code == 200 and response.content == b""

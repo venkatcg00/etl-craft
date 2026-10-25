@@ -1,4 +1,4 @@
-"""Daily project purges off the controller's lease-renewal loop."""
+"""Log publication retries and daily project purges off the controller's lease-renewal loop."""
 
 import contextvars
 import logging
@@ -13,6 +13,7 @@ from etl_craft.core.enums import ActionName
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.log_storage import publish_pending
 from etl_craft.services.operations.retention import PurgeInput
 
 logger = logging.getLogger(__name__)
@@ -22,14 +23,14 @@ class RetentionSchedule:
     """A single worker with durable daily completion cursors and bounded retry polling."""
 
     def __init__(self) -> None:
-        """Allocate no worker until a configured daily time is reached."""
+        """Prepare one background worker for log recovery and daily purge."""
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="etl-craft-retention")
         self.work: Future[None] | None = None
         self.next_check: datetime | None = None
 
     def refresh(self, ctx: OperationContext, now: datetime, stop: threading.Event) -> None:
-        """Retry failed days, without replaying every missed day or blocking supervision."""
-        if ctx.config.retention.daily_at is None or stop.is_set():
+        """Retry log publication and failed purge days without blocking supervision."""
+        if stop.is_set():
             return
         if self.work is not None:
             if not self.work.done():
@@ -37,7 +38,7 @@ class RetentionSchedule:
             error = self.work.exception()
             if error is not None:
                 # Background process boundary: invoke records the refusal/failure as well.
-                logger.error("daily retention failed: %s", error, exc_info=error)
+                logger.error("log/retention maintenance failed: %s", error, exc_info=error)
             self.work = None
         if self.next_check is not None and now < self.next_check:
             return
@@ -50,7 +51,8 @@ class RetentionSchedule:
 
 
 def purge_due(ctx: OperationContext, now: datetime, stop: threading.Event) -> None:
-    """Use each project's zone, retaining only the latest completed day across restarts."""
+    """Retry log publication, then purge each project's latest due day in its zone."""
+    publish_pending(replace(ctx, actor=SYSTEM_ACTOR))
     daily = ctx.config.retention.daily_at
     if daily is None:
         return

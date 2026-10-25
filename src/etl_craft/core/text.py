@@ -617,3 +617,8 @@ def _event_literals(
                 f"add a SUCCESS dependency on the wait before reading its {name}"
             )
     return values
+
+
+def byte_tail(value: str, maximum: int) -> str:
+    """Keep whole UTF-8 characters within the requested trailing byte budget."""
+    return value.encode()[-maximum:].decode("utf-8", errors="ignore") if maximum else ""

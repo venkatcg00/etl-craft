@@ -113,3 +113,42 @@ def test_signal_stops_the_real_cli_child_and_grandchild(cli_project, sig):
         assert not any(alive(pid) for pid in children), parent.output
     finally:
         parent.close()
+
+
+def test_local_attempt_keeps_full_file_and_configured_tail(cli_project):
+    import yaml
+
+    from etl_craft.config import load_config
+    from etl_craft.core.actor import SYSTEM_ACTOR
+    from etl_craft.core.enums import ActionName, ApiRole
+    from etl_craft.services.operations import OperationContext
+    from etl_craft.services.operations.actions import invoke
+    from etl_craft.services.operations.requests import LogInput
+
+    p = cli_project
+    raw = yaml.safe_load(p.config.config_path.read_text())
+    raw["Logs"] = {"Tail_bytes": 11}
+    p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    p.config = load_config(p.config.config_path)
+    (p.config.python_scripts_dir / "load.py").write_text(
+        "from etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n"
+        "    print('full-log-start-' + 'x' * 24000 + '-tail-end')\n"
+        "    return ScriptResult(7)\n"
+    )
+    code, output = p.run("run", "--pipeline-code", "P")
+    assert code == 0, output
+    with p.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT a.ATTEMPT_ID AS attempt_id, a.LOG_PATH AS log_path, "
+                "t.TASK_LOG AS task_log FROM AUD_TASK_ATTEMPTS a "
+                "JOIN AUD_TASK_RUN_LOG t ON t.TASK_RUN_ID=a.TASK_RUN_ID"
+            )
+        ).one()
+    assert len(row.task_log.split("\n\n")[-1].encode()) <= 11
+    assert "TARGET_COUNT = 7" in row.task_log
+    ctx = OperationContext(p.engine, p.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    full = b"".join(invoke(ctx, ActionName.LOGS, LogInput(attempt_id=row.attempt_id)))
+    assert b"full-log-start-" in full
+    assert b"x" * 24000 in full and b"-tail-end" in full

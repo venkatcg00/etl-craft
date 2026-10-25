@@ -660,21 +660,25 @@ def _project(config: ConnectorConfig) -> list[Check]:
 
 
 def _artifacts(config: ConnectorConfig) -> list[Check]:
-    """Prove the prefix used by immutable project files is reachable and writable."""
+    """Prove configured artifact and log prefixes are reachable and writable."""
     from etl_craft.core.errors import EtlCraftError
     from etl_craft.engine.artifacts import ArtifactStore
 
-    if config.artifacts.store is None:
-        return []
-    store = ArtifactStore(config, config.artifacts.store, config.artifacts.profile)
-    try:
-        store.probe()
-    except (EtlCraftError, OSError) as error:
-        return [fail("Artifact store", str(error))]
-    return [
-        ok(
-            "Artifact store",
-            f"profile={config.artifacts.profile}, "
-            f"prefix={config.artifacts.store}: list/write/read succeeded",
-        )
-    ]
+    checks: list[Check] = []
+    for label, location in (("Artifact store", config.artifacts), ("Log store", config.logs)):
+        if location.store is None:
+            continue
+        store = ArtifactStore(config, location.store, location.profile)
+        try:
+            store.probe()
+        except (EtlCraftError, OSError) as error:
+            checks.append(fail(label, str(error)))
+        else:
+            checks.append(
+                ok(
+                    label,
+                    f"profile={location.profile}, prefix={location.store}: "
+                    "list/write/read succeeded",
+                )
+            )
+    return checks

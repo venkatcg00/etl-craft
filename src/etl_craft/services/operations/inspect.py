@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import Boolean
 
 from etl_craft.core.enums import ApiRole, RunCondition, RunStatus
-from etl_craft.core.errors import ResourceNotFoundError
+from etl_craft.core.errors import ConfigurationError, ResourceNotFoundError
+from etl_craft.core.file_bytes import open_regular
 from etl_craft.core.graph import build_graph
 from etl_craft.core.time import as_utc
 from etl_craft.engine.connection import read_snapshot
+from etl_craft.engine.logs import (
+    LIVE_ATTEMPTS,
+    LogAttempt,
+    log_key,
+    log_location,
+    read_log_attempt,
+    shared_log,
+    stored_log,
+)
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.audit_reads import fetch_audit_records
 from etl_craft.engine.repository.dependencies import (
@@ -318,69 +328,86 @@ def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
     """Stream a stored attempt's canonical log in bounded chunks from a byte offset."""
     attempt_id = request.attempt_id
     with ctx.engine.connect() as conn:
-        removed = conn.execute(
-            statement(conn, "retention_log_removed"),
-            {
-                "attempt_id": attempt_id,
-            },
-        ).scalar_one_or_none()
-    if removed is not None:
-        return iter([f"removed by retention on {removed}\n".encode()])
-    attempt = get_attempt(ctx, request)
-    with ctx.engine.connect() as conn:
+        row = read_log_attempt(conn, attempt_id)
+        if row is None:
+            raise ResourceNotFoundError(f"attempt_id={attempt_id}: attempt does not exist")
+        if row.log_removed_at is not None:
+            return iter([f"removed by retention on {row.log_removed_at}\n".encode()])
         shared = conn.execute(
             statement(conn, "agent_chunk_last"), {"attempt_id": attempt_id}
         ).first()
-    if shared is not None:
-        return shared_log(ctx, request)
-    if attempt.log_path is None:
-        raise ResourceNotFoundError(f"attempt_id={attempt_id}: no log has been recorded")
-    with ctx.engine.connect() as conn:
-        row = conn.execute(
-            statement(conn, "api_attempt_identity"), {"attempt_id": attempt_id}
-        ).one()
-    expected = attempt_log_path(
-        ctx.config,
-        row.pipeline_code,
-        attempt.pipeline_run_id,
-        row.task_code,
-        attempt.attempt_number,
-    ).resolve()
-    path = Path(attempt.log_path).resolve()
-    if path != expected or not path.is_relative_to(ctx.config.log_dir.resolve()):
+    if row.log_path is None:
+        if shared is not None and shared.byte_offset + shared.byte_length > 0:
+            return shared_log(ctx.engine, attempt_id, request.offset)
+        if shared is None and row.status not in LIVE_ATTEMPTS:
+            raise ResourceNotFoundError(
+                f"attempt_id={attempt_id}: no stored log or uploaded chunks; expected a recorded "
+                "log location; inspect preserved TASK_LOG and restore the original log source"
+            )
         raise ResourceNotFoundError(
-            f"attempt_id={attempt_id}: log is outside its configured attempt path"
+            f"attempt_id={attempt_id}: log pending upload; expected acknowledged log bytes; "
+            "wait for the agent or controller to publish the log"
         )
+    if "://" in row.log_path:
+        key = log_key(
+            row.engine_id, row.project_id, row.pipeline_run_id, row.task_run_id, attempt_id
+        )
+        expected_location = log_location(ctx.config, key)
+        if row.log_path != expected_location:
+            raise ResourceNotFoundError(
+                f"attempt_id={attempt_id}: LOG_PATH={row.log_path!r}; expected "
+                f"{expected_location!r}; restore the original Logs.Store and canonical identity"
+            )
+        source = stored_log(ctx.config, key, request.offset)
+    else:
+        source = local_log(ctx, row, request.offset)
     try:
-        stream = path.open("rb")
-    except OSError as error:
-        raise ResourceNotFoundError(f"attempt_id={attempt_id}: log file is unavailable") from error
+        first = next(source, None)
+    except (ConfigurationError, ResourceNotFoundError):
+        with ctx.engine.connect() as conn:
+            removed = conn.execute(
+                statement(conn, "retention_log_removed"), {"attempt_id": attempt_id}
+            ).scalar_one_or_none()
+        if removed is not None:
+            return iter([f"removed by retention on {removed}\n".encode()])
+        raise
 
     def chunks() -> Iterator[bytes]:
-        with stream:
-            stream.seek(request.offset)
-            while data := stream.read(65536):
-                yield data
+        try:
+            if first is not None:
+                yield first
+            yield from source
+        finally:
+            source.close()
 
     return chunks()
 
 
-def shared_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
-    """Read bounded shared chunks without keeping a connection open while sending bytes."""
-    sequence = -1
-    while True:
-        with ctx.engine.connect() as conn:
-            rows = conn.execute(
-                statement(conn, "agent_chunks_read"),
-                {
-                    "attempt_id": request.attempt_id,
-                    "offset": request.offset,
-                    "sequence": sequence,
-                },
-            ).all()
-        if not rows:
-            return
-        for row in rows:
-            data = row.content.encode()
-            yield data[max(0, request.offset - row.byte_offset) :]
-            sequence = row.sequence_number
+def local_log(ctx: OperationContext, row: LogAttempt, offset: int) -> Generator[bytes, None, None]:
+    """Hold each local path ancestor while reading, refusing symlinks and special files."""
+    expected = attempt_log_path(
+        ctx.config,
+        row.pipeline_code,
+        row.pipeline_run_id,
+        row.task_code,
+        row.attempt_number,
+    ).absolute()
+    assert row.log_path is not None
+    path = Path(row.log_path).absolute()
+    if path != expected or not path.is_relative_to(ctx.config.log_dir.absolute()):
+        raise ResourceNotFoundError(
+            f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected {str(expected)!r}; "
+            "restore the configured canonical attempt path"
+        )
+    try:
+        with open_regular(
+            ctx.config.log_dir.absolute(),
+            path.relative_to(ctx.config.log_dir.absolute()).as_posix(),
+        ) as stream:
+            stream.seek(offset)
+            while data := stream.read(65536):
+                yield data
+    except ConfigurationError as error:
+        raise ResourceNotFoundError(
+            f"attempt_id={row.attempt_id}: log file is unavailable; {error}"
+        ) from error

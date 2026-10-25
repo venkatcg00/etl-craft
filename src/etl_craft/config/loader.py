@@ -50,7 +50,7 @@ from etl_craft.config.loader_orchestration import (
 from etl_craft.config.loader_warehouse import WAREHOUSE_SECTION_KEYS, parse_warehouse
 from etl_craft.config.managed_engine import managed_cloning_problem
 from etl_craft.config.model import DEFAULT_LOG_DIR, EXAMPLE_PATH, ConnectionProfile, ConnectorConfig
-from etl_craft.config.object_stores import ARTIFACT_KEYS, STORE_KEYS, with_artifacts
+from etl_craft.config.object_stores import ARTIFACT_KEYS, LOG_KEYS, STORE_KEYS, with_artifacts
 from etl_craft.config.resolve import Resolver
 from etl_craft.config.retention import KEYS as RETENTION_KEYS
 from etl_craft.config.retention import parse_retention
@@ -69,6 +69,7 @@ SECTIONS = (
     "Auth",
     "Object_stores",
     "Artifacts",
+    "Logs",
     "Retention",
 )
 
@@ -97,6 +98,7 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Auth": AUTH_KEYS,
         "Object_stores": STORE_KEYS,
         "Artifacts": ARTIFACT_KEYS,
+        "Logs": LOG_KEYS,
         "Retention": RETENTION_KEYS,
     }
 
@@ -299,6 +301,6 @@ def _check_layout(raw: object, path: Path) -> dict[str, object]:
         raise ConfigurationError(
             f"{path}: sections are in the order {present}; write them as {expected} "
             "(Secrets, Orchestration, Deployment, Engine, Warehouse, "
-            "Cloning, Docs_site, then Auth; followed by Object_stores and Artifacts)"
+            "Cloning, Docs_site, then Auth; followed by Object_stores, Artifacts and Logs)"
         )
     return raw

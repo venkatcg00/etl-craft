@@ -59,6 +59,7 @@ COMMON = {
     "UPDATE_COUNT": 3,
     "DELETE_COUNT": 5,
     "ROWS_WRITTEN": 15,
+    "TASK_LOG": "legacy output\n" * 6000,
     "OUTPUT_REVISION": 7,
     "CONSUMED_REVISION": 7,
     "SELECTED_REVISION": 7,

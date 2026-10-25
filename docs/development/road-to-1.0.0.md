@@ -157,7 +157,7 @@ item's text, or work done early under another item.
 | S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
 | S5.J | Done | #248 | Shared local/queue contracts and a ten-project demo. |
 | S6.A Retention | Done | #249, #250, #251, #252 | Project history/log archives, scoped reject lifetimes and supported Iceberg maintenance; current mirrors follow retained source state. |
-| S6.B and later | Not started | | |
+| S6.B Logs outside the Engine DB | Done | #254 | Full external logs, byte tails, stored/live streams and retention |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
@@ -319,6 +319,18 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S6.B validates full local/agent logs, live-to-stored byte continuity, configured UTF-8 tails,
+file/MinIO storage, exact identity and role/path refusals, pending/removed/inaccessible reports,
+and bounded file/chunk memory. Terminal guards refuse no-op rewrites, and the complete query
+plan gate verifies bounded reads without additional scan exemptions. Both Engine DBs cover
+publication/retention crash recovery and
+real-row upgrades from every released schema, preserving oversized legacy text. Real PostgreSQL
+agents cover upload interruption and controller restart; publication/retention and duplicate
+endings run twenty local race rounds. The built-in security-review tool was unavailable;
+manual security review, attacker-shaped checks and Semgrep supply the recorded review evidence.
+No warehouse SQL changed, so cloud acceptance is not required; the complete platform matrix,
+coverage and installed-wheel demos remain CI gates.
 
 S6.A slice 3 validates old/new/foreign reject boundaries and real merge exclusion on all four
 local warehouses, plus real process-loss recovery on both Engine DBs. Released-schema upgrades,
@@ -727,6 +739,31 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.B reuses local attempt files, the existing `LOG_PATH` column, ordered/fenced agent chunks,
+  byte-offset LOGS operation and S6.A removal/cleanup records. External keys include the existing
+  Engine DB identity, project, run, task-run and attempt IDs. Migration 0059 changes terminal
+  guards for one-time log acknowledgment and indexes pending uploads, without changing committed
+  outcomes or legacy text. Retention cleans unacknowledged destination/staging files as well.
+  Existing oversized `TASK_LOG` values stay in their original rows until retention; only new
+  output tails use the configured cap. Local attempts already keep reported values separately
+  from the supervisor's task-summary tail; agent endings commit both together.
+- The owner approved `Logs.Profile` to select an S5.F `Object_stores` profile explicitly. Logs
+  are host-owned settings, kept out of project bundle overrides. An omitted `Logs.Store` uses
+  `file://<Log_dir>/agents` for upgrade compatibility. API/controller copies share that prefix
+  or configure S3; agents upload through HTTP without storage credentials or supplied paths.
+- The API publishes complete acknowledged chunks after the independent outcome commit. A failed
+  upload is a separate `AUD_ACTIONS` agent-log failure; identical ending retries and controller
+  maintenance resume publication even with daily purge disabled. Chunks remain the durable
+  source until log retention. A lost agent's available chunks form its partial log after LOST
+  reconciliation; unacknowledged host bytes are not asserted complete.
+- The four S6.B bullets supply the derived Done when: full local/agent stored logs with exact
+  identities; configured byte tails plus reported values; bounded stored/live API streams;
+  retention of files and uploaded chunks with distinct pending/removed/inaccessible reports.
+  Source selection stays fixed during a download; a later request switches by the same byte
+  offset. Control handoffs record their empty source in the handoff transaction and publish it
+  without changing their immutable outcome or child wait. Run-log synthesis and zip/manifest
+  routes remain S7.A.3, as the approved wireframes say.
 
 - Owner decisions, 2026-10-25 (#253, one combined docs(plan) PR): Alpha/Beta retain
   15-minute SKIP schedules, Beta uses one ingestion slot and partition fan-out (2 readers,

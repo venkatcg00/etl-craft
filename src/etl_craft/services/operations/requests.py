@@ -198,10 +198,13 @@ class LogInput(AttemptId):
     offset: int = 0
 
     def __post_init__(self) -> None:
-        """Refuse a negative offset as well."""
+        """Require a byte offset representable by file and database drivers."""
         super().__post_init__()
-        if self.offset < 0:
-            raise UsageError(f"`offset` is {self.offset}; give a nonnegative byte offset")
+        if not 0 <= self.offset <= 2**63 - 1:
+            raise UsageError(
+                f"`offset` is {self.offset}; expected 0..{2**63 - 1} bytes; "
+                "give a nonnegative byte offset in that range"
+            )
 
 
 @dataclass(frozen=True, kw_only=True)

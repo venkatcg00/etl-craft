@@ -223,3 +223,27 @@ there is no additional CLI execution command.
 Project operations use `/api/v1/projects/{project}/...`. The examples above select
 `default`; substitute your `PROJECT_CODE` for another project. Authentication, accounts,
 groups, tokens, agent coordination and health remain deployment-wide.
+
+
+## Attempt log bytes
+
+The existing `GET /api/v1/projects/{project}/attempts/{attempt_id}/log?offset=0` operation requires
+viewer access to the owning pipeline and the exact project/attempt identity. Offsets are whole numbers from 0 through 2^63−1 and count
+UTF-8 bytes of acknowledged log content, not characters or lines. File and object downloads
+use blocks of at most 65536 bytes; the live relay fetches at most sixteen ordered chunks per
+batch, each at most 65536 bytes. A request at or past the available end returns no additional
+bytes. Advance the offset by the number of bytes received before polling again.
+
+While `ATTEMPT.log_path` is null, publication is pending and available chunks remain readable.
+With no acknowledged bytes, the operation reports `log pending upload` rather than an empty
+completed log. A non-null `log_path` acknowledges the complete stored log. A download already
+reading chunks keeps that source until it ends; the next request uses the stored file at its
+same byte offset. Chunks and stored files contain identical bytes, so this switch loses and
+duplicates none. S3 reads use ranges, and downloads close their source when cancelled.
+
+Retention returns `removed by retention on <timestamp>` even when physical cleanup is pending.
+An acknowledged file that cannot be opened reports its location, expected access and remedy;
+it never falls back to chunks or returns an empty log. Legacy terminal attempts without a
+file or chunks report that absence and direct the operator to preserved `TASK_LOG` text.
+The existing attempt document supplies task, task-run, run, attempt, owner and exit identity.
+Run-log synthesis and whole-run zip manifests remain the S7.A.3 work described by the wireframes.

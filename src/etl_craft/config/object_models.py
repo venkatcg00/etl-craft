@@ -24,3 +24,12 @@ class Artifacts:
 
     store: str | None = None
     profile: str | None = None
+
+
+@dataclass(frozen=True)
+class Logs:
+    """Host-owned full agent log storage and the output tail retained with reported values."""
+
+    store: str | None = None
+    profile: str | None = None
+    tail_bytes: int = 8192
