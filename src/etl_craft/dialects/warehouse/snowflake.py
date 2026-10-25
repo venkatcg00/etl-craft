@@ -38,6 +38,15 @@ class SnowflakeWarehouse(WarehouseDialect):
 
     session_fencing = True
 
+    def archive_type_matches(self, actual: str, expected: str) -> bool:
+        """Compare Snowflake's physical spellings for the archive's native DDL aliases."""
+        aliases = {
+            "BIGINT": "NUMBER(38,0)",
+            "VARCHAR": "VARCHAR(16777216)",
+            "TIMESTAMP WITH TIME ZONE": "TIMESTAMP_TZ(9)",
+        }
+        return self.same_column_type(actual, aliases.get(expected.upper(), expected))
+
     def session_tag_args(self, tag: str) -> Mapping[str, Any]:
         """Label every query of the session through its QUERY_TAG session parameter."""
         return {"session_parameters": {"QUERY_TAG": tag}}

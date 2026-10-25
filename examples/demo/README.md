@@ -287,3 +287,8 @@ section from its connector file, review `etl-craft purge --dry-run --format json
 `etl-craft purge` as an administrator. Files expire separately from run history; retained
 consumption and recovery evidence can keep old run skeletons. See the
 [retention guide](../../docs/deploying/engine-db.md#retaining-project-history).
+
+For a verified history archive, create a separate schema in the configured warehouse, then run
+`etl-craft purge --archive-to history --dry-run` and `etl-craft purge --archive-to history`.
+Rerun the same destination after interruption; pending archive work blocks plain purge.
+See [history retention](../../docs/deploying/engine-db.md#retaining-project-history).

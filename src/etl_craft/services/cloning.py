@@ -48,6 +48,7 @@ from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.engine.tables import CONFIG_TABLES
 from etl_craft.dialects.warehouse import WarehouseDialect
+from etl_craft.dialects.warehouse.copying import MAX_BOUND_VALUES, insert_rows
 from etl_craft.engine import locks
 from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
@@ -58,13 +59,6 @@ logger = logging.getLogger(__name__)
 
 BATCH_ROWS = 1_000
 """How many rows are read from the Engine DB at a time."""
-
-MAX_BOUND_VALUES = 250
-"""Values bound in one INSERT: many rows per statement, within every driver's parameter limit.
-
-A cloud warehouse answers each statement in a second or two, so a row per statement would
-take hours on a busy Engine DB; a statement per few dozen rows takes minutes at most.
-"""
 
 PREFIXES: Mapping[CloningScope, tuple[str, ...]] = {
     CloningScope.CFG: ("CFG_",),
@@ -97,10 +91,11 @@ def cloning_problem(config: ConnectorConfig) -> str | None:
     if config.warehouse is None:
         return "Cloning is enabled, but there is no Warehouse section to copy the tables into"
     problem = warehouse_dialect(config).cloning_storage_problem(config.cloning)
-    return problem or _own_schema_problem(config)
+    return problem or mirror_schema_problem(config)
 
 
-def _own_schema_problem(config: ConnectorConfig) -> str | None:
+def mirror_schema_problem(config: ConnectorConfig) -> str | None:
+    """Refuse a warehouse copy into the Engine DB's own physical schema."""
     assert config.warehouse is not None
     engine_profile, warehouse_profile = config.engine, config.warehouse
     if not engine_profile.jdbc_url.startswith("jdbc:postgresql:"):
@@ -242,6 +237,11 @@ def _clone_table(
     try:
         with warehouse.begin() as conn:
             existing = {name.upper() for name, _ in _mirror_columns(conn, dialect, mirror)}
+            if "_ETL_ARCHIVE_ENGINE_ID" in existing:
+                raise CloningError(
+                    f"{mirror}: immutable archive table; expected a replaceable mirror; "
+                    "choose another cloning schema"
+                )
             created = not existing
             added = () if created else tuple(n for n in names if n not in existing)
             if created:
@@ -255,7 +255,7 @@ def _clone_table(
             for batch in _batches(engine, table, columns):
                 for start in range(0, len(batch), per_statement):
                     chunk = batch[start : start + per_statement]
-                    conn.execute(*_insert_rows(mirror, names, chunk))
+                    conn.execute(*insert_rows(mirror, names, chunk))
                 rows += len(batch)
     except SQLAlchemyError as error:
         raise CloningError(f"cloning {table} into {mirror} failed: {error}") from error
@@ -268,17 +268,6 @@ def _clone_table(
         " (created)" if created else (f" (added {', '.join(added)})" if added else ""),
     )
     return ClonedTable(table, mirror, rows, created, added)
-
-
-def _insert_rows(
-    mirror: str, names: list[str], rows: list[tuple[object, ...]]
-) -> tuple[Any, dict[str, object]]:
-    """Return one INSERT of ``rows`` into ``mirror``, and its parameters."""
-    groups = ", ".join(
-        "(" + ", ".join(f":r{r}c{c}" for c in range(len(names))) + ")" for r in range(len(rows))
-    )
-    params = {f"r{r}c{c}": value for r, row in enumerate(rows) for c, value in enumerate(row)}
-    return text(f"INSERT INTO {mirror} ({', '.join(names)}) VALUES {groups}"), params
 
 
 def _batches(

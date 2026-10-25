@@ -234,7 +234,7 @@ transaction-local actor marker, including for `TRUNCATE`. SQLite requires functi
 on engine connections; the SQLite shell or a BI tool instead reports `no such function:
 etl_craft_actor` (or the corresponding actor-kind function). `CREATED_BY` and `UPDATED_BY` are
 stamped with the actor. Interventions, actions, metadata changes, consumption and gate decisions
-are append-only; terminal attempts cannot be changed. Retention is a separate future operation.
+are append-only; terminal attempts cannot be changed. Only the actor-scoped retention operation may expire eligible history.
 
 ### PostgreSQL privileges
 
@@ -388,8 +388,39 @@ host-controlled and are not accepted from developer publications. `setup` shows 
 periods for a newly created Engine DB; it never rewrites the team-owned YAML. `doctor` reports
 when PostgreSQL history is configured to be kept forever.
 
-Warehouse archiving (`--archive-to`) and warehouse auxiliary-data retention are the next S6.A
-slices. This command currently purges Engine DB history and local/shared attempt log content.
+To archive eligible history before removing it, create a dedicated schema in the configured
+warehouse and select it explicitly:
+
+```bash
+etl-craft --project default purge --archive-to history --dry-run
+etl-craft --project default purge --archive-to history
+```
+
+The schema must differ from the working/mirror schema and the Engine DB schema. Archive tables
+keep the source `AUD_` names and columns, adding `_ETL_ARCHIVE_ENGINE_ID`,
+`_ETL_ARCHIVE_ROW_SHA256` and `_ETL_ARCHIVE_SCHEMA_VERSION`. An Engine DB identity separates
+otherwise identical integer keys from different deployments. Changed source rows produce new
+immutable content versions; existing versions are never overwritten. Dates, timestamps,
+integers and booleans remain native; unconstrained numerics, JSON and binary values use exact
+text representations to avoid warehouse coercion. Added source columns are added to the archive;
+incompatible existing types fail with exit code 30 (`ArchiveError`).
+
+Each bounded snapshot is committed to `AUD_RETENTION_ARCHIVES` before warehouse writes. Purge
+reads back and compares every archived value, then locks and revalidates the source and its
+owning run before deleting. Source deletion and the batch's `AUD_ACTIONS` counts commit together.
+Rows changed during the copy remain in the Engine DB and appear in `retained_changed`. Ancestor
+rows are archived as context even when references retain them in the Engine DB. A dry run
+creates no archive tables or pending snapshots.
+
+After an interruption, rerun the same command against the original warehouse and schema. Pending
+work blocks plain purge and destination changes, even if its retention period was disabled.
+Verified rows already delivered are reused. Attempt tails and shared chunks are archived before
+retirement; local full log files are removed only after that decision commits. Full file bytes
+are not copied to the warehouse. Daily maintenance uses plain purge; pending archives require an
+explicit `--archive-to` retry before daily maintenance can continue.
+
+Warehouse auxiliary-data retention remains the next S6.A slice. Target business rows are never
+subject to this command.
 
 The manual/release volume gate is deliberately outside ordinary test discovery:
 

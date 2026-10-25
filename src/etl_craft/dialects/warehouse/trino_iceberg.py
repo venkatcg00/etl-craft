@@ -34,6 +34,12 @@ class TrinoIcebergWarehouse(WarehouseDialect):
 
     session_fencing = True
 
+    def archive_type_matches(self, actual: str, expected: str) -> bool:
+        """Iceberg reports microsecond precision explicitly for archive timestamps."""
+        if expected.upper() == "TIMESTAMP WITH TIME ZONE":
+            expected = "TIMESTAMP(6) WITH TIME ZONE"
+        return self.same_column_type(actual, expected)
+
     def row_id_base_sql(self, target: str) -> str:
         """Read the previous committed snapshot under the target lock."""
         return f"(SELECT COALESCE(MAX(ROW_ID), 0) FROM {target})"

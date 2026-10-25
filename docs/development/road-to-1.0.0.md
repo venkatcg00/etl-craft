@@ -156,7 +156,7 @@ item's text, or work done early under another item.
 | S5.H | Done | #246 | Deployment-wide connection reservations and shared local child limits. |
 | S5.I | Done | #247 | Managed PostgreSQL tokens, required TLS and cloning refusal; cloud acceptance procedure. |
 | S5.J | Done | #248 | Shared local/queue contracts and a ten-project demo. |
-| S6.A Retention | In progress | #249, #250 | Slice 1: project history/log purge and daily maintenance; archive and warehouse slices remain. |
+| S6.A Retention | In progress | #249, #250, #251 | History/log purge and recoverable warehouse archives; warehouse auxiliary retention remains. |
 | S6.B and later | Not started | | |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
@@ -317,13 +317,21 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
+S6.A slice 2 validates immutable archive delivery, complete-value verification and added-column
+schema evolution on DuckDB, PostgreSQL, Trino/Iceberg and DuckDB/Iceberg. Databricks native/UniForm and
+Snowflake native archive checks pass; Snowflake Iceberg storage is not configured for this acceptance.
+Both Engine DBs pass process-loss recovery at every archive commit boundary, reference-safe
+retention, log/file protection, administrator HTTP access and released-schema upgrades.
+Concurrent archive purges are repeated locally. The full platform matrix and installed-wheel
+demos remain CI checks; warehouse auxiliary retention is still open.
+
 S6.A slice 1 validates project history/log retention and released-schema upgrades on SQLite
 and PostgreSQL, CLI process death at each new commit boundary, administrator API access and
 reference protection. Populated query-plan checks cover indexed deletion/reference probes,
 with complete-category dry-run counts identified explicitly as maintenance reads. Its manual PostgreSQL volume gate removes one million attempts within
 the five-minute budget while a concurrent real pipeline finishes. Static/docs and unit checks
 pass; concurrent purge callers are repeated locally. No warehouse SQL changes in this slice;
-archiving and warehouse retention remain open, so S6.A is not Done.
+warehouse auxiliary retention remains open, so S6.A is not Done.
 
 S5.J validates shared local/queue contracts on PostgreSQL, including process death, claim
 acknowledgement loss, cancellation, controller recovery and capacity. Both providers and the
@@ -705,6 +713,21 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.A slice 2 keeps immutable content versions under source keys, deployment identity and
+  schema version: repaired runs and retired logs may legitimately change an existing key.
+  Three archive provenance columns distinguish those versions; exact-value verification refuses
+  duplicates or altered copies. Unconstrained numerics, JSON and binary data use lossless text.
+- Migration 0057 adds one Engine identity and one pending snapshot per project. Source rows and
+  owning run context are captured before remote writes, then locked and revalidated before
+  source mutation. A changed row is retained and counted; deletion and batch audit commit together.
+  Archive snapshots target at most 100 source rows and adapt to an 8 MiB per-table capture budget, allowing
+  one oversized row. Existing bounded plain purge remains unchanged.
+- Pending work binds to its original warehouse/catalog/storage definition and dedicated schema;
+  retries wait out resource leases and reuse verified content. Archive target locks cover source
+  commit, and cloning refuses archive tables. Manual `--archive-to` selects this behavior; daily
+  maintenance remains plain purge and refuses to bypass pending archive work. Tail/chunk data is
+  copied before retirement; full local file bytes are not exported.
 
 - S6.A slice 1 keeps retention policy on the host, so developer-published bundles cannot shorten
   another project's history. Manual purge selects one project; daily maintenance uses the host

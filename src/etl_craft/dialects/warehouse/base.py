@@ -552,6 +552,10 @@ class WarehouseDialect:
             == self.evolution_column_type(target).strip().casefold()
         )
 
+    def archive_type_matches(self, actual: str, expected: str) -> bool:
+        """Compare the lossless archive types against physical warehouse metadata."""
+        return self.same_column_type(actual, expected)
+
     def evolution_column_type(self, data_type: str) -> str:
         """Return the full stage type in the target table format's DDL representation."""
         return data_type

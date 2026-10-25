@@ -10,8 +10,12 @@ from etl_craft.services.operations.retention import PurgeInput, PurgeView
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
-    """Expose the item's read-only eligibility snapshot."""
+    """Expose archive selection and read-only eligibility counts."""
     configure_output(parser)
+    parser.add_argument(
+        "--archive-to",
+        help="Verify immutable archive rows in a dedicated warehouse schema before purge.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Report currently removable rows.")
 
 

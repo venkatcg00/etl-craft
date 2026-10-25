@@ -47,6 +47,7 @@ class PostgresEngineDialect(EngineDialect):
         return projection(sql, definition, postgres=True, name=name)
 
     supports_api_replicas = True
+    archive_lock_suffix = " FOR UPDATE"
     spec = engine_for_jdbc_url("jdbc:postgresql:")
     directory = Path(__file__).parent
 

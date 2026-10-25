@@ -690,3 +690,24 @@ class ObjectUrlStyle(StrEnum):
 
     PATH = "PATH"
     VIRTUAL = "VIRTUAL"
+
+
+class ArchiveKind(StrEnum):
+    """Portable, lossless representations of source archive columns."""
+
+    TEXT = "TEXT"
+    INTEGER = "INTEGER"
+    BOOLEAN = "BOOLEAN"
+    TIMESTAMP = "TIMESTAMP"
+    DATE = "DATE"
+    DECIMAL = "DECIMAL"
+    FLOAT = "FLOAT"
+    JSON = "JSON"
+    BINARY = "BINARY"
+
+
+class ArchiveStep(StrEnum):
+    """The source mutation authorized by a prepared archive snapshot."""
+
+    LOGS = "LOGS"
+    DELETE = "DELETE"

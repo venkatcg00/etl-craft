@@ -1,10 +1,12 @@
 """Retire log content before deleting files, with durable, idempotent cleanup."""
 
 import os
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import ConfigurationError
@@ -21,45 +23,68 @@ def expire_logs(engine: Engine, config: ConnectorConfig, cutoff: datetime, now: 
             rows = conn.execute(statement(conn, "retention_logs"), {"cutoff": cutoff}).all()
             if not rows:
                 return count
-            for row in rows:
-                if row.log_path is not None:
-                    expected = attempt_log_path(
-                        config,
-                        row.pipeline_code,
-                        row.pipeline_run_id,
-                        row.task_code,
-                        row.attempt_number,
-                    )
-                    path = Path(row.log_path)
-                    if path.absolute() != expected.absolute():
-                        raise ConfigurationError(
-                            f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected "
-                            f"{str(expected)!r}; restore the canonical attempt path before purge"
-                        )
-                    checked_relative(config, path)
-                    conn.execute(
-                        statement(conn, "retention_file_insert"),
-                        {
-                            "attempt_id": row.attempt_id,
-                            "path": str(path.absolute()),
-                            "now": now,
-                        },
-                    )
-                conn.execute(
-                    statement(conn, "retention_log_mark"),
-                    {
-                        "attempt_id": row.attempt_id,
-                        "now": now,
-                    },
-                )
-                conn.execute(
-                    statement(conn, "retention_summary_clear"),
-                    {
-                        "task_run_id": row.task_run_id,
-                    },
-                )
+            retire_log_rows(conn, config, [LogRemoval(**row._mapping) for row in rows], now)
         count += len(rows)
         fault_point("retention.after_log_commit")
+
+
+@dataclass(frozen=True)
+class LogRemoval:
+    """Canonical identity read before retiring an attempt's log content."""
+
+    attempt_id: int
+    log_path: str | None
+    attempt_number: int
+    task_run_id: int
+    pipeline_run_id: int
+    pipeline_code: str
+    task_code: str
+
+
+def retire_log_rows(
+    conn: Connection,
+    config: ConnectorConfig,
+    rows: Sequence[LogRemoval],
+    now: datetime,
+) -> None:
+    """Queue file cleanup and removal evidence in the caller's source transaction."""
+    for row in rows:
+        if row.log_path is not None:
+            expected = attempt_log_path(
+                config,
+                row.pipeline_code,
+                row.pipeline_run_id,
+                row.task_code,
+                row.attempt_number,
+            )
+            path = Path(row.log_path)
+            if path.absolute() != expected.absolute():
+                raise ConfigurationError(
+                    f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected "
+                    f"{str(expected)!r}; restore the canonical attempt path before purge"
+                )
+            checked_relative(config, path)
+            conn.execute(
+                statement(conn, "retention_file_insert"),
+                {
+                    "attempt_id": row.attempt_id,
+                    "path": str(path.absolute()),
+                    "now": now,
+                },
+            )
+        conn.execute(
+            statement(conn, "retention_log_mark"),
+            {
+                "attempt_id": row.attempt_id,
+                "now": now,
+            },
+        )
+        conn.execute(
+            statement(conn, "retention_summary_clear"),
+            {
+                "task_run_id": row.task_run_id,
+            },
+        )
 
 
 def checked_relative(config: ConnectorConfig, path: Path) -> Path:

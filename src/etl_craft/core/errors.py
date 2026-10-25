@@ -46,6 +46,7 @@ class ExitCode(IntEnum):
     SERVER = 27
     TRANSIENT = 28
     PERMANENT = 29
+    ARCHIVE = 30
 
 
 class EtlCraftError(Exception):
@@ -198,3 +199,9 @@ class PermanentError(EtlCraftError):
 
     retryable = False
     exit_code = ExitCode.PERMANENT
+
+
+class ArchiveError(EtlCraftError):
+    """An archive could not be verified; its source data remains authoritative."""
+
+    exit_code = ExitCode.ARCHIVE
