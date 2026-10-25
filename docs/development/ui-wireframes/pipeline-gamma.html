@@ -3,201 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SI_CLIENT_GAMMA · ETL Craft wireframe</title>
+<title>SI_CLIENT_GAMMA · etl-craft</title>
 <link rel="stylesheet" href="wireframes.css">
 </head>
 <body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
 <a class="skip" href="#content">Skip to content</a>
-<header class="top">
-<strong>ETL Craft</strong>
-<span>Design review · 25 Oct 2026 · sample data</span>
-<form action="search.html" method="get">
-<label for="global-search">Global search</label>
-<input id="global-search" name="q" value="SI_CLIENT_BETA">
-<button type="submit">Search</button>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
 </form>
-<span>operator · support team</span>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
 </header>
 <div class="shell">
-<nav aria-label="Console navigator">
-<h2>Console</h2>
-<ul>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="pipelines.html" class="current" >Pipelines</a>
-</li>
-<li>
-<a href="runs.html" class="" >Runs</a>
-</li>
-<li>
-<a href="backfills.html" class="" >Backfills</a>
-</li>
-<li>
-<a href="interventions.html" class="" >Interventions</a>
-</li>
-<li>
-<a href="agents.html" class="" >Agents and pools</a>
-</li>
-<li>
-<a href="insights.html" class="" >Pipeline Insights</a>
-</li>
-<li>
-<a href="gaps.html" class="" >Schema gaps</a>
-</li>
-<li>
-<a href="lineage.html" class="" >Lineage / catalog</a>
-</li>
-<li>
-<a href="metadata.html" class="" >Metadata</a>
-</li>
-<li>
-<a href="uploads.html" class="" >Uploads</a>
-</li>
-<li>
-<a href="commands.html" class="" >Command center</a>
-</li>
-</ul>
-<h2>Workflows</h2>
-<details open>
-<summary>Tag: ingestion</summary>
-<ul>
-<li>
-<a href="pipeline-alpha.html" class="" >SI_CLIENT_ALPHA</a>
-</li>
-<li>
-<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
-</li>
-<li>
-<a href="pipeline-gamma.html" aria-current="page" class="" >SI_CLIENT_GAMMA</a>
-</li>
-</ul>
-</details>
-<details>
-<summary>Tag: mart / reference</summary>
-<ul>
-<li>
-<a href="pipeline-dm.html" class="" >SI_DM</a>
-</li>
-<li>
-<a href="pipeline-reference.html" class="" >SI_REFERENCE</a>
-</li>
-<li>
-<a href="uploads.html" class="" >SI_STEWARD_DM_FACT</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_AGENTS</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_CUSTOMER_TYPES</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_SUPPORT_AREAS</a>
-</li>
-</ul>
-</details>
-<p>
-<a href="run.html" class="" >Recent: Beta run 419</a>
-</p>
-<p>
-<a href="README.md" class="" >Wireframe guide</a>
-</p>
-</nav>
-<div class="workspace">
-<nav class="crumbs" aria-label="Breadcrumb">
-<ol>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="project.html" class="" >support_insights</a>
-</li>
-<li>
-<a href="pipeline-gamma.html" aria-current="page" class="" >SI_CLIENT_GAMMA</a>
-</li>
-</ol>
-</nav>
-<div class="workarea">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe" data-section>Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work with-panel">
 <main id="content" tabindex="-1">
-<h1>SI_CLIENT_GAMMA</h1>
-<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
-<p class="annotation">
-<strong>S5.AA feed:</strong> PIPELINE /pipelines/{pipeline_code}; GRAPH /graph; CAPABILITIES /capabilities.</p>
-<div class="tabs">
-<a href="pipeline-gamma.html" aria-current="page" class="" >Overview</a>
-<a href="runs.html" class="" >Runs</a>
-<a href="matrix.html" class="" >Run matrix</a>
-<a href="insights.html" class="" >Insights</a>
-<a href="metadata.html" class="" >Read-only metadata</a>
-</div>
-<p>Selected pipeline: <strong>SI_CLIENT_GAMMA</strong> · Ends at ODS; no per-client ODS → DM task</p>
-<h2>Dependency graph</h2>
-<div class="dag" aria-label="Task dependency graph">
-<a href="run-gamma.html#wait" class="node" >gamma_wait_files<br>
-<span class="status waiting">
-<span aria-hidden="true">●</span> WAITING</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_source_to_lnd.html" class="node" >gamma_source_to_lnd<br>
-<span class="status success">
-<span aria-hidden="true">●</span> SUCCESS</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_lnd_to_prs.html" class="node" >gamma_lnd_to_prs<br>
-<span class="status queued">
-<span aria-hidden="true">●</span> QUEUED</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_prs_to_cdc.html" class="node" >gamma_prs_to_cdc<br>
-<span class="status queued">
-<span aria-hidden="true">●</span> QUEUED</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_preods_delete.html" class="node" >gamma_preods_delete<br>
-<span class="status queued">
-<span aria-hidden="true">●</span> QUEUED</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_cdc_to_preods.html" class="node" >gamma_cdc_to_preods<br>
-<span class="status queued">
-<span aria-hidden="true">●</span> QUEUED</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_rules.html" class="node" >gamma_rules<br>
-<span class="status queued">
-<span aria-hidden="true">●</span> QUEUED</span>
-</a>
-<span aria-hidden="true">→</span>
-<a href="task-gamma_preods_to_ods.html" class="node" >gamma_preods_to_ods<br>
-<span class="status queued">
-<span aria-hidden="true">●</span> QUEUED</span>
-</a>
-</div>
-<p>Arrow labels: SUCCESS except ingestion → PRS = HAS_DATA; Gamma wait → ingestion = SUCCESS.</p>
-<form action="ack-run.html" method="get" class="action">
-<input type="hidden" name="route" value="/api/v1/projects/support_insights/runs">
-<input type="hidden" name="pipeline_code" value="SI_CLIENT_GAMMA">
-<button type="submit">Run selected pipeline</button>
-</form>
-<small class="route">POST /api/v1/projects/support_insights/runs</small>
-<p>Different object: <a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM publishes ODS later <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a> · <a href="table.html" class=""  target="_blank" rel="noopener">dm.customer_support_fact <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</p>
-<p>EVENT_SQL on lnd.gamma_object_events, EVENT_KEY_COLUMN=object_key; 55 min; timeout SKIP. MinIO bucket notifications insert one signal row per object. minio_to_lnd.py reads task.event_keys.</p>
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-gamma.html" aria-current="page">SI_CLIENT_GAMMA</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-pipe" aria-hidden="true"></span>SI_CLIENT_GAMMA<span class="chip">ingestion</span><span class="chip">client-gamma</span></h1></div><div class="actions"><a class="btn primary" href="pipeline-gamma-run-now.html">Run now</a><form action="ack.html" method="get" class="inline"><input type="hidden" name="action" value="PAUSE"><input type="hidden" name="pipeline" value="SI_CLIENT_GAMMA"><button type="submit" class="btn">Pause schedule</button></form><a class="btn icon" href="console.html" aria-label="More actions in the console">⋯</a></div></div><nav class="tabs" aria-label="Views"><a href="pipeline-gamma.html" aria-current="page">Runs</a><a href="pipeline-gamma-matrix.html">Matrix</a><a href="pipeline-gamma-tasks.html">Tasks</a><a href="pipeline-gamma-access.html">Permissions</a></nav><figure class="durchart"><figcaption>Run duration · last 3 runs · bar height is duration relative to the longest (max 55m 00s)</figcaption><div class="bars"><a href="run-409.html" class="vbar v-ok" style="--h:22" aria-label="Run 409, SUCCESS, 12m 07s"><span>409</span></a><a href="run-412.html" class="vbar v-skip" style="--h:100" aria-label="Run 412, SKIPPED, 55m 00s"><span>412</span></a><a href="run-417.html" class="vbar v-run" style="--h:27" aria-label="Run 417, IN-PROGRESS, 15m 00s"><span>417</span></a></div></figure><div class="tbl"><table><caption class="sr-only">Runs</caption><thead><tr><th scope="col">Start (UTC)</th><th scope="col">Run</th><th scope="col">Run key</th><th scope="col">Trigger</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody><tr><td><a href="run-417.html">10-25 05:55</a></td><td><a href="run-417.html" class="mono">417</a></td><td><span class="mono small">schedule:2026-10-25T05:55Z</span></td><td>SCHEDULE</td><td>15m 00s</td><td><span class="st st-run">IN-PROGRESS</span></td></tr><tr><td><a href="run-412.html">10-25 04:55</a></td><td><a href="run-412.html" class="mono">412</a></td><td><span class="mono small">schedule:2026-10-25T04:55Z</span></td><td>SCHEDULE</td><td>55m 00s</td><td><span class="st st-skip">SKIPPED</span></td></tr><tr><td><a href="run-409.html">10-25 03:55</a></td><td><a href="run-409.html" class="mono">409</a></td><td><span class="mono small">schedule:2026-10-25T03:55Z</span></td><td>SCHEDULE</td><td>12m 07s</td><td><span class="st st-ok">SUCCESS</span></td></tr></tbody></table></div>
 </main>
-<aside aria-label="Selection properties">
-<h2>Selected object</h2>
-<p>SI_CLIENT_GAMMA</p>
-<p>Read-only definition · operator view</p>
-<p>Actions apply only to this selection and are filtered by CAPABILITIES. This is a static snapshot.</p>
-</aside>
+<aside class="panel" aria-label="Details"><h2>Pipeline details</h2><dl class="kv"><dt>Pipeline</dt><dd><span class="mono">SI_CLIENT_GAMMA</span></dd><dt>Project</dt><dd>support_insights</dd><dt>Trigger</dt><dd>Schedule + event wait</dd><dt>Schedule</dt><dd><span class="mono">*/5 0-1,3-23 * * *</span> UTC</dd><dt>Overlap</dt><dd>SKIP</dd><dt>Catch-up</dt><dd>off</dd><dt>Max parallel tasks</dt><dd>4</dd><dt>Priority</dt><dd>50</dd><dt>SLA</dt><dd>60 min</dd><dt>Email on failure</dt><dd>support-data@example.com</dd><dt>Tags</dt><dd><span class="tag">ingestion</span> <span class="tag">client-gamma</span></dd><dt>Upstream</dt><dd>none</dd><dt>Downstream</dt><dd><a href="pipeline-dm.html" target="_blank" rel="noopener">SI_DM<span class="ext" aria-hidden="true"></span><span class="sr-only"> (opens in a new tab)</span></a></dd><dt>Your role</dt><dd>operator (group support-ops, tag ingestion)</dd><dt>Definition</dt><dd><span class="mono">config/pipelines.csv</span> · read-only</dd></dl><p class="muted small">Client Gamma gzipped CSV objects in MinIO; starts work when a signal row arrives.</p></aside>
 </div>
-<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
 </div>
+
+<details class="wf-notes"><summary>Design notes (3)</summary><ul><li>Reads: PIPELINE <code>/pipelines/{code}</code>, HISTORY <code>/history</code>, CAPABILITIES <code>/capabilities</code>.</li><li>Run now opens the run dialog; Pause posts CONTROL <code>/controls</code> (definition pause, no run id).</li><li>Pending S6.F: the duration series with terminal/live semantics and units.</li></ul></details>
 </div>
 </body>
 </html>

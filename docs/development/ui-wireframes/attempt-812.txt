@@ -1,4 +1,1 @@
-STATIC DESIGN SAMPLE — not an actual production log
-2026-10-25T06:03:00Z attempt=812 owner=ingestion-02 started
-2026-10-25T06:03:01Z partition=2 resumed offset=430
-2026-10-25T06:03:22Z rows=128 status=RUNNING
+Sample design log for attempt 812 (wireframe).

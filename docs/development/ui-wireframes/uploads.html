@@ -3,201 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Uploads · ETL Craft wireframe</title>
+<title>Uploads · etl-craft</title>
 <link rel="stylesheet" href="wireframes.css">
 </head>
 <body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
 <a class="skip" href="#content">Skip to content</a>
-<header class="top">
-<strong>ETL Craft</strong>
-<span>Design review · 25 Oct 2026 · sample data</span>
-<form action="search.html" method="get">
-<label for="global-search">Global search</label>
-<input id="global-search" name="q" value="SI_CLIENT_BETA">
-<button type="submit">Search</button>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
 </form>
-<span>operator · support team</span>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
 </header>
 <div class="shell">
-<nav aria-label="Console navigator">
-<h2>Console</h2>
-<ul>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="pipelines.html" class="" >Pipelines</a>
-</li>
-<li>
-<a href="runs.html" class="" >Runs</a>
-</li>
-<li>
-<a href="backfills.html" class="" >Backfills</a>
-</li>
-<li>
-<a href="interventions.html" class="" >Interventions</a>
-</li>
-<li>
-<a href="agents.html" class="" >Agents and pools</a>
-</li>
-<li>
-<a href="insights.html" class="" >Pipeline Insights</a>
-</li>
-<li>
-<a href="gaps.html" class="" >Schema gaps</a>
-</li>
-<li>
-<a href="lineage.html" class="" >Lineage / catalog</a>
-</li>
-<li>
-<a href="metadata.html" class="" >Metadata</a>
-</li>
-<li>
-<a href="uploads.html" aria-current="page" class="current" >Uploads</a>
-</li>
-<li>
-<a href="commands.html" class="" >Command center</a>
-</li>
-</ul>
-<h2>Workflows</h2>
-<details open>
-<summary>Tag: ingestion</summary>
-<ul>
-<li>
-<a href="pipeline-alpha.html" class="" >SI_CLIENT_ALPHA</a>
-</li>
-<li>
-<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
-</li>
-<li>
-<a href="pipeline-gamma.html" class="" >SI_CLIENT_GAMMA</a>
-</li>
-</ul>
-</details>
-<details>
-<summary>Tag: mart / reference</summary>
-<ul>
-<li>
-<a href="pipeline-dm.html" class="" >SI_DM</a>
-</li>
-<li>
-<a href="pipeline-reference.html" class="" >SI_REFERENCE</a>
-</li>
-<li>
-<a href="uploads.html" aria-current="page" class="" >SI_STEWARD_DM_FACT</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_AGENTS</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_CUSTOMER_TYPES</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_SUPPORT_AREAS</a>
-</li>
-</ul>
-</details>
-<p>
-<a href="run.html" class="" >Recent: Beta run 419</a>
-</p>
-<p>
-<a href="README.md" class="" >Wireframe guide</a>
-</p>
-</nav>
-<div class="workspace">
-<nav class="crumbs" aria-label="Breadcrumb">
-<ol>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="project.html" class="" >support_insights</a>
-</li>
-</ol>
-</nav>
-<div class="workarea">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up" aria-current="page">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
 <main id="content" tabindex="-1">
-<h1>Uploads</h1>
-<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
-<p class="annotation">
-<strong>S5.AA feed:</strong> S7.M assigned-pipeline, upload and history reads GAP; RUN_DETAIL/AUDIT only after a run exists.</p>
-<p class="annotation">
-<strong>Pending contract:</strong> S6.B: validation/task logs use the same availability contract</p>
-<p>Planned S7.M · signed-in steward jo assigned to DS_AGENTS and DM_FACT; no arbitrary file path.</p>
-<form class="fields" action="ack-upload.html" method="get">
-<label>Assigned pipeline<select name="pipeline">
-<option>SI_STEWARD_DS_AGENTS</option>
-<option>SI_STEWARD_DS_CUSTOMER_TYPES</option>
-<option>SI_STEWARD_DS_SUPPORT_AREAS</option>
-<option>SI_STEWARD_DM_FACT</option>
-</select>
-</label>
-<label>Single CSV/TXT or XLSX file<input type="file" name="upload" accept=".csv,.txt,.xlsx" aria-describedby="upload-help" required>
-</label>
-<small id="upload-help">Static selection only. The package upload/action route is a gap under S7.M; this form goes only to the design acknowledgement.</small>
-<button type="submit">Submit selected upload (prototype only)</button>
-</form>
-<p class="route">POST: GAP — S7.M upload route not implemented</p>
-<section id="history">
-<h2>Upload history</h2>
-<div class="table-scroll" tabindex="0" role="region" aria-label="Single-file stewardship evidence">
-<table>
-<caption>Single-file stewardship evidence</caption>
-<thead>
-<tr>
-<th scope="col">Upload</th>
-<th scope="col">Actor</th>
-<th scope="col">Pipeline</th>
-<th scope="col">Outcome</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>
-<a href="uploads.html#accepted" class="" >74</a>
-</td>
-<td>steward:jo</td>
-<td>
-<a href="pipeline-reference.html" class=""  target="_blank" rel="noopener">SI_STEWARD_DS_AGENTS <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>
-<span class="status success">
-<span aria-hidden="true">●</span> SUCCESS</span>
-</td>
-</tr>
-<tr>
-<td>
-<a href="uploads.html#refused" class="" >73</a>
-</td>
-<td>steward:jo</td>
-<td>SI_STEWARD_DM_FACT</td>
-<td>
-<span class="status failed">
-<span aria-hidden="true">●</span> FAILED</span> · validation refused</td>
-</tr>
-</tbody>
-</table>
-</div>
-</section>
-<section id="accepted">
-<h2>Upload 74</h2>
-<p>agents-corrections.txt · 8 KiB · validate_file SUCCESS → steward_to_lnd → steward_to_ds → detached SI_REFERENCE. Seed LOCKED after first successful upload.</p>
-</section>
-<section id="refused">
-<h2>Upload 73 refused</h2>
-<p role="status">Missing source_system_identifier column; expected pipe-delimited required headers; fix the file and upload again. Nothing loaded.</p>
-</section>
+
+<div class="page-head"><div><h1>Uploads</h1><p class="sub">Stewardship uploads for pipelines you are assigned to</p></div><div class="actions"></div></div><form action="ack.html" method="get" class="card stack narrow"><label for="up">Pipeline</label><select id="up"><option>SI_STEWARD_DS_AGENTS</option><option>SI_STEWARD_DS_SUPPORT_AREAS</option></select><label for="uf">File (one pipe-delimited CSV/TXT or XLSX, up to 20 MB)</label><input id="uf" type="file"><button class="btn primary" type="submit">Upload and validate</button></form><h2>History</h2><div class="tbl"><table><caption class="sr-only">Upload history</caption><thead><tr><th scope="col">Upload</th><th scope="col">Pipeline</th><th scope="col">File</th><th scope="col">Outcome</th><th scope="col">Rows</th><th scope="col">By</th></tr></thead><tbody><tr><td>74</td><td>SI_STEWARD_DS_AGENTS</td><td>agents_q4.xlsx</td><td><span class="st st-ok">ACCEPTED</span></td><td>212 · 0 rejected</td><td>steward.ana</td></tr><tr><td>71</td><td>SI_STEWARD_DS_AGENTS</td><td>agents_fix.csv</td><td><span class="st st-bad">REFUSED</span></td><td>FILE_VALIDATION: column 'tier' missing</td><td>steward.ana</td></tr></tbody></table></div>
 </main>
-<aside aria-label="Selection properties">
-<h2>Selection</h2>
-<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
-<p>No definition editing.</p>
-</aside>
+
 </div>
-<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
 </div>
+
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>S7.M: no upload route exists yet; the form shows the planned flow only.</li></ul></details>
 </div>
 </body>
 </html>

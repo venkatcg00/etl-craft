@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run 414 tasks · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs" data-section>Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work with-panel">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-alpha.html">SI_CLIENT_ALPHA</a></li><li><a href="run-414.html" aria-current="page">Run 414</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-run" aria-hidden="true"></span>Run 414<span class="st st-ok">SUCCESS</span></h1></div><div class="actions"><a class="btn" href="run-414-recover.html">Rerun…</a></div></div><nav class="tabs" aria-label="Views"><a href="run-414.html">Graph</a><a href="run-414-timeline.html">Timeline</a><a href="run-414-list.html" aria-current="page">List</a></nav><div class="tbl"><table><caption class="sr-only">Task runs</caption><thead><tr><th scope="col">Task</th><th scope="col">Handler</th><th scope="col">Status</th><th scope="col">Attempts</th></tr></thead><tbody><tr><td><span class="mono">alpha_source_to_lnd</span></td><td>PYTHON</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_lnd_to_prs</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_prs_to_cdc</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_preods_delete</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_cdc_to_preods</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_rules</span></td><td>BUSINESS_RULES</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_ods_interactions</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_ods_customers</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_ods_agents</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_ods_support_areas</span></td><td>SQL</td><td><span class="st st-ok">SUCCESS</span></td><td>1</td></tr><tr><td><span class="mono">alpha_failure_alert</span></td><td>EMAIL_ALERT</td><td><span class="st st-skip">SKIPPED</span></td><td>—</td></tr></tbody></table></div>
+</main>
+<aside class="panel" aria-label="Details"><h2>Run details</h2><dl class="kv"><dt>Run</dt><dd><span class="mono">414</span></dd><dt>Pipeline</dt><dd><a href="pipeline-alpha.html">SI_CLIENT_ALPHA</a></dd><dt>Run key</dt><dd><span class="mono small">schedule:2026-10-25T05:30Z</span></dd><dt>Trigger</dt><dd>SCHEDULE</dd><dt>Started</dt><dd>2026-10-25 05:30:01 UTC</dd><dt>Duration</dt><dd>11m 31s</dd><dt>Status</dt><dd><span class="st st-ok">SUCCESS</span></dd><dt>Launched by</dt><dd>controller (schedule)</dd><dt>Output revision</dt><dd>1</dd></dl></aside>
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>Read: STEPS <code>/steps</code>.</li></ul></details>
+</div>
+</body>
+</html>

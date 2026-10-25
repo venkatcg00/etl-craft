@@ -3,179 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Interventions · ETL Craft wireframe</title>
+<title>Interventions · etl-craft</title>
 <link rel="stylesheet" href="wireframes.css">
 </head>
 <body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
 <a class="skip" href="#content">Skip to content</a>
-<header class="top">
-<strong>ETL Craft</strong>
-<span>Design review · 25 Oct 2026 · sample data</span>
-<form action="search.html" method="get">
-<label for="global-search">Global search</label>
-<input id="global-search" name="q" value="SI_CLIENT_BETA">
-<button type="submit">Search</button>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
 </form>
-<span>operator · support team</span>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
 </header>
 <div class="shell">
-<nav aria-label="Console navigator">
-<h2>Console</h2>
-<ul>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="pipelines.html" class="" >Pipelines</a>
-</li>
-<li>
-<a href="runs.html" class="" >Runs</a>
-</li>
-<li>
-<a href="backfills.html" class="" >Backfills</a>
-</li>
-<li>
-<a href="interventions.html" aria-current="page" class="current" >Interventions</a>
-</li>
-<li>
-<a href="agents.html" class="" >Agents and pools</a>
-</li>
-<li>
-<a href="insights.html" class="" >Pipeline Insights</a>
-</li>
-<li>
-<a href="gaps.html" class="" >Schema gaps</a>
-</li>
-<li>
-<a href="lineage.html" class="" >Lineage / catalog</a>
-</li>
-<li>
-<a href="metadata.html" class="" >Metadata</a>
-</li>
-<li>
-<a href="uploads.html" class="" >Uploads</a>
-</li>
-<li>
-<a href="commands.html" class="" >Command center</a>
-</li>
-</ul>
-<h2>Workflows</h2>
-<details open>
-<summary>Tag: ingestion</summary>
-<ul>
-<li>
-<a href="pipeline-alpha.html" class="" >SI_CLIENT_ALPHA</a>
-</li>
-<li>
-<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
-</li>
-<li>
-<a href="pipeline-gamma.html" class="" >SI_CLIENT_GAMMA</a>
-</li>
-</ul>
-</details>
-<details>
-<summary>Tag: mart / reference</summary>
-<ul>
-<li>
-<a href="pipeline-dm.html" class="" >SI_DM</a>
-</li>
-<li>
-<a href="pipeline-reference.html" class="" >SI_REFERENCE</a>
-</li>
-<li>
-<a href="uploads.html" class="" >SI_STEWARD_DM_FACT</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_AGENTS</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_CUSTOMER_TYPES</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_SUPPORT_AREAS</a>
-</li>
-</ul>
-</details>
-<p>
-<a href="run.html" class="" >Recent: Beta run 419</a>
-</p>
-<p>
-<a href="README.md" class="" >Wireframe guide</a>
-</p>
-</nav>
-<div class="workspace">
-<nav class="crumbs" aria-label="Breadcrumb">
-<ol>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="project.html" class="" >support_insights</a>
-</li>
-</ol>
-</nav>
-<div class="workarea">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit" aria-current="page">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
 <main id="content" tabindex="-1">
-<h1>Interventions</h1>
-<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
-<p class="annotation">
-<strong>S5.AA feed:</strong> AUDIT /audit; HISTORY /history; EXPLAIN /explanations.</p>
-<div class="table-scroll" tabindex="0" role="region" aria-label="Immutable intervention history">
-<table>
-<caption>Immutable intervention history</caption>
-<thead>
-<tr>
-<th scope="col">When UTC</th>
-<th scope="col">Actor</th>
-<th scope="col">Object</th>
-<th scope="col">Change / reason</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>06:03</td>
-<td>operator:maya</td>
-<td>
-<a href="run.html" class=""  target="_blank" rel="noopener">Beta run 419 <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>Recover failed partition · source connection restored</td>
-</tr>
-<tr>
-<td>05:00</td>
-<td>admin:lee</td>
-<td>
-<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM ods_to_dm <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>Watermark reset · 00:00 → 00:00 · verified replay scope</td>
-</tr>
-<tr>
-<td>04:30</td>
-<td>steward:jo</td>
-<td>
-<a href="uploads.html" class=""  target="_blank" rel="noopener">Upload 74 <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>Customer correction · approved support request</td>
-</tr>
-</tbody>
-</table>
-</div>
-<a href="commands.html#mark" class="" >Open selected action confirmation</a>
+
+<div class="page-head"><div><h1>Interventions</h1></div><div class="actions"></div></div><form class="filters" action="interventions.html"><label for="ia" class="sr-only">Actor</label><input id="ia" placeholder="Actor"><label for="ix" class="sr-only">Action</label><select id="ix"><option>Action: any</option></select><button class="btn" type="submit">Apply</button></form><div class="tbl"><table><caption class="sr-only">Interventions</caption><thead><tr><th scope="col">Time (UTC)</th><th scope="col">Who</th><th scope="col">Action</th><th scope="col">Scope</th><th scope="col">Why</th><th scope="col">Outcome</th></tr></thead><tbody><tr><td>06:07:12</td><td>ops.oncall</td><td>RECOVER</td><td>SI_CLIENT_BETA · run 419</td><td>Broker recovered</td><td><span class="st st-wait">REQUESTED</span></td></tr><tr><td>05:20:03</td><td>ops.oncall</td><td>MARK FAILED → SUCCESS</td><td>SI_CLIENT_BETA · run 413 · beta_rules</td><td>Rule fixed in config 31</td><td><span class="st st-ok">ACKNOWLEDGED</span></td></tr><tr><td>04:12:40</td><td>steward.ana</td><td>UPLOAD</td><td>SI_STEWARD_DS_AGENTS · upload 74</td><td>Quarterly agent list</td><td><span class="st st-ok">ACCEPTED</span></td></tr><tr><td>02:00:00</td><td>admin.venkat</td><td>HOLD</td><td>tag ingestion</td><td>Maintenance hour</td><td><span class="st st-ok">ACKNOWLEDGED</span></td></tr></tbody></table></div>
 </main>
-<aside aria-label="Selection properties">
-<h2>Selection</h2>
-<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
-<p>No definition editing.</p>
-</aside>
+
 </div>
-<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
 </div>
+
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>Read: AUDIT <code>/audit</code>; every recorded change with who, when and why.</li></ul></details>
 </div>
 </body>
 </html>

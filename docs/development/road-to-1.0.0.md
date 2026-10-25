@@ -744,6 +744,11 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   contracts settle. No S7.A page code precedes owner approval; merging the wireframe PR is
   that approval. Missing read actions are documented gaps, never invented API capabilities.
   UI/api changes run installed Semgrep during security self-review, not in CI.
+- Owner decision, 2026-10-25: the wireframes take Databricks as the whole template (Jobs,
+  job runs, Catalog Explorer), start at the sign-in page, use a shaded light theme and a dark
+  theme, and replace the command center's generated forms with a command console that runs
+  `etl-craft` command lines through the API. Pages are generated from one throwaway script;
+  the committed HTML is the design record.
 - Owner decision, 2026-10-25: S7.Y removes grants.csv before S7.A, keeps grant rows/history and
   introduces admin access grant/revoke/list with atomic bulk command input and dry-run.
   S7.B extends those command names to bindings. All other accepted metadata files remain;
@@ -6104,6 +6109,11 @@ page coverage, action routes and read gaps are listed in the README. Files are r
 static HTML/CSS with no JavaScript, external fonts or CDN. Selection/filter/menu/confirmation
 states are addressable; links and buttons visibly follow S7.A.4. S6.B/S6.F-dependent views
 state the contract they need. This step adds no runtime assets or CI job.
+The layout takes Databricks as the template (owner, 25 October 2026): a top bar with the
+project switcher and global search, a left sidebar, Jobs-style pipeline and run pages with
+graph, timeline, matrix and a details panel, and a Catalog Explorer for tables (columns,
+lineage, history, rules, details). The wireframes start at the sign-in page, keep design notes
+in a closed drawer apart from the console, and show both themes.
 
 **Security self-review.** UI and `api/` PRs run the installed Semgrep MCP `semgrep_scan`
 on their changed files as part of `security-review`, reporting findings and dispositions in
@@ -6209,6 +6219,10 @@ lists each element, its source and its data.
   - **Demo stack.** The full demo stack's k3d manifests live in the demo repository
     (S8.A); the package needs no Docker.
 - *Pages.*
+  - Sign-in (owner, 25 October 2026): the first page; SSO and local accounts as
+    `login methods` allows, then Home.
+  - Theme (owner, 25 October 2026): a shaded light theme, never pure white, and a dark theme;
+    the system setting chooses, and a switch in the top bar overrides it.
   - Projects: health per project (running, failed today, SLA misses, queued work).
   - Pipelines: list with schedule, next run, last status, pause state; a pipeline page with the DAG
     coloured by the selected run's task statuses.
@@ -6240,17 +6254,19 @@ lists each element, its source and its data.
       stays in the config files and CI.
     - The list comes from the action table, filtered by the person's role and pipeline grants
       (S5.AD); the server checks again on every submit, as the API does.
-    - Each command's form is generated from its request type: fields, choices, defaults and
-      validation messages. The form shows the equivalent CLI line, so the same command can be
-      scripted.
-    - Mark, force, abort, rerun and offset resets need a typed reason and a confirmation.
-    - Results render as the CLI's text output, with the JSON available. A history panel shows the
+    - It is a command console, not a set of forms (owner, 25 October 2026): the person types an
+      `etl-craft` command line, the server parses it with the CLI's own parser, calls the same
+      `/api/v1` action the CLI calls with `--api`, and prints the CLI's text output (`--json`
+      prints the JSON). Tab completes commands and flags from the action table; a refused
+      command prints the same message and exit code as the CLI.
+    - Mark, force, abort, rerun and offset resets prompt inside the console for a typed reason
+      and a typed confirmation, as the CLI does interactively. A history panel shows the
       person's own commands from `AUD_ACTIONS`; every command is audited like any API call.
 - *Tests.* Page tests with the API test client; an end-to-end browser test of the main operator flows
   (Playwright in a separate CI job). The command center lists exactly the actions each role and
   grant allows (generated from the action table, so a new action is covered automatically),
-  refuses a hand-crafted request for a hidden action, never lists a host or metadata action, and
-  shows the CLI line that runs the same request.
+  refuses a hand-crafted request for a hidden action, refuses host and metadata commands with the
+  CLI's message, and prints the same text and JSON as the CLI for the same command.
 
 ### S7.M Stewardship uploads
 

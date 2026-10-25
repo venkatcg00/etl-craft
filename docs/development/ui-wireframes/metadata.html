@@ -3,203 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Metadata · read-only · ETL Craft wireframe</title>
+<title>Metadata · etl-craft</title>
 <link rel="stylesheet" href="wireframes.css">
 </head>
 <body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
 <a class="skip" href="#content">Skip to content</a>
-<header class="top">
-<strong>ETL Craft</strong>
-<span>Design review · 25 Oct 2026 · sample data</span>
-<form action="search.html" method="get">
-<label for="global-search">Global search</label>
-<input id="global-search" name="q" value="SI_CLIENT_BETA">
-<button type="submit">Search</button>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
 </form>
-<span>operator · support team</span>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
 </header>
 <div class="shell">
-<nav aria-label="Console navigator">
-<h2>Console</h2>
-<ul>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="pipelines.html" class="" >Pipelines</a>
-</li>
-<li>
-<a href="runs.html" class="" >Runs</a>
-</li>
-<li>
-<a href="backfills.html" class="" >Backfills</a>
-</li>
-<li>
-<a href="interventions.html" class="" >Interventions</a>
-</li>
-<li>
-<a href="agents.html" class="" >Agents and pools</a>
-</li>
-<li>
-<a href="insights.html" class="" >Pipeline Insights</a>
-</li>
-<li>
-<a href="gaps.html" class="" >Schema gaps</a>
-</li>
-<li>
-<a href="lineage.html" class="" >Lineage / catalog</a>
-</li>
-<li>
-<a href="metadata.html" aria-current="page" class="current" >Metadata</a>
-</li>
-<li>
-<a href="uploads.html" class="" >Uploads</a>
-</li>
-<li>
-<a href="commands.html" class="" >Command center</a>
-</li>
-</ul>
-<h2>Workflows</h2>
-<details open>
-<summary>Tag: ingestion</summary>
-<ul>
-<li>
-<a href="pipeline-alpha.html" class="" >SI_CLIENT_ALPHA</a>
-</li>
-<li>
-<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
-</li>
-<li>
-<a href="pipeline-gamma.html" class="" >SI_CLIENT_GAMMA</a>
-</li>
-</ul>
-</details>
-<details>
-<summary>Tag: mart / reference</summary>
-<ul>
-<li>
-<a href="pipeline-dm.html" class="" >SI_DM</a>
-</li>
-<li>
-<a href="pipeline-reference.html" class="" >SI_REFERENCE</a>
-</li>
-<li>
-<a href="uploads.html" class="" >SI_STEWARD_DM_FACT</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_AGENTS</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_CUSTOMER_TYPES</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_SUPPORT_AREAS</a>
-</li>
-</ul>
-</details>
-<p>
-<a href="run.html" class="" >Recent: Beta run 419</a>
-</p>
-<p>
-<a href="README.md" class="" >Wireframe guide</a>
-</p>
-</nav>
-<div class="workspace">
-<nav class="crumbs" aria-label="Breadcrumb">
-<ol>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="project.html" class="" >support_insights</a>
-</li>
-</ol>
-</nav>
-<div class="workarea">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db" aria-current="page">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
 <main id="content" tabindex="-1">
-<h1>Metadata · read-only</h1>
-<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
-<p class="annotation">
-<strong>S5.AA feed:</strong> PIPELINE /pipelines/{pipeline_code}; VALIDATE /validation; AUDIT /audit; full metadata/history/access read GAP.</p>
-<p>Definitions change in reviewed config files; access changes through admin access commands (planned S7.Y). No edit, apply or grant form appears here.</p>
-<div class="table-scroll" tabindex="0" role="region" aria-label="Metadata provenance">
-<table>
-<caption>Metadata provenance</caption>
-<thead>
-<tr>
-<th scope="col">Source / entity</th>
-<th scope="col">Actor / history</th>
-<th scope="col">Validation</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>
-<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">config/pipelines.csv <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>developer:ci · revision si-25oct</td>
-<td>Valid</td>
-</tr>
-<tr>
-<td>
-<a href="task.html" class=""  target="_blank" rel="noopener">config/tasks.csv <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>developer:ci · task 719 snapshot</td>
-<td>max_items=4, max_parallel=2</td>
-</tr>
-<tr>
-<td>
-<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">config/task_dependencies.csv <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>developer:ci · SUCCESS/HAS_DATA edges</td>
-<td>Valid</td>
-</tr>
-<tr>
-<td>
-<a href="table.html" class=""  target="_blank" rel="noopener">config/tables.csv <span aria-hidden="true">↗</span>
-<span class="sr-only"> (opens in a new tab)</span>
-</a>
-</td>
-<td>developer:ci · schema history</td>
-<td>1 missing declared column</td>
-</tr>
-<tr>
-<td>
-<a href="metadata.html#access" class="" >Command-managed access</a>
-</td>
-<td>admin:lee · immutable access audit</td>
-<td>No grants.csv</td>
-</tr>
-</tbody>
-</table>
-</div>
-<section id="rules">
-<h2>Rules and dependencies</h2>
-<p>alpha_rules uses own-source scope; task dependencies determine ordering. No SI_DM client gate.</p>
-</section>
-<section id="scripts">
-<h2>Script source</h2>
-<p>python_scripts/kafka_to_lnd.py · commit si-25oct · source display read gap; no editor.</p>
-</section>
-<section id="access">
-<h2>Access records · read-only</h2>
-<p>support-operators → ingestion tag → operator; planned access list API (S7.Y), not config.</p>
-</section>
+
+<div class="page-head"><div><h1>Metadata</h1><p class="sub">Read-only view of the applied config files</p></div><div class="actions"></div></div><p class="banner">To change metadata, edit <span class="mono">config/*.csv</span> in the project repository and run <span class="mono">etl-craft config apply</span>. The console never edits definitions.</p><div class="split"><nav class="folders" aria-label="Config files"><h2>Config files</h2><ul><li><a href="metadata-pipelines.html" aria-current="page">pipelines.csv</a></li><li><a href="metadata-tasks.html">tasks.csv</a></li><li><a href="metadata-task_parameters.html">task_parameters.csv</a></li><li><a href="metadata-task_dependencies.html">task_dependencies.csv</a></li><li><span class="muted">pipeline_dependencies.csv</span></li><li><span class="muted">tables.csv</span></li><li><span class="muted">columns.csv</span></li><li><span class="muted">business_rules.csv</span></li><li><span class="muted">projects.csv</span></li><li><span class="muted">pools.csv</span></li></ul></nav><section><h2 class="mono">config/pipelines.csv</h2><div class="tbl"><table><caption class="sr-only">pipelines</caption><thead><tr><th scope="col">PIPELINE_CODE</th><th scope="col">RUN_SCHEDULE</th><th scope="col">OVERLAP_POLICY</th><th scope="col">ACTIVE_FLAG</th><th scope="col">Changed by</th><th scope="col">Changed</th><th scope="col">Validate</th></tr></thead><tbody><tr><td>SI_CLIENT_ALPHA</td><td>*/15 0-1,3-23 * * *</td><td>SKIP</td><td>Y</td><td>ci-deploy</td><td>2026-10-22</td><td>—</td></tr><tr><td>SI_CLIENT_BETA</td><td>*/15 0-1,3-23 * * *</td><td>SKIP</td><td>Y</td><td>ci-deploy</td><td>2026-10-22</td><td>—</td></tr><tr><td>SI_CLIENT_GAMMA</td><td>*/5 0-1,3-23 * * *</td><td>SKIP</td><td>Y</td><td>ci-deploy</td><td>2026-10-22</td><td>—</td></tr><tr><td>SI_DM</td><td>0 */6 * * *</td><td>SKIP</td><td>Y</td><td>ci-deploy</td><td>2026-10-22</td><td>—</td></tr><tr><td>SI_REFERENCE</td><td>—</td><td>SKIP</td><td>Y</td><td>ci-deploy</td><td>2026-10-22</td><td>—</td></tr></tbody></table></div><p class="muted small">History: <a href="interventions.html">changes by actor</a> · as-of view via <span class="mono">config export --as-of</span></p></section></div>
 </main>
-<aside aria-label="Selection properties">
-<h2>Selection</h2>
-<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
-<p>No definition editing.</p>
-</aside>
+
 </div>
-<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
 </div>
+
+<details class="wf-notes"><summary>Design notes (2)</summary><ul><li>Read gap: full read-only config rows with actor, as-of and validate findings per row.</li><li>Access grants are not here: they are managed by admins with etl-craft access (S7.Y).</li></ul></details>
 </div>
 </body>
 </html>

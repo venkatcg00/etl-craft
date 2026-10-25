@@ -1,140 +1,116 @@
-# ETL Craft console wireframes — S7.A.0
+# etl-craft console wireframes — S7.A.0
 
-Owner decisions: **25 October 2026**. This is one combined `docs(plan)` review with the
-Support Insights schedule/window/access plan. **No S7.A page code may start before owner
-approval; merging this PR is that approval.** These files are design documents, not shipped
-assets or an implementation of the routes described below.
+Owner decisions, 25 October 2026. No S7.A page code starts before the owner approves these
+wireframes; merging this `docs(plan)` PR is that approval. They are design documents, not
+shipped assets, and they add no route or action.
 
-Open [index.html](index.html) locally. No JavaScript, font downloads, CDN, server or build is
-needed. The shell stays dense: a narrow navigator, search/breadcrumb bar, content and selection
-panel. On a narrow screen the navigator and panel stack; wide tables/timelines have labelled,
-keyboard-focusable horizontal scroll regions. The source folder is excluded from MkDocs to
-prevent `README.md` generating an index page over the static `index.html` and to keep review
-assets out of the published product documentation. The roadmap links this source guide.
+Open [index.html](index.html) (the sign-in page) and click through. Everything is static HTML
+and one stylesheet: no JavaScript, fonts, CDN or server. The folder is excluded from MkDocs.
+
+## Design direction
+
+- **Databricks is the template.** Top bar with the project switcher and global search, a left
+  sidebar, Jobs-style pipeline pages (Runs, Matrix, Tasks, Permissions tabs and a details
+  panel), job-run-style run pages (Graph, Timeline, List and a run or task panel), and a
+  Catalog Explorer for tables (Columns, Lineage, History, Rules, Details).
+- **PowerCenter decides how you act.** Select an object, then act on it from the right-click
+  menu, the side panel or the header buttons; nothing acts without a selection.
+- **Console, not forms.** The command center is a terminal: type an `etl-craft` command line,
+  get the CLI's output. Host commands and metadata edits are refused with the CLI's message.
+- **Themes.** A shaded light theme (never pure white) and a dark theme. The system setting
+  chooses; the half-circle button in the top bar switches to the other theme. In the
+  wireframes the switch lasts for the current page only (no script); the real UI remembers it.
+- **Design notes stay out of the way.** Each page's read actions, routes and gaps are in the
+  closed "Design notes" drawer at the bottom right, not in the console itself.
 
 ## Walk the operator flow
 
-1. [Projects](index.html) → [support_insights](project.html) → [pipelines](pipelines.html).
-2. Apply the [ingestion filter](pipelines-filtered.html), select the
-   [pipeline side panel](pipeline-panel.html), then open [Beta](pipeline-beta.html).
-3. Inspect [runs and duration bars](runs.html), the [matrix](matrix.html),
-   [run 419 graph/timeline](run.html), the [task panel](task.html) and its
-   [action menu](task.html#actions). Historical cells open their actual task/run states.
-4. Inspect [Beta partition items](items.html), the [attempt log](attempt.html),
-   [failed attempt 811](attempt-811.html) and the [pipeline log/manifest](run-log.html).
-5. [Command center](commands.html) → type a reason → Review → confirm the selected scope →
-   static acknowledgement. Mark, force, abort, rerun and offset reset each have their own
-   addressable form/confirmation. A running selection's reset is refused by the real service;
-   the prototype shows the preconditions rather than implying it is currently allowed.
-6. Compare [Gamma waiting](run-gamma.html) with [DM's independent window](run-dm.html).
-   Gamma holds no agent slot; Alpha's in-progress merge fences the first DM window, not its
-   old pipeline ID or Gamma's idle run. The next window includes Alpha once.
-7. Review [uploads](uploads.html), [backfills](backfills.html), [interventions](interventions.html),
-   [agents/pools](agents.html), [Insights](insights.html), [gaps](gaps.html),
-   [lineage/catalog](lineage.html) and [read-only metadata](metadata.html).
+1. [Sign in](index.html) → [Home](home.html): health tiles, recent runs, projects.
+2. [Pipelines](pipelines.html): the tag tree is the navigator; [filter by tag](pipelines-ingestion.html).
+3. [SI_CLIENT_BETA](pipeline-beta.html): run-duration bars and runs; [matrix](pipeline-beta-matrix.html),
+   [tasks](pipeline-beta-tasks.html), [permissions](pipeline-beta-access.html), [run now](pipeline-beta-run-now.html).
+4. [Run 419](run-419.html): graph; [timeline](run-419-timeline.html); select
+   [beta_source_to_lnd](run-419-task.html) for its panel; [right-click menu](run-419-menu.html);
+   [recover](run-419-recover.html) → [acknowledged](run-419-ack.html); [mark](run-419-mark.html).
+5. [Attempt 812 log](attempt-812.html), [fan-out items](items-419.html), [pipeline run log](run-419-log.html).
+6. [Gamma waiting for signal rows](run-417.html) and [SI_DM's window](run-420.html).
+7. [Catalog](catalog.html) → [ods](schema-ods.html) → [interactions](table-ods-interactions.html):
+   [lineage](table-ods-interactions-lineage.html), [history](table-ods-interactions-history.html),
+   [rules](table-ods-interactions-rules.html), [details](table-ods-interactions-details.html);
+   [schema gaps](catalog-gaps.html).
+8. [Console](console.html) → [after a command](console-ran.html).
+9. [Insights](insights.html), [Agents and pools](agents.html), [Backfills](backfills.html),
+   [Interventions](interventions.html), [Uploads](uploads.html), [Metadata](metadata.html),
+   [Search](search.html).
 
-### What the static interactions mean
+### Link and action rules shown
 
-- Every navigation target is a real link. Cross-object links have a visible ↗ icon,
-  `target="_blank" rel="noopener"` and hidden “(opens in a new tab)” text. Same-run task
-  selection, filters and page tabs stay in the tab. The sidebar (console views and the
-  pipeline tree), breadcrumbs, search results and the first column of a list are navigation:
-  they select the object and stay in the tab, so Back works. New tabs are for links from one
-  object's page to another object.
-- Buttons are native form controls, never anchors disguised as actions. Prototype forms use
-  **GET to an acknowledgement HTML file** so they work from disk. Each displays the **actual
-  POST action route intended by the real UI**. They send no API request, execute no command,
-  confer no permission and never navigate to another object's page as a side effect.
-- Review buttons lead to a confirmation state, not an action. Confirmation buttons lead to
-  acknowledgement pages. Because there is no JavaScript/server, the first form's reason is
-  not dynamically echoed: confirmation labels the static sample and requires the reason again.
-  The real UI must preserve the exact typed value and selection through review and submit.
-- Confirmations are ordinary pages, not modal dialogs; there is no fake `aria-modal`, focus
-  trap or missing Escape handler. Browser Back or Cancel leaves the confirmation.
-- The task menu is an addressable `#actions` section: it is the visible right-click/menu design,
-  with a keyboard link equivalent. No custom context-menu behavior is claimed.
-- Downloads are labelled design-sample `.txt`/JSON files. Whole-run ZIP is disabled with its
-  missing route explained; there is no fabricated ZIP or invented full-log download endpoint.
-- Receipt is not completion: acknowledgement text distinguishes REQUESTED, acknowledged,
-  completed and refused outcomes. Remote force currently remains host-only; its static
-  acknowledgement explicitly shows refusal pending the S7.A.2 capability.
+- The sidebar, breadcrumbs, tabs, search results, list rows, graph nodes and matrix cells
+  select or drill in the same tab, so Back works.
+- A link from one object's page to another object (a table in lineage, a downstream pipeline,
+  an attempt log, a parent upload) opens a new tab, with the ↗ icon and hidden
+  "(opens in a new tab)" text.
+- Actions are buttons, never links. Dialogs and toasts are static pages drawn over the page
+  they belong to; Cancel returns to it. Receipt is not completion: the toast says REQUESTED.
 
-## Scenario and visual evidence
+## Coverage
 
-The names, pools and topology are the Support Insights design, with **illustrative review
-fixtures**, not measurements from a running deployment. Do not use the sample counts as release
-evidence. The date is 2026-10-25 UTC; Beta run 419 retries partition 2 while 0/1/3 succeed;
-Gamma run 417 waits for an unconsumed object signal row; Alpha run 418 holds an ODS merge open from 05:59;
-SI_DM run 420 freezes 00:00 → 05:59 and succeeds at 06:01:22. Alpha commits at 06:02 and
-appears in the next DM window. Beta historical runs 415 and 416 have distinct global Engine DB IDs from Alpha run 418.
-Historical links retain their exact run identity. No run-ID ordering is the DM offset. ODS UPDATE_DATE is projected as `ods_changed_at` to
-avoid returning a reserved engine audit name from the managed SELECT.
-SI_REFERENCE run 410 is detached from stewardship upload 74. Three one-slot ingestion agents
-and nine warehouse agents retain twelve × 256 MiB; Beta's two bounded readers share one slot.
-
-Status text/colour mapping is fixed in the single `wireframes.css`:
-
-| State | Colour | Non-colour evidence |
-| --- | --- | --- |
-| SUCCESS | dark green #23623b | text SUCCESS and dot |
-| FAILED / LOST | dark red #a0292b | text FAILED/LOST and dot |
-| RUNNING | blue #1556a1 | text RUNNING and dot |
-| WAITING / RETRYING | ochre #805612 | explicit text and dot |
-| QUEUED / SKIPPED / unavailable / stale | grey #525860 | distinct explicit labels |
-| Type mismatch | purple #723b8c | explicit mismatch, declared/deployed values |
-| Config only | dark red | Config only, reason; never inferred from colour |
-| Deployed only / lineage gap | ochre | labelled reason and affected object |
-| Matched / Not declared | neutral grey | distinct explicit labels and coverage |
-
-Charts are static HTML/CSS, never decorative. Bars/cells expose run/task/status/value in an
-accessible name, axes have time units, and KPI tiles show value/unit/period/comparison. Counts
-identify their denominator/provenance; “Not measured” is not zero. Queue/gate/event phases
-are separate from execution. A dependency-gate segment without an attempt selects its waiting
-task state rather than inventing an attempt; execution bars select the exact attempt.
-
-## Coverage: workflow navigation
-
-| Element from metadata-and-ui.md | Wireframe / addressable state |
+| Element or page (metadata-and-ui.md, S7.A) | Wireframe |
 | --- | --- |
-| Navigator: tags, pipelines, recent runs | Shared shell in [index](index.html); ingestion and mart/reference trees |
-| Global search | Shared labelled search form → [search results](search.html) |
-| Breadcrumbs | Every file; project → selected pipeline → exact run → task as applicable |
-| Pipeline list, name/tags/schedule/next tick/last runs/SLA/pause | [Pipelines](pipelines.html), [applied tag/sort/page](pipelines-filtered.html) |
-| Pipeline side panel: schedule/timezone/catch-up/overlap/tags/email/SLA/dependencies/triggers/access/source | [Pipeline panel](pipeline-panel.html) |
-| Run matrix / cell selection | [Matrix](matrix.html), separate historical/current task files |
-| Run-duration chart | [Runs](runs.html), labelled duration/status/run links |
-| Runs list, kind/date/key/status filters, parent/child links | [Runs](runs.html), [filtered](runs-filtered.html), [reference child](run-reference.html) |
-| Run graph / selected task | [Beta run](run.html), [task](task.html), [Alpha](run-alpha.html) |
-| Timeline with queue/gate/event/execution phases | [Run timeline](run.html), [Gamma wait](run-gamma.html), [fan-out items](items.html) |
-| Task side panel: status/attempts/classes/parameters/rows/rejects/explain/tail/owner/host | [Task panel](task.html), [attempts](task.html#attempts), [wait explanation](task.html#waits) |
-| Repair/rerun / affected selection preview | [Task menu](task.html#actions), [rerun form](commands.html#rerun), [confirmation](confirm-rerun.html) |
-| Run now with parameters / equivalent CLI | [Command center](commands.html#force), [force review](confirm-force.html); host-only refusal shown |
-| Live refresh / paused stream | Shared footer; [explicit paused state](run.html#stream); no real SSE in this prototype |
+| Sign-in | [index](index.html) |
+| Project overview and health | [Home](home.html) |
+| Navigator: tags, pipelines, recent runs | [Pipelines tag tree](pipelines.html), sidebar Recents |
+| Global search | top bar → [search](search.html) |
+| Breadcrumbs | every page below Home |
+| Pipeline list (tags, schedule, next run, recent runs, SLA, pause) | [Pipelines](pipelines.html) |
+| Pipeline side panel | [details panel](pipeline-beta.html) |
+| Run matrix | [Matrix](pipeline-beta-matrix.html) |
+| Run-duration chart | [Runs tab](pipeline-beta.html) |
+| Runs list, filters, parent and child links | [Runs](runs.html), [failed](runs-failed.html), [run 410 parent](run-410.html) |
+| Run graph | [Run 419](run-419.html), [Alpha 418](run-418.html), [Gamma 417](run-417.html), [DM 420](run-420.html) |
+| Task timeline (queue, gate, event wait, execution) | [Timeline](run-419-timeline.html), [Gamma](run-417-timeline.html) |
+| Task side panel | [Task panel](run-419-task.html) |
+| Right-click menu | [Menu](run-419-menu.html) |
+| Repair and rerun | [Recover](run-419-recover.html), [rerun a finished run](run-416-recover.html) |
+| Run now with parameters | [Run dialog](pipeline-beta-run-now.html) (override gap noted) |
+| Live refresh | "Live · paused" in run headers; stream contract is a gap |
+| Attempt: live tail, exit code, owner, host, download | [Attempt 812](attempt-812.html), [811](attempt-811.html) |
+| Pipeline run log and run zip | [Run log](run-419-log.html) |
+| Backfills | [Backfills](backfills.html), [start](backfills-start.html) |
+| Interventions | [Interventions](interventions.html) |
+| Agents and pools | [Agents and pools](agents.html) |
+| Catalog: tables, lineage, rules | [Catalog](catalog.html), [table](table-ods-interactions.html), [lineage](table-dm-fact-lineage.html), [rules](table-ods-interactions-rules.html) |
+| Schema gaps and states | [Gaps](catalog-gaps.html), [columns](table-ods-interactions.html) |
+| Pipeline Insights | [Insights](insights.html) |
+| Metadata (read-only, source file, actor) | [Metadata](metadata.html) |
+| Uploads | [Uploads](uploads.html) |
+| Command center | [Console](console.html) |
 
-## Coverage: S7.A pages and gap/metadata design
+## Scenario
 
-| Required page / element | Wireframe |
+Illustrative review data, not measurements. 2026-10-25 UTC. Beta run 419 retries
+partition-2 while partitions 0, 1 and 3 succeeded. Alpha run 418 holds an ODS merge open
+(attempt 9031). Gamma run 417 waits for MinIO signal rows and holds no slot. SI_DM run 420
+read the window 00:00 ≤ UPDATE_DATE < 05:59, fenced by Alpha's running attempt. SI_REFERENCE
+run 410 came from stewardship upload 74.
+
+## Status marks
+
+Every status is an icon plus its word; colour is never the only signal.
+
+| Status | Mark |
 | --- | --- |
-| App shell / Project Overview / health | [Projects](index.html), [project](project.html), shared sidebar/search/breadcrumb/panel |
-| Pipelines / DAG | [Alpha](pipeline-alpha.html), [Beta](pipeline-beta.html), [Gamma](pipeline-gamma.html), [DM](pipeline-dm.html), [Reference](pipeline-reference.html) |
-| Runs grid / filter | [Matrix](matrix.html), [runs](runs.html), [filter](runs-filtered.html) |
-| Run detail / attempt counts / errors / explain / scoped controls | [Run 419](run.html), [task panel](task.html), [items](items.html) |
-| Attempt live tail / exit / owner / host / download | [Attempt 812](attempt.html), [attempt 811](attempt-811.html), sample download |
-| Pipeline run log / zip availability | [Run log](run-log.html), manifest sample and disabled ZIP gap |
-| Backfill start/progress/stop | [Backfills](backfills.html#progress) |
-| Interventions who/when/why | [Interventions](interventions.html) |
-| Agents and pools | [Agents](agents.html#ingestion), warehouse/capacity/heartbeat sections |
-| Catalog lineage / tables / rules / scripts | [Lineage](lineage.html), [table comparison](table.html), [rules](rules.html), [scripts](scripts.html) |
-| Pipeline Insights / KPI/trends/task breakdown/latest runs | [Insights](insights.html), linked runs/tasks |
-| Schema gaps / coverage / table history | [Gaps](gaps.html), [stale state](gaps.html#stale), [table history](table.html#history) |
-| Metadata readonly / config source / actor / history / validation | [Metadata](metadata.html), [rules](metadata.html#rules), [script](metadata.html#scripts), [access record](metadata.html#access) |
-| Uploads assigned pipeline/single file/validation/reject/history | [Uploads](uploads.html), [accepted](uploads.html#accepted), [refused](uploads.html#refused) |
-| Command center / reason / confirmation / CLI | [Commands](commands.html), [mark](confirm-mark.html), [force](confirm-force.html), [abort](confirm-abort.html), [rerun](confirm-rerun.html), [offset](confirm-offset.html) |
-| Selection then act / no editing / new-tab affordance | Task menu/panel + all object-reference links; no definition editor anywhere |
+| SUCCESS, Matched, ACCEPTED, HEALTHY | green check |
+| FAILED, LOST, Config only, REFUSED | red cross |
+| IN-PROGRESS, RUNNING | blue spinner |
+| WAITING, REQUESTED, Deployed only, STALE, DRAINING | amber clock |
+| QUEUED, Engine managed, Unchecked | grey dotted ring |
+| SKIPPED, CANCELLED | grey square |
+| Type mismatch | purple diamond |
 
 ## Read actions, POST actions and gaps
 
-Every page has a visible S5.AA feed annotation. Prefix below is
+Every page lists its S5.AA reads in its design-notes drawer. Prefix below is
 `/api/v1/projects/{project}` (except `/api/v1/health` and `/api/v1/whoami`). Current action-table
 sources: `services/operations/actions.py`, request types and control/inspect services, read
 at the plan's origin/main baseline. A route existing does not imply every desired filter,
@@ -152,14 +128,15 @@ aggregate or child document is available; those gaps stay explicit.
 | AUDIT | `/audit` | actor/intervention records; not a synthesized pipeline log |
 | CATALOG_GAPS, LINEAGE, VALIDATE, DOCS_VERSION_CHECK | `/catalog/gaps`, `/lineage`, `/validation`, `/docs/versions` | structural gaps, lineage, validation, generated-doc versions |
 
-| Buttons | Current POST action route / acknowledgement |
+| Buttons | Current POST action route / wireframe state |
 | --- | --- |
-| Run, task-only, rerun, run-from, backfill | RUN `/runs` → [ack](ack-run.html); request flags/capability govern scope |
-| Pause/resume/hold/stop/abort/recover | CONTROL `/controls` → [ack](ack-control.html); definition pause omits run ID, controls require reason |
-| Mark / watermark / scalar or partition offset reset | MARK `/marks` → [ack](ack-mark.html); active-owner/reset checks still apply |
-| Item retry | ITEM_CONTROL `/pipelines/{pipeline_code}/runs/{run_id}/tasks/{task_code}/items/controls` → [ack](ack-items.html) |
-| Force | RUN route exists, remote force is currently host-only → [refusal ack](ack-force.html); S7.A.2 gap, not a new route |
-| Upload | No existing route; S7.M gap → [prototype-only ack](ack-upload.html) |
+| Run now, run task only, run from here, rerun, backfill | RUN `/runs` → [run dialog](pipeline-beta-run-now.html), [backfill dialog](backfills-start.html), [acknowledgement](run-419-ack.html) |
+| Pause, hold, stop, abort, recover | CONTROL `/controls` → [recover dialog](run-419-recover.html) → [acknowledgement toast](run-419-ack.html) |
+| Mark, watermark or offset reset | MARK `/marks` → [mark dialog](run-419-mark.html) with typed reason and confirmation |
+| Item retry | ITEM_CONTROL `/pipelines/{pipeline_code}/runs/{run_id}/tasks/{task_code}/items/controls` → [items](items-419.html) |
+| Console commands | the same routes; the console parses a command line and calls them ([console](console.html)) |
+| Force | RUN route exists; remote force is host-only today, so the console refuses it with the CLI's message until S7.A.2 adds the capability |
+| Upload | no route yet; S7.M gap → [uploads](uploads.html) |
 
 ### Required read gaps before implementation
 
@@ -195,36 +172,11 @@ operations layer before the relevant live view can claim parity:
 | S6.F Metrics | projects, project, runs/chart/matrix, timeline, items, agents, Insights, DM freshness | bounded date windows, units, comparisons; logical-run vs attempt identity; queue/gate/event/execution phases; slot vs query usage; missing measurements/denominators; shared CLI/API calculation provenance |
 | S7.X Bounded windows | SI_DM pipeline/run and lineage | committed low, frozen high, task-run owner, source attempt fence, retry/empty-window outcome and common-clock evidence |
 
-## Accessibility review (fixing-accessibility)
+## Accessibility and validation
 
-Applied the repository skill to all HTML/CSS. Review fixes include:
-
-| Finding risk | Resolution |
-| --- | --- |
-| Icons/status colours could carry the only meaning | Fixed text per state; new-tab icon hidden from screen readers with explicit hidden announcement |
-| Narrow grids could clip fields or trap horizontal layout | Responsive shell stacks; only labelled table/timeline regions scroll; no whole-page min-width |
-| Custom right-click menu/modal would lack keyboard/focus handling | Addressable ordinary section and confirmation pages; native buttons/details; visible focus outline; no fake modal/menu role |
-| Form controls could lack names or reasons | Wrapping labels/IDs, required reason/confirmation fields, helper associations, readonly scope fields |
-| Charts could be inaccessible pictures | Text bars/cells with accessible values, labelled axes/time units; KPI unit/period/comparison and table alternatives |
-| Live errors/availability might look healthy | Explicit paused/unavailable/removed/refused text; status region on acknowledgements; no automatic polling |
-| External assets might leak or fail offline | Shared local CSS only; no script/font/CDN requests |
-
-Body text #20252b on white has high contrast; link/focus #1556a1 and all status text colours
-on white exceed 4.5:1 (verified by the one-time check). Tables have captions/column headers;
-landmarks and a skip link are present. No positive tabindex. Native details controls supply
-keyboard semantics. The checks are source/contrast/link checks, not a claim of browser or
-screen-reader certification.
-
-## Review validation and limitations
-
-A one-time standard-library HTML/link walker checks every local href/form target and fragment,
-reachability from index, duplicate IDs, labels, new-tab announcements, heading structure,
-missing captions/column headers, absence of JavaScript/external styles, action acknowledgements
-and contrast. It is run for this PR only, **not added to CI**. Results/counts and durations are
-in the PR. Strict `make docs` passes with the review-only folder excluded. Runtime suites are
-not needed for this no-src plan change; the normal static gate is still run.
-
-No Playwright MCP is exposed in this session; no browser tooling was installed. Desktop
-1440px/narrow 390px screenshots and a visual/browser accessibility review are therefore
-unavailable and must be completed during owner review or the eventual UI implementation.
-The responsive design and source checks do not substitute for those screenshots.
+- Landmarks, a skip link, labelled inputs, `aria-current` on the current view, real buttons for
+  actions, and accessible names on every graph node, chart bar, matrix cell and timeline bar.
+- Text contrast meets WCAG AA in both themes.
+- A one-time link walk found every local link, form target and fragment resolves, no duplicate
+  ids, and every page reachable from the sign-in page. It is not added to CI.
+- Screenshots at 1440 px and 390 px, light and dark, were checked in Firefox.

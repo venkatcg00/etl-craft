@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run SI_CLIENT_BETA · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe" data-section>Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-beta.html" aria-current="page">SI_CLIENT_BETA</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-pipe" aria-hidden="true"></span>SI_CLIENT_BETA<span class="chip">ingestion</span><span class="chip">client-beta</span></h1></div><div class="actions"><a class="btn primary" href="pipeline-beta-run-now.html">Run now</a><form action="ack.html" method="get" class="inline"><input type="hidden" name="action" value="PAUSE"><input type="hidden" name="pipeline" value="SI_CLIENT_BETA"><button type="submit" class="btn">Pause schedule</button></form><a class="btn icon" href="console.html" aria-label="More actions in the console">⋯</a></div></div><nav class="tabs" aria-label="Views"><a href="pipeline-beta.html" aria-current="page">Runs</a><a href="pipeline-beta-matrix.html">Matrix</a><a href="pipeline-beta-tasks.html">Tasks</a><a href="pipeline-beta-access.html">Permissions</a></nav><figure class="durchart"><figcaption>Run duration · last 4 runs · bar height is duration relative to the longest (max 9m 02s)</figcaption><div class="bars"><a href="run-413.html" class="vbar v-bad" style="--h:50" aria-label="Run 413, FAILED, 6m 15s"><span>413</span></a><a href="run-415.html" class="vbar v-ok" style="--h:69" aria-label="Run 415, SUCCESS, 8m 40s"><span>415</span></a><a href="run-416.html" class="vbar v-ok" style="--h:72" aria-label="Run 416, SUCCESS, 9m 02s"><span>416</span></a><a href="run-419.html" class="vbar v-run" style="--h:63" aria-label="Run 419, IN-PROGRESS, 7m 51s"><span>419</span></a></div></figure><div class="tbl"><table><caption class="sr-only">Runs</caption><thead><tr><th scope="col">Start (UTC)</th><th scope="col">Run</th><th scope="col">Run key</th><th scope="col">Trigger</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody><tr><td><a href="run-419.html">10-25 06:00</a></td><td><a href="run-419.html" class="mono">419</a></td><td><span class="mono small">schedule:2026-10-25T06:00Z</span></td><td>SCHEDULE</td><td>7m 51s</td><td><span class="st st-run">IN-PROGRESS</span></td></tr><tr><td><a href="run-416.html">10-25 05:45</a></td><td><a href="run-416.html" class="mono">416</a></td><td><span class="mono small">schedule:2026-10-25T05:45Z</span></td><td>SCHEDULE</td><td>9m 02s</td><td><span class="st st-ok">SUCCESS</span></td></tr><tr><td><a href="run-415.html">10-25 05:30</a></td><td><a href="run-415.html" class="mono">415</a></td><td><span class="mono small">schedule:2026-10-25T05:30Z</span></td><td>SCHEDULE</td><td>8m 40s</td><td><span class="st st-ok">SUCCESS</span></td></tr><tr><td><a href="run-413.html">10-25 05:15</a></td><td><a href="run-413.html" class="mono">413</a></td><td><span class="mono small">schedule:2026-10-25T05:15Z</span></td><td>SCHEDULE</td><td>6m 15s</td><td><span class="st st-bad">FAILED</span></td></tr></tbody></table></div>
+</main>
+
+</div>
+</div>
+<div class="scrim"></div><section class="dialog" role="dialog" aria-labelledby="dlg-t"><h2 id="dlg-t">Run SI_CLIENT_BETA now</h2><form action="ack.html" method="get" class="stack"><input type="hidden" name="action" value="RUN"><label for="rk">Run key</label><input id="rk" name="key" value="manual:2026-10-25T06:07Z"><label for="rd">Run date</label><input id="rd" name="date" type="date" value="2026-10-25"><fieldset><legend>Scope</legend><label class="check"><input type="radio" name="scope" checked> Whole pipeline</label><label class="check"><input type="radio" name="scope"> One task only</label></fieldset><label for="rr">Reason</label><textarea id="rr" name="reason" required>Re-run after source replay</textarea><p class="muted small">Equivalent: <code>etl-craft run --pipeline-code SI_CLIENT_BETA --run-key manual:2026-10-25T06:07Z</code></p><div class="row-end"><a class="btn" href="pipeline-beta.html">Cancel</a><button class="btn primary" type="submit">Run</button></div></form></section>
+<details class="wf-notes"><summary>Design notes (1)</summary><ul><li>POST: RUN <code>/runs</code>. One-off parameter overrides are an S7.A.2 request-contract gap, so the dialog offers none.</li></ul></details>
+</div>
+</body>
+</html>

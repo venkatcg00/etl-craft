@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Home · etl-craft</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
+<a class="skip" href="#content">Skip to content</a>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
+</form>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
+</header>
+<div class="shell">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home" aria-current="page">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs">Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
+<main id="content" tabindex="-1">
+
+<div class="page-head"><div><h1>Home</h1><p class="sub">Signed in as ops.oncall · operator on support_insights</p></div><div class="actions"></div></div><div class="tiles"><a class="tile" href="runs.html"><span class="t-label">Running</span><span class="t-val">3</span><span class="t-sub">Alpha 418, Beta 419, Gamma 417 (waiting)</span></a><a class="tile" href="run-413.html"><span class="t-label">Failed today</span><span class="t-val">1</span><span class="t-sub">Beta 413 · beta_rules</span></a><a class="tile" href="insights.html"><span class="t-label">SLA misses (24 h)</span><span class="t-val">0</span><span class="t-sub">of 96 scheduled runs</span></a><a class="tile" href="agents.html"><span class="t-label">Queued work</span><span class="t-val">6 tasks</span><span class="t-sub">warehouse pool · 0 waiting for a slot</span></a><a class="tile" href="catalog-gaps.html"><span class="t-label">Schema gaps</span><span class="t-val">3</span><span class="t-sub">1 type mismatch · 1 config only · 1 deployed only</span></a><a class="tile" href="table-dm-fact-lineage.html"><span class="t-label">Lineage gaps</span><span class="t-val">1</span><span class="t-sub">dm.customer_support_fact.agent_tier</span></a></div><div class="cols2"><section><h2>Recent runs</h2><div class="tbl"><table><caption class="sr-only">Recent runs</caption><thead><tr><th scope="col">Run</th><th scope="col">Pipeline</th><th scope="col">Status</th><th scope="col">Started (UTC)</th><th scope="col">Duration</th></tr></thead><tbody><tr><td><a href="run-420.html">420</a></td><td><a href="pipeline-dm.html">SI_DM</a></td><td><span class="st st-ok">SUCCESS</span></td><td>06:00</td><td>1m 22s</td></tr><tr><td><a href="run-419.html">419</a></td><td><a href="pipeline-beta.html">SI_CLIENT_BETA</a></td><td><span class="st st-run">IN-PROGRESS</span></td><td>06:00</td><td>7m 51s</td></tr><tr><td><a href="run-418.html">418</a></td><td><a href="pipeline-alpha.html">SI_CLIENT_ALPHA</a></td><td><span class="st st-run">IN-PROGRESS</span></td><td>05:45</td><td>22m 10s</td></tr><tr><td><a href="run-417.html">417</a></td><td><a href="pipeline-gamma.html">SI_CLIENT_GAMMA</a></td><td><span class="st st-run">IN-PROGRESS</span></td><td>05:55</td><td>15m 00s</td></tr><tr><td><a href="run-416.html">416</a></td><td><a href="pipeline-beta.html">SI_CLIENT_BETA</a></td><td><span class="st st-ok">SUCCESS</span></td><td>05:45</td><td>9m 02s</td></tr><tr><td><a href="run-415.html">415</a></td><td><a href="pipeline-beta.html">SI_CLIENT_BETA</a></td><td><span class="st st-ok">SUCCESS</span></td><td>05:30</td><td>8m 40s</td></tr></tbody></table></div></section><section><h2>Projects in this Engine DB</h2><div class="tbl"><table><caption class="sr-only">Projects</caption><thead><tr><th scope="col">Project</th><th scope="col">Pipelines</th><th scope="col">Running</th><th scope="col">Failed today</th><th scope="col">SLA misses</th><th scope="col">Engine DB</th></tr></thead><tbody><tr><td><a href="home.html" aria-current="page">support_insights</a></td><td>9</td><td>3</td><td>1</td><td>0</td><td>shared PostgreSQL</td></tr><tr><td><span class="muted">finance_reporting</span></td><td>4</td><td>0</td><td>0</td><td>0</td><td>shared PostgreSQL</td></tr></tbody></table></div><p class="muted small">You see only projects and pipelines your groups are granted.</p></section></div>
+</main>
+
+</div>
+</div>
+
+<details class="wf-notes"><summary>Design notes (3)</summary><ul><li>Read gap: project list and health aggregates (running, failed today, SLA misses, queued) need one bounded read action; today they would take several reads.</li><li>Every tile is a link to the view that explains its number; nothing on Home is an action.</li><li>Pending S6.F: SLA miss and queue counts come from the shared metrics calculations.</li></ul></details>
+</div>
+</body>
+</html>

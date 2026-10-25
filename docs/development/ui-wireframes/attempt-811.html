@@ -3,158 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Attempt 811 · Beta failed · ETL Craft wireframe</title>
+<title>Attempt 811 · etl-craft</title>
 <link rel="stylesheet" href="wireframes.css">
 </head>
 <body>
+<input type="checkbox" id="theme" class="theme-switch" aria-label="Switch between light and dark theme">
+<div class="app">
 <a class="skip" href="#content">Skip to content</a>
-<header class="top">
-<strong>ETL Craft</strong>
-<span>Design review · 25 Oct 2026 · sample data</span>
-<form action="search.html" method="get">
-<label for="global-search">Global search</label>
-<input id="global-search" name="q" value="SI_CLIENT_BETA">
-<button type="submit">Search</button>
+<header class="topbar">
+<a class="brand" href="home.html">etl-craft</a>
+<a class="project" href="home.html" title="Switch project">support_insights</a>
+<form class="search" action="search.html" method="get" role="search">
+<label for="q" class="sr-only">Search pipelines, runs, tasks and tables</label>
+<input id="q" name="q" placeholder="Search pipelines, runs, tasks, tables   ( / )">
 </form>
-<span>operator · support team</span>
+<span class="wf-chip">Wireframe · sample data</span>
+<label for="theme" class="theme-btn"><span class="sr-only">Switch theme</span></label>
+<a class="user" href="index.html" title="Signed in as ops.oncall (operator). Sign out">OO</a>
 </header>
 <div class="shell">
-<nav aria-label="Console navigator">
-<h2>Console</h2>
-<ul>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="pipelines.html" class="" >Pipelines</a>
-</li>
-<li>
-<a href="runs.html" class="current" >Runs</a>
-</li>
-<li>
-<a href="backfills.html" class="" >Backfills</a>
-</li>
-<li>
-<a href="interventions.html" class="" >Interventions</a>
-</li>
-<li>
-<a href="agents.html" class="" >Agents and pools</a>
-</li>
-<li>
-<a href="insights.html" class="" >Pipeline Insights</a>
-</li>
-<li>
-<a href="gaps.html" class="" >Schema gaps</a>
-</li>
-<li>
-<a href="lineage.html" class="" >Lineage / catalog</a>
-</li>
-<li>
-<a href="metadata.html" class="" >Metadata</a>
-</li>
-<li>
-<a href="uploads.html" class="" >Uploads</a>
-</li>
-<li>
-<a href="commands.html" class="" >Command center</a>
-</li>
-</ul>
-<h2>Workflows</h2>
-<details open>
-<summary>Tag: ingestion</summary>
-<ul>
-<li>
-<a href="pipeline-alpha.html" class="" >SI_CLIENT_ALPHA</a>
-</li>
-<li>
-<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
-</li>
-<li>
-<a href="pipeline-gamma.html" class="" >SI_CLIENT_GAMMA</a>
-</li>
-</ul>
-</details>
-<details>
-<summary>Tag: mart / reference</summary>
-<ul>
-<li>
-<a href="pipeline-dm.html" class="" >SI_DM</a>
-</li>
-<li>
-<a href="pipeline-reference.html" class="" >SI_REFERENCE</a>
-</li>
-<li>
-<a href="uploads.html" class="" >SI_STEWARD_DM_FACT</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_AGENTS</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_CUSTOMER_TYPES</a>
-</li>
-<li>
-<a href="uploads.html#accepted">SI_STEWARD_DS_SUPPORT_AREAS</a>
-</li>
-</ul>
-</details>
-<p>
-<a href="run.html" class="" >Recent: Beta run 419</a>
-</p>
-<p>
-<a href="README.md" class="" >Wireframe guide</a>
-</p>
-</nav>
-<div class="workspace">
-<nav class="crumbs" aria-label="Breadcrumb">
-<ol>
-<li>
-<a href="index.html" class="" >Projects</a>
-</li>
-<li>
-<a href="project.html" class="" >support_insights</a>
-</li>
-<li>
-<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
-</li>
-<li>
-<a href="run.html" class="" >Run 419</a>
-</li>
-<li>
-<a href="task.html" class="" >beta_source_to_lnd</a>
-</li>
-</ol>
-</nav>
-<div class="workarea">
+<nav class="sidebar" aria-label="Console"><h2>Workspace</h2><ul><li><a href="home.html" class="nv nv-home">Home</a></li><li><a href="pipelines.html" class="nv nv-pipe">Pipelines</a></li><li><a href="runs.html" class="nv nv-runs" data-section>Runs</a></li><li><a href="catalog.html" class="nv nv-cat">Catalog</a></li><li><a href="insights.html" class="nv nv-chart">Insights</a></li><li><a href="console.html" class="nv nv-term">Console</a></li></ul><h2>Operations</h2><ul><li><a href="backfills.html" class="nv nv-back">Backfills</a></li><li><a href="uploads.html" class="nv nv-up">Uploads</a></li><li><a href="interventions.html" class="nv nv-audit">Interventions</a></li><li><a href="agents.html" class="nv nv-srv">Agents and pools</a></li></ul><h2>Configuration</h2><ul><li><a href="metadata.html" class="nv nv-db">Metadata</a></li></ul><h2>Recents</h2><ul class="recents"><li><a href="run-419.html">Run 419 · SI_CLIENT_BETA</a></li><li><a href="table-ods-interactions.html">lake.ods.interactions</a></li><li><a href="pipeline-dm.html">SI_DM</a></li></ul></nav>
+<div class="work">
 <main id="content" tabindex="-1">
-<h1>Attempt 811 · Beta failed</h1>
-<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
-<p class="annotation">
-<strong>S5.AA feed:</strong> ATTEMPT /attempts/{attempt_id}; LOGS /attempts/{attempt_id}/log.</p>
-<p class="annotation">
-<strong>Pending contract:</strong> S6.B: tail vs full upload availability</p>
-<p>
-<span class="status failed">
-<span aria-hidden="true">●</span> FAILED</span> · TRANSIENT · partition 2 source timeout · exit 1.</p>
-<p>Full bytes not yet uploaded; the run zip manifest must say why. Tail is durable audit evidence, not a fabricated full log.</p>
-<pre>06:02:05Z partition=2 source timeout; retry classified TRANSIENT</pre>
-<p>
-<a href="task.html" class="" >Return to task 719</a>
-</p>
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="pipelines.html">Pipelines</a></li><li><a href="pipeline-beta.html">SI_CLIENT_BETA</a></li><li><a href="run-419.html">Run 419</a></li><li><a href="attempt-811.html" aria-current="page">Attempt 811</a></li></ol></nav>
+<div class="page-head"><div><h1><span class="obj-icon oi-run" aria-hidden="true"></span>beta_source_to_lnd · attempt 811<span class="st st-bad">FAILED</span></h1></div><div class="actions"><a class="btn" href="attempt-811.txt" download>Download log</a></div></div><div class="facts"><div><span>Run</span><strong><a href="run-419.html">419</a></strong></div><div><span>Task run</span><strong>719</strong></div><div><span>Agent</span><strong>ingestion-02</strong></div><div><span>Host</span><strong>beta-7f2</strong></div><div><span>Exit code</span><strong>1</strong></div><div><span>Started</span><strong>06:00:04</strong></div></div><nav class="tabs" aria-label="Views"><a href="attempt-811.html" aria-current="page">Log</a><a href="items-419.html">Items</a></nav><div class="logbar"><label class="check"><input type="checkbox" checked> Follow</label><span class="muted small">Complete log</span></div><pre class="log">06:00:04.870 INFO  attempt 811 claimed by ingestion-02
+06:03:41.502 ERROR broker timeout; failure class TRANSIENT; retry due 06:04:41</pre>
 </main>
-<aside aria-label="Selection properties">
-<h2>Selected object</h2>
-<p>SI_CLIENT_BETA</p>
-<p>Run 419</p>
-<p>Task beta_source_to_lnd</p>
-<p>Read-only definition · operator view</p>
-<p>Actions apply only to this selection and are filtered by CAPABILITIES. This is a static snapshot.</p>
-<p>
-<a href="task.html" class="" >Task properties</a> · <a href="task.html#actions" class="" >Action menu</a>
-</p>
-</aside>
+
 </div>
-<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
 </div>
+
+<details class="wf-notes"><summary>Design notes (2)</summary><ul><li>Reads: ATTEMPT <code>/attempts/{id}</code>, LOGS <code>/attempts/{id}/log</code> (byte-offset tail).</li><li>Pending S6.B: logs stored outside the Engine DB; removed-by-retention vs not-yet-uploaded states.</li></ul></details>
 </div>
 </body>
 </html>
