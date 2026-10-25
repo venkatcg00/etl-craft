@@ -320,6 +320,9 @@ does not move worker work ahead of the metadata, account or operator-control cor
 S6.A slice 3 validates old/new/foreign reject boundaries and real merge exclusion on all four
 local warehouses, plus real process-loss recovery on both Engine DBs. Released-schema upgrades,
 config/history round trips, doctor/setup behavior and administrator API/archive regressions pass.
+Execution snapshots include complete table-policy rows in both dialects, and discovered source
+exports initialize all optional policies. Real execution and installed-wheel demo checks cover
+those shared metadata consumers.
 Trino snapshot/orphan procedures execute without changing current data; unsupported adapters
 refuse configured file-maintenance policies. Native Databricks and Snowflake reject checks pass.
 Snapshot/orphan counts are planned/executed operations, not estimated deleted files. The complete

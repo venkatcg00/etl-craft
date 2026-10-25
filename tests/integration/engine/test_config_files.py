@@ -715,3 +715,37 @@ def test_invalid_auxiliary_retention_names_the_file_column_and_remedy(exported, 
     edit(path, lambda rows: [{**row, column: value} for row in rows])
     with pytest.raises(MetadataFileError, match=column):
         read_config_files(exported.config_dir)
+
+
+def test_execution_snapshot_contains_complete_table_policy_rows(engine_db):
+    from sqlalchemy import text
+
+    from etl_craft.core.definitions import current
+    from etl_craft.engine.run_definitions import for_run
+    from fixtures.metadata import add_pipeline, add_task, start_run
+
+    with engine_db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "SNAPSHOT_POLICY")
+        add_task(
+            conn,
+            pipeline,
+            "load",
+            SQL_ACTION="CREATE_TABLE",
+            TARGET_OBJECT="main.policy",
+            SELECT_QUERY="SELECT 1 AS id",
+        )
+        conn.execute(
+            text(
+                "UPDATE CFG_TABLES SET REJECT_RETENTION_DAYS=30,SNAPSHOT_RETENTION_DAYS=7,"
+                "ORPHAN_RETENTION_DAYS=14 WHERE TABLE_NAME='policy'"
+            )
+        )
+        run = start_run(conn, pipeline)
+    with for_run(engine_db.engine, run):
+        snapshot = current.get()
+        assert snapshot is not None
+        row = next(row for row in snapshot.rows["CFG_TABLES"] if row["table_name"] == "policy")
+        assert row["reject_retention_days"] == 30
+        assert row["snapshot_retention_days"] == 7
+        assert row["orphan_retention_days"] == 14
+        assert set(row) == set(snapshot.columns["CFG_TABLES"])
