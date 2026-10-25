@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lineage and catalog · ETL Craft wireframe</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+<strong>ETL Craft</strong>
+<span>Design review · 25 Oct 2026 · sample data</span>
+<form action="search.html" method="get">
+<label for="global-search">Global search</label>
+<input id="global-search" name="q" value="SI_CLIENT_BETA">
+<button type="submit">Search</button>
+</form>
+<span>operator · support team</span>
+</header>
+<div class="shell">
+<nav aria-label="Console navigator">
+<h2>Console</h2>
+<ul>
+<li>
+<a href="index.html" class="" >Projects</a>
+</li>
+<li>
+<a href="pipelines.html" class="" >Pipelines</a>
+</li>
+<li>
+<a href="runs.html" class="" >Runs</a>
+</li>
+<li>
+<a href="backfills.html" class="" >Backfills</a>
+</li>
+<li>
+<a href="interventions.html" class="" >Interventions</a>
+</li>
+<li>
+<a href="agents.html" class="" >Agents and pools</a>
+</li>
+<li>
+<a href="insights.html" class="" >Pipeline Insights</a>
+</li>
+<li>
+<a href="gaps.html" class="" >Schema gaps</a>
+</li>
+<li>
+<a href="lineage.html" class="current" >Lineage / catalog</a>
+</li>
+<li>
+<a href="metadata.html" class="" >Metadata</a>
+</li>
+<li>
+<a href="uploads.html" class="" >Uploads</a>
+</li>
+<li>
+<a href="commands.html" class="" >Command center</a>
+</li>
+</ul>
+<h2>Workflows</h2>
+<details open>
+<summary>Tag: ingestion</summary>
+<ul>
+<li>
+<a href="pipeline-alpha.html" class=""  target="_blank" rel="noopener">SI_CLIENT_ALPHA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">SI_CLIENT_BETA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-gamma.html" class=""  target="_blank" rel="noopener">SI_CLIENT_GAMMA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<details>
+<summary>Tag: mart / reference</summary>
+<ul>
+<li>
+<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-reference.html" class=""  target="_blank" rel="noopener">SI_REFERENCE <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html" class=""  target="_blank" rel="noopener">SI_STEWARD_DM_FACT <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_AGENTS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_CUSTOMER_TYPES <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_SUPPORT_AREAS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<p>
+<a href="run.html" class=""  target="_blank" rel="noopener">Recent: Beta run 419 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</p>
+<p>
+<a href="README.md" class="" >Wireframe guide</a>
+</p>
+</nav>
+<div class="workspace">
+<nav class="crumbs" aria-label="Breadcrumb">
+<ol>
+<li>
+<a href="index.html" class=""  target="_blank" rel="noopener">Projects <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="project.html" class="" >support_insights</a>
+</li>
+</ol>
+</nav>
+<div class="workarea">
+<main id="content" tabindex="-1">
+<h1>Lineage and catalog</h1>
+<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
+<p class="annotation">
+<strong>S5.AA feed:</strong> LINEAGE /lineage; CATALOG_GAPS /catalog/gaps; DOCS_VERSION_CHECK /docs/versions.</p>
+<p>Selected column: dm.customer_support_fact.rating. Cross-object nodes open new tabs.</p>
+<div class="dag">
+<a href="pipelines.html" class="node"  target="_blank" rel="noopener">Alpha / Beta / Gamma LND <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="table.html" class="node"  target="_blank" rel="noopener">Normalized ODS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="pipeline-dm.html" class="node"  target="_blank" rel="noopener">SI_DM bounded window <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="table.html" class="node"  target="_blank" rel="noopener">dm.customer_support_fact <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+<span aria-hidden="true">→</span>
+</div>
+<p>
+<span class="status waiting">
+<span aria-hidden="true">●</span> Lineage gap</span> Python script inputs need explicit declarations; no invented source lineage.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Generated catalog navigation">
+<table>
+<caption>Generated catalog navigation</caption>
+<thead>
+<tr>
+<th scope="col">Catalog page</th>
+<th scope="col">Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<a href="table.html" class=""  target="_blank" rel="noopener">Tables <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>Contracts / comparison / sources</td>
+</tr>
+<tr>
+<td>
+<a href="rules.html" class=""  target="_blank" rel="noopener">Rules <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>INCOMPLETE, REJECT, REPORT policies</td>
+</tr>
+<tr>
+<td>
+<a href="scripts.html" class=""  target="_blank" rel="noopener">Scripts <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>Read-only input/output declarations</td>
+</tr>
+</tbody>
+</table>
+</div>
+</main>
+<aside aria-label="Selection properties">
+<h2>Selection</h2>
+<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
+<p>No definition editing.</p>
+</aside>
+</div>
+<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
+</div>
+</div>
+</body>
+</html>

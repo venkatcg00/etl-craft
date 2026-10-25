@@ -161,6 +161,9 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
+| S7.A.0 Wireframes | In review | #253 | Owner approval by merging the plan/wireframe PR gates all S7.A page code. |
+| S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
+| S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -725,6 +728,26 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- Owner decisions, 2026-10-25 (#253, one combined docs(plan) PR): Alpha/Beta retain
+  15-minute SKIP schedules, Beta uses one ingestion slot and partition fan-out (2 readers,
+  4-item cap), Gamma uses a settled-file wait with a 55-minute SKIP deadline and one slot.
+  Three ingestion plus nine warehouse agents preserve twelve 256 MiB agents and the RAM estimate.
+  MinIO deliveries use an identical-byte filesystem inbox because existing S5.M does not list buckets.
+- Owner decision, 2026-10-25: clients finish at ODS; SI_DM is independent every six hours.
+  The detailed bounded timestamp-window decision supersedes the preliminary run-ID offset
+  sketch; IDs remain provenance. S7.X extends the existing offset tracker without new tables,
+  and plans a common Engine DB clock/fence because current merge stamps use the agent clock.
+  Strict stamp-after-start precision is required for the inclusive high boundary. Completed
+  write attempts rather than whole-run completion prevent stranded timestamps.
+- Owner decision, 2026-10-25: S7.A.0 wireframes are reviewed during S6, before log/metrics read
+  contracts settle. No S7.A page code precedes owner approval; merging the wireframe PR is
+  that approval. Missing read actions are documented gaps, never invented API capabilities.
+  UI/api changes run installed Semgrep during security self-review, not in CI.
+- Owner decision, 2026-10-25: S7.Y removes grants.csv before S7.A, keeps grant rows/history and
+  introduces admin access grant/revoke/list with atomic bulk command input and dry-run.
+  S7.B extends those command names to bindings. All other accepted metadata files remain;
+  pipeline/task dependency files stay. No src/runtime changes ship in this plan PR.
+
 - S6.A slice 3 adds nullable `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS` and
   `ORPHAN_RETENTION_DAYS` to `CFG_TABLES`, its history and optional CSV columns. Empty values keep
   forever; rejects accept 1–36500 whole days and file maintenance 7–36500. Setup shows
@@ -976,8 +999,8 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   active-attempt check in the same transaction. The guide's Kafka example runs against a broker
   with the demo's checks in S8.H, as the item says.
 - Plan additions with S5.AH (owner, 22 October 2026): S7.A's command center, and S7.B's custom
-  roles and access bindings managed by commands like IAM, which replace S5.AD's `grants.csv` and
-  the account role column.
+  roles and access bindings managed by commands like IAM. S7.Y now removes S5.AD's
+  grants.csv before the UI; S7.B later extends those commands and replaces the account role column.
 
 - S5.AI looks up consumed keys only among the keys a probe returned (at most `EVENT_MAX_ROWS`,
   through the unique index), not the task's whole history, so a probe's cost stays with its
@@ -6033,11 +6056,58 @@ packaged; compatibility is promised; and a month of real use proves it.
 **Depends on.** 0.6. These workstreams can run in parallel and land on `main`; no release is cut
 before 1.0.0.
 
+### S7.Y Command-managed pipeline access
+
+Owner decision, 2026-10-25. Implement before S7.A, without waiting for S7.B. Access is identity,
+not pipeline metadata: nobody gains access because a config change was merged.
+
+- Remove `grants.csv` from `config plan`, `apply` and `export` and their config-file mapping.
+  A project that still contains it fails plan/apply with its path and the remedy: import the
+  rows through the admin access commands, review the plan, then remove the obsolete file.
+  Never silently ignore it. Export writes no grants file and refuses an obsolete destination
+  file rather than preserving a misleading config artifact.
+- Add admin-only `etl-craft access grant`, `access revoke`, `access list`. Keep the pipeline/tag
+  grant semantics and `CFG_PIPELINE_GRANTS` plus its history; no row migration or second store.
+  Each command is one actor-scoped `services/operations` action, shared with a documented API
+  route (planned `POST /api/v1/access/grants`, `POST /api/v1/access/revocations`,
+  `GET /api/v1/access/grants`), with role checks and audit. S7.B extends this group without renaming it.
+- `access grant --file PATH --dry-run` validates and shows a complete bulk diff; the same command
+  without dry-run applies the admin's reviewed grant rows in one transaction. This is command
+  input, never project configuration. Define required group, exactly one pipeline/tag, role,
+  active/revoke intent and project scope; refuse duplicate/conflicting rows before any write.
+  Every affected row retains actor attribution; one bad row rolls back the entire batch.
+  A server rechecks the submitted content/revision so a changed file cannot bypass the plan.
+- Update `docs/deploying/security.md`, the configuration-files guide, examples/config and the
+  CHANGELOG when implemented. Keep pipeline metadata files unchanged: four always (pipelines,
+  tasks, task_parameters, task_dependencies), at most four more (tables, columns, business_rules,
+  pipeline_dependencies). Dependency tables stay; project/pool administration remains separate.
+- Tests: existing grants survive unchanged; old grants.csv is refused with remedy; no export
+  writes it; CLI/API role matrix, attributed grant/revoke/list, plan makes no changes,
+  bulk atomic rollback, unknown scope/group/role and immediate revocation enforcement.
+
+*Done when:* all access changes use the command/API actions, project config cannot confer access,
+existing grant rows/history survive, and S7.B starts from the same command names.
+
 ### S7.A Web UI
 
 Branch: `feat/ui-*`, one per area. Served by `etl-craft ui` (S5.AE), and by
 `etl-craft controller` in an all-in-one deployment. Every UI change goes
 through the S5.AA action table and its `/api/v1` route; pages only render read actions.
+
+**S7.A.0 Wireframes — owner approval before page code (owner, 2026-10-25).**
+The static [console wireframes](https://github.com/venkatcg00/etl-craft/blob/main/docs/development/ui-wireframes/README.md) are produced now while S6 is in
+progress, so missing read actions are known before S6.B logs and S6.F metrics settle their
+outputs. No S7.A page is built until the owner approves these wireframes; merging this
+`docs(plan)` PR is that approval, not approval to invent missing actions. All navigation and
+page coverage, action routes and read gaps are listed in the README. Files are review-only,
+static HTML/CSS with no JavaScript, external fonts or CDN. Selection/filter/menu/confirmation
+states are addressable; links and buttons visibly follow S7.A.4. S6.B/S6.F-dependent views
+state the contract they need. This step adds no runtime assets or CI job.
+
+**Security self-review.** UI and `api/` PRs run the installed Semgrep MCP `semgrep_scan`
+on their changed files as part of `security-review`, reporting findings and dispositions in
+the PR (owner, 2026-10-25; installed Semgrep 1.182.1). Keep it out of CI; any recurring CI
+cost needs a separate proposal. Keep the accessibility and role-boundary checks as well.
 
 **S7.A.1 Pipeline Insights is required.** Implement the built-in operational dashboard panels,
 filters, metric definitions and drill-down in the [metadata and pipeline UI design](metadata-and-ui.md).
@@ -6098,7 +6168,7 @@ lists each element, its source and its data.
   - **Addressable.** Every view, selection and filter is in the URL; a link opens the same view.
   - **No definition editing.** Databricks' job editor and "Run as" are left out: definitions
     change through the config files and `etl-craft config apply`. Per-pipeline permissions are
-    S5.AD's grants: views show only what the account may see, and menus only what it may do.
+    S5.AD's command-managed grants (S7.Y): views show only what the account may see, and menus only what it may do.
   - **Links between objects open in a new tab.** This includes a table in lineage, a child
     or parent pipeline, the run linked from a trigger task, an upstream or downstream
     dependency, a table's catalog page and a full log view.
@@ -6153,8 +6223,9 @@ lists each element, its source and its data.
   - Agents and pools: capacity, slots in use, queue, heartbeats.
   - Catalog: today's lineage, tables, rules and scripts pages, linked from runs.
   - Metadata: a read-only view of `CFG_` rows (pipelines, tasks, parameters, dependencies,
-    rules, stewardable pipelines, groups and grants), with each row's actor, history and `validate` findings, and a link
-    to its CSV file in the project repository. The UI does not edit metadata. Changes
+    rules and stewardable pipelines), with each row's actor, history and `validate` findings,
+    and a link to its CSV file in the project repository. Groups/grants are read-only access
+    records with command/audit provenance, never a grants.csv link (S7.Y). The UI does not edit metadata. Changes
     are made in the config files and deployed by `etl-craft config apply`, so the UI and the
     reviewed files cannot drift apart.
   - Uploads (S7.M): a drop-down of the stewardable pipelines the signed-in steward is assigned
@@ -6489,8 +6560,9 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
     `ACTIVE_FLAG` instead of deletes).
   - A binding gives a principal (an account or a group) a role on a scope: the deployment, one
     pipeline, or a tag. `etl-craft access grant | revoke | list | explain`, in `CFG_ROLE_BINDINGS`.
-    It replaces S5.AD's `grants.csv` and the deployment role column on accounts, so there is one
-    way to give access; the migration turns both into bindings.
+    It extends S7.Y's existing `access grant | revoke | list` commands with bindings and `explain`,
+    replacing the deployment role column and translating existing `CFG_PIPELINE_GRANTS` rows
+    into bindings. `grants.csv` was already removed by S7.Y; it is not a migration input.
   - The built-in roles (viewer, operator, steward, developer, admin) are package-defined
     roles that cannot be edited or disabled, so a deployment using only them behaves as before.
     `agent` stays a system role no person can hold.
@@ -6510,7 +6582,7 @@ S5.S delivers the accounts, the login, the roles and the role check on every act
   - Tests, generated from the action table so a new action is covered: for each built-in role
     and a custom role, every listed action is allowed and every other refused, on the CLI and
     the API, deployment-wide, on a pipeline and through a tag; group bindings; escalation and
-    last-admin refusals; the upgrade turns `grants.csv` rows and account roles into bindings; a
+    last-admin refusals; the upgrade turns retained grant rows and account roles into bindings; a
     revoked binding stops working on the next request.
 
 ### S7.C Redaction (W13, B49)
@@ -6983,6 +7055,106 @@ upgrades, failure messages.
 *Done when:* every checklist row in all six skills maps to a passing test, and S7.P's
 catalog rows name theirs.
 
+### S7.X Bounded timestamp windows and the single offset store
+
+Owner decision, 2026-10-25; extends S5.L, required before S8.B rule 1 can implement `SI_DM`.
+The detailed timestamp-window decision supersedes the earlier sketch “offset = last pipeline
+run id processed”. Run IDs remain provenance/inspection fields, never the ordered DM cursor:
+completion order and repairs do not follow run-ID order.
+
+- **Window.** For bounded TIMESTAMP mode the managed SELECT uses
+  `<ts> > $$watermark AND <ts> <= $$watermark_max`. The first admission of a task run freezes
+  both marks before executing SQL; all its attempts reuse exactly that window. On success,
+  advance to the admitted high mark, not MAX of returned rows. An empty window succeeds with
+  zero rows and still advances. `AUD_TASK_RUN_LOG.WATERMARK_FROM/WATERMARK_TO` retain the
+  per-run evidence, including empty and failed windows; backfills never advance the live cursor.
+  Existing scalar lower-bound behavior remains compatible; bounded mode requires TIMESTAMP
+  and the max token, refusing incomplete definitions rather than silently changing old SELECTs.
+- **Column and clock, checked against code.** Current `handlers/sql/__init__.py` passes
+  `datetime.now(UTC)` from the task process to `ActionContext`; `handlers/sql/actions.py` binds
+  it as `:now` for `UPDATE_DATE` on SCD1/SCD2 writes. It is not warehouse CURRENT_TIMESTAMP.
+  The managed SELECT also refuses reserved output names (`handlers/sql/tables.py`), so
+  project ODS `UPDATE_DATE AS ods_changed_at` and set WATERMARK_COLUMN=ods_changed_at;
+  filter on the physical ODS UPDATE_DATE. The projected source watermark is distinct from
+  the DM target's engine-written UPDATE_DATE and must not be compared as a business column.
+  Admission times and these agent clocks are not a proven single clock. The implementation
+  must use Engine DB UTC server time for both attempt start fences, task admission bounds and
+  managed update stamps; warehouses receive that checked literal. Do not compare independent
+  agent/warehouse clocks or add a silent skew allowance. Require monotonic fence/stamp ordering
+  in Engine DB transactions: refuse a clock moving behind a recorded fence/committed mark,
+  name the timestamps and require clock repair before admitting writes. A row stamp must be
+  strictly later than its attempt start at the warehouse's preserved timestamp precision; if
+  equality/precision collapse occurs, wait for a later Engine clock tick and recheck before
+  writes, or refuse. “At or after” alone is insufficient for the inclusive high bound.
+- **Attempt-based high fence.** Optional `WATERMARK_SOURCE_PIPELINES` is a list of existing,
+  unambiguous project pipeline codes, encoded as a JSON array of strings in the task
+  parameter and validated before admission (duplicates/unknown codes are refused). In the same admission/fence
+  serialization used by source attempt starts, freeze the minimum of the reader's own task
+  start and all running source attempts' start times. With none running (or without the
+  parameter), use the reader's start. Resolve expired/LOST owners before calculating the
+  fence; CLAIMED attempts cannot write until their RUNNING fence is recorded. New writers
+  admitted after the fence get strictly later stamps. Use attempts, never pipeline run start:
+  Gamma may sit in EVENT_WAIT for hours holding no running ingestion/merge attempt. Reject a
+  high below the committed low (clock/ownership inconsistency), never rewind or guess.
+- **Concurrency and completed data.** A running merge commits after its start fence, with
+  row stamps strictly later than that fence, so the inclusive high excludes its uncommitted
+  output. Successful source attempts' committed writes may enter a window even if another
+  task still keeps their pipeline run open; do not add a “whole run completed” eligibility
+  filter that would drop these older timestamps after the mark advances. SI_DM reads committed
+  ODS from completed write attempts, not run-ID order. A crashed source may have a warehouse
+  commit before its Engine acknowledgement; reconciliation/fencing and idempotent source
+  retry must settle that write before releasing its fence. A later retry/repair of an old run
+  uses a fresh current write stamp after the committed mark and needs no special repair rule.
+- **One store, no new table.** `AUD_TASK_OFFSET_TRACKER` already stores one row per TASK_ID,
+  OFFSET_TYPE (NUMBER/TEXT/TIMESTAMP/PARTITIONS), OFFSET_VALUE (JSON for PARTITIONS) and update
+  time. `engine/repository/offsets.py` fetches/saves it; `engine/transitions.py` commits returned
+  script/SQL offsets with successful attempt endings; `execution/interventions.py` currently
+  shares that save helper but has separate reset_watermark/reset_offset validation paths.
+  Extend this table with nullable `PENDING_TASK_RUN_ID` and `PENDING_UPPER_BOUND` (typed UTC
+  timestamp), with FK/check constraints requiring the pair together and TIMESTAMP type for a
+  pending window. OFFSET_VALUE stays the committed low; initial state uses the configured
+  WATERMARK_START without advancing it. The task-run log supplies the frozen low and high.
+  Reuse a pending high only for that exact task run; concurrent task runs sharing its cursor
+  are refused until ownership ends. Success commits the high and clears the pending pair in
+  the same fenced attempt-ending transaction as outcome, summary and dependency consumption.
+  A LOST attempt retains the pair while that task run is retryable; reconciliation never
+  releases it merely because a lease expired. Explicit cancel/abandon after fencing all
+  possible writers clears it without advancing, preserves run-range/audit evidence and lets
+  a new run admit a new high. Reopening an abandoned run cannot silently steal another run's
+  pending cursor; use the existing repair/explicit reset rules and refuse conflicts.
+- **Pending-state retention.** History retention cannot delete a pending task run or its
+  range/audit evidence before the pending owner is safely cleared. Cover the FK/reference
+  barrier in the existing retention tests alongside abandonment recovery.
+- **Resets and upgrades.** `mark --watermark` and scalar/PARTITIONS offset resets use one
+  shared mutation path for all types, with type-specific validation, no live/pending owner,
+  before/after intervention records and actor attribution. Preserve existing CLI selectors.
+  Ship migrations in both Engine dialects and matching schema.sql; no new offset table.
+  Upgrade released 0.3.0 scalar rows and S5.AH PARTITIONS JSON rows byte-for-byte, with NULL
+  pending fields. Test real seeded rows, reset refusals, transaction rollback and fresh/upgrade
+  equivalence. Event-file/key consumption remains in AUD_EVENT_FILES/AUD_EVENT_KEYS: these
+  are consumed-item sets, not offsets. S5.AH partial item progress remains in its existing
+  partition/item commit boundaries; don't delay acknowledged partition progress until the
+  whole fan-out task succeeds.
+- **Tests to extend.** `tests/integration/warehouse/test_sql_watermarks.py`:
+  `test_watermark_batches_and_retry`, `test_typed_watermarks`,
+  `test_backfill_does_not_advance_the_sql_watermark`,
+  `test_a_reset_reloads_through_a_merge_without_duplicates`.
+  `tests/integration/engine/test_watermarks.py`: `test_failed_ranges_and_success_offsets_are_atomic`,
+  `test_stale_owners_cannot_record_ranges`, `test_reset_refuses_active_attempts_and_records_old_and_new`,
+  `test_cli_watermark_reset_does_not_change_run_status`, `test_real_task_processes_commit_each_sql_watermark`.
+  Add empty-window advancement, retry-stable high, repairs of old runs, same-timestamp boundary,
+  clock rollback/precision refusal, admissions racing source starts and abandoned-run cleanup.
+  Offset agent and warehouse clocks independently in tests: neither may change stamps/windows
+  taken from Engine DB time; a backward Engine clock must refuse rather than infer safety.
+  Race oracle: hold Alpha's merge open, let Beta finish, admit DM, then commit Alpha. DM excludes
+  Alpha; the next DM window includes each Alpha row once, no duplicate SCD2 version. Include
+  Gamma waiting with no attempt to prove it cannot pin the bound. Repeat races 20 times locally,
+  both Engine DBs, every supported warehouse; no new repeated PR-CI job.
+
+*Done when:* the window and all offset kinds use the existing tracker, source/admission/write
+fences share the checked Engine clock, all named tests and the Support Insights race pass,
+upgrade/reset/recovery behavior is documented, and no business-date or run-ID cursor is substituted.
+
 ## Release candidate: the Support Insights example
 
 **Goal.** Prove 1.0.0 on a real project before it is released. The
@@ -7012,7 +7184,7 @@ never runs the demo itself.
 
 | Part | Today | What happens to it |
 | --- | --- | --- |
-| Sources | MongoDB (client Alpha documents), Kafka (Beta events), MinIO (Gamma gzipped CSVs) | Kept: they are the sources |
+| Sources | MongoDB (client Alpha JSON documents), Kafka (Beta XML events), MinIO (Gamma gzipped CSVs) | Kept: they are the sources |
 | Synthetic generators and their UI (port 1212) | `generators/*.py`, `infra/entrypoint/data_generator_orchestrator.py` | Kept and extended with S8.H's named mixed-quality cases: they stand in for real source systems |
 | Orchestration | Airflow (webserver, scheduler, its own database), three DAGs `Client_{Alpha,Beta,Gamma}_ETL_Task_Flow` | **Replaced** by the etl-craft controller and agents |
 | Processing | PySpark in local mode, writing to PostgreSQL over JDBC | **Replaced** by etl-craft SQL tasks running in the warehouse, and Python scripts |
@@ -7049,6 +7221,12 @@ Supports-Insights-Docker/
 
 **Layout.** k3d on one laptop: 16 GB RAM, six cores, swap allowed; slow is acceptable.
 One job per container. SQLite wherever a component needs a database, except the Engine DB.
+The generator publishes Gamma's immutable object to `minio-gamma`, then atomically publishes
+identical bytes to a shared delivery inbox mounted read-only at `/deliveries/minio-gamma/`
+on the controller and ingestion agents. Keep per-file hashes/object keys in the generator's
+existing SQLite state; acceptance verifies byte identity and publication order. This is a demo
+filesystem projection, not package bucket listing or direct access to MinIO's internal storage.
+No sidecar/extra agent or new RAM allocation is introduced.
 
 - **Engine DB:** a three-instance CloudNativePG cluster, with one synchronous replica
   required. A PgBouncer Pooler in transaction mode serves the `ui` copies; the controller
@@ -7058,7 +7236,12 @@ One job per container. SQLite wherever a component needs a database, except the 
   agent tokens only. Reuse S7.F's Kubernetes manifests unchanged apart from counts and
   limits. One agent plus one task process measures about 128 MB before a query runs;
   S5.T refuses a container too small for a slot, and S5.C measures lazy imports toward
-  160-192 MB per agent.
+  160-192 MB per agent. Three one-slot agents serve `ingestion` (Alpha, Beta and Gamma
+  each reserve one slot while running); nine one-slot agents serve `warehouse`. Total remains
+  twelve × 256 MiB = 3072 MiB; no extra agent or container is added. Beta's two concurrent
+  bounded partition readers share one task process/reservation, not two agent slots; cap
+  each reader's batch buffer at 16 MiB and measure the whole pod below 256 MiB in S8.F.
+  The approximately 13 GB stack estimate stays unchanged until measurements say otherwise.
 - **Warehouse:** Trino over Iceberg. The Iceberg REST catalog runs on SQLite. `minio-lake`
   holds lake files, bundles and logs. Deployment bootstrap creates warehouse schemas
   through the Trino CLI: etl-craft never creates warehouse schemas. One project,
@@ -7089,17 +7272,18 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | `SI_SETUP` (manual, once and on schema change) | one `SETUP_TABLE` per target table in `lnd`, `prs`, `cdc`, `pre_ods`, `ods`, `dm`, `dwh` | SQL `SETUP_TABLE` | `infra/sql/06` to `11` |
 | `SI_REFERENCE` (deploy after `seed apply`, or detached stewardship trigger; no daily schedule) | `ds_*_to_dwh`, `info_data_dictionary_to_dwh` | SQL `SCD2_MERGE` for the four `ds` tables and dictionary | reference-history triggers |
 | | `<table>_deletes_to_dwh` (one per copy) | SQL `DELETE_ROWS` (soft), selecting `dwh` keys absent from the source | the triggers' `D` rows |
-| `SI_CLIENT_ALPHA` (every 15 min outside the maintenance hour) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
+| `SI_CLIENT_ALPHA` (every 15 min outside the maintenance hour; `OVERLAP_POLICY=SKIP`) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
 | | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
 | | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_run_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
 | | `alpha_preods_delete` | SQL `DELETE_ROWS`, `HARD_DELETE = true`: selects Alpha's keys from `pre_ods.customer_support_stage` | replacement of Alpha's stage rows |
 | | `alpha_cdc_to_preods` (depends on the delete with `SUCCESS`) | SQL `APPEND_TABLE` into `pre_ods.customer_support_stage`: joins `ds` lookups, maps codes and writes the source column | the transform half of `client_alpha_cdc_to_predm` |
 | | `alpha_rules` | BUSINESS_RULES on only Alpha's rows in `pre_ods.customer_support_stage`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
 | | `alpha_preods_to_ods` (one task per ODS table, depending on the rules) | SQL `SCD1_MERGE` into the normalized ODS: one table per entity (interactions, customers, agents, support areas and the like), each keyed on its own business key and referring to the others by key, excluding rejected keys | the normalized half of `client_alpha_predm_to_dm` |
-| | `alpha_ods_to_dm` (depends on every ODS merge) | SQL `SCD2_MERGE` into `dm.customer_support_fact`, one flattened wide table joining the ODS tables and `ds` lookups, keyed on `source_system_identifier` | `client_alpha_predm_to_dm` |
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
-| `SI_CLIENT_BETA` | as Alpha, with `kafka_to_lnd.py` (consumer offsets stored as etl-craft offsets) | | `Client_Beta_ETL_Task_Flow` |
-| `SI_CLIENT_GAMMA` | as Alpha, with `minio_to_lnd.py` (the last processed object key, `{sequence_number:10d}_...`, as a `TEXT` offset) | | `Client_Gamma_ETL_Task_Flow` |
+| `SI_CLIENT_BETA` (every 15 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `beta_source_to_lnd`, then Beta-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS tasks as Alpha; ends at ODS | One PYTHON `kafka_to_lnd.py` task, S5.AK `task.fan_out`, one item per Kafka partition; S5.AH PARTITIONS offsets | `Client_Beta_ETL_Task_Flow` |
+| `SI_CLIENT_GAMMA` (every 5 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `gamma_wait_files` at the head | EVENT_WAIT, `EVENT_FILE=/deliveries/minio-gamma/*.csv.gz`, settle 30 s, `EVENT_TIMEOUT_MINUTES=55`, `EVENT_ON_TIMEOUT=SKIP` | event-driven Gamma delivery |
+| | `gamma_source_to_lnd` with `SUCCESS` dependency on wait; then Gamma-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS; ends at ODS | PYTHON `minio_to_lnd.py`, `INPUT_PARAMS={"files":"$$event_files"}`; reads exactly saved paths, no bucket scan or second TEXT cursor | `Client_Gamma_ETL_Task_Flow` |
+| `SI_DM` (`0 */6 * * *`; no client pipeline dependency gate) | `ods_to_dm` | SQL `SCD2_MERGE` into flattened `dm.customer_support_fact`; S7.X bounded UPDATE_DATE window over committed ODS writes | all former per-client ODS-to-DM tasks |
 | `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per stewarded `ds` table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
 | | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads every file in `task.uploads` into the table's landing table, each row with its `UPLOAD_ID` | |
 | | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table | |
@@ -7116,8 +7300,10 @@ Rules for building them:
    with a design note in this plan, then cut a new release candidate. Example: the Data Metrics
    view needs a duplicate count per run; if the `SCD2_MERGE` dedupe step doesn't report it, add
    `DUPLICATE_COUNT` to the action's counts rather than computing it in a script.
-2. Each Python script replaces its landing table's rows every run and returns
-   `ScriptResult(row_count, offset)`. If the scripting helper cannot replace, record a package
+2. Alpha and Gamma replace their landing table's rows every run; Beta's one fan-out task
+   writes disjoint item-key-tagged rows to one landing table, replacing only that item's batch
+   so retries preserve successful partitions. Each returns its appropriate ScriptResult;
+   Gamma uses recorded event-file consumption instead of an independent offset. If the scripting helper cannot replace, record a package
    gap under rule 1. The layers (owner, 22 October 2026): LND overwrite, PRS SCD2, CDC
    overwrite, PRE_ODS, business rules, ODS SCD1 and normalized, DM SCD2 as one flattened wide
    table. All clients share `pre_ods.customer_support_stage`, with a source column. Each client
@@ -7131,8 +7317,35 @@ Rules for building them:
    `dm.customer_support_fact` table is created by `SETUP_TABLE` with etl-craft's SCD2 audit
    columns, flattened from the ODS for reporting. Its source-based partitions are dropped (the data is small); `is_active` becomes
    `ACTIVE_FLAG = 'Y'`, and validity comes from the business rules.
-4. Pools: ingestion tasks run in the `ingestion` pool on agent 1, SQL and rules in the `warehouse`
-   pool on agent 2, so the example exercises the cluster.
+4. Pools: Alpha's and Gamma's Python ingestion each reserve one `ingestion` slot. Beta
+   also reserves one ingestion slot; `task.fan_out(..., max_parallel=2, max_items=4)` bounds
+   four configured Kafka partitions with two simultaneous I/O readers, fitting the bounded
+   16 MiB-per-reader batches within the 256 MiB agent/task pod. Refuse a fifth partition until
+   metadata/budget is deliberately revised. AUD_TASK_ITEMS records partition keys/outcomes;
+   retry runs only failed partitions and preserves successful item rows/partition offsets.
+   Use S5.AK short `task.write` scopes for each item, not one transaction around fan_out.
+   Three ingestion and nine warehouse one-slot agents match S8.A; SQL/rules/DM use warehouse.
+5. All three clients stop at ODS; delete every `<client>_ods_to_dm` task/dependency. Schedule
+   Alpha/Beta with `*/15 0-1,3-23 * * *`, Gamma with `*/5 0-1,3-23 * * *`, all UTC; reserve
+   02:00–03:00 UTC for maintenance. Before it, use existing run/task hold controls to stop
+   client dispatch (including ingestion downstream of an already waiting Gamma run), then
+   drain active writers. Release holds after maintenance; SKIP schedule alone does not drain
+   active runs or stop an event that becomes satisfied. A wait's original deadline still applies.
+   Gamma's 55-minute deadline avoids indefinite idle runs while overlapping ticks skip; a
+   no-file wait and its SUCCESS-only downstream chain end SKIPPED, never a failed baseline.
+   Failure-alert tasks use FAILURE edges so a skipped wait sends no failure alert.
+6. SI_DM runs every six hours at 00:00/06:00/12:00/18:00 UTC, on committed ODS writes using
+   `WATERMARK_TYPE=TIMESTAMP`, `WATERMARK_COLUMN=ods_changed_at` (the SELECT aliases the
+   source engine UPDATE_DATE to avoid the reserved target column), a defined UTC WATERMARK_START,
+   and `WATERMARK_SOURCE_PIPELINES=["SI_CLIENT_ALPHA","SI_CLIENT_BETA","SI_CLIENT_GAMMA"]`.
+   Filter `UPDATE_DATE > $$watermark AND UPDATE_DATE <= $$watermark_max`; use S7.X's shared
+   clock and admitted fence, not MAX of data or last pipeline run ID. It has no
+   CFG_PIPELINE_DEPENDENCY on clients: requiring fresh upstream success would stall behind
+   Gamma. Keep source run/task IDs as provenance. Changed ODS lookup entities must expand
+   affected fact keys, not only interaction UPDATE_DATE; a package inability is rule 1's gap.
+   Independent reference queries compare after the corresponding completed DM window, not
+   immediately after an ODS run. Source attempts may complete under a still-open run: use
+   completed write attempts/committed ODS, not a run-status filter that can strand old stamps.
 
 
 **Reference seeds.** `project/seeds/<catalog>/<schema>/<table>/` holds:
@@ -7172,7 +7385,8 @@ maintenance.
 ### S8.C Configuration through CI
 
 Metadata is code in the demo's `project/config/`, one CSV per `CFG_` table, merged by key.
-Pipeline, rule, stewardable-pipeline and grant edits are pull requests; retiring a row sets
+Pipeline, rule and stewardable-pipeline edits are pull requests; access grants use S7.Y
+admin commands outside config CI. Grant command input is not a project config file; retiring a row sets
 `ACTIVE_FLAG = 'N'`. Nobody edits the Engine DB by hand; the UI shows metadata read-only.
 
 - **Pull requests:** `validate.yml` runs on a GitHub-hosted runner, with no secrets. Install
@@ -7193,7 +7407,10 @@ Keep `vw.customer_support_fact_view` and `vw.data_metrics_view` as `CREATE_VIEW`
 each checked by S8.F's independent reference queries.
 
 1. **Customer support facts.** Rewrite the fact view over `dm.customer_support_fact`:
-   `ACTIVE_FLAG = 'Y'` replaces `is_active` and the date range; exclude rejected keys through
+   `ACTIVE_FLAG = 'Y'` replaces `is_active` and the date range; SI_DM alone builds scheduled
+   mart versions from bounded ODS windows (steward writes remain separately attributed).
+   Show source ODS run/task provenance separately from the SI_DM run that publishes a version;
+   expose the last committed window and freshness. Exclude rejected keys through
    the business-rule results mirrored by cloning. Reference queries check interactions,
    first-contact resolution, handle time, ratings, query status, agent/customer/support-area
    breakdowns, volume over time and latest interactions.
@@ -7204,7 +7421,7 @@ each checked by S8.F's independent reference queries.
    | Today (`aud.dag_runs`) | From etl-craft |
    | --- | --- |
    | `dag_run_id`, `run_start_date`, `run_duration` | `AUD_PIPELINES_RUN_LOG`: `PIPELINE_RUN_ID`, `START_DATE`, `END_DATE - START_DATE` |
-   | `source_name` | the pipeline through the developer-owned `ds.sources` mapping |
+   | `source_name` | client pipeline through developer-owned `ds.sources`; SI_DM is a separate cross-source publication, never a fabricated fourth client |
    | `batch_count` | the ingestion task's `SOURCE_COUNT` |
    | `insert_count`, `update_count` | the `lnd_to_prs` task: `UPDATE_COUNT` counts closed versions; `INSERT_COUNT - UPDATE_COUNT` counts new keys |
    | `duplicate_count` | the `lnd_to_prs` dedupe count (S8.B rule 1) |
@@ -7227,15 +7444,21 @@ In the Support Insights repository's `.github/workflows/`:
 
 `tests/` in the example repository (run by `e2e.yml`):
 
-1. Every baseline scheduled client run, explicit `SI_REFERENCE` run and maintenance run ends `SUCCESS`; `etl-craft status` shows
+1. Alpha/Beta run every 15 minutes with SKIP overlap outside maintenance; Gamma schedules
+   every five minutes and waits for settled files. A delivered baseline ends SUCCESS; an idle
+   Gamma deadline ends SKIPPED with no failure alert. SI_DM runs every six hours independently,
+   including an empty window that advances successfully. Explicit SI_REFERENCE and maintenance runs end SUCCESS; `etl-craft status` shows
    no unexplained failed or lost attempt. Injected failure scenarios state their expected failure
    and recovery outcomes explicitly, and assert both.
 2. Row reconciliation: for each client, the known source keys, stewardship inserts/corrections
    and deletions reconcile with active mart rows and excluded/rejected keys under the declared
    S8.H policies. Count overlapping rule flags once per excluded key, distinguish load rejects,
    and retain reportable rows when their policy permits it. No key has two active versions.
-3. Incremental behaviour: a second generator batch is picked up from the stored offsets with no
-   duplicate versions in `prs`; `lnd` contains exactly the latest batch's rows.
+3. Incremental behaviour: a second generator batch is picked up from the stored scalar or
+   PARTITIONS offsets, and Gamma's exact consumed-file evidence, with no duplicate versions in
+   PRS. Alpha/Gamma LND contains the latest batch; Beta contains each partition's latest
+   item-key-tagged batch. Assert DM after its matching completed bounded window, not after
+   each client finishes ODS.
 4. Failure and recovery: stop MongoDB during a run; the Alpha run fails, the alert arrives in Mailpit,
    and after MongoDB returns, `etl-craft run --pipeline-code SI_CLIENT_ALPHA --run-id <failed-run>` (or the next
    scheduled run) completes with no lost or doubled rows. `kill -9` an agent mid-run; its attempt is
@@ -7244,11 +7467,25 @@ In the Support Insights repository's `.github/workflows/`:
    inspection steps and UI/catalog pages without errors. Every data dictionary field has a
    matching `CFG_COLUMNS` row for its source's landing table.
 6. Catalog: `etl-craft generate-docs` builds; each client pipeline's lineage reaches
-   `dm.customer_support_fact`, and `SI_REFERENCE` shows the five source-to-`dwh` copies.
+   ODS and through SI_DM's window lineage to `dm.customer_support_fact`; no per-client
+   ODS-to-DM task remains. SI_REFERENCE shows the five source-to-dwh copies.
    Maintenance files list their lake tables explicitly, as S8.B requires.
 7. Scenario coverage: S8.H's expected source keys, reject reasons, business-rule flags, human
    corrections and downstream counts match their fixtures. Every feature's demonstration has
    recorded results; README commands and UI inspection instructions reproduce those results.
+
+8. Concurrency/window oracle: hold Alpha's warehouse merge open while Beta finishes, start
+   SI_DM and record its frozen low/high; commit Alpha after admission. First DM excludes
+   Alpha; next DM includes each Alpha row exactly once with no duplicate active/SCD2 version.
+   Repair an old Alpha run with a new write stamp and observe it in the next window. Repeat
+   with Gamma waiting (no attempt) to show its run does not pin the upper bound; retry DM
+   with the same task-run window, and prove empty-window advancement. Inspect run IDs only
+   as provenance, never as the cursor. Verify 3 ingestion/9 warehouse slots and measured
+   Beta pod memory under 256 MiB with max_parallel=2/max_items=4; stack remains about 13 GB.
+9. Beta: inject one partition failure; AUD_TASK_ITEMS and PARTITIONS offsets prove successful
+   partitions are not reread, all landing rows carry item keys, and the retry completes only
+   failed partitions. Gamma: verify MinIO/inbox hashes, one settled file consumed once through
+   $$event_files, and no-file timeout has no failure status or Mailpit error.
 
 ### S8.H Messy sources
 
@@ -7346,7 +7583,7 @@ The source-error cases below are a minimum, not the full feature-coverage matrix
 | The source | etl-craft handles it with | The check |
 |---|---|---|
 | replays a batch, or sends a key twice | merges with `MERGE_DEDUPE_ORDER`; retry-safe appends | rows equal the distinct source records |
-| sends records late or out of order | SCD2 history; S5.L watermarks with `WATERMARK_LAG` | a late row lands once, in the right version |
+| sends records late or out of order | SCD2 history; ingestion UPDATE_DATE and S7.X bounded timestamp windows | a late row lands once, in the right version |
 | adds, drops or retypes a column | S5.N source definitions: `validate` names the drift; `SCHEMA_EVOLUTION` takes added columns | `validate` reports the change before the run; the run then succeeds, or fails naming the column |
 | sends values that do not fit: bad dates, text in numbers, over-long text, NULL keys | S5.K rejects with `REJECT_LIMIT` | the injected bad rows, and only those, are in `__rejects` with reasons |
 | sends wrong encodings or stray whitespace | business rules (`REJECT`, `INCOMPLETE`, `REPORT`) | the flags equal the injected count |
@@ -7355,8 +7592,11 @@ The source-error cases below are a minimum, not the full feature-coverage matrix
 | sends an empty or truncated batch, or a sudden spike | `HAS_DATA` dependencies; rules on counts | downstream tasks skip, and an alert says why |
 | drops a file at an unknown time | S5.M event waits | the run starts when the file settles, once per file |
 | fails mid-transfer, or times out | retries, leases, `LOST` reconciliation | after a kill and a retry, no row is doubled or missing |
+| Alpha remains in progress while Beta finishes and DM starts | S7.X attempt-fenced timestamp window; no client run gate | Alpha is excluded from the first DM window and reaches the next exactly once; Gamma idle wait does not pin it |
+| one Beta partition fails | S5.AK fan-out and S5.AH partition offsets | successful item keys/rows stay; only failed partitions retry |
+| Gamma receives no object before its deadline | S5.M FILE EVENT_WAIT with SKIP timeout | run and downstream work SKIPPED, no failure alert |
 | sends timestamps without zones, or across a DST change | typed `CAST` to the declared type; UTC audit times | run dates and event times match the generator's truth |
-| resends corrected history | backfills and reopened runs; `CONSUME_REPAIRS` | the mart reflects the correction once |
+| resends corrected history | backfills/reopened runs with fresh engine UPDATE_DATE and S7.X windows | next SI_DM window reflects the correction once, regardless of old source run ID |
 
 **Tests.** For every client, generate each quality class and a mixed batch with known keys;
 assert exact membership, counts, reasons and downstream inclusion, including multi-flag rows.

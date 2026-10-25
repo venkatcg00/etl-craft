@@ -1,0 +1,5 @@
+STATIC DESIGN SAMPLE — synthesized audit view
+2026-10-25T06:00:00Z RUN_CREATED run=419 actor=system trigger=SCHEDULE
+2026-10-25T06:00:30Z TASK_STARTED beta_source_to_lnd attempt=811
+2026-10-25T06:02:05Z ATTEMPT_FAILED attempt=811 class=TRANSIENT partition=2
+2026-10-25T06:03:00Z RETRY_STARTED attempt=812 actor=system

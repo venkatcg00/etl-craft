@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SI_CLIENT_BETA · ETL Craft wireframe</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+<strong>ETL Craft</strong>
+<span>Design review · 25 Oct 2026 · sample data</span>
+<form action="search.html" method="get">
+<label for="global-search">Global search</label>
+<input id="global-search" name="q" value="SI_CLIENT_BETA">
+<button type="submit">Search</button>
+</form>
+<span>operator · support team</span>
+</header>
+<div class="shell">
+<nav aria-label="Console navigator">
+<h2>Console</h2>
+<ul>
+<li>
+<a href="index.html" class="" >Projects</a>
+</li>
+<li>
+<a href="pipelines.html" class="" >Pipelines</a>
+</li>
+<li>
+<a href="runs.html" class="" >Runs</a>
+</li>
+<li>
+<a href="backfills.html" class="" >Backfills</a>
+</li>
+<li>
+<a href="interventions.html" class="" >Interventions</a>
+</li>
+<li>
+<a href="agents.html" class="" >Agents and pools</a>
+</li>
+<li>
+<a href="insights.html" class="" >Pipeline Insights</a>
+</li>
+<li>
+<a href="gaps.html" class="" >Schema gaps</a>
+</li>
+<li>
+<a href="lineage.html" class="" >Lineage / catalog</a>
+</li>
+<li>
+<a href="metadata.html" class="" >Metadata</a>
+</li>
+<li>
+<a href="uploads.html" class="" >Uploads</a>
+</li>
+<li>
+<a href="commands.html" class="" >Command center</a>
+</li>
+</ul>
+<h2>Workflows</h2>
+<details open>
+<summary>Tag: ingestion</summary>
+<ul>
+<li>
+<a href="pipeline-alpha.html" class=""  target="_blank" rel="noopener">SI_CLIENT_ALPHA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">SI_CLIENT_BETA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-gamma.html" class=""  target="_blank" rel="noopener">SI_CLIENT_GAMMA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<details>
+<summary>Tag: mart / reference</summary>
+<ul>
+<li>
+<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-reference.html" class=""  target="_blank" rel="noopener">SI_REFERENCE <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html" class=""  target="_blank" rel="noopener">SI_STEWARD_DM_FACT <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_AGENTS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_CUSTOMER_TYPES <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_SUPPORT_AREAS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<p>
+<a href="run.html" class=""  target="_blank" rel="noopener">Recent: Beta run 419 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</p>
+<p>
+<a href="README.md" class="" >Wireframe guide</a>
+</p>
+</nav>
+<div class="workspace">
+<nav class="crumbs" aria-label="Breadcrumb">
+<ol>
+<li>
+<a href="index.html" class=""  target="_blank" rel="noopener">Projects <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="project.html" class=""  target="_blank" rel="noopener">support_insights <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-beta.html" class="" >SI_CLIENT_BETA</a>
+</li>
+</ol>
+</nav>
+<div class="workarea">
+<main id="content" tabindex="-1">
+<h1>SI_CLIENT_BETA</h1>
+<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
+<p class="annotation">
+<strong>S5.AA feed:</strong> PIPELINE /pipelines/{pipeline_code}; GRAPH /graph; CAPABILITIES /capabilities.</p>
+<div class="tabs">
+<a href="pipeline-beta.html" class="" >Overview</a>
+<a href="runs.html" class="" >Runs</a>
+<a href="matrix.html" class="" >Run matrix</a>
+<a href="insights.html" class="" >Insights</a>
+<a href="metadata.html" class="" >Read-only metadata</a>
+</div>
+<p>Selected pipeline: <strong>SI_CLIENT_BETA</strong> · Ends at ODS; no per-client ODS → DM task</p>
+<h2>Dependency graph</h2>
+<div class="dag" aria-label="Task dependency graph">
+<a href="task.html" class="node" >beta_source_to_lnd<br>
+<span class="status waiting">
+<span aria-hidden="true">●</span> RETRYING</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="task-beta_lnd_to_prs.html" class="node" >beta_lnd_to_prs<br>
+<span class="status queued">
+<span aria-hidden="true">●</span> QUEUED</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="task-beta_prs_to_cdc.html" class="node" >beta_prs_to_cdc<br>
+<span class="status queued">
+<span aria-hidden="true">●</span> QUEUED</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="task-beta_preods_delete.html" class="node" >beta_preods_delete<br>
+<span class="status queued">
+<span aria-hidden="true">●</span> QUEUED</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="task-beta_cdc_to_preods.html" class="node" >beta_cdc_to_preods<br>
+<span class="status queued">
+<span aria-hidden="true">●</span> QUEUED</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="task-beta_rules.html" class="node" >beta_rules<br>
+<span class="status queued">
+<span aria-hidden="true">●</span> QUEUED</span>
+</a>
+<span aria-hidden="true">→</span>
+<a href="task-beta_preods_to_ods.html" class="node" >beta_preods_to_ods<br>
+<span class="status queued">
+<span aria-hidden="true">●</span> QUEUED</span>
+</a>
+</div>
+<p>Arrow labels: SUCCESS except ingestion → PRS = HAS_DATA; Gamma wait → ingestion = SUCCESS.</p>
+<form action="ack-run.html" method="get" class="action">
+<input type="hidden" name="route" value="/api/v1/projects/support_insights/runs">
+<input type="hidden" name="pipeline_code" value="SI_CLIENT_BETA">
+<button type="submit">Run selected pipeline</button>
+</form>
+<small class="route">POST /api/v1/projects/support_insights/runs</small>
+<p>Different object: <a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM publishes ODS later <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a> · <a href="table.html" class=""  target="_blank" rel="noopener">dm.customer_support_fact <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</p>
+<h2>Bounded fan-out</h2>
+<p>One ingestion task/slot · 4 Kafka partitions · max_items=4 · max_parallel=2 · rows tagged by partition key · PARTITIONS offsets.</p>
+<a href="items.html" class="" >Partition items</a>
+</main>
+<aside aria-label="Selection properties">
+<h2>Selected object</h2>
+<p>SI_CLIENT_BETA</p>
+<p>Read-only definition · operator view</p>
+<p>Actions apply only to this selection and are filtered by CAPABILITIES. This is a static snapshot.</p>
+</aside>
+</div>
+<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
+</div>
+</div>
+</body>
+</html>

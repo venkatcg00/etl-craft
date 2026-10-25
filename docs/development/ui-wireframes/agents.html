@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agents and pools · ETL Craft wireframe</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+<strong>ETL Craft</strong>
+<span>Design review · 25 Oct 2026 · sample data</span>
+<form action="search.html" method="get">
+<label for="global-search">Global search</label>
+<input id="global-search" name="q" value="SI_CLIENT_BETA">
+<button type="submit">Search</button>
+</form>
+<span>operator · support team</span>
+</header>
+<div class="shell">
+<nav aria-label="Console navigator">
+<h2>Console</h2>
+<ul>
+<li>
+<a href="index.html" class="" >Projects</a>
+</li>
+<li>
+<a href="pipelines.html" class="" >Pipelines</a>
+</li>
+<li>
+<a href="runs.html" class="" >Runs</a>
+</li>
+<li>
+<a href="backfills.html" class="" >Backfills</a>
+</li>
+<li>
+<a href="interventions.html" class="" >Interventions</a>
+</li>
+<li>
+<a href="agents.html" class="current" >Agents and pools</a>
+</li>
+<li>
+<a href="insights.html" class="" >Pipeline Insights</a>
+</li>
+<li>
+<a href="gaps.html" class="" >Schema gaps</a>
+</li>
+<li>
+<a href="lineage.html" class="" >Lineage / catalog</a>
+</li>
+<li>
+<a href="metadata.html" class="" >Metadata</a>
+</li>
+<li>
+<a href="uploads.html" class="" >Uploads</a>
+</li>
+<li>
+<a href="commands.html" class="" >Command center</a>
+</li>
+</ul>
+<h2>Workflows</h2>
+<details open>
+<summary>Tag: ingestion</summary>
+<ul>
+<li>
+<a href="pipeline-alpha.html" class=""  target="_blank" rel="noopener">SI_CLIENT_ALPHA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">SI_CLIENT_BETA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-gamma.html" class=""  target="_blank" rel="noopener">SI_CLIENT_GAMMA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<details>
+<summary>Tag: mart / reference</summary>
+<ul>
+<li>
+<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-reference.html" class=""  target="_blank" rel="noopener">SI_REFERENCE <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html" class=""  target="_blank" rel="noopener">SI_STEWARD_DM_FACT <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_AGENTS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_CUSTOMER_TYPES <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_SUPPORT_AREAS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<p>
+<a href="run.html" class=""  target="_blank" rel="noopener">Recent: Beta run 419 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</p>
+<p>
+<a href="README.md" class="" >Wireframe guide</a>
+</p>
+</nav>
+<div class="workspace">
+<nav class="crumbs" aria-label="Breadcrumb">
+<ol>
+<li>
+<a href="index.html" class=""  target="_blank" rel="noopener">Projects <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="project.html" class="" >support_insights</a>
+</li>
+</ol>
+</nav>
+<div class="workarea">
+<main id="content" tabindex="-1">
+<h1>Agents and pools</h1>
+<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
+<p class="annotation">
+<strong>S5.AA feed:</strong> HEALTH /api/v1/health; STATUS /status; operator capacity/agent read GAP.</p>
+<p class="annotation">
+<strong>Pending contract:</strong> S6.F: per-pool slots, queue age, heartbeat timestamps, measured memory vs limits</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Twelve-agent allocation">
+<table>
+<caption>Twelve-agent allocation</caption>
+<thead>
+<tr>
+<th scope="col">Pool</th>
+<th scope="col">Capacity</th>
+<th scope="col">Used</th>
+<th scope="col">Queue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<a href="agents.html#ingestion" class="" >ingestion</a>
+</td>
+<td>3 × 1 slot, 256 MiB per pod</td>
+<td>Alpha 1 · Beta 1 · Gamma 0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>
+<a href="agents.html#warehouse" class="" >warehouse</a>
+</td>
+<td>9 × 1 slot, 256 MiB per pod</td>
+<td>2 / 9</td>
+<td>2 tasks</td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="ingestion">
+<h2>Ingestion agents</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Ingestion heartbeat snapshot">
+<table>
+<caption>Ingestion heartbeat snapshot</caption>
+<thead>
+<tr>
+<th scope="col">Agent</th>
+<th scope="col">State</th>
+<th scope="col">Owner</th>
+<th scope="col">Heartbeat UTC</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<a href="agents.html#agent1" class="" >ingestion-01</a>
+</td>
+<td>
+<span class="status running">
+<span aria-hidden="true">●</span> RUNNING</span>
+</td>
+<td>
+<a href="pipeline-alpha.html" class=""  target="_blank" rel="noopener">Alpha attempt <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>06:05:00</td>
+</tr>
+<tr>
+<td>
+<a href="task.html" class=""  target="_blank" rel="noopener">ingestion-02 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>
+<span class="status running">
+<span aria-hidden="true">●</span> RUNNING</span>
+</td>
+<td>
+<a href="task.html" class=""  target="_blank" rel="noopener">Beta task 719 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>06:05:00</td>
+</tr>
+<tr>
+<td>
+<a href="agents.html#agent3" class="" >ingestion-03</a>
+</td>
+<td>
+<span class="status success">
+<span aria-hidden="true">●</span> SUCCESS</span>
+</td>
+<td>idle · Gamma waiting</td>
+<td>06:05:00</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="warehouse">
+<h2>Warehouse agents</h2>
+<p>warehouse-01 … warehouse-09 · 9 slots. Measured memory, free slots and query concurrency must be separate.</p>
+</section>
+<section id="agent1">
+<h2>ingestion-01</h2>
+<p>256 MiB limit; 184 MiB observed; 1 / 1 slot; token pool scope: ingestion.</p>
+</section>
+<section id="agent3">
+<h2>ingestion-03</h2>
+<p>Idle; event wait holds no attempt or agent slot.</p>
+</section>
+<p class="gap">
+<strong>Read/action gap:</strong> There is no operator-facing list agents/pools GET action; agent protocol endpoints are not console read APIs. See README; no route is implied.</p>
+</main>
+<aside aria-label="Selection properties">
+<h2>Selection</h2>
+<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
+<p>No definition editing.</p>
+</aside>
+</div>
+<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
+</div>
+</div>
+</body>
+</html>

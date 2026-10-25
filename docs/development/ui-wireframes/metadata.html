@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Metadata · read-only · ETL Craft wireframe</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+<strong>ETL Craft</strong>
+<span>Design review · 25 Oct 2026 · sample data</span>
+<form action="search.html" method="get">
+<label for="global-search">Global search</label>
+<input id="global-search" name="q" value="SI_CLIENT_BETA">
+<button type="submit">Search</button>
+</form>
+<span>operator · support team</span>
+</header>
+<div class="shell">
+<nav aria-label="Console navigator">
+<h2>Console</h2>
+<ul>
+<li>
+<a href="index.html" class="" >Projects</a>
+</li>
+<li>
+<a href="pipelines.html" class="" >Pipelines</a>
+</li>
+<li>
+<a href="runs.html" class="" >Runs</a>
+</li>
+<li>
+<a href="backfills.html" class="" >Backfills</a>
+</li>
+<li>
+<a href="interventions.html" class="" >Interventions</a>
+</li>
+<li>
+<a href="agents.html" class="" >Agents and pools</a>
+</li>
+<li>
+<a href="insights.html" class="" >Pipeline Insights</a>
+</li>
+<li>
+<a href="gaps.html" class="" >Schema gaps</a>
+</li>
+<li>
+<a href="lineage.html" class="" >Lineage / catalog</a>
+</li>
+<li>
+<a href="metadata.html" class="current" >Metadata</a>
+</li>
+<li>
+<a href="uploads.html" class="" >Uploads</a>
+</li>
+<li>
+<a href="commands.html" class="" >Command center</a>
+</li>
+</ul>
+<h2>Workflows</h2>
+<details open>
+<summary>Tag: ingestion</summary>
+<ul>
+<li>
+<a href="pipeline-alpha.html" class=""  target="_blank" rel="noopener">SI_CLIENT_ALPHA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">SI_CLIENT_BETA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-gamma.html" class=""  target="_blank" rel="noopener">SI_CLIENT_GAMMA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<details>
+<summary>Tag: mart / reference</summary>
+<ul>
+<li>
+<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-reference.html" class=""  target="_blank" rel="noopener">SI_REFERENCE <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html" class=""  target="_blank" rel="noopener">SI_STEWARD_DM_FACT <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_AGENTS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_CUSTOMER_TYPES <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_SUPPORT_AREAS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<p>
+<a href="run.html" class=""  target="_blank" rel="noopener">Recent: Beta run 419 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</p>
+<p>
+<a href="README.md" class="" >Wireframe guide</a>
+</p>
+</nav>
+<div class="workspace">
+<nav class="crumbs" aria-label="Breadcrumb">
+<ol>
+<li>
+<a href="index.html" class=""  target="_blank" rel="noopener">Projects <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="project.html" class="" >support_insights</a>
+</li>
+</ol>
+</nav>
+<div class="workarea">
+<main id="content" tabindex="-1">
+<h1>Metadata · read-only</h1>
+<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
+<p class="annotation">
+<strong>S5.AA feed:</strong> PIPELINE /pipelines/{pipeline_code}; VALIDATE /validation; AUDIT /audit; full metadata/history/access read GAP.</p>
+<p>Definitions change in reviewed config files; access changes through admin access commands (planned S7.Y). No edit, apply or grant form appears here.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Metadata provenance">
+<table>
+<caption>Metadata provenance</caption>
+<thead>
+<tr>
+<th scope="col">Source / entity</th>
+<th scope="col">Actor / history</th>
+<th scope="col">Validation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">config/pipelines.csv <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>developer:ci · revision si-25oct</td>
+<td>Valid</td>
+</tr>
+<tr>
+<td>
+<a href="task.html" class=""  target="_blank" rel="noopener">config/tasks.csv <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>developer:ci · task 719 snapshot</td>
+<td>max_items=4, max_parallel=2</td>
+</tr>
+<tr>
+<td>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">config/task_dependencies.csv <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>developer:ci · SUCCESS/HAS_DATA edges</td>
+<td>Valid</td>
+</tr>
+<tr>
+<td>
+<a href="table.html" class=""  target="_blank" rel="noopener">config/tables.csv <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>developer:ci · schema history</td>
+<td>1 missing declared column</td>
+</tr>
+<tr>
+<td>
+<a href="metadata.html#access" class="" >Command-managed access</a>
+</td>
+<td>admin:lee · immutable access audit</td>
+<td>No grants.csv</td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="rules">
+<h2>Rules and dependencies</h2>
+<p>alpha_rules uses own-source scope; task dependencies determine ordering. No SI_DM client gate.</p>
+</section>
+<section id="scripts">
+<h2>Script source</h2>
+<p>python_scripts/kafka_to_lnd.py · commit si-25oct · source display read gap; no editor.</p>
+</section>
+<section id="access">
+<h2>Access records · read-only</h2>
+<p>support-operators → ingestion tag → operator; planned access list API (S7.Y), not config.</p>
+</section>
+</main>
+<aside aria-label="Selection properties">
+<h2>Selection</h2>
+<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
+<p>No definition editing.</p>
+</aside>
+</div>
+<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
+</div>
+</div>
+</body>
+</html>

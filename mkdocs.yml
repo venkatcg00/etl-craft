@@ -31,6 +31,7 @@ theme:
 
 # The reference generators run at build time; they are not pages.
 exclude_docs: |
+  development/ui-wireframes/
   gen_python_api.py
   gen_cli_page.py
   gen_reference_pages.py

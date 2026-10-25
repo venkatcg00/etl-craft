@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Backfills · ETL Craft wireframe</title>
+<link rel="stylesheet" href="wireframes.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+<strong>ETL Craft</strong>
+<span>Design review · 25 Oct 2026 · sample data</span>
+<form action="search.html" method="get">
+<label for="global-search">Global search</label>
+<input id="global-search" name="q" value="SI_CLIENT_BETA">
+<button type="submit">Search</button>
+</form>
+<span>operator · support team</span>
+</header>
+<div class="shell">
+<nav aria-label="Console navigator">
+<h2>Console</h2>
+<ul>
+<li>
+<a href="index.html" class="" >Projects</a>
+</li>
+<li>
+<a href="pipelines.html" class="" >Pipelines</a>
+</li>
+<li>
+<a href="runs.html" class="" >Runs</a>
+</li>
+<li>
+<a href="backfills.html" class="current" >Backfills</a>
+</li>
+<li>
+<a href="interventions.html" class="" >Interventions</a>
+</li>
+<li>
+<a href="agents.html" class="" >Agents and pools</a>
+</li>
+<li>
+<a href="insights.html" class="" >Pipeline Insights</a>
+</li>
+<li>
+<a href="gaps.html" class="" >Schema gaps</a>
+</li>
+<li>
+<a href="lineage.html" class="" >Lineage / catalog</a>
+</li>
+<li>
+<a href="metadata.html" class="" >Metadata</a>
+</li>
+<li>
+<a href="uploads.html" class="" >Uploads</a>
+</li>
+<li>
+<a href="commands.html" class="" >Command center</a>
+</li>
+</ul>
+<h2>Workflows</h2>
+<details open>
+<summary>Tag: ingestion</summary>
+<ul>
+<li>
+<a href="pipeline-alpha.html" class=""  target="_blank" rel="noopener">SI_CLIENT_ALPHA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-beta.html" class=""  target="_blank" rel="noopener">SI_CLIENT_BETA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-gamma.html" class=""  target="_blank" rel="noopener">SI_CLIENT_GAMMA <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<details>
+<summary>Tag: mart / reference</summary>
+<ul>
+<li>
+<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="pipeline-reference.html" class=""  target="_blank" rel="noopener">SI_REFERENCE <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html" class=""  target="_blank" rel="noopener">SI_STEWARD_DM_FACT <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_AGENTS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_CUSTOMER_TYPES <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="uploads.html#accepted" target="_blank" rel="noopener">SI_STEWARD_DS_SUPPORT_AREAS <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+</ul>
+</details>
+<p>
+<a href="run.html" class=""  target="_blank" rel="noopener">Recent: Beta run 419 <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</p>
+<p>
+<a href="README.md" class="" >Wireframe guide</a>
+</p>
+</nav>
+<div class="workspace">
+<nav class="crumbs" aria-label="Breadcrumb">
+<ol>
+<li>
+<a href="index.html" class=""  target="_blank" rel="noopener">Projects <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</li>
+<li>
+<a href="project.html" class="" >support_insights</a>
+</li>
+</ol>
+</nav>
+<div class="workarea">
+<main id="content" tabindex="-1">
+<h1>Backfills</h1>
+<p class="notice">Static wireframe · definitions are read-only · no live requests are sent.</p>
+<p class="annotation">
+<strong>S5.AA feed:</strong> HISTORY /history; RUN_DETAIL /runs/{run_id}; RUN /runs returns BackfillView; aggregate backfill-list read GAP.</p>
+<p>Explicit pipeline, dates, actor and reason; successful task runs are not replayed on recovery.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Backfill progress">
+<table>
+<caption>Backfill progress</caption>
+<thead>
+<tr>
+<th scope="col">Backfill</th>
+<th scope="col">Pipeline</th>
+<th scope="col">Progress</th>
+<th scope="col">Scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<a href="backfills.html#progress" class="" >Backfill 32</a>
+</td>
+<td>
+<a href="pipeline-dm.html" class=""  target="_blank" rel="noopener">SI_DM <span aria-hidden="true">↗</span>
+<span class="sr-only"> (opens in a new tab)</span>
+</a>
+</td>
+<td>3 / 4 logical dates SUCCESS</td>
+<td>2026-10-23 → 2026-10-24</td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="progress">
+<h2>Backfill 32</h2>
+<p>Selected date 2026-10-24T06:00Z · one run waiting. Live cursor is not advanced.</p>
+<form action="ack-control.html" method="get" class="action">
+<input type="hidden" name="reason" value="Static reviewed operator request">
+<input type="hidden" name="route" value="/api/v1/projects/support_insights/controls">
+<input type="hidden" name="pipeline_code" value="SI_CLIENT_BETA">
+<input type="hidden" name="run_id" value="403">
+<input type="hidden" name="action" value="STOP">
+<button type="submit">Stop selected backfill run</button>
+</form>
+<small class="route">POST /api/v1/projects/support_insights/controls</small>
+</section>
+<form action="ack-run.html" method="get" class="fields">
+<input type="hidden" name="route" value="/api/v1/projects/support_insights/runs">
+<label>Pipeline<select name="pipeline_code">
+<option>SI_DM</option>
+</select>
+</label>
+<label>Start date<input type="date" name="backfill_from" value="2026-10-23" required>
+</label>
+<label>End date<input type="date" name="backfill_to" value="2026-10-24" required>
+</label>
+<label>Reason<input name="reason" required value="Reconcile corrected source batch">
+</label>
+<button type="submit">Start backfill (static acknowledgement)</button>
+</form>
+<small>POST /api/v1/projects/support_insights/runs</small>
+</main>
+<aside aria-label="Selection properties">
+<h2>Selection</h2>
+<p>Project support_insights. Select a row or graph node to inspect an explicit pipeline/run/task.</p>
+<p>No definition editing.</p>
+</aside>
+</div>
+<footer>Live refresh: paused in this static snapshot. Actual SSE read contract is a gap. <a href="run.html#stream" class="" >Show paused-stream state</a> · All times UTC.</footer>
+</div>
+</div>
+</body>
+</html>

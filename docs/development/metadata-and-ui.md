@@ -309,6 +309,16 @@ table/task/lineage view. Export the structured gap records through the same serv
 by these pages. Distinguish no source lineage for a constant expression from failed tracing;
 script lineage is unknown unless explicitly declared, never fabricated from its target name.
 
+## Wireframe approval before UI implementation
+
+Owner decision, 2026-10-25: S7.A.0 is reviewed while S6 is in progress. The
+[static console wireframes](https://github.com/venkatcg00/etl-craft/blob/main/docs/development/ui-wireframes/README.md)
+cover the navigation/page inventory below, S6.B log availability and S6.F metric needs.
+No S7.A page code precedes owner approval; merging that docs(plan) PR is the approval.
+Missing action-table reads are explicit gaps, not invented endpoints. Access is managed through
+S7.Y's admin access commands before S7.A; S7.B extends them to role bindings. Metadata views
+remain read-only and never link access to a grants.csv definition.
+
 ## Workflow navigation: Databricks and PowerCenter
 
 PowerCenter's Workflow Monitor sets the interaction: a navigator of folders and workflows, a

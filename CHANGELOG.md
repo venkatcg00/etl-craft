@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Plan only (owner decisions, 2026-10-25): Support Insights uses scheduled Alpha/Beta,
+  partition fan-out for Beta, file-driven Gamma and an independent six-hour SI_DM. Plan
+  S7.X bounded timestamp windows in the existing offset tracker and S7.Y command-managed
+  grants before the UI. S7.A.0 static wireframes gate page implementation on owner approval;
+  these are design documents, not shipped UI or new runtime capabilities.
+
 - Add nullable per-target `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS` and
   `ORPHAN_RETENTION_DAYS` to `tables.csv` and the Engine contract (migration 0058).
   Purge expires project-owned rejects by ingestion time under target/ledger locks; Trino
