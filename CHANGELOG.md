@@ -6,6 +6,13 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Document coordinated Engine DB/store backups, PostgreSQL restore and the drain/stop/migrate/
+  restart upgrade procedure; rolling upgrades remain unsupported. Registration, claim and renewal
+  retain their existing agent/API version refusal.
+- Add `etl_craft_controller_tick_duration_seconds` to the existing metrics registry, excluding
+  idle waits. Manual `benchmarks/` tooling generates ordinary projects and evaluates release
+  load budgets; the 24-hour reference validation is deferred until after the S8 demo passes.
+
 - Add unsigned Prometheus 0.0.4 `GET /metrics` to both controller listeners, with current
   run/attempt/queue/gate and per-agent pressure gauges, committed process event counters,
   and admission, dispatch and catalog-labelled Engine DB statement histograms. Followers

@@ -162,6 +162,7 @@ item's text, or work done early under another item.
 | S6.D Business rules that don't re-check everything | Done | #256 | Complete scoped SELECTs, one check per rule, serialized unique flags and per-project upgrades |
 | S6.E Cloning that keeps up | Done | #258 | Scheduled incremental audit mirrors, exact-version recovery and bounded coalesced locking |
 | S6.F Metrics | Done | #259 | Shared bounded Prometheus exposition, controller events and recorded agent pressure |
+| S6.G Backup, restore, upgrade and the load benchmark | Done | #260 | Restore recovery, coordinated upgrade procedure and manual load harness; reference gate deferred until after S8 |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
@@ -339,6 +340,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S6.G covers PostgreSQL container-matched dump/restore recovery, committed-task preservation,
+agent registration/claim/renewal version refusals and controller tick measurements. A two-project
+smoke run validates the manual harness and reports a queue-age budget failure; its measurements
+belong in PR #260, not release evidence. Owner decision, 2026-10-26: the 24-hour reference run
+and similar long-running validation are deferred until the S8 Support Insights demo completes
+without failures. No reference-cluster performance gate is claimed by this item.
 
 S6.F covers both Engine DBs, both HTTP listeners, transaction/savepoint rollback, live queue
 and agent state, constant scrape statement counts and released-schema upgrades. Scrapes during
@@ -780,6 +788,20 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.G derives Done when from its three parts: coordinated database/store backup and documented
+  restore order with a bounded real restore regression; supported non-rolling upgrade steps and
+  version refusals; ordinary generated projects, a manual runner and tested budget evaluation.
+  The owner requests one combined PR and defers the 24-hour reference gate until after S8.
+- Agent registration, claim and renewal already share `check_agent`; controller/UI already
+  check package/schema compatibility. S6.G tests those existing guards rather than rebuilding
+  them. Tick duration was not recorded, so the existing registry gains the named histogram.
+- The restore test uses a small two-task deployment and container client tools, preserving a
+  committed task while retrying the interrupted attempt under the same logical run. A command
+  manifest supports local/SSH launchers and explicit host probes without a new package setting,
+  dependency, handler or scheduler. Config files apply and bundles publish through existing CLI
+  commands; the workload uses existing `INPUT_PARAMS`. Reports fail missing measurements and
+  disclose sampled gauges and conservative histogram bounds.
 
 - S6.F derives its Done when from the three bullets: both controller listeners expose one
   Prometheus operation with the listed controller and recorded agent series; agent slots,
