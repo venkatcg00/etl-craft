@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import ClassVar
 
+from sqlalchemy import bindparam
+from sqlalchemy.engine import Connection, Row
+
 from etl_craft import __version__
 from etl_craft.core.agent_resources import AgentResources, capacity
 from etl_craft.core.enums import AgentStatus, DeploymentProfile, SlotKind
@@ -277,11 +280,22 @@ def command(ctx: OperationContext, request: AgentControl) -> AgentReply:
     return AgentReply({"command_id": command_id})
 
 
+def registered_agents(conn: Connection, *, current: bool = False) -> list[Row[tuple[object, ...]]]:
+    """Share the registry read, optionally excluding historical GONE registrations."""
+    statuses = [status for status in AgentStatus if not current or status != AgentStatus.GONE]
+    return list(
+        conn.execute(
+            statement(conn, "agent_list").bindparams(bindparam("statuses", expanding=True)),
+            {"statuses": statuses},
+        )
+    )
+
+
 def list_agents(ctx: OperationContext, request: NoInput) -> AgentsView:
     """Read measured resources and live ownership using the same service for every interface."""
     result = []
     with ctx.engine.connect() as conn:
-        for row in conn.execute(statement(conn, "agent_list")):
+        for row in registered_agents(conn):
             resources = from_json(AgentResources, json.loads(row.resource_report))
             attempts = tuple(
                 conn.execute(statement(conn, "agent_attempts"), {"owner": str(row.agent_id)})

@@ -1,6 +1,8 @@
 """Shared per-agent capacity with reservations counted across overlapping host scopes."""
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from sqlalchemy.engine import Connection
@@ -12,13 +14,43 @@ from etl_craft.engine.queries import statement
 from etl_craft.services.operations.serialization import from_json
 
 
+@dataclass(frozen=True)
+class AgentUsage:
+    """One live reservation group shared by admission and aggregate telemetry."""
+
+    agent_id: int
+    resource_report: str
+    slot_kind: str | None
+    cpu_used: float
+    memory_used_mb: int
+    used: int
+
+
 def available(
-    conn: Connection, agent_id: int, resources: AgentResources
+    conn: Connection,
+    agent_id: int,
+    resources: AgentResources,
+    *,
+    usage: Sequence[AgentUsage] | None = None,
 ) -> tuple[dict[str, int], float, int]:
     """Count each live reservation against its agent, host and overlapping scope."""
     used = dict.fromkeys(SlotKind, 0)
     host_cpu = host_memory = scope_cpu = scope_memory = 0.0
-    rows = conn.execute(statement(conn, "agent_usage"), {"node_id": resources.node_id}).all()
+    rows = (
+        usage
+        if usage is not None
+        else [
+            AgentUsage(
+                row.agent_id,
+                row.resource_report,
+                row.slot_kind,
+                float(row.cpu_used),
+                int(row.memory_used_mb),
+                int(row.used),
+            )
+            for row in conn.execute(statement(conn, "agent_usage"), {"node_id": resources.node_id})
+        ]
+    )
     for row in rows:
         report = from_json(AgentResources, json.loads(row.resource_report))
         if row.slot_kind is None:

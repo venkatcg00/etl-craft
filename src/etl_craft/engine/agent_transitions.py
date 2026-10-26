@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection, Row
 
 from etl_craft.core.actor import Actor
 from etl_craft.engine import controls
+from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
 
 
@@ -18,7 +19,7 @@ def claim_queued_attempt(
     """Claim the highest-priority queued attempt this agent has a free slot for, or ``None``."""
     from etl_craft.engine.placement import claim_parameters
 
-    return conn.execute(
+    claimed = conn.execute(
         statement(conn, "transition_claim_queued_attempt"),
         {
             **claim_parameters(),
@@ -28,6 +29,9 @@ def claim_queued_attempt(
             **free,
         },
     ).one_or_none()
+    if claimed is not None:
+        lifecycle(conn, "dispatch", claimed.attempt_id)
+    return claimed
 
 
 def register_agent(conn: Connection, params: dict[str, object]) -> Row[tuple[object, ...]] | None:
@@ -86,4 +90,5 @@ def claim_with_capacity(
                 return False
             raise transitions.stale_attempt(conn, attempt_id, "QUEUED (unowned)", None)
         transitions.sync_attempt_summary(conn, attempt_id)
+        lifecycle(conn, "dispatch", attempt_id)
         return True

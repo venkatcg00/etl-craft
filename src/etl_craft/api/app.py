@@ -5,7 +5,7 @@ import logging
 from dataclasses import replace
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.api.gateway import Gateway, GatewayMiddleware
@@ -21,6 +21,7 @@ from etl_craft.core.errors import (
 )
 from etl_craft.services.operations import OperationContext, to_json
 from etl_craft.services.operations.actions import ACTIONS
+from etl_craft.services.operations.metrics import scrape
 from etl_craft.services.operations.processes import probe, readiness
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,11 @@ def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> Fast
         redoc_url=None,
         openapi_url="/api/v1/openapi.json",
     )
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        result = scrape(ctx)
+        return Response(result.body, result.status, headers={"Content-Type": result.content_type})
 
     ctx = replace(ctx, shutdown=None if gateway is None else gateway.stop)
     app.state.gateway = gateway

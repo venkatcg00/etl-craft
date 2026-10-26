@@ -16,6 +16,7 @@ from etl_craft.core.errors import LockTimeoutError, RunRefusedError
 from etl_craft.core.filelock import file_lock
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.locks import advisory_key
+from etl_craft.engine.metrics import state
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.controllers import active_controller
 
@@ -37,7 +38,12 @@ class Leadership:
         Refuse when another controller took it meanwhile. SQLite's file lock never drops.
         """
         if self.engine is not None and self.connection is None:
+            metrics = state(self.engine)
+            if metrics is not None:
+                metrics.leader = False
             self.connection = _acquire(self.engine, self.key, retaking=True, config=self.config)
+            if metrics is not None:
+                metrics.leader = True
 
     def wait(self, stop: threading.Event) -> None:
         """Wake on a committed execution notification or at the one-second poll.

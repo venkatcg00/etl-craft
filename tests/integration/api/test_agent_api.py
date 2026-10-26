@@ -86,6 +86,55 @@ def claim(scene, handler="SQL"):
     return attempt
 
 
+def test_controller_metrics_follow_agent_slots_children_and_stale_heartbeats(agent_scene):
+    from etl_craft.engine.metrics import install
+    from etl_craft.services.operations.metrics import scrape
+    from fixtures.metrics import value
+
+    db, _, _, _, owner, config = agent_scene
+    install(db.engine).leader = True
+    attempt = claim(agent_scene)
+    assert (
+        post(agent_scene, "report", attempt_id=attempt, operation="START", pid=123).status_code
+        == 200
+    )
+    ctx = OperationContext(db.engine, config, SYSTEM_ACTOR)
+    now = datetime.now(UTC)
+    body = scrape(ctx, now=now).body
+    assert value(body, "active_agents", pool="default") == 1
+    assert value(body, "agent_running_children", pool="default", agent=str(owner)) == 1
+    assert (
+        value(
+            body,
+            "agent_slots",
+            pool="default",
+            agent=str(owner),
+            slot_kind="warehouse",
+            status="used",
+        )
+        == 1
+    )
+    with db.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_AGENTS SET HEARTBEAT_AT=:now WHERE AGENT_ID=:id"),
+            {"now": now - timedelta(seconds=40), "id": owner},
+        )
+    body = scrape(ctx, now=now).body
+    assert value(body, "active_agents", pool="default") == 0
+    assert value(body, "agent_heartbeat_age_seconds", pool="default", agent=str(owner)) == 40
+    assert (
+        value(
+            body,
+            "agent_slots",
+            pool="default",
+            agent=str(owner),
+            slot_kind="warehouse",
+            status="free",
+        )
+        == 0
+    )
+
+
 def test_agent_and_account_credentials_cannot_cross_protocols(agent_scene):
     _, client, agent, person, _, _ = agent_scene
     response = client.get("/api/v1/projects/default/pipelines", headers=agent)

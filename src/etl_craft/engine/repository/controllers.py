@@ -47,14 +47,20 @@ def start(engine: Engine) -> int:
 def heartbeat(engine: Engine, controller_id: int, *, stopped: bool = False) -> None:
     """Renew this process's history, optionally recording its clean shutdown."""
     actor = current_actor()
+    now = datetime.now(UTC)
     with engine.begin() as conn:
         conn.execute(
             statement(conn, "controller_heartbeat"),
             {
-                "now": datetime.now(UTC),
+                "now": now,
                 "stopped": stopped,
                 "actor": actor.name,
                 "kind": actor.kind.value,
                 "id": controller_id,
             },
         )
+    from etl_craft.engine.metrics import state
+
+    metrics = state(engine)
+    if metrics is not None:
+        metrics.heartbeat = now.timestamp()

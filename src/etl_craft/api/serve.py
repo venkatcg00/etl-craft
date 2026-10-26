@@ -17,11 +17,13 @@ from etl_craft.api.gateway import Gateway
 from etl_craft.config.model import parse_api_address
 from etl_craft.controller.supervisor import serve
 from etl_craft.core.http import bind_api_address
+from etl_craft.engine.metrics import install
 from etl_craft.services.operations.context import OperationContext
 
 
 def serve_http(ctx: OperationContext, stop: threading.Event, *, controller: bool = True) -> None:
     """Bind HTTP before taking leadership, then share the process shutdown lifecycle."""
+    install(ctx.engine)
     host, port = parse_api_address(ctx.config.api_address)
     listener = bind_api_address(host, port)
     errors: list[BaseException] = []

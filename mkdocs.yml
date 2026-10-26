@@ -130,6 +130,7 @@ nav:
       - Pinned project bundles: deploying/project-bundles.md
       - Scheduling runs: deploying/scheduling.md
       - Controller: deploying/controller.md
+      - Metrics and alerts: deploying/metrics.md
       - Agents and the queue: deploying/agents.md
       - Deployment profiles and sizing: deploying/sizing.md
       - HTTP API: deploying/http-api.md

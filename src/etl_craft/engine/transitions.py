@@ -32,6 +32,7 @@ from etl_craft.engine.attempts import record_attempt_failure as record_attempt_f
 from etl_craft.engine.attempts import (
     set_attempt_retry_policy as set_attempt_retry_policy,
 )
+from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
@@ -39,6 +40,7 @@ from etl_craft.engine.rule_runs import finish_rule_run as finish_rule_run
 from etl_craft.engine.rule_runs import restart_rule_run as restart_rule_run
 from etl_craft.engine.run_creation import RunCreation
 from etl_craft.engine.run_creation import create as create_new_run
+from etl_craft.engine.transition_guards import stale as _stale
 
 
 def create_active_run(
@@ -288,29 +290,6 @@ def stale_attempt(
     return _stale(conn, "attempt", attempt_id, expected, owner)
 
 
-def _stale(
-    conn: Connection, kind: str, row_id: int, expected: str, owner: str | None
-) -> StaleTransitionError:
-    row = (
-        conn.execute(statement(conn, f"transition_row_{kind}"), {"row_id": row_id})
-        .mappings()
-        .one_or_none()
-    )
-    found = "missing" if row is None else repr(dict(row))
-    if kind == "task":
-        active = (
-            conn.execute(statement(conn, "active_attempt"), {"task_run_id": row_id})
-            .mappings()
-            .one_or_none()
-        )
-        if active is not None:
-            found += f"; active attempt {dict(active)!r}"
-    return StaleTransitionError(
-        f"{kind} row_id={row_id}: expected status {expected}, owner={owner!r}; found {found}. "
-        "Read the run history and refresh the status and owner before retrying."
-    )
-
-
 def actor_parameters(actor: Actor) -> dict[str, Any]:
     """Bind the initiating actor to an attributed lifecycle write."""
     return {"actor": actor.name, "actor_kind": actor.kind.value, "now": datetime.now(UTC)}
@@ -325,11 +304,15 @@ def _guard(
     owner: str | None,
     params: dict[str, Any],
 ) -> None:
+    if query == "admit_run":
+        lifecycle(conn, "admission", row_id)
     result = conn.execute(
         statement(conn, f"transition_{query}"), {"row_id": row_id, "owner": owner, **params}
     )
     if result.rowcount != 1:
         raise _stale(conn, kind, row_id, expected, owner)
+    if query in {"finish_run", "cancel_run", "mark_run"}:
+        lifecycle(conn, "run", row_id, str(params["status"]))
 
 
 def admit_run(conn: Connection, pipeline_run_id: int, actor: Actor) -> None:
@@ -490,6 +473,7 @@ def queue_attempt(
             )
             dispatch.inherit_dispatch(conn, attempt_id, task_run_id)
             sync_attempt_summary(conn, attempt_id)
+            lifecycle(conn, "retry", attempt_id)
             return attempt_id
     except IntegrityError as error:
         raise _stale(conn, "task", task_run_id, "no active attempt", None) from error
@@ -572,6 +556,7 @@ def _end_attempt(
         row = conn.execute(statement(conn, f"transition_{query}"), params).one_or_none()
         if row is None:
             raise _stale(conn, "attempt", attempt_id, expected, owner)
+        lifecycle(conn, "attempt", attempt_id, status)
         if query == "finish_attempt" and status == AttemptStatus.SUCCESS:
             fault_point("attempt.before_summary")
         sync_attempt_summary(conn, attempt_id)

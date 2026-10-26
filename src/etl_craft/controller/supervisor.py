@@ -20,6 +20,7 @@ from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import RunStatus, YesNo
 from etl_craft.core.errors import ConfigurationError, EngineDbError, EtlCraftError
 from etl_craft.core.outage import OutageBudget
+from etl_craft.engine.metrics import install
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import controllers
 from etl_craft.engine.repository.dependencies import PipelineGraphData, fetch_pipeline_graph
@@ -184,10 +185,12 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             "set ETL_CRAFT_TOKEN to an administrator service account token"
         )
     supervisor = _Supervisor(ctx, stop, create_pool(ctx.engine, ctx.config, ctx.child))
+    metrics = install(ctx.engine)
     outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
     try:
         with acting_as(ctx.actor), leadership(ctx.engine, ctx.config) as leader:
             controller_id = controllers.start(ctx.engine)
+            metrics.leader = True
             logger.info("controller_id=%s: controller active", controller_id)
             if not ctx.config.allow_schedule:
                 logger.info("Orchestration.Allow_schedule is false: no scheduled pipeline runs")
@@ -212,6 +215,7 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             f"controller lost its Engine DB connection: {error}; restore it and restart controller"
         ) from error
     finally:
+        metrics.leader = False
         supervisor.schedules.catalog.close()
         supervisor.retention.close()
         supervisor.pool.close()

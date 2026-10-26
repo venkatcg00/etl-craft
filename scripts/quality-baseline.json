@@ -105,7 +105,7 @@
       "src/etl_craft/services/validate.py": 1
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 39
+      "src/etl_craft/engine/transitions.py": 24
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

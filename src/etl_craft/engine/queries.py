@@ -27,7 +27,7 @@ def statement(bind: Connection | Engine, name: str) -> TextClause:
         from etl_craft.engine.repository.pipelines import current_project_id
 
         query = query.bindparams(project_id=current_project_id())
-    return query
+    return query.execution_options(etl_craft_query=name)
 
 
 def run_script(conn: Connection, statements: Iterable[str]) -> None:
