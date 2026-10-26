@@ -91,3 +91,18 @@ def test_scrape_during_run_admission_keeps_old_gauge_until_commit(engine_db):
     body = scrape(ctx).body
     assert value(body, "runs", project="1", status=RunStatus.IN_PROGRESS) == 1
     assert value(body, "admission_latency_seconds_count", project="1") == 1
+
+
+def test_enabling_metrics_during_transaction_start_does_not_mutate_listeners(engine_db):
+    engine = engine_db.engine
+
+    def transaction():
+        with engine.begin() as conn:
+            conn.exec_driver_sql("SELECT 1")
+
+    def at_begin(conn, sql, *args, **kwargs):
+        return sql == "BEGIN IMMEDIATE" or sql.startswith("SELECT set_config(")
+
+    with paused_after(transaction, owner=Connection, name="exec_driver_sql", when=at_begin):
+        registry = install(engine)
+    assert registry is install(engine)

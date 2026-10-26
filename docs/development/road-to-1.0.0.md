@@ -342,8 +342,8 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 S6.F covers both Engine DBs, both HTTP listeners, transaction/savepoint rollback, live queue
 and agent state, constant scrape statement counts and released-schema upgrades. Scrapes during
-admission and lease expiry run twenty local rounds. Semgrep scans the changed API files; the
-built-in security-review tool is unavailable, so manual security review covers the HTTP, actor,
+admission, lease expiry and metrics activation run twenty local rounds. Semgrep scans the
+changed API files; the built-in security-review tool is unavailable, so manual security review covers the HTTP, actor,
 label and connection boundaries. No warehouse SQL changes require cloud acceptance. Full
 platform coverage and installed-wheel demos remain CI gates.
 
@@ -792,7 +792,9 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   statement latency, as the exception to the dimension list. No SQL text or bind values are
   labels. Counters and latency buckets are process observations that reset on restart; cluster
   gauges are current indexed reads served only by the leader. SQLite snapshot reads use WAL
-  read transactions so a scrape does not reserve the writer lock.
+  read transactions so a scrape does not reserve the writer lock. Listener registration happens
+  at module import; enabling a registry never changes SQLAlchemy listener lists in use by
+  another thread. The demo end alert explicitly waits for its parallel quality branch.
 
 - S6.E's derived Done when is: cloning runs only on its independent controller schedule with
   coalesced requests and a bounded recorded lock skip; the first post-upgrade copy is full and

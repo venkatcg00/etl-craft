@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 
@@ -237,3 +238,20 @@ def test_invalidated_transaction_rolls_back_without_reconnecting(engine_db):
         conn.rollback()
         assert conn.invalidated and not conn.in_transaction()
     assert operation.scrape(ctx).status == 200
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_enabling_metrics_inside_an_existing_savepoint_preserves_its_outcome(engine_db, rollback):
+    _, _, attempt = queued(engine_db)
+    with engine_db.engine.begin() as conn:
+        nested = conn.begin_nested()
+        registry = install(engine_db.engine)
+        registry.leader = True
+        transitions.cancel_attempt(conn, attempt, SYSTEM_ACTOR, error_message="nested")
+        if rollback:
+            nested.rollback()
+        else:
+            nested.commit()
+    assert value(
+        registry.render({}), "attempts_ended_total", project="1", status=AttemptStatus.CANCELLED
+    ) == (0 if rollback else 1)

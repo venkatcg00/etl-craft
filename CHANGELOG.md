@@ -11,6 +11,8 @@ All notable changes are recorded here. The format follows
   and admission, dispatch and catalog-labelled Engine DB statement histograms. Followers
   omit cluster gauges. Scrapes share the bounded probe allowance without audit writes;
   migration 0062 adds current-state indexes. See the metrics guide and starter alert rules.
+- The Support Insights demo end alert waits for its parallel business-rule check before
+  classifying the outcome, including when the ANY summary finishes first.
 
 - Cloning runs on the controller's own schedule (`Cloning.Every_minutes`, default 15),
   outside pipeline finalization. Concurrent requests coalesce; `Cloning.Lock_wait_seconds`

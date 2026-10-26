@@ -53,7 +53,7 @@ def state(engine: Engine) -> Metrics | None:
 
 
 def install(engine: Engine) -> Metrics:
-    """Attach once to the controller's existing engine; retain no statement text."""
+    """Enable one registry without changing listeners on an engine already in use."""
     with _lock:
         if engine in _states:
             return _states[engine]
@@ -61,69 +61,89 @@ def install(engine: Engine) -> Metrics:
         for name, (help, kind) in FAMILIES.items():
             metrics.define(name, help, kind)
         _states[engine] = metrics
-    _instrument(engine, metrics)
     return metrics
 
 
-def _instrument(engine: Engine, metrics: Metrics) -> None:
-    """Publish committed observations only after commit has returned successfully."""
+def _instrument() -> None:
+    """Declare listeners at import time; publish observations only after successful commit."""
 
     def flush(info: dict[str, object]) -> None:
         committed = info.pop("metrics_committed", [])
         assert isinstance(committed, list)
+        metrics = info.get("metrics_registry")
+        assert isinstance(metrics, Metrics)
         for name, labels, value in committed:
             metrics.add(name, labels, value)
 
-    @event.listens_for(engine, "begin")
+    @event.listens_for(Engine, "begin")
     def begin(conn: Connection) -> None:
+        metrics = state(conn.engine)
+        if metrics is None:
+            return
+        conn.info["metrics_registry"] = metrics
         flush(conn.info)
         conn.info["metrics_pending"] = {}
         conn.info["metrics_savepoints"] = []
 
-    @event.listens_for(engine, "commit")
+    @event.listens_for(Engine, "commit")
     def commit(conn: Connection) -> None:
+        metrics = state(conn.engine)
+        if metrics is None:
+            return
+        conn.info["metrics_registry"] = metrics
         flush(conn.info)
         pending = conn.info.pop("metrics_pending", {})
         conn.info["metrics_committed"] = [
             sample for samples in pending.values() for sample in samples
         ]
 
-    @event.listens_for(engine, "rollback")
+    @event.listens_for(Engine, "rollback")
     def rollback(conn: Connection) -> None:
-        if not conn.invalidated:
+        if not conn.invalidated and state(conn.engine) is not None:
             conn.info.pop("metrics_pending", None)
             conn.info.pop("metrics_committed", None)
 
-    @event.listens_for(engine, "savepoint")
-    def savepoint(conn: Connection, name: str | None) -> None:
-        conn.info["metrics_savepoints"].append(dict(conn.info.get("metrics_pending", {})))
-
-    @event.listens_for(engine, "rollback_savepoint")
-    def undo(conn: Connection, name: str, context: object) -> None:
-        conn.info["metrics_pending"] = conn.info["metrics_savepoints"].pop()
-
-    @event.listens_for(engine, "release_savepoint")
-    def release(conn: Connection, name: str, context: object) -> None:
-        conn.info["metrics_savepoints"].pop()
-
-    @event.listens_for(engine, "checkin")
+    @event.listens_for(Engine, "checkin")
     def checkin(driver: object, record: ConnectionPoolEntry) -> None:
         info = record.info
-        if driver is not None:
+        if driver is not None and "metrics_registry" in info:
             flush(info)
         info.pop("metrics_pending", None)
         info.pop("metrics_committed", None)
 
-    _timing(engine, metrics)
+    _savepoints()
+    _timing()
 
 
-def _timing(engine: Engine, metrics: Metrics) -> None:
+def _savepoints() -> None:
+    """Restore staged observations when a nested transaction rolls back."""
+
+    @event.listens_for(Engine, "savepoint")
+    def savepoint(conn: Connection, name: str | None) -> None:
+        if state(conn.engine) is not None:
+            conn.info.setdefault("metrics_savepoints", []).append(
+                dict(conn.info.get("metrics_pending", {}))
+            )
+
+    @event.listens_for(Engine, "rollback_savepoint")
+    def undo(conn: Connection, name: str, context: object) -> None:
+        if state(conn.engine) is not None:
+            snapshots = conn.info.get("metrics_savepoints", [])
+            conn.info["metrics_pending"] = snapshots.pop() if snapshots else {}
+
+    @event.listens_for(Engine, "release_savepoint")
+    def release(conn: Connection, name: str, context: object) -> None:
+        if state(conn.engine) is not None:
+            snapshots = conn.info.get("metrics_savepoints", [])
+            if snapshots:
+                snapshots.pop()
+
+
+def _timing() -> None:
     """Measure cursor execution without retaining SQL or bind values."""
     from etl_craft.dialects.engine import for_engine
 
-    names = for_engine(engine).query_names()
-
-    @event.listens_for(engine, "before_cursor_execute")
+    @event.listens_for(Engine, "before_cursor_execute")
     def before(
         conn: Connection,
         cursor: object,
@@ -132,9 +152,10 @@ def _timing(engine: Engine, metrics: Metrics) -> None:
         context: ExecutionContext,
         many: bool,
     ) -> None:
-        conn.info["metrics_started"] = time.perf_counter()
+        if state(conn.engine) is not None:
+            conn.info["metrics_started"] = time.perf_counter()
 
-    @event.listens_for(engine, "after_cursor_execute")
+    @event.listens_for(Engine, "after_cursor_execute")
     def after(
         conn: Connection,
         cursor: object,
@@ -143,20 +164,23 @@ def _timing(engine: Engine, metrics: Metrics) -> None:
         context: ExecutionContext,
         many: bool,
     ) -> None:
+        metrics = state(conn.engine)
+        if metrics is None:
+            return
         started = conn.info.pop("metrics_started", None)
         if started is not None:
             query = context.execution_options.get("etl_craft_query", "unknown")
-            query = query if query in names else "unknown"
+            query = query if query in for_engine(conn).query_names() else "unknown"
             metrics.add(
                 "engine_db_statement_latency_seconds",
                 (("query", query),),
                 time.perf_counter() - started,
             )
 
-    @event.listens_for(engine, "handle_error")
+    @event.listens_for(Engine, "handle_error")
     def failed(context: ExceptionContext) -> None:
         conn = context.connection
-        if conn is not None and not conn.invalidated:
+        if conn is not None and not conn.invalidated and state(conn.engine) is not None:
             conn.info.pop("metrics_committed", None)
 
 
@@ -199,3 +223,6 @@ def lifecycle(conn: Connection, kind: str, row_id: int, status: str = "") -> Non
                 (name, labels, 1) for name in ("lease_expiries_total", "lost_attempts_total")
             )
     conn.info.setdefault("metrics_pending", {})[(kind, row_id)] = samples
+
+
+_instrument()

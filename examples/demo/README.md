@@ -76,6 +76,9 @@ Other; a repaired logical run is counted once in its current group. History disp
 
 ## Under an orchestrator
 
+The mart's end alert waits for the parallel business-rule check as well as its data outputs,
+so its outcome describes completed work even when the ANY summary finishes first.
+
 The controller schedules and supervises these pipelines. External schedulers can submit runs
 through the authenticated HTTP API. Install `etl-craft[ui]` for all-in-one HTTP, or run
 `etl-craft controller --no-ui` for the standard-library `/health` and `/metrics` endpoints. This SQLite demo
