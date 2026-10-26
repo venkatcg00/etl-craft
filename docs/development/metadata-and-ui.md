@@ -482,14 +482,15 @@ action has neither.
 | `ITEM_CONTROL` | Fan-out item | Items view row menu |
 | `RECONCILE` | Run, attempt | Run header Reconcile when an attempt's lease expired |
 | Standing task controls | Task | Task page and task menu: Pause task, Set standing outcome, Remove |
-| Offset and watermark reset | Task | Task page Offsets panel, with the stored value and the new one |
+| Offset and watermark reset | `INGESTION` Python task, watermark SQL task (S7.AD) | Task page Offsets panel, with the stored value and the new one; absent on other tasks |
 | Pipeline refresh | Pipeline, project | Pipeline header Refresh; project page Refresh all |
 | `DATA_PROVENANCE`, `DATA_EDIT`, `DATA_UNLOCK` | Table row and column | Catalog table Data tab, lock symbols, Edit and Unlock |
 | `LINEAGE_REFRESH`, `GENERATE_DOCS`, `DOCS_VERSION`, `VALIDATE` | Project, pipeline | Catalog header and pipeline page |
 | `AGENT_CONTROL` | Agent | Agents page row menu |
-| Groups, accounts, tokens, access, projects, pools | Admin objects | Admin pages, one per object, with list, add, change and disable |
+| Groups, accounts, tokens, access, projects, pools | Admin objects | Admin pages, one per object, with list, add, change and disable; account unlock and password reset on the accounts page (S7.A.7) |
+| Announcements | Deployment | Admin announcement page; the banner on every page (S7.A.7) |
 | `PURGE`, `REHASH`, upgrade targets, `CLONE` | Project, table | Admin maintenance page, each with a dry-run preview first |
-| `WHOAMI`, `LOGOUT`, `REFRESH` | Session | User menu in the top bar |
+| `WHOAMI`, `LOGOUT`, `REFRESH`, password change, personal settings | Session, own account | Profile menu in the top bar and the settings page (S7.A.7) |
 | Read actions (`STATUS`, `EXPLAIN`, `HISTORY`, `AUDIT`, `ATTEMPT`, `LOGS`, `ITEMS`, `HEALTH`, `CAPABILITIES`, …) | Their object | The view that renders them |
 
 Views the wireframes lack and S7.A builds: task-run statistics (rows in, inserted, updated,

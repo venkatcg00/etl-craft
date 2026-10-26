@@ -167,6 +167,8 @@ item's text, or work done early under another item.
 | S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; projects and pools become admin commands; direct `CFG_` SQL edits in RELAXED projects |
 | S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
 | S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
+| S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
+| S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -203,6 +205,11 @@ The approved local recovery boundary is interactive `setup` with Engine DB write
 when no active admin remains, never an HTTP route. Remote Airflow exports require the approved
 `Auth.Airflow_connection_id`; pipeline action reasons carry the triggering user URL-encoded,
 while the service account remains the actor.
+
+**Plan, 2026-10-26 (owner).** Business stewardship corrects ODS, the operational store, through
+the client chain; DM takes corrections only through SI_DM. S7.A.7 adds account lockout (not a
+growing delay) and server-side personal settings; personal subscriptions stay out. The
+deployment is usually internal: weigh security choices against that, not public exposure.
 
 **UI plan, 2026-10-25 (owner).** S7.Y, S7.Z, S7.AA and S7.AB come before S7.A page code, after
 S6 completes. `GOVERNANCE` (`STRICT`/`RELAXED`) is the single switch for relaxed rules; the
@@ -286,7 +293,8 @@ does not move worker work ahead of the metadata, account or operator-control cor
     stewardable pipelines.
   - `craft-connector.yml` sets a blanket upload size limit for the project, and each
     pipeline's `FILE_VALIDATION` task may set a lower one.
-  - Demo stewardship covers the `dm` mart and the `ds` reference tables (S8.H item 3).
+  - Demo stewardship covers the normalized ODS (business data) and the `ds` reference tables
+    (S8.H item 3); the mart takes business corrections only through its normal ODS load.
 - **The UI never edits metadata.** It is for pipeline operations. Its actions follow
   Informatica PowerCenter's Workflow Monitor (S5.Q, S7.A.2), not Airflow's narrower
   constraints. It adds run views, the generated catalog documentation and run-health
@@ -6382,6 +6390,54 @@ on every time, findings on the object, keyboard search, and WCAG AA. Browser tes
 preview, the disabled-with-reason state, the stale-state warning and keyboard-only use.
 Every page also shows the project's environment badge (S7.Z), with production clearly marked.
 
+**S7.A.7 Platform basics (owner, 2026-10-26).** What any platform needs besides its own
+features. Sign-in and sign-out are covered above; password recovery is "contact your
+administrator", with no emailed resets.
+- *Accounts and sessions.*
+  - An admin password reset sets a temporary password that must be changed at the next
+    sign-in. Local accounts can change their own password from the profile; SSO accounts have
+    no password page.
+  - Account lockout: after `Auth.Lockout_after` consecutive failed password sign-ins (default
+    5; 0 turns it off), the account locks until an admin unlocks it (`etl-craft account unlock`,
+    the accounts page). A successful sign-in resets the count. "Account locked, contact your
+    administrator" is shown only after a correct password. SSO accounts are locked by their
+    identity provider; service tokens are never locked by password failures. No growing delay
+    (owner: it slows developers). `CFG_ACCOUNTS` gains `FAILED_SIGNINS`, `LOCKED_DATE` and
+    `MUST_CHANGE_PASSWORD`; last sign-in is read from `AUD_ACTIONS`.
+  - The sign-in page gives one message for a wrong name or password. `Auth.Admin_contact` and
+    an optional `Auth.Signin_notice` (an "authorized use only" notice) are shown on it.
+  - After sign-in the person returns to the page they asked for; only same-site paths are
+    accepted.
+  - Session expiry is warned before it happens, and signing in again keeps the page. Signing out
+    in one tab signs out every tab.
+  - Browser security: HTTP-only, Secure, SameSite session cookies; a CSRF check on every change
+    request; a content security policy; no framing by other sites; no token in browser storage.
+- *Profile menu.* Name, account, role in the current project, groups; theme, timezone, default
+  project; change password (local accounts); the CLI sign-in command for this server; keyboard
+  shortcuts; help; about; sign out.
+- *Personal settings*, stored on the server per account (owner) in one validated JSON column,
+  `CFG_ACCOUNTS.UI_SETTINGS`: theme, timezone, default project, page size, relative or absolute
+  times, pins and saved filters. Changed by the account itself through one action.
+- *Screen states.* A "not found or no access" page that does not reveal what exists; a server
+  error page with a request id and a "copy details" button; empty states with the next step;
+  loading placeholders; "updated N s ago"; a "live updates lost, reconnecting" banner; a "new
+  version deployed, reload" prompt; a short result notice linking to each action's request.
+- *Navigation basics.* Browser tab titles naming the object (`Run 419 · SI_CLIENT_ALPHA ·
+  etl-craft`) and a favicon; copy buttons for ids, run keys, links and CLI lines; recently viewed
+  items in search; CSV export of every list with its filters and limits; a `?` shortcut list.
+- *Accessibility and size.* Skip link, visible focus, reduced motion, usable at 200% zoom.
+  Desktop first with a stated minimum width; status pages stay readable on a phone.
+- *Admin.* An announcement banner the admin sets (`etl-craft announce`, stored in the Engine DB
+  with start, end and level) next to the system's own banners; an accounts page with last
+  sign-in, failed sign-ins, locked and disabled accounts and the sign-in audit; an About page
+  with the package, Engine DB schema, server and controller versions, license and the docs for
+  that version.
+- *Left out (owner).* Personal notification subscriptions (alerts stay pipeline config; another
+  email path would be needed), avatar upload, self-registration, emailed resets, translations.
+- *Tests.* Lockout, unlock, forced change and the generic sign-in message through CLI, API and
+  page; return-to refuses other sites; CSRF and cookie flags; settings round trip across
+  browsers; each screen state; About versions match the server.
+
 - *Technology.* One package and one language for contributors. The UI is served by
   `etl-craft controller` from the `server` extra, with no Node toolchain for users, contributors or
   CI.
@@ -6531,8 +6587,8 @@ after S5.S (accounts and roles) and S5.O.3 (protection of human writes).
          script defect.
      - A refused file fails the task, so no downstream task runs. The downstream tasks the dev
        team writes (Python scripts reading `task.upload`, then SQL actions) land and
-       process the accepted file. In the demo, these are the `dm` mart and the `ds` reference
-       tables (S8.H item 3).
+       process the accepted file. In the demo, these are the normalized ODS and the `ds`
+       reference tables (S8.H item 3).
   3. **Uploading.** One service sits behind `etl-craft upload --pipeline_code P FILE`,
      `POST /api/v1/uploads` and the S7.A Uploads page.
      - **The page.** The steward chooses the pipeline from a drop-down listing only the active
@@ -7369,6 +7425,63 @@ completion order and repairs do not follow run-ID order.
 fences share the checked Engine clock, all named tests and the Support Insights race pass,
 upgrade/reset/recovery behavior is documented, and no business-date or run-ID cursor is substituted.
 
+### S7.AC Table-level business rules
+
+Owner decision, 2026-10-26. Branch: `feat/handlers-table-rules`. After S6.D, whose complete
+SELECT form it reuses. Many checks are about a whole table or a run's rows, not individual
+rows: a row count above zero, a NULL rate under a threshold, totals that reconcile. Flagging
+rows for those means nothing, so their result is one value per run.
+
+- `CFG_BUSINESS_RULES.BUSINESS_RULE_LEVEL`: `ROW` (default, today's behaviour) or `TABLE`
+  (an enum in `core.enums`), in `business_rules.csv`. Existing rules upgrade as `ROW`.
+- A `TABLE` rule is one complete read-only SELECT returning exactly one row with `PASSED`
+  (`Y`/`N`) and optionally `OBSERVED` (text, for example `4.7%` or `0 rows`) and `DETAIL`.
+  `$$rows_in_scope` works as for row rules, so "this run's rows" is the scoped form.
+  `BUSINESS_RULE_KEY_COLUMN` must be empty for `TABLE` rules and is required for `ROW` rules.
+- Results: one row per rule per run on the existing `AUD_BUSINESS_RULES_RUN_LOG`, which gains
+  nullable `PASSED`, `OBSERVED` and `DETAIL`. `AUD_BUSINESS_RULES_RESULTS` stays row-level
+  only; a `TABLE` rule writes nothing there.
+- Types: `REJECT` fails the task, so its downstream does not run; `REPORT` records the result
+  and continues. `INCOMPLETE` is refused for a `TABLE` rule (there are no rows to mark).
+- Fail rather than guess: zero rows, more than one row, a missing `PASSED` or a value other
+  than `Y`/`N` fails the rule with its name, what it returned and the remedy. `validate`
+  checks the output columns, as S6.D does for row rules.
+- Sequence waves, retries that resume, failure logging and `--force` behave as for row rules.
+- Pipeline Insights and the S7.A table page show each `TABLE` rule's `OBSERVED` values over runs.
+- S8.H demonstrates a `TABLE` rule of each allowed type on a Support Insights client.
+- Tests: pass and fail for `REJECT` and `REPORT`; each malformed output; scoped and whole-table
+  forms; retries; upgrade from every released schema with real rules; `validate` findings.
+
+*Done when:* whole-table checks are configured as ordinary business rules, store one result
+per run with its observed value, and never write per-row results.
+
+### S7.AD Python script kinds
+
+Owner decision, 2026-10-26. Branch: `feat/handlers-script-kinds`. Today every Python script is
+treated as ingestion: `ScriptResult.row_count` is required and recorded as source, target and
+insert counts, and every script is given an offset. A script that calls an API, sends a file or
+refreshes a report has no source position and no loaded rows.
+
+- A required `SCRIPT_KIND` task parameter on `PYTHON` tasks: `INGESTION` or `UTILITY` (an enum
+  in `core.enums`). Existing Python tasks upgrade as `INGESTION`, which keeps their behaviour;
+  `validate` refuses a Python task without it, naming the task and both values.
+- `INGESTION`: today's contract. The offset is given and stored, PARTITIONS offsets and
+  fan-out included; `row_count` is required.
+- `UTILITY`: no offset is given (`task.offset` is `None`), and returning one fails with the
+  task name and the remedy (`SCRIPT_KIND=INGESTION`). `row_count` is optional; when absent the
+  counts are recorded as not measured, shown as "Not measured" and never as 0, and Insights
+  row totals leave them out. Fan-out, variables, logs, retries and time limits are unchanged.
+- SQL tasks take no kind: a SELECT that uses `$$watermark` declares its offset (S5.L, S7.X), and
+  one that does not never gets a tracker row.
+- The offset panel and offset or watermark reset appear only on `INGESTION` Python tasks and
+  watermark SQL tasks; elsewhere they are absent, and the CLI reset refuses with the reason.
+- Tests: both kinds through the scripting contract; `UTILITY` returning an offset; absent and
+  present `row_count`; Insights totals; reset refusals; upgrade with real Python tasks and
+  stored offsets.
+
+*Done when:* every Python task declares its kind, utility scripts carry no offset and no
+invented row counts, and ingestion scripts behave exactly as before.
+
 ## Release candidate: the Support Insights example
 
 **Goal.** Prove 1.0.0 on a real project before it is released. The
@@ -7496,15 +7609,16 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | `SI_CLIENT_BETA` (every 15 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `beta_source_to_lnd`, then Beta-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS tasks as Alpha; ends at ODS | One PYTHON `kafka_to_lnd.py` task, S5.AK `task.fan_out`, one item per Kafka partition; S5.AH PARTITIONS offsets | `Client_Beta_ETL_Task_Flow` |
 | `SI_CLIENT_GAMMA` (every 5 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `gamma_wait_objects` at the head | EVENT_WAIT, S5.AI keyed `EVENT_SQL` on `lnd.gamma_object_events` with `EVENT_KEY_COLUMN=object_key`, `EVENT_TIMEOUT_MINUTES=55`, `EVENT_ON_TIMEOUT=SKIP` | event-driven Gamma delivery |
 | | `gamma_source_to_lnd` with `SUCCESS` dependency on wait; then Gamma-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS; ends at ODS | PYTHON `minio_to_lnd.py`: reads exactly the consumed object keys from `task.event_keys` (ETag and size from `task.event_rows`) through the S3 API; no bucket listing or second TEXT cursor | `Client_Gamma_ETL_Task_Flow` |
-| `SI_DM` (`0 */6 * * *`; no client pipeline dependency gate) | `ods_to_dm` | SQL `SCD2_MERGE` into flattened `dm.customer_support_fact`; S7.X bounded UPDATE_DATE window over committed ODS writes | all former per-client ODS-to-DM tasks |
+| `SI_DM` (`0 */6 * * *`; no client pipeline dependency gate) | `ods_to_dm` | SQL `SCD2_MERGE` into flattened `dm.customer_support_fact`; S7.X bounded UPDATE_DATE window over committed ODS writes, including steward corrections; the mart has no human writes | all former per-client ODS-to-DM tasks |
 | `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per stewarded `ds` table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
 | | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads every file in `task.uploads` into the table's landing table, each row with its `UPLOAD_ID` | |
 | | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table | |
 | | `reference_refresh` (final task after the merge) | S5.AC `RUN_PIPELINE` for `SI_REFERENCE`, `DETACH` | carries corrections to `dwh` |
 | `SI_MAINTENANCE` (nightly, outside client schedules) | one task per layer | S5.X `SQL_SCRIPT`, explicit lake-table maintenance; `RETRY_ON = NONE` | Iceberg file and snapshot maintenance |
-| `SI_STEWARD_DM_FACT` (`STEWARDABLE_FLAG = 'Y'`; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION with the fact's own script | hand-corrected mart rows |
-| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py` into `lnd.steward_customer_support_fact` | |
-| | `steward_to_dm` (depends on `steward_to_lnd`) | SQL `SCD2_MERGE` into `dm.customer_support_fact` as human writes under S5.O.3's locks | |
+| `SI_STEWARD_BUSINESS` (`STEWARDABLE_FLAG = 'Y'`; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION with the business file's own script | hand-corrected business records |
+| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py` into `lnd.steward_cs_data`, each row with its `UPLOAD_ID` and source `STEWARD` | |
+| | `steward_lnd_to_prs`, `steward_prs_to_cdc`, `steward_preods_delete`, `steward_cdc_to_preods`, `steward_rules` | The client chain's actions: the delete selects only `STEWARD` rows of `pre_ods.customer_support_stage`; the same business rules run on corrections | |
+| | `steward_preods_to_ods` (one per ODS table, depending on the rules) | SQL `SCD1_MERGE` into the normalized ODS as human writes under S5.O.3's locks, attributed to the uploader | |
 
 Rules for building them:
 
@@ -7550,7 +7664,9 @@ Rules for building them:
 6. SI_DM runs every six hours at 00:00/06:00/12:00/18:00 UTC, on committed ODS writes using
    `WATERMARK_TYPE=TIMESTAMP`, `WATERMARK_COLUMN=ods_changed_at` (the SELECT aliases the
    source engine UPDATE_DATE to avoid the reserved target column), a defined UTC WATERMARK_START,
-   and `WATERMARK_SOURCE_PIPELINES=["SI_CLIENT_ALPHA","SI_CLIENT_BETA","SI_CLIENT_GAMMA"]`.
+   and `WATERMARK_SOURCE_PIPELINES=["SI_CLIENT_ALPHA","SI_CLIENT_BETA","SI_CLIENT_GAMMA",
+   "SI_STEWARD_BUSINESS"]`: the steward pipeline writes ODS too, so a running steward merge
+   holds the high mark like a client merge.
    Filter `UPDATE_DATE >= $$watermark AND UPDATE_DATE < $$watermark_max`; use S7.X's shared
    clock and admitted fence, not MAX of data or last pipeline run ID. It has no
    CFG_PIPELINE_DEPENDENCY on clients: requiring fresh upstream success would stall behind
@@ -7621,7 +7737,8 @@ each checked by S8.F's independent reference queries.
 
 1. **Customer support facts.** Rewrite the fact view over `dm.customer_support_fact`:
    `ACTIVE_FLAG = 'Y'` replaces `is_active` and the date range; SI_DM alone builds scheduled
-   mart versions from bounded ODS windows (steward writes remain separately attributed).
+   mart versions from bounded ODS windows. Steward corrections arrive through ODS; the view
+   shows their steward and upload from ODS, apart from the SI_DM run that published them.
    Show source ODS run/task provenance separately from the SI_DM run that publishes a version;
    expose the last committed window and freshness. Exclude rejected keys through
    the business-rule results mirrored by cloning. Reference queries check interactions,
@@ -7742,7 +7859,11 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    policies; do not assume that every flag excludes a record from the mart.
 3. Add S7.M stewardable pipelines and assigned stewards for two kinds of target, correcting
    the same Alpha, Beta and Gamma records rather than a disconnected upload-only dataset:
-   - **The `dm` mart:** `SI_STEWARD_DM_FACT` into `dm.customer_support_fact`.
+   - **Business data, at ODS:** `SI_STEWARD_BUSINESS` takes the client chain (LND → PRS →
+     CDC → PRE_ODS → rules → ODS) with source `STEWARD`, and merges corrections into the
+     normalized ODS by business key as human writes. ODS is the operational store, so
+     corrections belong there; DM is analytical and receives them through SI_DM's next window,
+     exactly once. DM has no human writes or locks (owner, 2026-10-26).
    - **The `ds` reference tables:** one `SI_STEWARD_DS_<TABLE>` per stewarded table (`agents`,
      `customer_types`, `support_areas`), whose corrections reach `dwh` through a final detached `SI_REFERENCE` trigger. A successful first upload
      locks the seed; later deploys report `LOCKED`, exit 0 and preserve the stewarded table.
@@ -7755,10 +7876,12 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    - a file over the pipeline's size limit and one over the blanket limit;
    - an attempt to run the pipeline without an upload.
    Demonstrate human inserts, row and value corrections, accurate uploader attribution,
-   rejected uploads and permission refusals. On protected SCD tables, subsequent writes from
-   source pipelines preserve human-locked rows/values while updating unlocked values; another
+   rejected uploads and permission refusals. On the protected ODS and `ds` tables, subsequent
+   writes from source pipelines preserve human-locked rows/values while updating unlocked
+   values; another
    authorized human may update them, and an explicit unlock lets automation resume. Exercise
-   SCD1 and SCD2, including history and active/deleted flags. Machine-originated writes alone
+   SCD1 and SCD2, including history and active/deleted flags. The mart no longer takes human
+   writes, so S8.H's feature inventory names the SCD2 target that demonstrates SCD2 protection. Machine-originated writes alone
    create no human locks; ordinary non-SCD tables have no such overwrite protection. This
    corrects warehouse records, not the MongoDB, Kafka or MinIO source systems.
 4. Maintain a feature-to-scenario coverage matrix in the example README for every package
@@ -7824,8 +7947,9 @@ from passing. Verify that deliberately removing a feature's mapping or result fa
 
 **Done when.** All three sources produce reproducible valid, incomplete, rejectable and
 reportable cases; their rules, rejects, corrections and reporting reconcile exactly with
-independent expected results. Stewards correct those same warehouse records and human-only
-protection is demonstrated through later source refreshes and unlocks. Every package feature
+independent expected results. Stewards correct those same records in ODS and `ds`, human-only
+protection is demonstrated there through later source refreshes and unlocks, and each
+business correction reaches the mart once through SI_DM. Every package feature
 has a passing Support Insights scenario and an accurate root-README walkthrough explaining
 what is covered and how to see it, with evidence for the pinned project and candidate. No known
 package bug or missing feature demonstration remains hidden behind a project workaround.
