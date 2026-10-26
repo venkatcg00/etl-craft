@@ -304,3 +304,13 @@ Attempt logs remain complete files under `logs/`; the task summary keeps reporte
 an 8 KiB output tail. Set `Logs.Tail_bytes` in `craft-connector.yml` to change that byte budget.
 For agents, the API publishes full logs to `Logs.Store` (default `file://<Log_dir>/agents`),
 with an explicit `Logs.Profile` for S3; see the deployment logging guide.
+
+### Business-rule scope
+
+Support Insights rules are complete SELECTs returning `fact_key` from `$$rows_in_scope`.
+Normal checks flag and clear only this run's active rows. Corrected rows outside the run and
+rows deleted from the target keep their flags until an explicit full check with `run --force`
+for the selected BR task and an exact run identity. The engine adds no periodic rechecks;
+teams configure ordinary pipelines and schedules themselves. Returned, newly flagged, cleared
+and dropped counts appear per rule in the task's reported values and log. Upgrading converts
+stored fragment rules to complete SELECTs with EXISTS; export config again after upgrading.

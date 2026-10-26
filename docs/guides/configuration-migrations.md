@@ -235,3 +235,15 @@ applying its migrations.
 
 Project migration SQL must name the selected project when inserting project-owned metadata.
 Use `config apply` for code-based CSV merging; a scoped ledger does not rewrite arbitrary SQL.
+
+## Upgrading business rules in a shared Engine DB
+
+S6.D converts stored rule fragments to complete SELECTs and checks active-flag uniqueness.
+A shared Engine DB can hold projects using different warehouses. Run `migrate` with the first
+project's connector config and repeat `--project-config PATH` for the others. The files must
+be readable UTF-8 connector configurations on the executing host, name distinct projects,
+and resolve to the same Engine DB address and schema. Their Warehouse profiles determine
+identifier quoting; warehouse connections are not opened. Supply configurations for inactive
+projects too when they retain stored rules. A missing dialect refuses all pending upgrades
+before writes; restore/provide that project's configuration and retry. Existing migration
+roles and host-only placement apply; no HTTP migration route is added.

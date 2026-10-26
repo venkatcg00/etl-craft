@@ -47,7 +47,7 @@ B20 = [
     "tests/integration/execution/test_email.py::test_a_multiline_database_error_is_safe_in_the_subject_and_kept_in_the_body",
 ]
 B21 = [
-    "tests/integration/warehouse/test_business_rules.py::test_a_flag_is_cleared_when_its_key_is_gone_from_the_table",
+    "tests/integration/warehouse/test_business_rules.py::test_a_deleted_rows_flag_waits_for_a_forced_check",
     "tests/integration/warehouse/test_business_rules.py::test_only_the_active_version_of_a_versioned_table_is_judged",
 ]
 B23 = [

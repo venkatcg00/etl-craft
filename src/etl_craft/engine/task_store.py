@@ -12,12 +12,13 @@ from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.actor import current_actor
 from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.core.items import ItemRecord, ItemState, ItemStore
 from etl_craft.core.ownership import ResourceLocker, attempt_holder
-from etl_craft.engine import locks, transitions
+from etl_craft.engine import locks, resource_locks, transitions
 from etl_craft.engine.agent_state import fence
 from etl_craft.engine.alerts import AlertState, read_alert
 from etl_craft.engine.queries import statement
@@ -363,11 +364,30 @@ class LocalTaskStore:
             "report only this attempt's rules"
         )
 
+    def _rule_lock(self, conn: Connection, rule: BusinessRule) -> None:
+        if self.identity.attempt_id is None:
+            return
+        lock = locks.business_rule(rule.business_rule_id, rule.business_rule_name)
+        holder = resource_locks.Holder(
+            self.identity.holder_id,
+            self.identity.owner or "",
+            current_actor(),
+            self.identity.attempt_id,
+        )
+        try:
+            # Renewing also locks the ownership row through the flag transaction's commit.
+            resource_locks.renew(conn, lock.key, holder)
+        except StaleTransitionError as error:
+            raise StaleTransitionError(
+                f"{lock.name}: attempt {self.identity.attempt_id} has no live rule lock; "
+                "acquire the rule lock before checking or publishing flags"
+            ) from error
+
     def begin_rule(self, rule_id: int) -> RuleRunBinding:
         """Bind a validated rule under this attempt's task run."""
         with using(self.definition), self.engine.begin() as conn:
             self._assert(conn)
-            self._rule(conn, rule_id)
+            self._rule_lock(conn, self._rule(conn, rule_id))
             return begin_rule_run(conn, rule_id, self.identity.task_run_id, datetime.now(UTC))
 
     def rule_keys(self, rule_id: int) -> set[str]:
@@ -386,6 +406,7 @@ class LocalTaskStore:
         with self.engine.begin() as conn:
             self._assert(conn)
             rule = self._rule(conn, ending.rule_id)
+            self._rule_lock(conn, rule)
             row = conn.execute(
                 statement(conn, "business_rule_run"),
                 {"business_rule_id": ending.rule_id, "task_run_id": self.identity.task_run_id},

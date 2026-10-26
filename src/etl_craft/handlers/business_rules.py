@@ -1,29 +1,7 @@
-"""``HANDLER=BUSINESS_RULES``: check a task's ``CFG_BUSINESS_RULES`` and flag the rows that fail.
+"""Run complete business-rule queries, publishing one serialized flag snapshot per rule.
 
-A rule names a warehouse table (``TARGET_TABLE``, ``schema.table`` or ``database.schema.table``),
-the column that identifies a row (``BUSINESS_RULE_KEY_COLUMN``) and a condition
-(``BUSINESS_RULE_SQL``): a correlated ``SELECT`` that returns a row when the table's row ``t``
-breaks the rule, such as ``SELECT 1 FROM sales.customers c WHERE c.id = t.customer_id AND
-c.active = 'N'``. For each rule the engine:
-
-1. finds the keys of the rows in scope that break it:
-   ``SELECT DISTINCT t.<key> FROM <table> t WHERE <scope> AND EXISTS (<rule>)``;
-2. flags each such key not already flagged, as a row of ``AUD_BUSINESS_RULES_RESULTS`` with
-   the rule's ``BUSINESS_RULE_TYPE``;
-3. clears the flags of keys it flagged before whose rows in scope no longer break it, and of
-   keys that no longer have a row in the table at all.
-
-The scope is the rows the current run wrote (``t.PIPELINE_RUN_ID = <run>``), or every row when
-the task is forced; on a table with ``ACTIVE_FLAG`` (an ``SCD2_MERGE`` target) only active
-versions are judged. A forced run judges the whole table, so every flag it does not find again
-is cleared. Rules run in waves by ``SEQUENCE_NUMBER``: the rules of a wave run in
-parallel, at most the measured local task capacity at once, and the next wave starts once
-every rule of this one has finished. A rule that fails is recorded ``FAILED`` and the rest of
-its wave still runs; then the task fails, naming every rule that failed. A rule that already
-succeeded under the task run is not run again, unless the task itself is run again after it
-succeeded.
-
-Each rule records its outcome in ``AUD_BUSINESS_RULES_RUN_LOG`` in a transaction of its own.
+Normal checks flag and clear current-run active rows only. Forced checks also clear flags
+for corrected rows outside the run and rows deleted from the warehouse.
 """
 
 from __future__ import annotations
@@ -33,14 +11,14 @@ import contextvars
 import itertools
 import logging
 import time
-from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.pool import QueuePool
 
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import RunStatus
@@ -48,26 +26,36 @@ from etl_craft.core.errors import ConfigurationError, HandlerError, SqlGuardErro
 from etl_craft.core.text import (
     as_subquery,
     is_safe_identifier,
+    is_safe_object_ref,
     qualify,
     split_object_ref,
-    split_statements,
 )
+from etl_craft.dialects.business_rules import (
+    expand_scope,
+    key_identifier,
+    output_key,
+    quote_output_key,
+    rule_namespace,
+    rule_problem,
+    scope_cte,
+    table_identifier,
+)
+from etl_craft.engine import locks
 from etl_craft.engine.repository.business_rules import BusinessRule
 from etl_craft.engine.task_store import RuleEnding, TaskStore
 from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
-from etl_craft.handlers.sql.analysis import read_only_problem
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 logger = logging.getLogger(__name__)
-
-KEY_CHUNK = 500
-"""How many flagged keys one clearing query checks at a time."""
 
 
 @dataclass(frozen=True)
 class RuleOutcome:
     """What one rule did: the keys it flagged and cleared, or that it had already run."""
 
+    rule_id: int = 0
+    returned: int = 0
+    dropped: int = 0
     flagged: int = 0
     cleared: int = 0
     skipped: bool = False
@@ -109,14 +97,29 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
         "every row (forced)" if context.force else f"pipeline_run_id={context.pipeline_run_id}",
     )
     flagged = cleared = 0
-    with open_warehouse(config, store) as warehouse:
+    values: dict[str, object] = {}
+    with open_warehouse(
+        config,
+        store,
+        poolclass=QueuePool,
+        pool_size=min(max(config.limits.max_parallel_tasks, 1), len(checked)),
+        max_overflow=0,
+    ) as warehouse:
         runner = _RuleRunner(context, store, warehouse, scope, string_type)
         for number, wave in itertools.groupby(checked, key=lambda r: r.rule.sequence_number):
             outcomes = runner.wave(number, list(wave))
+            for outcome in outcomes:
+                if not outcome.skipped:
+                    values[f"BUSINESS_RULE_{outcome.rule_id}"] = {
+                        "returned": outcome.returned,
+                        "flagged": outcome.flagged,
+                        "cleared": outcome.cleared,
+                        "dropped": outcome.dropped,
+                    }
             flagged += sum(outcome.flagged for outcome in outcomes)
             cleared += sum(outcome.cleared for outcome in outcomes)
     logger.info("business rules done: %d key(s) flagged, %d cleared", flagged, cleared)
-    return HandlerResult(insert_count=flagged, update_count=cleared)
+    return HandlerResult(insert_count=flagged, update_count=cleared, variables=values)
 
 
 def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> _Rule:
@@ -139,16 +142,61 @@ def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> 
         split_object_ref(rule.target_table, param_name="TARGET_TABLE")
     except HandlerError as error:
         raise SqlGuardError(f"{name}: {error}") from error
-    statements = split_statements(rule.business_rule_sql)
-    if len(statements) != 1:
-        raise SqlGuardError(
-            f"{name}: BUSINESS_RULE_SQL must be one correlated SELECT; it holds "
-            f"{len(statements)} statements"
-        )
-    problem = read_only_problem(statements[0], dialect)
+    problem = rule_problem(rule.business_rule_sql, rule.business_rule_key_column, dialect)
     if problem is not None:
-        raise SqlGuardError(f"{name}: BUSINESS_RULE_SQL must be a read-only SELECT; it {problem}")
-    return _Rule(rule, qualify(rule.target_table, catalog))
+        raise SqlGuardError(f"{name}: BUSINESS_RULE_SQL {problem}")
+    table = qualify(rule.target_table, catalog)
+    if not is_safe_object_ref(table):
+        raise SqlGuardError(
+            f"{name}: TARGET_TABLE={table!r}; expected schema.table or catalog.schema.table "
+            "with plain SQL identifiers; correct the CFG_TABLES catalog/schema/table contract"
+        )
+    return _Rule(rule, table)
+
+
+def check_output(checked: _Rule, context: TaskContext, warehouse: Engine) -> str:
+    """Resolve wildcard or unparsed projections through the warehouse without returning rows."""
+    rule = checked.rule
+    prefix = rule_namespace(rule.business_rule_sql)
+    rows = prefix + "scope"
+    query = expand_scope(rule.business_rule_sql, rows)
+    dialect = warehouse_dialect(context.config).sqlglot_dialect
+    if key := output_key(rule.business_rule_sql, rule.business_rule_key_column, dialect):
+        return key
+    sql = (
+        f"WITH {scope_cte(checked.table, '1=0', rows, dialect)} "
+        f"SELECT * FROM {as_subquery(query)} {prefix}output WHERE 1=0"
+    )
+    try:
+        with (
+            warehouse.connect() as conn,
+            conn.execute(
+                text(sql),
+                {
+                    "pipeline_id": context.pipeline_id,
+                    "pipeline_run_id": context.pipeline_run_id,
+                    "task_run_id": context.task_run_id,
+                },
+            ) as result,
+        ):
+            columns = list(result.keys())
+    except SQLAlchemyError as error:
+        raise SqlGuardError(
+            f"business rule {rule.business_rule_name!r}: could not verify BUSINESS_RULE_SQL "
+            f"output for BUSINESS_RULE_KEY_COLUMN={rule.business_rule_key_column!r}; "
+            "expected a complete read-only SELECT returning that key; restore the target/warehouse "
+            f"connection or correct the rule and run validate again; warehouse reported: {error}"
+        ) from error
+    found = next(
+        (name for name in columns if name.lower() == rule.business_rule_key_column.lower()), None
+    )
+    if found is None:
+        raise SqlGuardError(
+            f"business rule {rule.business_rule_name!r}: BUSINESS_RULE_SQL returns {columns!r}; "
+            f"expected BUSINESS_RULE_KEY_COLUMN={rule.business_rule_key_column!r}; "
+            "select that target row key in BUSINESS_RULE_SQL"
+        )
+    return quote_output_key(found, dialect)
 
 
 class _RuleRunner:
@@ -192,6 +240,16 @@ class _RuleRunner:
         return outcomes
 
     def _run_rule(self, checked: _Rule) -> RuleOutcome:
+        lock = locks.business_rule(checked.rule.business_rule_id, checked.rule.business_rule_name)
+        with lock.hold(self.store):
+            try:
+                return self._check_locked(checked)
+            except _RuleFailedError as error:
+                # This failure cannot publish flags; release without cancelling sibling reads.
+                failure = error
+        raise failure
+
+    def _check_locked(self, checked: _Rule) -> RuleOutcome:
         rule = checked.rule
         binding = self.store.begin_rule(rule.business_rule_id)
         if binding.already_succeeded and not (self.context.force or self.context.rerun):
@@ -206,18 +264,12 @@ class _RuleRunner:
             step = "read the table's columns"
             scope = self._scope(checked)
             step = "find the keys that break the rule"
-            failing = self._keys(checked, scope, "EXISTS")
+            failing, in_scope, returned, dropped = self._keys(checked, scope)
             active = self.store.rule_keys(rule.business_rule_id)
             new = sorted(failing - active)
             step = "find the flagged keys that now pass"
             unflagged = sorted(active - failing)
-            if self.context.force:
-                # The whole table was judged: a flag not found again no longer applies.
-                passing = unflagged
-            else:
-                passing = self._now_passing(checked, scope, unflagged)
-                step = "find the flagged keys whose rows are gone"
-                passing += self._gone(checked, scope, sorted(set(unflagged) - set(passing)))
+            passing = unflagged if self.context.force else sorted(set(unflagged) & in_scope)
             step = "record the flags"
             self.store.end_rule(
                 RuleEnding(
@@ -251,70 +303,75 @@ class _RuleRunner:
                 f"{type(cause).__name__}: {detail}"
             ) from error
         logger.info(
-            "rule %s on %s: %d key(s) break it, %d newly flagged, %d cleared (%.2fs)",
+            "rule %s on %s: %d returned, %d flagged, %d cleared, %d dropped (%.2fs)",
             rule.business_rule_name,
             checked.table,
-            len(failing),
+            returned,
             len(new),
             len(passing),
+            dropped,
             time.monotonic() - started,
         )
-        return RuleOutcome(flagged=len(new), cleared=len(passing))
-
-    def _key(self, checked: _Rule) -> str:
-        return f"CAST(t.{checked.rule.business_rule_key_column} AS {self.string_type})"
+        return RuleOutcome(rule.business_rule_id, returned, dropped, len(new), len(passing))
 
     def _scope(self, checked: _Rule) -> str:
         """Return the rows the rule judges: the run's scope, and only active versions."""
-        rows = self._query(f"SELECT * FROM {checked.table} WHERE 1 = 0", {}, keys=True)
+        table = table_identifier(
+            checked.table, warehouse_dialect(self.context.config).sqlglot_dialect
+        )
+        rows = self._query(f"SELECT * FROM {table} WHERE 1 = 0", keys=True)
         if any(str(name).lower() == "active_flag" for name in rows):
             return f"{self.scope} AND t.ACTIVE_FLAG = 'Y'"
         return self.scope
 
-    def _keys(self, checked: _Rule, scope: str, test: str) -> set[str]:
+    def _keys(self, checked: _Rule, scope: str) -> tuple[set[str], set[str], int, int]:
+        """Evaluate the rule once and intersect its distinct text keys with scoped keys."""
+        rule = checked.rule
+        result_key = check_output(checked, self.context, self.warehouse)
+        dialect = warehouse_dialect(self.context.config).sqlglot_dialect
+        key = key_identifier(rule.business_rule_key_column, dialect)
+        prefix = rule_namespace(rule.business_rule_sql)
+        rows = prefix + "scope"
+        query = expand_scope(rule.business_rule_sql, rows)
+
         sql = (
-            f"SELECT DISTINCT {self._key(checked)} FROM {checked.table} t "
-            f"WHERE {scope} AND {test} {as_subquery(checked.rule.business_rule_sql)}"
+            f"WITH {scope_cte(checked.table, scope, rows, dialect)}, "
+            f"{prefix}returned AS {as_subquery(query)}, "
+            f"{prefix}keys AS (SELECT CAST({result_key} AS {self.string_type}) AS rule_key, "
+            f"COUNT(*) AS occurrences FROM {prefix}returned "
+            f"GROUP BY CAST({result_key} AS {self.string_type})), "
+            f"{prefix}scope_keys AS (SELECT DISTINCT CAST({key} AS {self.string_type}) "
+            f"AS rule_key FROM {rows}) "
+            f"SELECT k.rule_key AS returned_key, s.rule_key AS scope_key, k.occurrences "
+            f"FROM {prefix}keys k FULL OUTER JOIN {prefix}scope_keys s "
+            "ON k.rule_key = s.rule_key"
         )
-        return {str(row[0]) for row in self._query(sql, {})}
+        failing: set[str] = set()
+        in_scope: set[str] = set()
+        returned = dropped = nulls = 0
+        for row in self._query(sql):
+            returned_key, scope_key, occurrences = row
+            returned += int(occurrences or 0)
+            if occurrences is not None and returned_key is None:
+                nulls += int(occurrences)
+            if scope_key is not None:
+                in_scope.add(str(scope_key))
+                if occurrences is not None:
+                    failing.add(str(scope_key))
+            elif returned_key is not None:
+                dropped += int(occurrences)
+        if nulls:
+            raise HandlerError(
+                f"business rule {rule.business_rule_name!r}: returned {nulls} NULL key(s) in "
+                f"BUSINESS_RULE_KEY_COLUMN={rule.business_rule_key_column!r}; expected non-NULL "
+                "target row keys; correct BUSINESS_RULE_SQL to return a key for every flagged row"
+            )
+        return failing, in_scope, returned, dropped
 
-    def _now_passing(self, checked: _Rule, scope: str, flagged: Sequence[str]) -> list[str]:
-        """Return which of the flagged keys have rows in scope that no longer break the rule."""
-        return self._chunked(
-            checked,
-            flagged,
-            f"{scope} AND {self._key(checked)} IN :keys "
-            f"AND NOT EXISTS {as_subquery(checked.rule.business_rule_sql)}",
-        )
-
-    def _gone(self, checked: _Rule, scope: str, flagged: Sequence[str]) -> list[str]:
-        """Return which of the flagged keys have no row left in the table (active, if versioned)."""
-        active_only = " AND t.ACTIVE_FLAG = 'Y'" if "t.ACTIVE_FLAG" in scope else ""
-        present = set(
-            self._chunked(checked, flagged, f"{self._key(checked)} IN :keys{active_only}")
-        )
-        return sorted(key for key in flagged if key not in present)
-
-    def _chunked(self, checked: _Rule, keys: Sequence[str], where: str) -> list[str]:
-        """Return which of ``keys`` the rows matching ``where`` have, ``KEY_CHUNK`` at a time.
-
-        ``where`` binds the chunk as ``:keys``.
-        """
-        found: list[str] = []
-        for start in range(0, len(keys), KEY_CHUNK):
-            chunk = list(keys[start : start + KEY_CHUNK])
-            sql = f"SELECT DISTINCT {self._key(checked)} FROM {checked.table} t WHERE {where}"
-            found += [str(row[0]) for row in self._query(sql, {"keys": chunk}, expanding=True)]
-        return sorted(found)
-
-    def _query(
-        self, sql: str, params: dict[str, object], *, expanding: bool = False, keys: bool = False
-    ) -> list[Any]:
+    def _query(self, sql: str, *, keys: bool = False) -> list[Any]:
         """Return the rows ``sql`` selects, or with ``keys`` the names of its columns."""
         logger.debug("%s", sql)
         statement = text(sql)
-        if expanding:
-            statement = statement.bindparams(bindparam("keys", expanding=True))
         try:
             with self.warehouse.connect() as conn:
                 result = conn.execute(
@@ -323,12 +380,14 @@ class _RuleRunner:
                         "pipeline_id": self.context.pipeline_id,
                         "pipeline_run_id": self.context.pipeline_run_id,
                         "task_run_id": self.context.task_run_id,
-                        **params,
                     },
                 )
-                if keys:
-                    return list(result.keys())
-                return [tuple(row) for row in result]
+                try:
+                    if keys:
+                        return list(result.keys())
+                    return [tuple(row) for row in result]
+                finally:
+                    result.close()
         except SQLAlchemyError:
             logger.error("the failing statement was:\n%s", sql)
             raise

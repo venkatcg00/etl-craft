@@ -816,3 +816,31 @@ def test_composite_merges(tmp_path, name, variables, table_format):
         for target in targets:
             w.execute(f"DROP TABLE IF EXISTS {w.name(target)}")
         close_world(w)
+
+
+@pytest.mark.cloud_databricks
+def test_business_rule_queries_on_databricks(tmp_path):
+    from fixtures.business_rules import check_business_rule_queries
+
+    require_variables("DATABRICKS", DATABRICKS_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_DATABRICKS_{name}" for name in DATABRICKS_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_DATABRICKS_SCHEMA"]
+    w = cloud_world(tmp_path, "Databricks", fields, TableFormat.NATIVE, schema)
+    try:
+        check_business_rule_queries(w)
+    finally:
+        close_world(w)
+
+
+@pytest.mark.cloud_snowflake
+def test_business_rule_queries_on_snowflake(tmp_path):
+    from fixtures.business_rules import check_business_rule_queries
+
+    require_variables("SNOWFLAKE", SNOWFLAKE_VARS)
+    fields = {name.lower(): f"ETL_CRAFT_TEST_SNOWFLAKE_{name}" for name in SNOWFLAKE_VARS}
+    schema = os.environ["ETL_CRAFT_TEST_SNOWFLAKE_SCHEMA"]
+    w = cloud_world(tmp_path, "Snowflake", fields, TableFormat.NATIVE, schema)
+    try:
+        check_business_rule_queries(w)
+    finally:
+        close_world(w)

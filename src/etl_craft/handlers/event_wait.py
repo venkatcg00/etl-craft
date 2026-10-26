@@ -15,9 +15,9 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.errors import HandlerError
+from etl_craft.dialects.query_analysis import event_query_problem, read_only_problem
 from etl_craft.engine.repository.events import consumed_keys
 from etl_craft.handlers.resources import LocalLocker
-from etl_craft.handlers.sql.analysis import event_query_problem, read_only_problem
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
 PARAMETERS = frozenset(

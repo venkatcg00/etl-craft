@@ -6,6 +6,25 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- `migrate --project-config PATH` is repeatable for other projects sharing the selected Engine
+  DB (`MigrateInput.project_configs` in the shared operation). Rule conversion requires each
+  project's own Warehouse dialect before any pending upgrade writes; missing, duplicate,
+  unreadable or foreign-Engine configs fail with a remedy. Config paths are on the executing
+  host; migration retains its existing host-only placement.
+
+- Business rules now use complete read-only SELECTs returning their configured key column.
+  `$$rows_in_scope` supplies the current run's active rows; returned keys are intersected with
+  that scope, duplicate keys are deduplicated and NULL keys fail with a diagnostic. The upgrade
+  converts stored correlated fragments with an EXISTS wrapper and retains recorded results;
+  export configuration again after upgrading. `validate` shows the conversion for old fragments
+  and warns without the scope token. Wildcard output is verified with a zero-row warehouse
+  probe, including during config apply. Rule values/logs report returned, flagged, cleared and
+  dropped counts.
+- Normal business-rule checks use one query per rule. Corrected out-of-run and deleted-row
+  flags await an explicit `run --force` check. Same-rule checks serialize through the existing
+  lock service; an active-flag unique index retains inactive history and refuses legacy
+  duplicates before upgrading. Teams continue to own BR pipelines and schedules.
+
 - Store complete agent attempt logs outside the Engine DB through `Logs.Store` (`file://`
   or profiled `s3://`) and `Logs.Profile`. Local attempts retain their existing `Log_dir` files.
   `Logs.Tail_bytes` defaults to 8192 output bytes plus reported values; legacy `TASK_LOG` text

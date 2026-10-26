@@ -57,10 +57,10 @@ from etl_craft.core.text import (
     substitute_task_tokens,
     suggest,
 )
+from etl_craft.dialects.query_analysis import read_only_problem
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.handlers.registry import TaskContext
-from etl_craft.handlers.sql.analysis import read_only_problem
 from etl_craft.handlers.sql.watermarks import Watermark, read_watermark
 from etl_craft.warehouse.connection import warehouse_dialect
 

@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import Actor, ActorKind, current_actor, migration
-from etl_craft.core.errors import ConfigurationError, MigrationError
+from etl_craft.core.errors import ConfigurationError, MigrationError, SqlGuardError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.dialects.engine import for_engine
-from etl_craft.engine.queries import statement
+from etl_craft.engine.queries import project_statement, statement
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,15 @@ class Target:
 
     catalog: str | None = None
     warehouse_dialect: str | None = None
+    project_dialects: Mapping[str, str] | None = None
+
+
+class TargetOptions(TypedDict, total=False):
+    """Keyword inputs for the migration context used by setup and migrate."""
+
+    catalog: str | None
+    warehouse_dialect: str | None
+    project_dialects: Mapping[str, str] | None
 
 
 NO_TARGET = Target()
@@ -135,6 +144,79 @@ def _record_accounts(conn: Connection, state: LegacyRows, target: Target) -> Non
     )
 
 
+def _check_business_rule_flags(conn: Connection, target: Target) -> LegacyRows:
+    from etl_craft.dialects.business_rules import converted_rule
+
+    inspector = inspect(conn)
+    if inspector.has_table("aud_business_rules_results"):
+        conflicts = [
+            f"rule={row.business_rule_id}, key={row.business_rule_key!r}, "
+            f"result id={row.business_rule_result_id}"
+            for row in conn.execute(statement(conn, "business_rule_duplicate_flags"))
+        ]
+        if conflicts:
+            raise MigrationError(
+                "AUD_BUSINESS_RULES_RESULTS has conflicting active flags: "
+                + "; ".join(conflicts)
+                + "; expected one ACTIVE_FLAG=Y result per (BUSINESS_RULE_ID, BUSINESS_RULE_KEY). "
+                "Nothing was changed; use the previous package and an explicit project migration "
+                "to clear the conflicting flags while retaining their history, "
+                "then run migrate again"
+            )
+    if not inspector.has_table("cfg_business_rules"):
+        return []
+    rows = [
+        dict(row._mapping)
+        for row in conn.execute(project_statement(conn, "business_rule_legacy_sql"))
+    ]
+    dialects = target.project_dialects
+    if dialects is None:
+        dialects = {"default": target.warehouse_dialect} if target.warehouse_dialect else {}
+    for row in rows:
+        dialect = dialects.get(row["project_code"])
+        if dialect is None:
+            raise MigrationError(
+                f"CFG_BUSINESS_RULES rule {row['business_rule_name']!r} "
+                f"(BUSINESS_RULE_ID={row['business_rule_id']}), project={row['project_code']!r}: "
+                "Warehouse dialect=None; expected the target project's Warehouse dialect; "
+                "configure Warehouse and supply its connector file "
+                "with migrate --project-config PATH"
+            )
+        try:
+            row["converted_sql"] = converted_rule(
+                row["business_rule_sql"], row["business_rule_key_column"], dialect
+            )
+        except (SqlGuardError, ValueError) as error:
+            raise MigrationError(
+                f"business rule {row['business_rule_name']!r} "
+                f"(BUSINESS_RULE_ID={row['business_rule_id']}) "
+                f"project={row['project_code']!r}, Warehouse dialect={dialect!r}, "
+                f"BUSINESS_RULE_SQL={row['business_rule_sql']!r}: {error}; "
+                "correct this rule with the previous package before upgrading"
+            ) from error
+    return rows
+
+
+def _convert_business_rule_sql(conn: Connection, state: LegacyRows, target: Target) -> None:
+    from etl_craft.engine.repository.target_contracts import (
+        record_conversion,
+        suspend_config_capture,
+    )
+
+    if not state:
+        return
+    suspend_config_capture(conn, "CFG_BUSINESS_RULES")
+    for row in state:
+        conn.execute(
+            statement(conn, "business_rule_convert_sql"),
+            {
+                "business_rule_id": row["business_rule_id"],
+                "rule_sql": row["converted_sql"],
+            },
+        )
+    record_conversion(conn, "CFG_BUSINESS_RULES", "BUSINESS_RULE_ID", migration.get())
+
+
 STEPS: dict[str, MarkerStep] = {
     "rebuild-metadata": MarkerStep(),
     "check-account-token-identities": MarkerStep(
@@ -152,6 +234,9 @@ STEPS: dict[str, MarkerStep] = {
         check=_legacy_tasks, convert=_convert_tasks, names_migration=True
     ),
     "convert-target-state": MarkerStep(check=lambda conn, target: check_target_names(conn)),
+    "check-business-rule-flags": MarkerStep(
+        check=_check_business_rule_flags, convert=_convert_business_rule_sql, names_migration=True
+    ),
 }
 """Every marker, in the order its checks run."""
 MARKERS = frozenset(STEPS)

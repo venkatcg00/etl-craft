@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from etl_craft.core import text
-from etl_craft.handlers.sql.analysis import Reading, read_only_problem, read_query
+from etl_craft.dialects.query_analysis import Reading, read_only_problem, read_query
 
 DEMO = Path(__file__).parents[2] / "examples" / "demo"
 DEMO_SQL = sorted(

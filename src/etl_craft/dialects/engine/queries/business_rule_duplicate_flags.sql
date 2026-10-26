@@ -1,0 +1,12 @@
+SELECT r.BUSINESS_RULE_ID AS business_rule_id, r.BUSINESS_RULE_KEY AS business_rule_key,
+       r.BUSINESS_RULE_RESULT_ID AS business_rule_result_id
+FROM AUD_BUSINESS_RULES_RESULTS r
+JOIN (
+    SELECT BUSINESS_RULE_ID AS business_rule_id, BUSINESS_RULE_KEY AS business_rule_key
+    FROM AUD_BUSINESS_RULES_RESULTS
+    WHERE ACTIVE_FLAG = 'Y'
+    GROUP BY BUSINESS_RULE_ID, BUSINESS_RULE_KEY HAVING COUNT(*) > 1
+) conflicts ON conflicts.business_rule_id = r.BUSINESS_RULE_ID
+           AND conflicts.business_rule_key = r.BUSINESS_RULE_KEY
+WHERE r.ACTIVE_FLAG = 'Y'
+ORDER BY r.BUSINESS_RULE_ID, r.BUSINESS_RULE_KEY, r.BUSINESS_RULE_RESULT_ID

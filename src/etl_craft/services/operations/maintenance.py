@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from etl_craft.config import load_config
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import ConfigurationError
+from etl_craft.dialects.engine import build_engine
 from etl_craft.engine.migrations import apply_pending_migrations
 from etl_craft.engine.privileges import grants_sql
 from etl_craft.engine.schema import InitResult, init_db
@@ -31,9 +33,10 @@ class InitInput(Request):
 
 @dataclass(frozen=True, kw_only=True)
 class MigrateInput(Request):
-    """The project's migrations folder; ``migrations/`` in the project directory unless given."""
+    """Project migrations and connector files for shared-project warehouse dialects."""
 
     migrations_dir: Path | None = None
+    project_configs: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -81,6 +84,44 @@ def initialize(ctx: OperationContext, request: InitInput) -> InitResult:
     return init_db(ctx.engine, force=request.force)
 
 
+def _migration_dialects(ctx: OperationContext, paths: tuple[Path, ...]) -> dict[str, str]:
+    """Resolve supplied project dialects, refusing another database or duplicate project."""
+    dialect, _ = dialect_and_catalog(ctx.config)
+    resolved = {ctx.config.project: dialect} if dialect is not None else {}
+    for path in paths:
+        try:
+            config = load_config(path)
+        except (OSError, UnicodeError) as error:
+            raise ConfigurationError(
+                f"project config {path}: {error}; expected a readable UTF-8 connector config; "
+                "restore its permissions/encoding and retry migrate --project-config"
+            ) from error
+        candidate = build_engine(config)
+        try:
+            actual = candidate.url.set(username=None, password=None)
+            expected = ctx.engine.url.set(username=None, password=None)
+            same = actual == expected and config.engine.schema == ctx.config.engine.schema
+        finally:
+            candidate.dispose()
+        if not same:
+            raise ConfigurationError(
+                f"project config {path}: Engine address={str(actual)!r}, "
+                f"Schema={config.engine.schema!r}; expected the selected Engine DB "
+                f"address={str(expected)!r}, Schema={ctx.config.engine.schema!r}; "
+                "point every --project-config at the same Engine DB and schema as --config"
+            )
+        dialect, _ = dialect_and_catalog(config)
+        if dialect is None or config.project in resolved:
+            raise ConfigurationError(
+                f"project config {path}: project={config.project!r}, "
+                f"Warehouse dialect={dialect!r}; "
+                "expected one config with a Warehouse per project; remove duplicate "
+                "--project-config arguments or configure its Warehouse"
+            )
+        resolved[config.project] = dialect
+    return resolved
+
+
 def migrate(ctx: OperationContext, request: MigrateInput) -> list[str]:
     """Apply pending packaged and project migrations."""
     dialect, catalog = dialect_and_catalog(ctx.config)
@@ -90,6 +131,7 @@ def migrate(ctx: OperationContext, request: MigrateInput) -> list[str]:
         project_default=ctx.config.migrations_dir,
         catalog=catalog,
         warehouse_dialect=dialect,
+        project_dialects=_migration_dialects(ctx, request.project_configs),
     )
 
 

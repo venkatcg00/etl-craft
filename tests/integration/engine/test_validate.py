@@ -76,7 +76,7 @@ def add_rule(conn, pipeline, task, name, *, key="id", target="sales.orders", sql
         name=name,
         p=pipeline,
         t=task,
-        rule_sql=sql or "SELECT 1 WHERE t.amount < 0",
+        rule_sql=sql or f"SELECT {key} FROM $$rows_in_scope t WHERE t.amount < 0",
         key=key,
         target=add_table(conn, target),
     )
@@ -297,7 +297,7 @@ def test_task_definitions_are_checked_with_the_handlers_own_rules(project):
         "BUSINESS_RULE_KEY_COLUMN is ROW_ID, but BAD.rebuild rebuilds s.y" in m
         for m in rules_messages
     )
-    assert any("must be one correlated SELECT" in m for m in rules_messages)
+    assert any("must be one read-only SELECT" in m for m in rules_messages)
     alert_messages = [m for _, m in by_task["BAD.alert"]]
     assert "EMAIL_TO has address(es) that are not valid: ops" in alert_messages
     assert any(m.startswith("no EMAIL_SUBJECT for outcome(s) SUCCESS") for m in alert_messages)
@@ -545,7 +545,11 @@ def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project
 
     report = validate(engine, config)
 
-    assert not report.failed
+    assert report.failed
+    assert any(
+        "could not verify BUSINESS_RULE_SQL output" in finding.message
+        for finding in report.findings
+    )
     warnings = {where: message for where, status, message in found(report) if status is Status.WARN}
     assert warnings["SALES.setup"].startswith(
         "SCRIPT_FILE='sql_scripts/orders.sql': sqlglot cannot read it as duckdb SQL "
@@ -613,4 +617,33 @@ def test_unknown_pipeline_parameters_fail_with_allowed_keys_and_remedy(project, 
         and "EMAIL_RECIPIENTS" in f.message
         and "remove" in f.message
         for f in findings
+    )
+
+
+@pytest.mark.parametrize(
+    ("sql", "status", "part"),
+    [
+        (
+            "SELECT amount FROM $$rows_in_scope",
+            Status.FAIL,
+            "expected BUSINESS_RULE_KEY_COLUMN='id'",
+        ),
+        ("VALUES (1)", Status.FAIL, "read-only SELECT"),
+        (
+            "SELECT 1 WHERE t.amount < 0",
+            Status.FAIL,
+            'SELECT t."id" FROM $$rows_in_scope t WHERE EXISTS',
+        ),
+        ("SELECT id FROM sales.orders", Status.WARN, "has no $$rows_in_scope"),
+    ],
+)
+def test_validate_complete_business_rule_contract(project, sql, status, part):
+    engine, config, _ = project
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "BR")
+        task = add_task(conn, pipeline, "rules", "BUSINESS_RULES")
+        add_rule(conn, pipeline, task, "contract", sql=sql)
+    report = validate(engine, config)
+    assert any(
+        f.where == "BR.rules" and f.status is status and part in f.message for f in report.findings
     )

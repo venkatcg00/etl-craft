@@ -136,6 +136,10 @@ def _lock(ctx: OperationContext, task: TaskContext, request: AgentTask) -> Agent
     if target := task.task_params.get("TARGET_OBJECT"):
         lock = locks.target(target, active_catalog(task.config))
         allowed[lock.key] = lock.name
+    if task.handler == Handler.BUSINESS_RULES:
+        for rule in _store(ctx, task).state().rules:
+            lock = locks.business_rule(rule.business_rule_id, rule.business_rule_name)
+            allowed[lock.key] = lock.name
     if is_single_writer(task.config):
         allowed[WAREHOUSE_LOCK_KEY] = "warehouse"
     if key not in allowed:

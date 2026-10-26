@@ -377,6 +377,8 @@ CREATE TABLE AUD_BUSINESS_RULES_RESULTS (
 ALTER TABLE AUD_BUSINESS_RULES_RESULTS DROP COLUMN TARGET_TABLE;
 CREATE INDEX ix_brresults_run ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_RUN_ID);
 CREATE INDEX ix_brresults_rule ON AUD_BUSINESS_RULES_RESULTS (BUSINESS_RULE_ID);
+CREATE UNIQUE INDEX ux_brresults_active_key ON AUD_BUSINESS_RULES_RESULTS
+    (BUSINESS_RULE_ID, BUSINESS_RULE_KEY) WHERE ACTIVE_FLAG = 'Y';
 COMMENT ON TABLE AUD_BUSINESS_RULES_RESULTS IS 'One row per record a business rule flagged. A record that passes on a later run is cleared: ACTIVE_FLAG = ''N'' and END_DATE set.';
 
 -- Where each incremental Python script got to: the offset it reads from next.

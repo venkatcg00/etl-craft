@@ -38,7 +38,9 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
     retained = seed(engine, tmp_path)
 
     upgrade_started = datetime.now(UTC)
-    apply_pending_migrations(engine, project_default=tmp_path / "migrations")
+    apply_pending_migrations(
+        engine, project_default=tmp_path / "migrations", warehouse_dialect="duckdb"
+    )
     upgrade_ended = datetime.now(UTC)
     assert {"AUD_TASK_EVENTS", "AUD_EVENT_FILES", "AUD_EVENT_KEYS"} <= {
         name.upper() for name in inspect(engine).get_table_names()
@@ -82,7 +84,12 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
     with pytest.raises(IntegrityError), engine.begin() as conn:
         conn.execute(insert)
     # A second migrate has nothing left to do.
-    assert apply_pending_migrations(engine, project_default=tmp_path / "migrations") == []
+    assert (
+        apply_pending_migrations(
+            engine, project_default=tmp_path / "migrations", warehouse_dialect="duckdb"
+        )
+        == []
+    )
 
 
 def test_signal_migration_keeps_existing_file_consumption_and_evidence(engine_db):
