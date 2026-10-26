@@ -17,7 +17,7 @@ Task-scoped actions keep their existing synchronous operation behaviour.
 SQLite supports all-in-one only; `ui` refuses it with the PostgreSQL remedy.
 
 `controller --no-ui`, and a plain install without the `ui` extra, serve only the unsigned
-`GET /health` probe using the standard library. They expose no API or documentation routes.
+`GET /health` and [Prometheus `/metrics`](metrics.md) using the standard library. They expose no API or documentation routes.
 All-in-one and `ui` also expose `/health`; `/api/v1/health` still requires a bearer token.
 On `ui`, `/health` is readiness: it returns 503 with the cause during database/schema failure
 or shutdown, and recovers without restarting. On the controller it remains liveness.
@@ -70,7 +70,7 @@ continue working with their original roles. It never silently merges or renames 
 The token-local `ROLE` column is removed; join `CFG_API_TOKENS.ACCOUNT_ID` to `CFG_ACCOUNTS`
 to read the current role.
 
-Except for sign-in and `/health`, every resource endpoint requires `Authorization: Bearer <token>`.
+Except for sign-in, `/health` and `/metrics`, every resource endpoint requires `Authorization: Bearer <token>`.
 `viewer` can read, `operator` can also trigger, cancel, pause, resume, mark, rerun and backfill,
 `developer` includes operator access, and `admin` can also create, list and revoke tokens
 through `/api/v1/tokens`.

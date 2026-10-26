@@ -6,7 +6,7 @@ and finalization hooks as foreground `etl-craft run`.
 
 With the optional `etl-craft[ui]` extra, it also serves the [authenticated HTTP API](http-api.md)
 at `Orchestration.Api_address` (default `127.0.0.1:8730`). Use `controller --no-ui` to expose
-only `GET /health`, even when the extra is installed. Without the extra this probe-only mode
+`GET /health` and [Prometheus `/metrics`](metrics.md), even when the extra is installed. Without the extra this probe-only mode
 is automatic. On PostgreSQL, run separate `etl-craft ui` copies for HTTP; they never acquire
 controller leadership or supervise tasks. SQLite keeps the all-in-one layout. Both roles
 check the package's applied Engine DB migrations before listening; upgrade every process

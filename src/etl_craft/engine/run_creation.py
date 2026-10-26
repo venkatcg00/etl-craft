@@ -12,6 +12,7 @@ from etl_craft.core.actor import Actor, sso_groups
 from etl_craft.core.enums import RunStatus, TriggerKind, YesNo
 from etl_craft.core.errors import ConfigurationError, RunStateError, StaleTransitionError
 from etl_craft.engine import runlog
+from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
 
 
@@ -76,6 +77,10 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
                     f"bundle is published; "
                     "expected an admitted project bundle; run `etl-craft bundle publish` first"
                 )
+            if status == RunStatus.SKIPPED:
+                lifecycle(conn, "run", int(run_id), status)
+            elif status == RunStatus.IN_PROGRESS:
+                lifecycle(conn, "admission", int(run_id))
             return int(run_id)
     except IntegrityError as error:
         found = (

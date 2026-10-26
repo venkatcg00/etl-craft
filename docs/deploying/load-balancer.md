@@ -7,6 +7,8 @@ S7.F supplies the complete Compose and Kubernetes layouts.
 
 ## Health, timeouts and shutdown
 
+Scrape [`GET /metrics`](metrics.md) on each process directly for operational telemetry.
+
 Probe **`GET /health` on each UI copy**, accepting only 200. It returns 503 with the cause
 when the Engine DB cannot be reached, its applied migrations differ from the package, or
 shutdown has begun. Public responses name a safe failure category; SQL, parameters and

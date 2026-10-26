@@ -161,6 +161,7 @@ item's text, or work done early under another item.
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Done | #256 | Complete scoped SELECTs, one check per rule, serialized unique flags and per-project upgrades |
 | S6.E Cloning that keeps up | Done | #258 | Scheduled incremental audit mirrors, exact-version recovery and bounded coalesced locking |
+| S6.F Metrics | Done | #259 | Shared bounded Prometheus exposition, controller events and recorded agent pressure |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
@@ -338,6 +339,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S6.F covers both Engine DBs, both HTTP listeners, transaction/savepoint rollback, live queue
+and agent state, constant scrape statement counts and released-schema upgrades. Scrapes during
+admission, lease expiry and metrics activation run twenty local rounds. Semgrep scans the
+changed API files; the built-in security-review tool is unavailable, so manual security review covers the HTTP, actor,
+label and connection boundaries. No warehouse SQL changes require cloud acceptance. Full
+platform coverage and installed-wheel demos remain CI gates.
 
 S6.E acceptance runs incremental insert/update/purge equality and changed-row copy volume on all
 four local warehouses, real controller-loss recovery on both Engine DBs, every released-schema
@@ -772,6 +780,21 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.F derives its Done when from the three bullets: both controller listeners expose one
+  Prometheus operation with the listed controller and recorded agent series; agent slots,
+  children and heartbeat ages require no agent listener; documented starting rules cover queue
+  age, LOST attempts and missing controller heartbeat.
+- S6.F keeps agents as API clients and exposes their recorded state centrally. Existing agent
+  registry, ownership and capacity reads are shared; health has no existing queue aggregate to
+  reuse. Pipeline Insights continues to use service calculations rather than process counters.
+- The owner approved the finite catalog `query` label (or `unknown`) solely for Engine DB
+  statement latency, as the exception to the dimension list. No SQL text or bind values are
+  labels. Counters and latency buckets are process observations that reset on restart; cluster
+  gauges are current indexed reads served only by the leader. SQLite snapshot reads use WAL
+  read transactions so a scrape does not reserve the writer lock. Listener registration happens
+  at module import; enabling a registry never changes SQLAlchemy listener lists in use by
+  another thread. The demo end alert explicitly waits for its parallel quality branch.
 
 - S6.E's derived Done when is: cloning runs only on its independent controller schedule with
   coalesced requests and a bounded recorded lock skip; the first post-upgrade copy is full and

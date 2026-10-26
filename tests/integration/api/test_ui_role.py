@@ -96,7 +96,7 @@ def test_two_ui_processes_share_sessions_runs_refresh_and_revocation(cli_project
         )
 
 
-def test_controller_no_ui_exposes_only_health_and_still_supervises(cli_project, monkeypatch):
+def test_controller_no_ui_exposes_probes_and_still_supervises(cli_project, monkeypatch):
     p = cli_project
     (p.config.project_dir / "sitecustomize.py").write_text(
         "import sys\n"
@@ -116,6 +116,10 @@ def test_controller_no_ui_exposes_only_health_and_still_supervises(cli_project, 
     p.wait_for(
         "SELECT STATUS FROM AUD_PIPELINES_RUN_LOG WHERE RUN_KEY='headless'", expected="SUCCESS"
     )
+    response = httpx.get(url + "/metrics")
+    assert response.status_code == 200
+    assert "etl_craft_controller_leader 1" in response.text
+    assert 'etl_craft_runs_ended_total{project="1",status="SUCCESS"} 1' in response.text
     controller.signal(signal.SIGTERM)
     assert controller.wait() == 0, controller.output
 

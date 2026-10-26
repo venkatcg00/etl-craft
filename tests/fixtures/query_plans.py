@@ -151,6 +151,7 @@ def bindings(sql, name=""):
         "lineage_cache_edges": {"confirmed_keys": [(1, "plan")]},
         "clear_rule_results": {"keys": ["key_1"]},
         "control_event_probes": {"keys": [1, 2]},
+        "agent_list": {"statuses": ["ACTIVE", "DRAINING"]},
         "insert_task_documentation": {"version": 1},
         "save_target_hash_version": {"version": 1},
         "item_report": {"report_id": "plan-report"},
@@ -271,6 +272,8 @@ def full_scans(plan, partial_indexes=frozenset(), limited=False):
 
 REGISTRY = "Reads the agent registry: one row per agent token, bounded by the tokens issued."
 FULL_READS = {
+    ("metrics_runs", "cfg_pipelines"): "Groups current runs across all configured projects.",
+    ("metrics_gates", "cfg_pipelines"): "Groups current waits across all configured projects.",
     (
         "audit_project_pipeline_ids",
         "cfg_pipelines",

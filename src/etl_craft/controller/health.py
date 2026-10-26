@@ -7,13 +7,16 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from etl_craft.config.model import parse_api_address
 from etl_craft.controller.supervisor import serve
 from etl_craft.core.http import bind_api_address
+from etl_craft.engine.metrics import install
 from etl_craft.services.operations import OperationContext, to_json
+from etl_craft.services.operations.metrics import scrape
 from etl_craft.services.operations.processes import probe
 
 
 def serve_health(ctx: OperationContext, stop: threading.Event) -> None:
     """Bind probes first, supervise in the main thread, and close the listener on exit."""
     host, port = parse_api_address(ctx.config.api_address)
+    install(ctx.engine)
     listener = bind_api_address(host, port)
 
     class Handler(BaseHTTPRequestHandler):
@@ -22,6 +25,15 @@ def serve_health(ctx: OperationContext, stop: threading.Event) -> None:
             self.connection.settimeout(5)
 
         def do_GET(self) -> None:
+            if self.path == "/metrics":
+                result = scrape(ctx)
+                body = result.body.encode()
+                self.send_response(result.status)
+                self.send_header("Content-Type", result.content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path != "/health":
                 self.send_error(404)
                 return

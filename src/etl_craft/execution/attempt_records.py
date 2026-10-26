@@ -19,6 +19,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.engine import attempt_cancellation, attempt_starts, controls, runlog, transitions
+from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
@@ -196,6 +197,7 @@ def record_attempt(
         transitions.set_task_log(
             conn, task_run_id, attempt_id, owner, _task_log(values, result.output_tail)
         )
+        lifecycle(conn, "attempt", attempt_id)
     if status == RunStatus.SUCCESS:
         logger.info("%s: SUCCESS", task_code)
         return TaskOutcome(status, f"{task_code}: SUCCESS", task_run_id)
@@ -233,6 +235,7 @@ def _handoff_outcome(
         {"attempt_id": attempt_id, "task_run_id": task_run_id},
     ).one()
     if attempt.status == AttemptStatus.HANDED_OFF:
+        lifecycle(conn, "attempt", attempt_id)
         controls.observe_exit(conn, attempt_id, queries_ended=True)
         recorded = runlog.fetch_task_run_result(conn, task_run_id)
         return TaskOutcome(

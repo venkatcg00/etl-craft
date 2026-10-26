@@ -1,0 +1,17 @@
+groups:
+  - name: etl-craft
+    rules:
+      - alert: EtlCraftQueueAge
+        expr: etl_craft_queue_oldest_age_seconds > 60
+        for: 2m
+        annotations:
+          summary: Queued work is waiting; inspect agent freshness and admission limits.
+      - alert: EtlCraftLostAttempt
+        expr: etl_craft_lost_attempts_total > 0
+        annotations:
+          summary: An attempt was LOST; inspect the audit record and side effects before repair.
+      - alert: EtlCraftControllerHeartbeat
+        expr: max(etl_craft_controller_heartbeat_age_seconds) > 45 or max(etl_craft_controller_leader) < 1 or absent(etl_craft_controller_leader)
+        for: 1m
+        annotations:
+          summary: No healthy leader heartbeat; inspect controller and Engine DB connectivity.

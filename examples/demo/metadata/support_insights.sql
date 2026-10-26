@@ -226,6 +226,7 @@ FROM (VALUES
     ('SUPPORT_DM', 'drop_source_counts', 'SUPPORT_DM', 'source_counts', 'SUCCESS'),
     ('SUPPORT_DM', 'alert', 'SUPPORT_DM', 'drop_source_counts', 'ALWAYS'),
     ('SUPPORT_DM', 'alert', 'SUPPORT_DM', 'area_summary', 'ALWAYS'),
+    ('SUPPORT_DM', 'alert', 'SUPPORT_DM', 'quality', 'ALWAYS'),
     ('SUPPORT_DM', 'alert', 'SUPPORT_DM', 'agent_history', 'ALWAYS'),
     ('SUPPORT_BACKFILL', 'backfill', 'SUPPORT_BACKFILL', 'prepare', 'SUCCESS')
 ) v

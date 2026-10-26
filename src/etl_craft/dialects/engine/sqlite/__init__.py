@@ -101,6 +101,10 @@ class SqliteEngineDialect(EngineDialect):
         refresh_metadata_triggers(conn)
         refresh_sqlite(conn)
 
+    def snapshot(self, conn: Connection) -> Connection:
+        """Use a stable WAL read transaction without taking the writer reservation."""
+        return conn.execution_options(etl_craft_read_only=True)
+
     def build_engine(
         self,
         config: ConnectorConfig,
@@ -275,7 +279,7 @@ def _convert_timestamp(value: bytes) -> datetime:
 
 
 def _begin_immediate(conn: Connection) -> None:
-    """Open the transaction SQLAlchemy is beginning, taking the write lock at once.
+    """Open a stable read snapshot or take the writer reservation before reading.
 
     The driver runs in autocommit mode, so this ``BEGIN`` is the only one sent: every statement,
     DDL and savepoints included, belongs to the transaction, and a rollback undoes all of it.
@@ -283,7 +287,9 @@ def _begin_immediate(conn: Connection) -> None:
     then writes waits for another writer (up to ``BUSY_TIMEOUT_MS``) instead of failing because
     the data it read changed.
     """
-    conn.exec_driver_sql("BEGIN IMMEDIATE")
+    conn.exec_driver_sql(
+        "BEGIN" if conn.get_execution_options().get("etl_craft_read_only") else "BEGIN IMMEDIATE"
+    )
 
 
 def sqlite_creator(database: str) -> Callable[[], Any]:
