@@ -251,13 +251,13 @@ SELECT v.column1, t.PIPELINE_ID, t.TASK_ID, v.column2, v.column3, 'fact_key',
        CAST(v.column4 AS INTEGER)
 FROM (VALUES
     ('unknown agent',
-     'SELECT 1 FROM ds.support_areas s WHERE s.area_name = t.area_name AND t.team IS NULL',
+     'SELECT t.fact_key FROM $$rows_in_scope t JOIN ds.support_areas s ON s.area_name = t.area_name AND t.team IS NULL',
      'INCOMPLETE', '1'),
     ('rating out of range',
-     'SELECT 1 FROM ds.support_areas s WHERE s.area_name = t.area_name AND (t.rating < 1 OR t.rating > 5)',
+     'SELECT t.fact_key FROM $$rows_in_scope t JOIN ds.support_areas s ON s.area_name = t.area_name AND (t.rating < 1 OR t.rating > 5)',
      'REJECT', '1'),
     ('long call',
-     'SELECT 1 FROM ds.support_areas s WHERE s.area_name = t.area_name AND t.handle_seconds > 600',
+     'SELECT t.fact_key FROM $$rows_in_scope t JOIN ds.support_areas s ON s.area_name = t.area_name AND t.handle_seconds > 600',
      'REPORT', '2')
 ) v
 JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = 'SUPPORT_DM'

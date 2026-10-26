@@ -159,7 +159,7 @@ item's text, or work done early under another item.
 | S6.A Retention | Done | #249, #250, #251, #252 | Project history/log archives, scoped reject lifetimes and supported Iceberg maintenance; current mirrors follow retained source state. |
 | S6.B Logs outside the Engine DB | Done | #254 | Full external logs, byte tails, stored/live streams and retention |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
-| S6.D Business rules that don't re-check everything | Planned | | B52; one implementation PR after S5.R item 3 supplies the migration-marker registry |
+| S6.D Business rules that don't re-check everything | Done | #256 | Complete scoped SELECTs, one check per rule, serialized unique flags and per-project upgrades |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
@@ -328,6 +328,15 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S6.D validates complete-query shapes, scoped/forced clearing, output-key errors and counts on
+all four local warehouses, plus live Databricks and Snowflake. Both Engine DBs cover real-row
+upgrades from every released schema, mixed-project dialect conversion, duplicate refusals and
+transaction rollback. Same-rule publication, independent rules, agent ownership checks and
+six-rule DuckDB Iceberg waves pass twenty local rounds. The built-in security-review tool was
+unavailable; manual security review and Semgrep cover the changed SQL/input paths. Semgrep's
+constructed-SQL audit finding is reviewed against the read-only guard, quoted identifiers and
+bound execution IDs. Full platform coverage and installed-wheel demos remain CI gates.
 
 S6.B validates full local/agent logs, live-to-stored byte continuity, configured UTF-8 tails,
 file/MinIO storage, exact identity and role/path refusals, pending/removed/inaccessible reports,
@@ -748,6 +757,31 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.D reuses the merged marker registry and both check timings, existing per-rule/task-run
+  rows, retry/sequence handling, explicit force path, empty-task refusal and 1,000-key Engine DB
+  clearing batches. Config export already writes stored SQL; conversion changes its output
+  without a second export implementation. No setting, column, table, action or route is added.
+  The owner approved repeatable `migrate --project-config PATH` and the matching shared
+  `MigrateInput.project_configs` input for per-project warehouse dialects in shared Engine DBs.
+  Configs resolve on the executing host, must name distinct projects and the same Engine DB
+  address/schema, and are checked before pending upgrade writes. Host-only placement stays.
+- S6.D moves the existing SQL analysis module into `dialects` so runtime validation and Engine DB
+  conversion share the same read-only check without an upward import. The named marker's SQL
+  header and `STEPS` entry supply its check/conversion; the migration runner is unchanged.
+  Conversion preserves rule IDs, metadata stamps, recorded results and earlier history, closing
+  current config versions through the existing capture helpers. The actual Warehouse dialect
+  is required for identifier quoting rather than assuming ANSI names.
+- S6.D counts returned/dropped output rows before deduplication, newly flagged unique keys and
+  cleared active flags in `BUSINESS_RULE_<id>` reported values and the log. Successful retry
+  skips do not manufacture new query counts. A zero-row metadata probe resolves wildcard or
+  unparsed output columns; explicit projections stay static. Schema-only validation reads do
+  not reserve the Engine DB while config apply holds its transaction.
+- S6.D uses the existing renewable per-rule resource lock with its bounded wait, including
+  pinned-rule authorization on the agent API. Publication renews ownership in the flag
+  transaction so the ownership row stays locked through commit. BR warehouse connections use
+  a queue pool sized to their worker limit; a thread-bound pool can evict active connections
+  beyond five concurrent rules. Generated CTE names avoid names in the team's SQL.
 
 - S6.B reuses local attempt files, the existing `LOG_PATH` column, ordered/fenced agent chunks,
   byte-offset LOGS operation and S6.A removal/cleanup records. External keys include the existing
@@ -1617,6 +1651,15 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   frozen soak still gates S5.R. Teams own reconciliation pipelines and schedules through the
   existing BR configuration; add no automatic periodic rechecks, per-rule schedule column or
   new execution mode. Independent S7.N CI work can proceed meanwhile.
+  - The implementation converts fragments once in migration 0060 and installs the active-flag
+    unique index in both dialects. Normal checks evaluate each complete SELECT once, intersect
+    its keys with the run's active rows, and clear only those scoped flags. Deleted/out-of-run
+    flags wait for explicit force. The guide shows returning every key of a breaking group;
+    NULL output keys fail, repeated keys produce one flag, and extra output columns are ignored.
+  - Duplicate legacy flags refuse before any pending file and inside the migration transaction,
+    naming rule/key/result IDs and an explicit history-preserving repair. Checks group the
+    active flags once; the two checks plus index build are not per-key warehouse work.
+
 
 - S6.C proceeds as independent catalog work while the frozen soak continues; no blocked S5
   prerequisite is moved. Its derived Done when is: bulk reads, indexed last-N pipeline/task

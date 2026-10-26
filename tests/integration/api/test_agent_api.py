@@ -1387,3 +1387,94 @@ def test_agent_control_handoff_publishes_an_empty_log_after_the_child_settles(ag
     assert row.status == "HANDED_OFF" and row.log_path is not None
     response = client.get(f"/api/v1/projects/default/attempts/{attempt}/log", headers=person)
     assert response.status_code == 200 and response.content == b""
+
+
+def test_rule_publication_requires_its_own_live_rule_lock(agent_scene):
+    from etl_craft.engine import locks
+    from fixtures.metadata import add_table, insert
+
+    db, client, headers, _, _, _ = agent_scene
+    with db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "RULE_LOCK")
+        task = add_task(conn, pipeline, "T", "BUSINESS_RULES")
+        other = add_task(conn, pipeline, "other_rules", "BUSINESS_RULES")
+        rules = []
+        for owner in (task, other):
+            rules.append(
+                insert(
+                    conn,
+                    "INSERT INTO CFG_BUSINESS_RULES (BUSINESS_RULE_NAME,PIPELINE_ID,TASK_ID,"
+                    "BUSINESS_RULE_SQL,BUSINESS_RULE_TYPE,BUSINESS_RULE_KEY_COLUMN,TARGET_TABLE_ID,"
+                    "SEQUENCE_NUMBER) VALUES "
+                    "('check',:pipeline,:task,:rule_sql,'REPORT','id',:target,1)",
+                    "BUSINESS_RULE_ID",
+                    pipeline=pipeline,
+                    task=owner,
+                    rule_sql="SELECT id FROM $$rows_in_scope",
+                    target=add_table(conn, "main.orders"),
+                )
+            )
+        run = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
+        summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
+        attempt = transitions.queue_attempt(conn, summary, SYSTEM_ACTOR)
+    claim_reply = client.post(
+        "/api/v1/agent/claim",
+        headers=headers,
+        json={"version": __version__, "free_kinds": ["warehouse"]},
+    )
+    assert claim_reply.json()["data"]["task"]["attempt_id"] == attempt
+    own, foreign = rules
+    refused = post(agent_scene, "report", attempt_id=attempt, operation="RULE_BEGIN", rule_id=own)
+    assert refused.status_code == 409, refused.text
+    assert "no live rule lock" in refused.text
+    refused = post(
+        agent_scene,
+        "report",
+        attempt_id=attempt,
+        operation="LOCK",
+        lock_key=locks.business_rule(foreign, "check").key,
+        lock_wait_seconds=0.01,
+    )
+    assert refused.status_code == 403, refused.text
+    assert "outside its resources" in refused.text
+    key = locks.business_rule(own, "check").key
+    acquired = post(agent_scene, "report", attempt_id=attempt, operation="LOCK", lock_key=key)
+    assert acquired.status_code == 200, acquired.text
+    binding = post(agent_scene, "report", attempt_id=attempt, operation="RULE_BEGIN", rule_id=own)
+    assert binding.status_code == 200, binding.text
+    ending = {
+        "rule_id": own,
+        "rule_run_id": binding.json()["data"]["business_rule_run_id"],
+        "status": "SUCCESS",
+        "new_keys": ["11"],
+    }
+    assert (
+        post(
+            agent_scene, "report", attempt_id=attempt, operation="UNLOCK", lock_key=key
+        ).status_code
+        == 200
+    )
+    refused = post(
+        agent_scene, "report", attempt_id=attempt, operation="RULE_END", rule_ending=ending
+    )
+    assert refused.status_code == 409 and "no live rule lock" in refused.text
+    with db.engine.connect() as conn:
+        assert (
+            conn.execute(text("SELECT COUNT(*) FROM AUD_BUSINESS_RULES_RESULTS")).scalar_one() == 0
+        )
+    assert (
+        post(agent_scene, "report", attempt_id=attempt, operation="LOCK", lock_key=key).status_code
+        == 200
+    )
+    result = post(
+        agent_scene, "report", attempt_id=attempt, operation="RULE_END", rule_ending=ending
+    )
+    assert result.status_code == 200, result.text
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT BUSINESS_RULE_ID AS rule, BUSINESS_RULE_KEY AS key, ACTIVE_FLAG AS active "
+                "FROM AUD_BUSINESS_RULES_RESULTS"
+            )
+        ).one()
+    assert row.rule == own and row.key == "11" and row.active == "Y"

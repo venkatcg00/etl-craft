@@ -366,6 +366,19 @@ FULL_READS = {
     ): "Normalizes every legacy target name once during migration.",
 }
 
+FULL_READS.update(
+    {
+        (
+            "business_rule_legacy_sql",
+            "cfg_business_rules",
+        ): "Converts every stored legacy predicate once during the rule-query upgrade.",
+        (
+            "business_rule_duplicate_flags",
+            "aud_business_rules_results",
+        ): "Checks all active flags before upgrades; no legacy duplicate can be ignored.",
+    }
+)
+
 # Exact dry-run counts visit the complete eligible category during explicit maintenance.
 FULL_READS.update(
     {

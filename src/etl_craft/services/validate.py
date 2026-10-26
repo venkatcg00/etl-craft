@@ -31,7 +31,9 @@ from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph, cycles
 from etl_craft.core.placement import ResourceRequest, resource_request
 from etl_craft.core.text import is_metadata_code, qualify, suggest
+from etl_craft.dialects.business_rules import expand_scope, output_key
 from etl_craft.dialects.engine import for_engine
+from etl_craft.dialects.query_analysis import output_columns, read_query
 from etl_craft.engine.queries import project_statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
@@ -56,11 +58,10 @@ from etl_craft.execution.event_probe import probe_sql
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
 from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline, sql_script
-from etl_craft.handlers.business_rules import check_rule
+from etl_craft.handlers.business_rules import check_output, check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql import task_dialect
-from etl_craft.handlers.sql.analysis import output_columns, read_query
 from etl_craft.handlers.sql.creation import writer_action
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
@@ -441,11 +442,17 @@ def _unread_sql(conn: Connection, context: TaskContext) -> list[str]:
             (f"business rule {rule.business_rule_name!r}", rule.business_rule_sql)
             for rule in fetch_business_rules_for_task(conn, context.task_id)
         ]
-    return [
+    warnings = [
+        f"{where}: BUSINESS_RULE_SQL has no $$rows_in_scope; use FROM $$rows_in_scope to avoid "
+        "checking rows outside this run (returned keys are still intersected with its scope)"
+        for where, sql in found
+        if context.handler == Handler.BUSINESS_RULES and expand_scope(sql) == sql
+    ]
+    return warnings + [
         f"{where}: sqlglot cannot read it as {dialect or 'standard'} SQL ({reading.unparsed}); "
         "the warehouse decides when the task runs, and column lineage cannot trace it"
         for where, sql in found
-        if (reading := read_query(sql, dialect)).unparsed is not None
+        if (reading := read_query(expand_scope(sql), dialect)).unparsed is not None
     ]
 
 
@@ -556,7 +563,12 @@ def _business_rules(conn: Connection, context: TaskContext, data: _Metadata) -> 
     problems: list[str] = []
     for rule in rules:
         try:
-            check_rule(rule, catalog, dialect_and_catalog(config)[0])
+            dialect = dialect_and_catalog(config)[0]
+            checked = check_rule(rule, catalog, dialect)
+            if output_key(rule.business_rule_sql, rule.business_rule_key_column, dialect) is None:
+                # Schema-only reads cannot reserve the Engine DB during config apply's transaction.
+                with open_warehouse(config) as warehouse:
+                    check_output(checked, context, warehouse)
         except EtlCraftError as error:
             problems.append(str(error))
             continue

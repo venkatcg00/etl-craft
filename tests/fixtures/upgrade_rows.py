@@ -398,6 +398,12 @@ def assert_retained(engine, kept, upgrade_window):
                         "SOURCE_SQL_FILE": ("SCRIPT_FILE", _in_folder("sql_scripts/", value)),
                         "SOURCE_SQL": ("SELECT_QUERY", value),
                     }[name]
+                if table == "CFG_BUSINESS_RULES":
+                    original["BUSINESS_RULE_SQL"] = (
+                        'SELECT t."id" FROM $$rows_in_scope t WHERE EXISTS (\n'
+                        + original["BUSINESS_RULE_SQL"]
+                        + "\n)"
+                    )
                 columns = ", ".join(
                     f"{_expression(table, name)} AS {name.lower()}" for name in original
                 )

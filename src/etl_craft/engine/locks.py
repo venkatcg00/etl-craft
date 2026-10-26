@@ -75,3 +75,11 @@ def event(task_id: int) -> ResourceLock:
 def advisory_key(name: str) -> int:
     """Hash an exact lock namespace to PostgreSQL's signed 64-bit advisory key."""
     return int.from_bytes(blake2b(name.encode(), digest_size=8).digest(), "big", signed=True)
+
+
+def business_rule(rule_id: int, name: str) -> ResourceLock:
+    """Serialize one rule's warehouse snapshot and Engine DB publication."""
+    return ResourceLock(
+        f"business rule {name!r} (BUSINESS_RULE_ID={rule_id})",
+        advisory_key(f"business-rule:{rule_id}"),
+    )

@@ -100,13 +100,15 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
         (
             "large order this run",
             "REPORT",
-            "SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id "
+            "SELECT t.ROW_ID FROM $$rows_in_scope t JOIN sales.customers c "
+            "ON c.customer_id = t.customer_id "
             "AND t.amount > c.credit_limit AND t.PIPELINE_RUN_ID = :pipeline_run_id",
         ),
         (
             "test customer",
             "REPORT",
-            "SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id "
+            "SELECT t.ROW_ID FROM $$rows_in_scope t JOIN sales.customers c "
+            "ON c.customer_id = t.customer_id "
             "AND c.name LIKE 'TEST%'",
         ),
     ]

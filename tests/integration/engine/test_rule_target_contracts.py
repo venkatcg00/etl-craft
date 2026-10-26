@@ -79,7 +79,16 @@ def test_conversion_reuses_contract_preserves_stamps_history_and_old_names(
         after = conn.execute(
             text("SELECT * FROM CFG_BUSINESS_RULES ORDER BY BUSINESS_RULE_ID")
         ).all()
-        assert [tuple(row) for row in after] == [(*row[:7], *row[8:], parent) for row in before]
+        expected = []
+        for row in before:
+            values = {key.lower(): value for key, value in row._mapping.items()}
+            values["business_rule_sql"] = (
+                'SELECT t."id" FROM $$rows_in_scope t WHERE EXISTS (\nSELECT 1\n)'
+            )
+            values.pop("target_table")
+            values["target_table_id"] = parent
+            expected.append(tuple(values.values()))
+        assert [tuple(row) for row in after] == expected
         assert [
             row[:6]
             for row in conn.execute(
@@ -143,7 +152,7 @@ def test_custom_data_refused_without_discarding_it(legacy_rules_db):
         conn.exec_driver_sql("UPDATE CFG_BUSINESS_RULES SET CUSTOM_NOTE='keep this'")
     before = snapshot(db.engine)
     with pytest.raises(MigrationError, match=r"custom columns.*CUSTOM_NOTE"):
-        migrations.apply_pending_migrations(db.engine)
+        migrations.apply_pending_migrations(db.engine, warehouse_dialect="duckdb")
     assert snapshot(db.engine) == before
 
 
@@ -208,7 +217,7 @@ def test_reserved_rule_counter_survives_conversion(legacy_rules_db):
                 "SELECT setval(pg_get_serial_sequence("
                 "'cfg_business_rules','business_rule_id'),100,true)"
             )
-    migrations.apply_pending_migrations(db.engine)
+    migrations.apply_pending_migrations(db.engine, warehouse_dialect="duckdb")
     with db.engine.begin() as conn:
         created = conn.execute(
             text(
@@ -245,7 +254,7 @@ def test_target_dependent_schema_is_refused_before_conversion(legacy_rules_db, d
         conn.exec_driver_sql(ddl)
     before = snapshot(db.engine)
     with pytest.raises(MigrationError, match="target-dependent schema objects"):
-        migrations.apply_pending_migrations(db.engine)
+        migrations.apply_pending_migrations(db.engine, warehouse_dialect="duckdb")
     assert snapshot(db.engine) == before
 
 

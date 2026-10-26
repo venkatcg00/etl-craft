@@ -17,6 +17,7 @@ import tomllib
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Unpack
 
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection, Engine
@@ -28,7 +29,14 @@ from etl_craft.core.text import sha256_hex, strip_comments_and_literals
 from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.engine.tables import AUDIT_TABLES, OWNED_CONFIG_TABLES
 from etl_craft.engine import locks
-from etl_craft.engine.migration_steps import MARKERS, NO_TARGET, STEPS, MarkerStep, Target
+from etl_craft.engine.migration_steps import (
+    MARKERS,
+    NO_TARGET,
+    STEPS,
+    MarkerStep,
+    Target,
+    TargetOptions,
+)
 from etl_craft.engine.queries import run_script, statement
 
 logger = logging.getLogger(__name__)
@@ -282,8 +290,7 @@ def apply_pending_migrations(
     *,
     project_default: Path | None = None,
     wait_seconds: float = 0,
-    catalog: str | None = None,
-    warehouse_dialect: str | None = None,
+    **target_options: Unpack[TargetOptions],
 ) -> list[str]:
     """Apply every pending ENGINE, then PROJECT, migration; return the filenames applied.
 
@@ -294,7 +301,7 @@ def apply_pending_migrations(
     nothing left to do.
     """
     streams = migration_streams(engine, project_dir, project_default)
-    target = Target(catalog, warehouse_dialect)
+    target = Target(**target_options)
     applied: list[str] = []
     with locks.MIGRATE.hold(engine, wait_seconds):
         with engine.connect() as conn:

@@ -121,13 +121,13 @@ SELECT t.PIPELINE_ID, t.TASK_ID, v.column3, CAST(v.column4 AS INTEGER), v.column
        o.TABLE_ID, v.column8
 FROM (VALUES
     ('SALES_DAILY', 'check_orders', 'closed customer', 1, 'REJECT', 'ROW_ID', 'sales.orders_uk',
-     'SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.status = ''closed'''),
+     'SELECT t.ROW_ID FROM $$rows_in_scope t JOIN sales.customers c ON c.customer_id = t.customer_id AND c.status = ''closed'''),
     ('SALES_DAILY', 'check_orders', 'missing amount', 1, 'INCOMPLETE', 'ROW_ID', 'sales.orders_uk',
-     'SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount IS NULL'),
+     'SELECT t.ROW_ID FROM $$rows_in_scope t JOIN sales.customers c ON c.customer_id = t.customer_id AND t.amount IS NULL'),
     ('SALES_DAILY', 'check_orders', 'test customer', 1, 'REPORT', 'ROW_ID', 'sales.orders_uk',
-     'SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND c.name LIKE ''TEST%'''),
+     'SELECT t.ROW_ID FROM $$rows_in_scope t JOIN sales.customers c ON c.customer_id = t.customer_id AND c.name LIKE ''TEST%'''),
     ('SALES_DAILY', 'check_orders', 'large order this run', 2, 'REPORT', 'ROW_ID', 'sales.orders_uk',
-     'SELECT 1 FROM sales.customers c WHERE c.customer_id = t.customer_id AND t.amount > c.credit_limit AND t.PIPELINE_RUN_ID = :pipeline_run_id')
+     'SELECT t.ROW_ID FROM $$rows_in_scope t JOIN sales.customers c ON c.customer_id = t.customer_id AND t.amount > c.credit_limit AND t.PIPELINE_RUN_ID = :pipeline_run_id')
 ) v
 LEFT JOIN CFG_TABLES o ON o.SCHEMA_NAME='sales' AND o.TABLE_NAME='orders_uk'
 LEFT JOIN CFG_PIPELINES p ON p.PIPELINE_CODE = v.column1 AND p.ACTIVE_FLAG = 'Y'
