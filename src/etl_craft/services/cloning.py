@@ -25,7 +25,7 @@ from etl_craft.core.errors import CloningError, ConfigurationError, LockTimeoutE
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import parse_jdbc_url, qualify, sha256_hex
 from etl_craft.dialects.engine import for_engine
-from etl_craft.dialects.engine.cloning import INTERNAL, changed_statement
+from etl_craft.dialects.engine.cloning import INTERNAL, changed_statement, source_keys
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.engine.tables import CONFIG_TABLES
 from etl_craft.dialects.warehouse import WarehouseDialect
@@ -234,12 +234,7 @@ def _clone_table(
     )
     initialized = state.register(engine) if table.startswith("AUD_") else False
     with engine.connect() as conn:
-        keys = [
-            str(k).upper()
-            for k in inspect(conn).get_pk_constraint(for_engine(conn).stored_name(table))[
-                "constrained_columns"
-            ]
-        ]
+        keys = [str(k).upper() for k in source_keys(conn, for_engine(conn).stored_name(table))]
     if table.startswith("AUD_") and not keys:
         raise CloningError(
             f"cloning {table} cannot track incremental changes: found no primary key; expected "

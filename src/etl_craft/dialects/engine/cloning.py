@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 INTERNAL = frozenset({"AUD_CLONE_STATE", "AUD_CLONE_CHANGES"})
 
 
+def source_keys(conn: Connection, table: str) -> list[str]:
+    """Use the declared primary key or the gate wait's existing unique identity."""
+    keys = list(inspect(conn).get_pk_constraint(table)["constrained_columns"])
+    if not keys and table.upper() == "AUD_GATE_WAITS":
+        return ["pipeline_run_id", "task_id", "wait_kind"]
+    return keys
+
+
 def sources(conn: Connection) -> list[tuple[str, list[str], list[str]]]:
     """Return installed audit tables, their keys and columns after schema upgrades."""
     inspector = inspect(conn)
@@ -22,7 +30,7 @@ def sources(conn: Connection) -> list[tuple[str, list[str], list[str]]]:
     return [
         (
             name,
-            list(inspector.get_pk_constraint(name)["constrained_columns"]),
+            source_keys(conn, name),
             [str(c["name"]) for c in inspector.get_columns(name)],
         )
         for name in sorted(inspector.get_table_names())
@@ -68,36 +76,38 @@ def refresh_postgres(conn: Connection) -> None:
 
 def _sqlite_stamp(conn: Connection, table: str, keys: list[str], columns: list[str]) -> None:
     quote = conn.dialect.identifier_preparer.quote
-    name = quote(table)
     regular = [c for c in columns if c.upper() != "UPDATED_AT"]
     same = " AND ".join(f"NEW.{quote(c)} IS OLD.{quote(c)}" for c in regular)
-    guard = f"trg_actor_guard_{table.lower()}_update"
-    sql = conn.execute(
-        text("SELECT sql AS sql FROM sqlite_schema WHERE type='trigger' AND name=:name"),
-        {"name": guard},
-    ).scalar_one_or_none()
-    if (
-        sql
-        and "NEW.UPDATED_AT IS NOT OLD.UPDATED_AT" not in sql
-        and (table.upper().startswith("AUD_CFG_") or table.upper() == "AUD_TASK_ATTEMPTS")
-    ):
-        sql = sql.split(" WHEN NOT (etl_craft_actor()", 1)[0] + (
-            " BEGIN" + sql.split(" BEGIN", 1)[1] if " WHEN NOT (etl_craft_actor()" in sql else ""
-        )
-        conn.exec_driver_sql(f"DROP TRIGGER {quote(guard)}")
-        # A stamp-only write changes no historical data; its originating write was guarded.
-        predicate = (
-            "NOT (etl_craft_actor() IS NOT NULL AND "
-            f"NEW.UPDATED_AT IS NOT OLD.UPDATED_AT AND {same})"
-        )
-        conn.exec_driver_sql(sql.replace("BEGIN", f"WHEN {predicate} BEGIN", 1))
+    stamp = f"etl_craft_actor() IS NOT NULL AND NEW.UPDATED_AT IS NOT OLD.UPDATED_AT AND {same}"
+    guards = conn.execute(
+        text(
+            "SELECT name AS name,sql AS sql FROM sqlite_schema WHERE type='trigger' "
+            "AND lower(tbl_name)=lower(:table)"
+        ),
+        {"table": table},
+    ).all()
+    for guard in guards:
+        header, separator, body = guard.sql.partition("BEGIN")
+        if (
+            "BEFORE UPDATE" not in header.upper()
+            or "NEW.UPDATED_AT IS NOT OLD.UPDATED_AT" in header
+        ):
+            continue
+        prefix, when, condition = header.partition("WHEN")
+        header = prefix + " WHEN "
+        if when:
+            header += f"({condition.strip()}) AND "
+        header += f"NOT ({stamp}) "
+        conn.exec_driver_sql(f"DROP TRIGGER {quote(guard.name)}")
+        conn.exec_driver_sql(header + separator + body)
     where = " AND ".join(f"{quote(k)} IS NEW.{quote(k)}" for k in keys)
     for operation in ("INSERT", "UPDATE OF " + ", ".join(quote(c) for c in regular)):
         trigger = quote(f"trg_stamp_{table}_{operation.split()[0]}")
         conn.exec_driver_sql(f"DROP TRIGGER IF EXISTS {trigger}")
         conn.exec_driver_sql(
-            f"CREATE TRIGGER {trigger} AFTER {operation} ON {name} BEGIN "
-            f"UPDATE {name} SET UPDATED_AT=(strftime('%Y-%m-%d %H:%M:%f','now') || '000+00:00') "
+            f"CREATE TRIGGER {trigger} AFTER {operation} ON {quote(table)} BEGIN "
+            f"UPDATE {quote(table)} SET UPDATED_AT="
+            "(strftime('%Y-%m-%d %H:%M:%f','now') || '000+00:00') "
             f"WHERE {where} AND UPDATED_AT IS NOT "
             "(strftime('%Y-%m-%d %H:%M:%f','now') || '000+00:00'); END"
         )

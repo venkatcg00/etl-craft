@@ -786,6 +786,8 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   audit rows receive database-maintained `UPDATED_AT` stamps on both Engine DBs; this covers
   transition and non-transition writers consistently. Append-only rows use their primary keys
   through the same dirty-key ledger. Config tables retain their existing full scoped refresh.
+  Gate waits reuse their existing unique run/task/kind identity rather than adding a key column;
+  nullable pipeline-level task identities participate in incremental updates and deletions.
 - At the owner's request, this implementation PR also records the plan-only S7.AE Pipeline
   samples decision, its Planned Progress row and the Appendix B replacement. It adds no S7.AE
   runtime code.

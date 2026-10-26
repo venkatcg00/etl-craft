@@ -9,7 +9,10 @@ def key_predicate(keys: list[str], rows: list[list[object]]) -> tuple[str, dict[
         parts = []
         for index, (key, value) in enumerate(zip(keys, row, strict=True)):
             name = f"key_{number}_{index}"
-            parts.append(f"{key}=:{name}")
-            params[name] = value
+            if value is None:
+                parts.append(f"{key} IS NULL")
+            else:
+                parts.append(f"{key}=:{name}")
+                params[name] = value
         clauses.append("(" + " AND ".join(parts) + ")")
     return " OR ".join(clauses), params

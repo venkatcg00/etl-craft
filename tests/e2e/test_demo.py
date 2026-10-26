@@ -137,6 +137,7 @@ def test_the_demo_runs_locally(make_demo, installer, engine, warehouse):
         "backfill": ("SUCCESS", 2),
     }
 
+    demo.ok("clone")
     check_the_warehouse(demo)
     check_the_emails(demo, failed=True)
     check_the_reports(demo)

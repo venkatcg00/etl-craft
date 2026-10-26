@@ -15,6 +15,37 @@ from fixtures.cloning import configured, insert_pause, only_table
 TABLE = "AUD_PIPELINE_PAUSES"
 
 
+def test_gate_waits_with_null_task_identity_are_cloned_and_removed(sql_world, monkeypatch):
+    world = sql_world
+    table = "AUD_GATE_WAITS"
+    only_table(monkeypatch, table)
+    config = configured(world)
+    clone(world.engine_db, config)
+    with world.engine_db.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_GATE_WAITS "
+                "(PIPELINE_RUN_ID,TASK_ID,FIRST_CHECK_AT,LOOKS,WAIT_KIND) "
+                "VALUES (:run,NULL,CURRENT_TIMESTAMP,0,'EVENT')"
+            ),
+            {"run": world.pipeline_run_id},
+        )
+    assert clone(world.engine_db, config)[0].rows == 1
+    with world.engine_db.begin() as conn:
+        conn.execute(text("UPDATE AUD_GATE_WAITS SET LOOKS=1"))
+    assert clone(world.engine_db, config)[0].rows == 1
+    with world.warehouse.connect() as conn:
+        row = conn.execute(
+            text(f"SELECT TASK_ID AS task_id,LOOKS AS looks FROM {world.name(table)}")
+        ).one()
+        assert row.task_id is None and row.looks == 1
+    with world.engine_db.begin() as conn:
+        conn.execute(text("DELETE FROM AUD_GATE_WAITS"))
+    assert clone(world.engine_db, config)[0].rows == 0
+    with world.warehouse.connect() as conn:
+        assert conn.execute(text(f"SELECT COUNT(*) FROM {world.name(table)}")).scalar_one() == 0
+
+
 def assert_source(world):
     with world.engine_db.connect() as conn:
         expected = (

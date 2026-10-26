@@ -1887,6 +1887,7 @@ CREATE INDEX ix_attempt_log_pending ON AUD_TASK_ATTEMPTS (ATTEMPT_ID)
 WHERE LOG_PATH IS NULL AND LOG_REMOVED_AT IS NULL
 AND STATUS NOT IN ('QUEUED','CLAIMED','RUNNING');
 
+-- Durable baseline and schema signature for each warehouse mirror and audit table.
 CREATE TABLE AUD_CLONE_STATE (
     MIRROR_ID VARCHAR(64) NOT NULL,
     TABLE_NAME VARCHAR(128) NOT NULL,
@@ -1896,6 +1897,7 @@ CREATE TABLE AUD_CLONE_STATE (
     PRIMARY KEY (MIRROR_ID, TABLE_NAME)
 );
 CREATE INDEX ix_clone_state_table ON AUD_CLONE_STATE(TABLE_NAME,MIRROR_ID);
+-- Latest unacknowledged change version per source identity and registered mirror.
 CREATE TABLE AUD_CLONE_CHANGES (
     MIRROR_ID VARCHAR(64) NOT NULL,
     TABLE_NAME VARCHAR(128) NOT NULL,

@@ -507,6 +507,8 @@ are covered by the mandatory first full copy. Append-only rows need no update ti
 
 `AUD_CLONE_STATE` stores the destination/table baseline checkpoint; `AUD_CLONE_CHANGES` stores
 pending primary keys with opaque versions. Both are internal and excluded from mirrors.
+Gate waits use their existing unique run/task/kind identity, including a NULL task for a
+pipeline-level wait. Clone timestamps are excluded from metadata-history JSON.
 Changes are recorded in the source transaction, including insertions and retention deletions.
 A version is acknowledged only after its mirror commit. A concurrent update replaces that
 version, so acknowledging the older copy cannot discard it. A long transaction that commits
