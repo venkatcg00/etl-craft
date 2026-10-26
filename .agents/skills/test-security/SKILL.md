@@ -67,7 +67,7 @@ Code: `services/oidc.py`, `config/loader_auth.py`; fixtures: `tests/fixtures/oid
 
 ### SQL and identifiers
 
-Code: `handlers/sql/spec.py`, `handlers/sql/analysis.py`, `dialects/`.
+Code: `handlers/sql/spec.py`, `dialects/query_analysis.py`, `dialects/`.
 
 1. A SQL file with a second statement, a write, a `;` inside a comment or string, or a CTE that
    writes: refused before anything runs (`SqlGuardError`).

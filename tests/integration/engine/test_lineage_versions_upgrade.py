@@ -163,7 +163,7 @@ def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
         run_script(conn, [sql for sql in statements if sql not in placement])
     before = legacy_lineage(db, config, monkeypatch)
     assert before and not [item.error for item in before if item.error]
-    migrations.apply_pending_migrations(db.engine)
+    migrations.apply_pending_migrations(db.engine, warehouse_dialect="duckdb")
     after = collect(db.engine, config)
     assert [(item.task, item.edges) for item in after] == [
         (item.task, item.edges) for item in before
