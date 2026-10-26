@@ -334,7 +334,7 @@ only way to act.
 | Global search | Databricks search | Pipelines, tasks, tables and run ids or keys from one box (`/` or Ctrl+K); results open the object's page |
 | Breadcrumbs | Databricks | Project › pipeline › run › task run › attempt on every page; each part is a link |
 | Pipeline list | Databricks jobs list | Name, tags, schedule (with `Allow_schedule` and pause state), next tick, last N runs as status dots, SLA state; filters by tag, status, schedule state and name; sortable |
-| Pipeline side panel | Databricks job details | Schedule, timezone, catch-up, overlap, tags, `EMAIL_RECIPIENTS`, SLA, upstream and downstream pipelines, trigger tasks in and out (S5.AC), the groups granted access and the viewer's own role on it (S5.AD), definition source file |
+| Pipeline side panel | Databricks job details | Schedule, timezone, catch-up, overlap, tags, `EMAIL_RECIPIENTS`, SLA, upstream and downstream pipelines, trigger tasks in and out (S5.AC), principal grants and effective CAN_VIEW/CAN_RUN/CAN_MANAGE levels with their sources (S7.Y), definition source file |
 | Run matrix | Databricks matrix view | Tasks as rows, the latest runs as columns, a status cell per task run with duration; a cell selects that task run |
 | Run-duration chart | Databricks runs chart | Bars of recent run durations coloured by status, above the run list; a bar selects its run |
 | Runs list | Databricks job runs; PowerCenter task view | All runs or one pipeline's, filtered by status, trigger kind, date range, tag and run key; parent and child runs linked (S5.AC) |
@@ -345,11 +345,24 @@ only way to act.
 | Run now with parameters | Databricks | S7.A.2's one-off parameter overrides, audited with the run |
 | Live refresh | Databricks; PowerCenter monitor | Server-sent events update the open view; a paused stream says so |
 
-Per-pipeline permissions are S5.AD's group grants on pipelines and tags, the PowerCenter
-folder permission in Databricks' per-job form: every view shows only what the account may see,
-and every menu only what it may do. Left out: Databricks' job and task editors, "Run as" and
-compute settings. Definitions change through the config files (or direct SQL edits in a
-`RELAXED` project), and agents and pools have their own page.
+Pipeline permissions follow Databricks job permissions (owner decision, 2026-10-26).
+`CAN_VIEW`, `CAN_RUN` and `CAN_MANAGE` apply to one pipeline or tag in one project. A principal
+is exactly one group, account or deployment role (`viewer` or `operator`, including holders of
+higher deployment roles). Effective permission is the highest level from the account, active
+groups and applicable role grants; projects default-deny without a project grant, and admins always have access. A pipeline
+without an active pipeline/tag grant uses the project level; such grants elevate a pipeline only
+when the account has at least CAN_VIEW on the project. Project CAN_MANAGE delegates any level
+on that project or its pipelines/tags, never deployment admin actions. Missing and inaccessible
+projects have the same reply across interfaces, including served catalog. Existing projects
+upgrade with viewer/operator role grants preserving access; new projects have no grants. CAN_MANAGE includes running/controls and delegation
+of any permission on that pipeline; managing individual pipelines does not authorize a tag
+grant unless the account manages that tag. The S7.A access panel shows effective levels and
+their sources, offering grant/revoke only to admins or the relevant manager. Revocation is
+checked on the next request. Admitted runs retain group identities and recheck current account,
+group and role permissions, including project access, before admitting or starting children; running children keep their
+admitted work. Left out: Databricks' job/task editors, "Run as" and compute settings.
+Definitions still change through developer config (or permitted RELAXED edits).
+
 
 ## Environments and governance
 
@@ -393,7 +406,7 @@ the project, its environment and the remedy (`--reason`), never "argument requir
 
 **Admin, not config.** Projects and pools leave the config files. `projects.csv` and
 `pools.csv` are removed from `config plan`, `apply` and `export`, as S7.Y removes `grants.csv`;
-a project that still contains them fails plan and apply with the path and the remedy. Admin
+leftover files are ignored as unknown inputs, never applied as team-owned tables. Admin
 commands manage them (`etl-craft project add|set|list|disable`, `etl-craft pool
 add|set|list|disable`), each an audited `services/operations` action with an API route and an
 admin page. Developer config files left: `pipelines`, `tasks`, `task_parameters`,
@@ -487,7 +500,9 @@ action has neither.
 | `DATA_PROVENANCE`, `DATA_EDIT`, `DATA_UNLOCK` | Table row and column | Catalog table Data tab, lock symbols, Edit and Unlock |
 | `LINEAGE_REFRESH`, `GENERATE_DOCS`, `DOCS_VERSION`, `VALIDATE` | Project, pipeline | Catalog header and pipeline page |
 | `AGENT_CONTROL` | Agent | Agents page row menu |
-| Groups, accounts, tokens, access, projects, pools | Admin objects | Admin pages, one per object, with list, add, change and disable; account unlock and password reset on the accounts page (S7.A.7) |
+| Groups, accounts, tokens | Admin identities | Admin pages with list, add, change and disable; account unlock/password reset (S7.A.7) |
+| Access | Project pipelines and tags | Effective levels and group/account/role sources; admins or relevant CAN_MANAGE holders grant/revoke; bulk is admin-only (S7.Y) |
+| Projects and pools | Admin objects | Audited, reasoned add/set/list/disable commands and pages (S7.Y); S7.Z adds environment/governance fields |
 | Announcements | Deployment | Admin announcement page; the banner on every page (S7.A.7) |
 | `PURGE`, `REHASH`, upgrade targets, `CLONE` | Project, table | Admin maintenance page, each with a dry-run preview first |
 | `WHOAMI`, `LOGOUT`, `REFRESH`, password change, personal settings | Session, own account | Profile menu in the top bar and the settings page (S7.A.7) |

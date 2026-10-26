@@ -1,6 +1,5 @@
 """Group policy through action admission, HTTP, CLI and durable configuration on both DBs."""
 
-import csv
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -48,9 +47,9 @@ def grant(ctx, *, tag=False):
     with acting_as(OWNER), ctx.engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, TAG, ROLE) "
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, TAG, PERMISSION) "
                 "VALUES ((SELECT GROUP_ID FROM CFG_GROUPS WHERE GROUP_NAME='sales'), "
-                ":code, :tag, 'operator')"
+                ":code, :tag, 'CAN_RUN')"
             ),
             {"code": None if tag else "PRIVATE", "tag": "sales" if tag else None},
         )
@@ -61,7 +60,7 @@ def test_direct_and_tag_grants_filter_lists_and_elevate_only_members(scene, tag)
     ctx, reader, token, _, _, _, run_id, _ = scene
     grant(ctx, tag=tag)
     assert {p.pipeline_code for p in act(reader, ActionName.PIPELINES).pipelines} == {"OPEN"}
-    with pytest.raises(PermissionDeniedError, match=r"reader.*PRIVATE.*viewer.*group grant"):
+    with pytest.raises(PermissionDeniedError, match=r"reader.*PRIVATE.*viewer.*permission"):
         act(reader, ActionName.RUN_DETAIL, run_id=run_id)
     assert act(reader, ActionName.HISTORY, all=True).entries == ()
     assert act(reader, ActionName.STATUS).runs == ()
@@ -126,38 +125,6 @@ def test_cli_uses_the_same_grant_and_admin_policy(metadata_project, monkeypatch,
     assert "admin" in capsys.readouterr().err
 
 
-def test_non_admin_config_apply_refuses_grants_and_rolls_back_other_files(metadata_project):
-    project = metadata_project
-    project.load_examples()
-    ctx = OperationContext(project.engine, project.config, OWNER, role=ApiRole.ADMIN)
-    act(ctx, ActionName.GROUP_ADD, name="sales")
-    act(ctx, ActionName.CONFIG_EXPORT, config_dir=project.config_dir)
-    code = act(ctx, ActionName.PIPELINES).pipelines[0].pipeline_code
-    (project.config_dir / "grants.csv").write_text(
-        f"GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG\nsales,{code},,operator,Y\n"
-    )
-    path = project.config_dir / "pipelines.csv"
-    with path.open(newline="") as handle:
-        data = list(csv.DictReader(handle))
-    for row in data:
-        if row["PIPELINE_CODE"] == code:
-            row["PIPELINE_NAME"] = "Changed name"
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, data[0].keys())
-        writer.writeheader()
-        writer.writerows(data)
-    with pytest.raises(PermissionDeniedError, match=r"grants.csv.*sales.*no changes"):
-        act(
-            replace(ctx, role=ApiRole.DEVELOPER),
-            ActionName.CONFIG_APPLY,
-            config_dir=project.config_dir,
-        )
-    assert all(p.pipeline_name != "Changed name" for p in act(ctx, ActionName.PIPELINES).pipelines)
-    applied = act(ctx, ActionName.CONFIG_APPLY, config_dir=project.config_dir)
-    assert applied.applied and not applied.failed
-    assert any(change.file == "grants.csv" for change in applied.changes)
-
-
 def test_sso_ids_survive_rename_refresh_and_logout_but_current_restrictions_apply(scene):
     ctx, _, _, group_id, _, _, _, _ = scene
     act(ctx, ActionName.ACCOUNT_ADD, name="sso", role=ApiRole.VIEWER, oidc_subject="subject")
@@ -184,8 +151,8 @@ def test_sso_ids_survive_rename_refresh_and_logout_but_current_restrictions_appl
         add_pipeline(conn, "OTHER")
         conn.execute(
             text(
-                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
-                "VALUES (:id, 'OTHER', 'operator')"
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, PERMISSION) "
+                "VALUES (:id, 'OTHER', 'CAN_RUN')"
             ),
             {"id": replacement.group_id},
         )
@@ -263,8 +230,8 @@ def test_run_admission_persists_sso_ids_after_session_revocation(metadata_projec
     with acting_as(OWNER), ctx.engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
-                "VALUES (:group, :code, 'operator')"
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, PERMISSION) "
+                "VALUES (:group, :code, 'CAN_RUN')"
             ),
             {"group": group.group_id, "code": code},
         )

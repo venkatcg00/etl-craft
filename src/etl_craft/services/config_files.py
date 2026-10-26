@@ -36,7 +36,7 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
 from etl_craft.core.enums import YesNo
-from etl_craft.core.errors import EngineDbError, MetadataFileError, PermissionDeniedError
+from etl_craft.core.errors import EngineDbError, MetadataFileError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
@@ -45,10 +45,7 @@ from etl_craft.engine.repository.config_rows import (
     BUSINESS_RULES,
     OBJECT_TABLES,
     PIPELINE_DEPENDENCIES,
-    PIPELINE_GRANTS,
     PIPELINES,
-    POOLS,
-    PROJECTS,
     SOURCE_COLUMNS,
     TABLES,
     TASK_DEPENDENCIES,
@@ -149,7 +146,7 @@ def config_directory(config: ConnectorConfig, directory: Path | None = None) -> 
 def read_config_files(directory: Path) -> ConfigFiles:
     """Read and check the config files; raise ``MetadataFileError`` naming every problem.
 
-    The pipeline/task files and grants.csv must exist; tables.csv and columns.csv may be omitted
+    The pipeline/task files must exist; tables.csv and columns.csv may be omitted
     together to leave their contracts unchanged. A file with only its header row holds no rows.
     """
     if not directory.is_dir():
@@ -170,7 +167,7 @@ def read_config_files(directory: Path) -> ConfigFiles:
         try:
             payload = path.read_bytes()
         except FileNotFoundError:
-            if table in (SOURCE_COLUMNS, OBJECT_TABLES):
+            if table in (SOURCE_COLUMNS, OBJECT_TABLES, BUSINESS_RULES, PIPELINE_DEPENDENCIES):
                 continue
             problems.append(
                 f"{path} is missing: every config file must exist, even with only its header "
@@ -313,7 +310,7 @@ def _check_references(rows: dict[str, dict[Key, FileRow]], problems: list[str]) 
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
     """Return the pipelines and tasks a row names, by code."""
-    if table in (POOLS, PROJECTS, PIPELINES, OBJECT_TABLES, PIPELINE_GRANTS):
+    if table in (PIPELINES, OBJECT_TABLES):
         return []
     if table is SOURCE_COLUMNS:
         return [("table", tuple(values[name] for name in OBJECT_TABLES.key))]
@@ -390,21 +387,6 @@ def _links(
     current: Mapping[str, Mapping[Key, StoredRow]],
 ) -> dict[str, int | None]:
     """Return the ids an insert of ``file_row`` sets, from the current pipelines and tasks."""
-    if table is PIPELINE_GRANTS:
-        from etl_craft.engine.queries import statement
-
-        group_id = conn.execute(
-            statement(conn, "group_identity"), {"name": file_row.values["GROUP_NAME"]}
-        ).scalar_one_or_none()
-        if group_id is None:
-            raise MetadataFileError(
-                f"grants.csv line {file_row.line}: group {file_row.values['GROUP_NAME']!r} "
-                "does not exist; ask an administrator to use `etl-craft group add`"
-            )
-        return {
-            "PROJECT_ID": int(next(iter(current[PROJECTS.file].values())).row_id),
-            "GROUP_ID": group_id,
-        }
     found: list[StoredRow] = []
     for kind, end in _ends(table, file_row.values):
         file = {"pipeline": PIPELINES.file, "task": TASKS.file, "table": OBJECT_TABLES.file}[kind]
@@ -423,9 +405,9 @@ def _links(
     ):
         found.append(external_dependency(conn, table, file_row))
     if table in (PIPELINES, OBJECT_TABLES):
-        return {"PROJECT_ID": int(next(iter(current[PROJECTS.file].values())).row_id)}
-    if table in (POOLS, PROJECTS, PIPELINE_GRANTS):
-        return {}
+        from etl_craft.engine.repository.pipelines import current_project_id
+
+        return {"PROJECT_ID": current_project_id()}
     if table is SOURCE_COLUMNS:
         return {"TABLE_ID": int(found[0].row_id)}
     if table is TASKS:
@@ -510,9 +492,9 @@ def _merge(conn: Connection, files: ConfigFiles, project_code: str) -> list[Chan
     current: dict[str, dict[Key, StoredRow]] = {}
     current_ids: dict[str, set[int | str]] = {}
     for table in TABLES:
-        project_id = next(
-            (int(row.row_id) for row in current.get(PROJECTS.file, {}).values()), None
-        )
+        from etl_craft.engine.repository.pipelines import current_project_id
+
+        project_id = current_project_id()
         if table.file not in files.rows:
             if table is OBJECT_TABLES:
                 current[table.file], _ = current_rows(
@@ -668,7 +650,6 @@ def sync_config(
     files: ConfigFiles,
     *,
     apply: bool,
-    allow_grants: bool = True,
 ) -> ConfigSync:
     """Merge ``files`` into the ``CFG_`` tables; with ``apply`` false, roll it all back.
 
@@ -676,13 +657,6 @@ def sync_config(
     committed.
     """
     require_tables(engine)
-    selected = files.rows.get(PROJECTS.file, {})
-    if set(selected) != {(config.project,)}:
-        found = ", ".join(str(key[0]) for key in selected) or "no project"
-        raise MetadataFileError(
-            f"{files.directory / PROJECTS.file}: selected project is {config.project!r}, but "
-            f"the file contains {found}; keep exactly the selected project row in projects.csv"
-        )
     files = resolved_files(files, config)
     changes: list[Change] = []
     findings: tuple[Finding, ...] = ()
@@ -690,24 +664,17 @@ def sync_config(
     with locks.MIGRATE.hold(engine), _labelled(files.revision):
         try:
             with engine.begin() as conn:
-                changes.extend(normalized_changes(conn, config))
-                changes.extend(_merge(conn, files, config.project))
-                denied = [change.row for change in changes if change.file == "grants.csv"]
-                if apply and denied and not allow_grants:
-                    raise PermissionDeniedError(
-                        "grants.csv: admin role required to change "
-                        + "; ".join(denied)
-                        + "; ask an administrator to apply these files; no changes were committed"
-                    )
                 project = conn.execute(
                     statement(conn, "project_by_code"), {"code": config.project}
                 ).one_or_none()
-                if project is None:
+                if project is None or project.active_flag != YesNo.YES:
                     raise MetadataFileError(
-                        f"projects.csv: project {config.project!r} was not created; expected "
-                        "ACTIVE_FLAG=Y for a new project; activate it before applying metadata"
+                        f"project {config.project!r}: expected an active project; "
+                        "use `etl-craft project add --project CODE --reason REASON` first"
                     )
                 with selected_project(int(project.project_id)):
+                    changes.extend(normalized_changes(conn, config))
+                    changes.extend(_merge(conn, files, config.project))
                     findings = tuple(validate_on(conn, config).findings)
                 if not apply or any(f.status is Status.FAIL for f in findings):
                     raise _RollBackError

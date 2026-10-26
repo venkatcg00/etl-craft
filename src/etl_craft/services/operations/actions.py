@@ -41,7 +41,9 @@ from etl_craft.engine.schema import InitResult
 from etl_craft.services.catalog.gaps import GapSnapshot
 from etl_craft.services.config_files import ConfigExport, ConfigSync
 from etl_craft.services.operations import (
+    access,
     accounts,
+    admin_metadata,
     agent_claims,
     agent_doctor,
     agent_logs,
@@ -296,6 +298,37 @@ _ROWS = (
     Action(ActionName.RECONCILE, runs.reconcile_runs, ReconcileInput, models.ReconciliationView,
            OPERATOR, POST, f"{API}/reconciliations", REQUEST,
            scope=ActionScope.PIPELINE),
+    Action(ActionName.PROJECT_ADD, admin_metadata.add_project, admin_metadata.ProjectFields,
+           admin_metadata.Projects,
+           ADMIN, POST, f"{API}/projects", REQUEST),
+    Action(ActionName.PROJECT_SET, admin_metadata.set_project, admin_metadata.ProjectFields,
+           admin_metadata.Projects,
+           ADMIN, POST, f"{API}/projects/set", REQUEST),
+    Action(ActionName.PROJECT_LIST, admin_metadata.list_projects, admin_metadata.ProjectIdentity,
+           admin_metadata.Projects,
+           ADMIN, GET, f"{API}/projects", REQUEST),
+    Action(ActionName.PROJECT_DISABLE, admin_metadata.disable_project,
+           admin_metadata.ProjectIdentity,
+           admin_metadata.Projects,
+           ADMIN, POST, f"{API}/projects/disable", REQUEST),
+    Action(ActionName.POOL_ADD, admin_metadata.add_pool, admin_metadata.PoolFields,
+           admin_metadata.Pools,
+           ADMIN, POST, f"{API}/pools", REQUEST),
+    Action(ActionName.POOL_SET, admin_metadata.set_pool, admin_metadata.PoolFields,
+           admin_metadata.Pools,
+           ADMIN, POST, f"{API}/pools/set", REQUEST),
+    Action(ActionName.POOL_LIST, admin_metadata.list_pools, admin_metadata.PoolIdentity,
+           admin_metadata.Pools,
+           ADMIN, GET, f"{API}/pools", REQUEST),
+    Action(ActionName.POOL_DISABLE, admin_metadata.disable_pool, admin_metadata.PoolIdentity,
+           admin_metadata.Pools,
+           ADMIN, POST, f"{API}/pools/disable", REQUEST),
+    Action(ActionName.ACCESS_GRANT, access.grant_access, access.AccessWrite, access.AccessView,
+           VIEWER, POST, f"{API}/access/grants", BY_ACTION, escalate=access.required_role),
+    Action(ActionName.ACCESS_REVOKE, access.revoke_access, access.AccessWrite, access.AccessView,
+           VIEWER, POST, f"{API}/access/revocations", BY_ACTION),
+    Action(ActionName.ACCESS_LIST, access.list_access, access.AccessFilter, access.AccessView,
+           VIEWER, GET, f"{API}/access/grants", REQUEST),
     Action(ActionName.GROUP_LIST, groups.list_groups, NoInput, groups.Groups, ADMIN, GET,
            f"{API}/groups"),
     Action(ActionName.GROUP_ADD, groups.add_group, groups.GroupAdd, groups.Groups, ADMIN, POST,
@@ -588,7 +621,7 @@ def _project_context(ctx: OperationContext, action: Action) -> OperationContext:
             return ctx
         raise UsageError(
             f"project={ctx.project!r}; expected an active CFG_PROJECTS row; add it to "
-            "projects.csv and run `etl-craft config apply --project " + ctx.project + "`"
+            "`etl-craft project add --project " + ctx.project + " --reason REASON`"
         )
     return replace(
         ctx,

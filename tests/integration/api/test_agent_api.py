@@ -929,7 +929,7 @@ def test_agent_registration_requires_an_active_pool(agent_scene, pool):
         json={"version": __version__, "pool": pool, "resources": encode(resources())},
     )
     assert answer.status_code == 404, answer.text
-    for part in (pool, "CFG_POOLS", "pools.csv", "config apply"):
+    for part in (pool, "CFG_POOLS", "pool add", "--reason"):
         assert part in answer.text
 
 
@@ -1039,7 +1039,7 @@ def test_missing_default_pool_cannot_bypass_custom_pool_admission(agent_scene):
             {"id": attempt},
         ).one()
     assert row.status == "QUEUED"
-    for part in ("CFG_POOLS.default", "missing", "expected", "restore", "config apply"):
+    for part in ("CFG_POOLS.default", "missing", "expected", "restore", "pool add"):
         assert part in row.reason
 
 

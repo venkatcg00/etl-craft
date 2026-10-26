@@ -237,6 +237,17 @@ class ActionName(StrEnum):
     LOGIN_SSO_POLL = "login sso poll"
     REFRESH = "refresh"
     LOGOUT = "logout"
+    PROJECT_ADD = "project add"
+    PROJECT_SET = "project set"
+    PROJECT_LIST = "project list"
+    PROJECT_DISABLE = "project disable"
+    POOL_ADD = "pool add"
+    POOL_SET = "pool set"
+    POOL_LIST = "pool list"
+    POOL_DISABLE = "pool disable"
+    ACCESS_GRANT = "access grant"
+    ACCESS_REVOKE = "access revoke"
+    ACCESS_LIST = "access list"
     GROUP_LIST = "group list"
     GROUP_ADD = "group add"
     GROUP_DISABLE = "group disable"
@@ -718,3 +729,27 @@ class IcebergMaintenance(StrEnum):
 
     EXPIRE_SNAPSHOTS = "expire_snapshots"
     REMOVE_ORPHAN_FILES = "remove_orphan_files"
+
+
+class AccessIntent(StrEnum):
+    """Bulk access command intent."""
+
+    GRANT = "GRANT"
+    REVOKE = "REVOKE"
+
+
+class AccessChange(StrEnum):
+    """The actual change relative to current access rows."""
+
+    ADDED = "added"
+    CHANGED_PERMISSION = "changed permission"
+    REVOKED = "revoked"
+    UNCHANGED = "unchanged"
+
+
+class Permission(StrEnum):
+    """Increasing permissions on a pipeline or tag."""
+
+    CAN_VIEW = "CAN_VIEW"
+    CAN_RUN = "CAN_RUN"
+    CAN_MANAGE = "CAN_MANAGE"

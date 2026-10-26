@@ -19,7 +19,7 @@ def check_pool(pool: str, active: str | None, task: str) -> None:
         state = "missing" if active is None else f"ACTIVE_FLAG={active}"
         raise MetadataError(
             f"{task}: POOL={pool!r} is {state}; expected an active CFG_POOLS row; "
-            "add or activate the pool in config/pools.csv and run etl-craft config apply"
+            "create an active pool with etl-craft pool add --name POOL --reason REASON"
         )
 
 

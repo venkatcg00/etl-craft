@@ -18,9 +18,9 @@ from etl_craft.config.remote import server_url
 from etl_craft.core.http_client import open_request
 
 
-def command(config: Path, project: str, *args: str) -> None:
+def command(config: Path, project: str, *args: str) -> str:
     """Apply metadata through the same CLI used by teams; retain diagnostics on failure."""
-    subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -33,8 +33,10 @@ def command(config: Path, project: str, *args: str) -> None:
         ],
         check=True,
         timeout=1800,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        text=True,
     )
+    return result.stdout
 
 
 def prepare(root: Path) -> Path:
@@ -43,6 +45,20 @@ def prepare(root: Path) -> Path:
     if not projects:
         raise SystemExit(f"{root}: no generated projects; run benchmarks.generate first")
     for config in projects:
+        current = json.loads(
+            command(
+                config,
+                config.parent.name,
+                "project",
+                "list",
+                "--reason",
+                "Benchmark setup",
+                "--format",
+                "json",
+            )
+        )
+        if not any(row["project"] == config.parent.name for row in current["projects"]):
+            command(config, config.parent.name, "project", "add", "--reason", "Benchmark setup")
         command(config, config.parent.name, "config", "apply")
         command(config, config.parent.name, "bundle", "publish")
     return projects[0]

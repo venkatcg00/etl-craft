@@ -11,7 +11,7 @@ from sqlalchemy import BigInteger, DateTime, bindparam, text
 from sqlalchemy.engine import Connection
 
 from etl_craft.engine.queries import statement
-from etl_craft.engine.repository.config_rows import POOLS, TABLES
+from etl_craft.engine.repository.config_rows import TABLES
 
 
 def document(value: Any) -> Any:
@@ -113,7 +113,7 @@ def project_changes(
                 for doc in (change["before_json"], change["after_json"])
                 if doc is not None and doc.get("pipeline_id") in pipelines
             )
-    scoped = {table.table for table in TABLES if table is not POOLS}
+    scoped = {table.table for table in TABLES} | {"CFG_PROJECTS", "CFG_PIPELINE_GRANTS"}
     return [
         change
         for change in changes

@@ -82,27 +82,42 @@ alice`, and `group list`. Matching HTTP actions use `/api/v1/groups` and its `di
 `members`, and `members/remove` routes. Group identities and memberships are retired with
 `ACTIVE_FLAG=N`, never deleted; all changes have typed, actor-attributed history.
 
-Keep grants in `config/grants.csv`:
+Pipeline permissions use three levels: `CAN_VIEW` reads, `CAN_RUN` adds execution and operator
+controls, and `CAN_MANAGE` adds permission delegation. Principals are an active group, an
+account, or a deployment role (`viewer` includes everyone with at least viewer; `operator`
+includes everyone with at least operator). Each grant names one project and one pipeline or tag.
 
-```csv
-GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG
-sales,SALES,,operator,Y
-analysts,,reporting,viewer,Y
+```bash
+etl-craft access grant --project sales --group analysts --pipeline DAILY --permission CAN_VIEW --reason "Reporting"
+etl-craft access grant --project sales --account alice --tag reporting --permission CAN_MANAGE --reason "Reporting owner"
+etl-craft access revoke --project sales --group analysts --pipeline DAILY --reason "Team changed"
+etl-craft access list --project sales
+etl-craft access grant --project sales --file access.csv --dry-run --reason "Review permissions"
+etl-craft access grant --project sales --file access.csv --reason "Apply permissions"
 ```
 
-Create the groups first, then apply the files as an admin. Set exactly one of `PIPELINE_CODE`
-or `TAG`; roles are `viewer` or `operator`. Tag grants apply to every pipeline with that exact
-tag. A developer's `config apply` refuses the entire transaction when any grant would change,
-naming the rows; configuration changes in other files are rolled back too.
+The exact HTTP actions are `POST /api/v1/access/grants`, `POST /api/v1/access/revocations`,
+and `GET /api/v1/access/grants`. Lists include the caller's effective levels and their contributing sources.
+An administrator or a holder of `CAN_MANAGE` on the pipeline can grant or revoke any level on
+it. Granting on a tag requires `CAN_MANAGE` on that tag; managing one tagged pipeline is
+insufficient. These permissions confer no deployment administration or project-wide editing.
 
-A pipeline with no active direct or tag grant uses the deployment role. With any active grant,
-it is restricted: the highest role from the account's active groups applies, and no matching
-group grant means no access. Disabling a group does not make its pipelines open. An admin
-always has access. A pipeline operator grant can elevate a deployment viewer on that pipeline;
-project-wide configuration, identity and maintenance actions still use the deployment role.
-Lists omit inaccessible pipelines before pagination. Direct reads, logs and changes fail with
-exit 26 / HTTP 403. Dependency and lineage views may name restricted related pipelines, but
-withhold their tasks, runs and logs.
+Bulk input is admin-only, with columns `PROJECT,GROUP_NAME,ROLE,PIPELINE_CODE,TAG,PERMISSION,ACTION`.
+Choose exactly one group or role and one pipeline or tag; `ACTION` is `GRANT` or `REVOKE`.
+Rows name their project; if --project is supplied, every row must match that scope. Account grants use the single-row `--account` form,
+never the bulk file. The CLI sends content; the server validates every row and diffs the current
+state inside the apply transaction. All bad lines are reported and nothing is applied.
+Dry-run returns added, changed permission, revoked and unchanged rows without changing grants;
+its request is still audited. Writes require a reason, retain attribution and history, and
+revocation marks `ACTIVE_FLAG=N` without deleting rows.
+
+A pipeline with no active direct or tag grant uses the deployment role. Otherwise the highest
+matching account, active group or deployment role permission applies; no match means no access.
+Disabled groups' grants keep pipelines restricted. Administrators always have access. Permission
+changes take effect on the next request, with no cache. Revoking the last active pipeline/tag
+grant restores the deployment-role fallback. Lists omit inaccessible pipelines before pagination.
+Direct reads, logs and changes fail with exit 26 / HTTP 403; dependency and lineage views may
+name restricted related pipelines but withhold their tasks, runs and logs.
 
 With SSO, set optional `Auth.Oidc_groups_claim: groups` beside `Auth.Oidc_issuer` and
 `Auth.Oidc_client_id`. The configured claim must be a list of group names. Only names matching
@@ -120,13 +135,13 @@ provider claims. Access expiry is capped at the refresh token's expiry, so `Auth
 bounds retained claims in a server session. A local session is bounded by `Auth.Session_hours`.
 Removing someone from a group at the identity provider is seen at their next SSO sign-in,
 not by an already admitted session or run. Disable the account or the local group, or retire
-its grant, to withdraw access immediately under the current policy.
+its grant, to withdraw its contribution immediately under the current policy.
 
 Admitted runs retain their initiating group IDs after token expiry or revocation. A child
 copies its parent's `SSO_GROUP_IDS`, and grandchildren carry the same set. Before each child
 is admitted, and again immediately before a queued child starts, the engine checks that the
 initiating account is active, every retained SSO group still has `ACTIVE_FLAG=Y`, and the
-account still has operator permission through current groups and grants (or the current
+account still has CAN_RUN through current group, account or deployment-role grants (or the current
 deployment role on an open pipeline). A refusal before admission
 fails the trigger task; a queued child that loses permission is cancelled with the reason in
 its interventions. Already running children keep their admitted work. Current admins and the

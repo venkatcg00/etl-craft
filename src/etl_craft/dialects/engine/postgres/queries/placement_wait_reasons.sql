@@ -11,9 +11,9 @@ WITH scope AS not materialized (
 )
 UPDATE AUD_TASK_ATTEMPTS AS a SET ERROR_MESSAGE=CASE
 WHEN NOT EXISTS (SELECT 1 FROM CFG_POOLS p WHERE p.POOL_NAME='default')
-THEN 'CFG_POOLS.default is missing; expected the deployment admission row; restore default in pools.csv and config apply'
+THEN 'CFG_POOLS.default is missing; expected the deployment admission row; restore default using etl-craft pool add --name default --reason REASON'
 WHEN NOT EXISTS (SELECT 1 FROM CFG_POOLS p WHERE p.POOL_NAME=a.POOL AND p.ACTIVE_FLAG='Y')
-THEN 'pool ' || a.POOL || ' is missing or ACTIVE_FLAG=N; activate it in pools.csv and config apply'
+THEN 'pool ' || a.POOL || ' is missing or ACTIVE_FLAG=N; choose an active pool or use etl-craft pool add --name POOL --reason REASON'
 WHEN (SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS x JOIN AUD_TASK_RUN_LOG r ON r.TASK_RUN_ID=x.TASK_RUN_ID
  JOIN AUD_PIPELINES_RUN_LOG origin ON origin.PIPELINE_RUN_ID=r.PIPELINE_RUN_ID
  WHERE x.STATUS IN ('CLAIMED','RUNNING') AND origin.PIPELINE_ID=(SELECT owner_run.PIPELINE_ID FROM AUD_PIPELINES_RUN_LOG owner_run JOIN AUD_TASK_RUN_LOG tr ON tr.PIPELINE_RUN_ID=owner_run.PIPELINE_RUN_ID WHERE tr.TASK_RUN_ID=a.TASK_RUN_ID))

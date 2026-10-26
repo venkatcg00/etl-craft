@@ -13,12 +13,12 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import MetadataFileError
+from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.config_history import config_as_of
 from etl_craft.engine.repository.config_rows import (
     ACTIVE_FLAG,
     BUSINESS_RULES,
     OBJECT_TABLES,
-    PROJECTS,
     SOURCE_COLUMNS,
     TABLES,
     TASKS,
@@ -48,7 +48,12 @@ def export_config(
     With ``as_of``, the rows are those that stood then, rebuilt from the change history. Rows
     are sorted by key. Existing files are kept unless ``overwrite`` is set.
     """
-    from etl_craft.services.config_files import ConfigExport, cell, current_rows, require_tables
+    from etl_craft.services.config_files import (
+        ConfigExport,
+        cell,
+        current_rows,
+        require_tables,
+    )
 
     require_tables(engine)
     existing = [table.file for table in TABLES if (directory / table.file).exists()]
@@ -64,7 +69,15 @@ def export_config(
         with engine.connect() as conn:
             source = config_as_of(conn, as_of)
     with source.connect() as conn:
-        project_id: int | None = None
+        project = conn.execute(
+            statement(conn, "project_by_code"), {"code": project_code}
+        ).one_or_none()
+        if project is None:
+            raise MetadataFileError(
+                f"project {project_code!r}: expected an existing project; "
+                "select another project or use project add first"
+            )
+        project_id = int(project.project_id)
         for table in TABLES:
             current[table.file], _ = current_rows(
                 table,
@@ -72,14 +85,6 @@ def export_config(
                 current_ids,
             )
             current_ids[table.file] = {row.row_id for row in current[table.file].values()}
-            if table is PROJECTS:
-                selected = current[table.file]
-                if not selected:
-                    raise MetadataFileError(
-                        f"project {project_code!r}: no recorded project at the selected time; "
-                        "expected an existing project; select another project or a later time"
-                    )
-                project_id = int(next(iter(selected.values())).row_id)
     if config is not None and as_of is None:
         with selected_project(project_id):
             _warehouse_rows(engine, config, directory, current)

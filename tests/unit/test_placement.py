@@ -99,7 +99,7 @@ def test_pool_admission_refuses_missing_and_inactive_rows(pool, state):
 
     with pytest.raises(MetadataError) as caught:
         check_pool(pool, state, "SALES.load")
-    for part in ("SALES.load", pool, "active CFG_POOLS", "pools.csv", "config apply"):
+    for part in ("SALES.load", pool, "active CFG_POOLS", "pool add", "--reason"):
         assert part in str(caught.value)
 
 

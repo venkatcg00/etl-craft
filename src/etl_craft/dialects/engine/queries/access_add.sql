@@ -1,0 +1,3 @@
+INSERT INTO CFG_PIPELINE_GRANTS
+(PROJECT_ID,GROUP_ID,ACCOUNT_ID,GRANTEE_ROLE,PIPELINE_CODE,TAG,PERMISSION,ACTIVE_FLAG)
+VALUES (:project_id,:group_id,:account_id,:grantee_role,:pipeline,:tag,:permission,'Y')

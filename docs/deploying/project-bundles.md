@@ -103,17 +103,20 @@ Select `--project CODE`; its default is `Orchestration.Project`, then `default`.
 Each project has its own warehouse. Deployment roles remain shared, with pipeline grants
 scoped to their project. Pools remain deployment-wide.
 
-Keep exactly the selected project in `config/projects.csv`:
+Administrators create projects before applying pipeline metadata:
 
-```csv
-PROJECT_CODE,PROJECT_NAME,TIMEZONE,DEFAULT_POOL,MAX_RUNNING_TASKS,ACTIVE_FLAG
-sales,Sales,UTC,default,8,Y
+```bash
+etl-craft project add --project sales --name Sales --timezone UTC --default-pool default --max-running-tasks 8 --reason "Sales onboarding"
+etl-craft --project sales config apply
+etl-craft project set --project sales --max-running-tasks 12 --reason "Capacity review"
+etl-craft project list --reason "Review projects"
 ```
 
-Apply it with `etl-craft config apply --project sales`. It cannot retire another project's
-pipelines, tables or grants. `DEFAULT_POOL` is used when a task has no `POOL` parameter;
-`MAX_RUNNING_TASKS` caps claims across all pipelines in that project. Each approved bundle
-records its warehouse query limit. A full project does not prevent another from claiming work.
+`project add|set|disable` require `--project` on the command line. `set` changes only supplied
+fields; no field is an error. `disable` takes the identity and reason, preserving metadata.
+Add defaults to pool `default`; the pool must be active. `DEFAULT_POOL` is used for tasks with
+no `POOL`; `MAX_RUNNING_TASKS` caps claims across the project's pipelines. A full project does
+not prevent another from claiming work. All project/pool administration requires deployment admin.
 
 Publish and run with the same selection:
 
