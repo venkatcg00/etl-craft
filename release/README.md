@@ -85,6 +85,30 @@ their modification time. This measures generated metadata/history, without a war
 or executing synthetic tasks. The Release gate workflow runs it after the evidence gate and
 uploads its JUnit artifact; it adds no job to pull-request CI and does not replace suite evidence.
 
+## Controller load, backup and upgrade acceptance
+
+S6.G's [manual benchmark](../benchmarks/README.md) generates 100 projects × 100 pipelines ×
+10 ordinary tasks and drives the existing controller and agents. Its reference cluster is a
+4-vCPU/12-GiB controller, ten 2-vCPU/8-GiB agents and 4-vCPU/16-GiB PostgreSQL in the same zone.
+Budgets and report evaluation live in `benchmarks/budgets.py`; the runner scrapes admission,
+queue and tick metrics and reads CPU, live sessions and resident memory from explicit probes.
+Use an isolated deployment and the tested candidate wheel. No benchmark is discovered by PR CI.
+
+Owner decision, 2026-10-26: the 24-hour reference run and other long-running validation wait
+until the S8 Support Insights demo completes without failures. This item delivers the harness
+and restore regression. A two-project, few-minute smoke report proves only the harness and
+belongs in the PR description. Do not commit workstation reports to `release/benchmarks/`.
+After S8, qualifying release results go in `release/benchmarks/<version>.md`, with allocation,
+commit/wheel identity, at least 200 active runs, duration and every measured budget. A nonzero
+runner exit or an unqualified deployment is not passing reference evidence.
+
+The ordinary PostgreSQL suite runs the bounded dump/restore regression using client tools
+inside the compose PostgreSQL container. It kills a real interrupted deployment, restores into
+a new database, runs `doctor`/`reconcile` and verifies recovery without losing or repeating
+committed work. It does not repeat a sustained benchmark in CI. See
+[Operations](../docs/deploying/operations.md) for schema/role/store backups, managed snapshots,
+restore order and the supported non-rolling upgrade procedure.
+
 ## The soak
 
 Release 0.4's gate runs the demo for seven days under `etl-craft controller`, with no external scheduling, while the server is killed with SIGKILL at random times. `scripts/soak.py` prepares and

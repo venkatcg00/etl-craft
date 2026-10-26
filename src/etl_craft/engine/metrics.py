@@ -18,6 +18,10 @@ _states: WeakKeyDictionary[Engine, Metrics] = WeakKeyDictionary()
 _lock = threading.Lock()
 
 FAMILIES = {
+    "controller_tick_duration_seconds": (
+        "Controller supervision work per tick, excluding wait.",
+        "histogram",
+    ),
     "controller_leader": ("This process holds deployment leadership.", "gauge"),
     "controller_heartbeat_age_seconds": (
         "Seconds since this leader's recorded heartbeat.",

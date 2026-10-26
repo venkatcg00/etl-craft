@@ -198,7 +198,15 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
                 while not stop.is_set():
                     try:
                         leader.hold()
-                        supervisor.supervise_once(controller_id)
+                        started = time.perf_counter()
+                        try:
+                            supervisor.supervise_once(controller_id)
+                        finally:
+                            metrics.add(
+                                "controller_tick_duration_seconds",
+                                (),
+                                time.perf_counter() - started,
+                            )
                         leader.wait(stop)
                     except TRANSIENT_ERRORS as error:
                         stop.wait(outage.failed("supervising runs", error))

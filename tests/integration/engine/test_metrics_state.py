@@ -255,3 +255,41 @@ def test_enabling_metrics_inside_an_existing_savepoint_preserves_its_outcome(eng
     assert value(
         registry.render({}), "attempts_ended_total", project="1", status=AttemptStatus.CANCELLED
     ) == (0 if rollback else 1)
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_controller_tick_histogram_excludes_the_wait_and_uses_explicit_duration(
+    engine_db, monkeypatch, failed
+):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from etl_craft.controller import supervisor
+
+    ctx, registry = context(engine_db)
+    from dataclasses import replace
+
+    ctx = replace(ctx, actor=Actor("controller", ActorKind.SERVICE))
+    stop = threading.Event()
+    ticks = iter((10.0, 10.25))
+    monkeypatch.setattr(
+        supervisor,
+        "time",
+        SimpleNamespace(perf_counter=lambda: next(ticks), monotonic=time.monotonic),
+    )
+
+    def tick(*args):
+        stop.set()
+        if failed:
+            raise supervisor.ConfigurationError("tick failed")
+
+    monkeypatch.setattr(supervisor._Supervisor, "supervise_once", tick)
+    if failed:
+        with pytest.raises(supervisor.ConfigurationError, match="tick failed"):
+            supervisor.serve(ctx, stop)
+    else:
+        supervisor.serve(ctx, stop)
+    body = registry.render({})
+    assert value(body, "controller_tick_duration_seconds_count") == 1
+    assert value(body, "controller_tick_duration_seconds_sum") == 0.25

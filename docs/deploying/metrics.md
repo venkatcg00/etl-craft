@@ -21,6 +21,7 @@ never labels. `query` is the catalog query name or `unknown`, never SQL or bind 
 
 | Name after the prefix | Type | Labels and meaning |
 | --- | --- | --- |
+| `controller_tick_duration_seconds` | histogram | No labels: supervision work per tick, including failed ticks and excluding the notification/poll wait |
 | `controller_leader` | gauge | 1 while this process holds leadership, otherwise 0 |
 | `controller_heartbeat_age_seconds` | gauge | Seconds since the leader committed its heartbeat |
 | `runs` | gauge | `project`, `status`: current QUEUED and IN-PROGRESS logical runs |

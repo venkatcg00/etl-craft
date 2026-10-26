@@ -1527,3 +1527,69 @@ def test_rule_publication_requires_its_own_live_rule_lock(agent_scene):
             )
         ).one()
     assert row.rule == own and row.key == "11" and row.active == "Y"
+
+
+@pytest.mark.parametrize("route", ["register", "claim", "renew"])
+def test_running_agent_refuses_api_upgrade_before_mutating_ownership(
+    agent_scene, monkeypatch, route
+):
+    from etl_craft.services.operations import agents
+
+    db, client, headers, _, _, _ = agent_scene
+    attempt = queue(db)
+    monkeypatch.setattr(agents, "__version__", "next-version")
+    fields = {
+        "register": {"pool": "default", "resources": encode(resources())},
+        "claim": {"free_kinds": ["warehouse"]},
+        "renew": {"attempts": [], "resources": encode(resources())},
+    }[route]
+    response = client.post(
+        f"/api/v1/agent/{route}", headers=headers, json={"version": __version__, **fields}
+    )
+    assert response.status_code == 409
+    for part in (f"agent version={__version__}", "API version=next-version", "install", "restart"):
+        assert part in response.text
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status,OWNER_ID AS owner FROM AUD_TASK_ATTEMPTS "
+                "WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+        assert row.status == "QUEUED" and row.owner is None
+
+
+def test_registered_agent_stops_claiming_when_the_api_version_changes(agent_scene, monkeypatch):
+    import threading
+
+    from etl_craft.agent.client import AgentClient
+    from etl_craft.agent.loop import AgentLoop, AgentOptions
+    from etl_craft.config.sizing import ceilings
+    from etl_craft.core.errors import ConfigurationError
+    from etl_craft.services.operations import agents
+    from etl_craft.services.operations.agent_models import AgentReply
+
+    _, client, headers, _, owner, config = agent_scene
+    calls = []
+
+    def exchange(self, action, request, **kwargs):
+        calls.append(action)
+        if action == ActionName.AGENT_REGISTER:
+            monkeypatch.setattr(agents, "__version__", "upgraded-api")
+            return AgentReply({"agent_id": owner, "lease_seconds": 60})
+        route = "renew" if action == ActionName.AGENT_RENEW else "claim"
+        response = client.post(f"/api/v1/agent/{route}", headers=headers, json=encode(request))
+        from etl_craft.core.api_errors import response_error
+
+        raise response_error(response.status_code, response.content, route)
+
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", "test-agent")
+    monkeypatch.setattr(AgentClient, "call", exchange)
+    stop = threading.Event()
+    with pytest.raises(ConfigurationError, match=r"upgraded-api.*install.*restart"):
+        AgentLoop(
+            config, AgentOptions("http://127.0.0.1:1", "default", ceilings(config)), stop
+        ).serve()
+    assert stop.is_set()
+    assert calls.count(ActionName.AGENT_CLAIM) <= 1
