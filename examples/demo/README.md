@@ -7,7 +7,7 @@ history, builds a support fact with checks on it, and summarises it per area and
 ```text
 lnd (landed, as sent) ─► prs (parsed, typed) ─► pre_dm (every client, one shape) ─► dm (fact, summary)
                          ds (agents, support areas) ─┘   cdc (agents' teams over time)
-aud: the Engine DB's own tables, cloned after every run
+aud: the Engine DB's own tables, cloned on its own schedule
 ```
 
 | Pipeline | What it does |

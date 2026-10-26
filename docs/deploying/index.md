@@ -9,7 +9,7 @@ Running etl-craft on a machine or under an orchestrator.
 - [Checking a deployment: `doctor` and `setup`](doctor-and-setup.md): every check, and setting up
   or upgrading in one command.
 - [Cloning into the warehouse](cloning.md): copying the Engine DB tables into the warehouse
-  after every run, and `etl-craft clone`.
+  on its own schedule, and `etl-craft clone`.
 - [Engine DB setup and upgrades](engine-db.md): `init-db`, `migrate`, and your own migrations.
 - [Operations](operations.md): backups, upgrades, logs and watching runs.
 - [Security](security.md): secrets, least-privilege accounts, and what tasks can do.

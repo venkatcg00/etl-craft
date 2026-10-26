@@ -1,0 +1,2 @@
+SELECT INITIALIZED AS initialized, COPIED_AT AS copied_at FROM AUD_CLONE_STATE
+WHERE MIRROR_ID=:mirror_id AND TABLE_NAME=:table_name

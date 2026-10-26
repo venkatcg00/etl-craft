@@ -605,7 +605,8 @@ def _cloning(config: ConnectorConfig) -> list[Check]:
     return [
         ok(
             "Cloning",
-            f"scope {cloning.scope}: after each run, into schema {config.warehouse.schema}",
+            f"scope {cloning.scope}: every {cloning.every_minutes} minutes, "
+            f"into schema {config.warehouse.schema}",
         )
     ]
 

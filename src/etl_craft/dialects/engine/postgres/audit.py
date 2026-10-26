@@ -167,7 +167,7 @@ def _change_view(conn: Connection, configs: list[str]) -> None:
     """Make ``AUD_METADATA_CHANGES`` the changes of every history table, as JSON."""
     quote = conn.dialect.identifier_preparer.quote
     conn.exec_driver_sql("DROP VIEW IF EXISTS aud_metadata_changes")
-    dropped = ", ".join(f"'{name}'" for name in CHANGE_COLUMNS)
+    dropped = ", ".join(f"'{name}'" for name in (*CHANGE_COLUMNS, "updated_at"))
     parts = []
     for table in configs:
         key = quote(

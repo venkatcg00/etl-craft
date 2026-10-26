@@ -240,6 +240,9 @@ def seeded_tables(db):
             "backend_started_at": datetime.now(UTC),
             "heartbeat_at": datetime.now(UTC),
             "expires_at": datetime.now(UTC),
+            "mirror_id": "actor-mirror",
+            "table_name": "AUD_PIPELINE_PAUSES",
+            "row_key": "[1]",
         }
         inspector = inspect(conn)
         schema = None if engine.dialect.name == "sqlite" else inspector.default_schema_name

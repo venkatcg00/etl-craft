@@ -14,14 +14,23 @@ from sqlalchemy import text
 
 from etl_craft.config import CloningConfig
 from etl_craft.config.targets import active_catalog
+from etl_craft.core.actor import purpose
 from etl_craft.core.enums import CloningScope, TableFormat
+from etl_craft.engine import locks
+from etl_craft.handlers.resources import LocalLocker
 from etl_craft.services import cloning
 from etl_craft.warehouse.connection import build_warehouse_engine, warehouse_dialect
+from fixtures.cloning import insert_pause
 from fixtures.cloud import DATABRICKS_VARS, SNOWFLAKE_VARS, require_variables, write_config
 from fixtures.engine_db import apply_schema, sqlite_engine_db
 from fixtures.metadata import add_pipeline
 
 pytestmark = [pytest.mark.timeout(600), pytest.mark.usefixtures("engine_actor")]
+
+
+def clone_one(engine, warehouse, dialect, config, table, mirror, columns):
+    with locks.ResourceLock(locks.CLONE.name, locks.CLONE.key).hold(LocalLocker(engine, config)):
+        return cloning._clone_table(engine, warehouse, dialect, config, table, mirror, columns)
 
 
 def gains_columns(tmp_path, name, fields, table_format, schema):
@@ -45,6 +54,7 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
     dialect = warehouse_dialect(config)
     mirror = f"{active_catalog(config)}.{schema}.etl_craft_mirror_{uuid.uuid4().hex[:8]}"
     accounts_mirror = mirror + "_accounts"
+    audit_mirror = mirror + "_audit"
     inventory = dict(cloning._engine_tables(engine_db, config, ("CFG_",)))
     assert "CFG_TEAM" not in inventory
     columns = next(
@@ -53,7 +63,7 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
         if table == "CFG_PIPELINES"
     )
     try:
-        account_copy = cloning._clone_table(
+        account_copy = clone_one(
             engine_db,
             warehouse,
             dialect,
@@ -70,21 +80,91 @@ def gains_columns(tmp_path, name, fields, table_format, schema):
             assert "scrypt:private" not in str(result.all())
         with warehouse.begin() as conn:
             conn.execute(text(f"CREATE TABLE {mirror} (PIPELINE_ID BIGINT)"))
-        cloned = cloning._clone_table(
-            engine_db, warehouse, dialect, config, "CFG_PIPELINES", mirror, columns
-        )
+        cloned = clone_one(engine_db, warehouse, dialect, config, "CFG_PIPELINES", mirror, columns)
         assert not cloned.created and cloned.rows == 1
         assert "PIPELINE_CODE" in cloned.added and "PIPELINE_ID" not in cloned.added
         with warehouse.connect() as conn:
             assert conn.execute(text(f"SELECT PIPELINE_CODE FROM {mirror}")).all() == [("SALES",)]
-        again = cloning._clone_table(
-            engine_db, warehouse, dialect, config, "CFG_PIPELINES", mirror, columns
-        )
+        again = clone_one(engine_db, warehouse, dialect, config, "CFG_PIPELINES", mirror, columns)
         assert again.added == () and again.rows == 1
+        audit_columns = dict(cloning._engine_tables(engine_db, config, ("AUD_",)))[
+            "AUD_PIPELINE_PAUSES"
+        ]
+        with engine_db.begin() as conn:
+            pipeline = conn.execute(
+                text("SELECT PIPELINE_ID AS pipeline_id FROM CFG_PIPELINES")
+            ).scalar_one()
+            pause = insert_pause(conn, pipeline, "baseline")
+        copied = clone_one(
+            engine_db,
+            warehouse,
+            dialect,
+            config,
+            "AUD_PIPELINE_PAUSES",
+            audit_mirror,
+            audit_columns,
+        )
+        assert copied.rows == 1
+        with engine_db.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE AUD_PIPELINE_PAUSES SET REASON='incremental' WHERE PIPELINE_PAUSE_ID=:p"
+                ),
+                {"p": pause},
+            )
+        assert (
+            clone_one(
+                engine_db,
+                warehouse,
+                dialect,
+                config,
+                "AUD_PIPELINE_PAUSES",
+                audit_mirror,
+                audit_columns,
+            ).rows
+            == 1
+        )
+        assert (
+            clone_one(
+                engine_db,
+                warehouse,
+                dialect,
+                config,
+                "AUD_PIPELINE_PAUSES",
+                audit_mirror,
+                audit_columns,
+            ).rows
+            == 0
+        )
+        with warehouse.connect() as conn:
+            assert (
+                conn.execute(text(f"SELECT REASON FROM {audit_mirror}")).scalar_one()
+                == "incremental"
+            )
+        token = purpose.set("retention")
+        try:
+            with engine_db.begin() as conn:
+                conn.execute(
+                    text("DELETE FROM AUD_PIPELINE_PAUSES WHERE PIPELINE_PAUSE_ID=:p"), {"p": pause}
+                )
+        finally:
+            purpose.reset(token)
+        clone_one(
+            engine_db,
+            warehouse,
+            dialect,
+            config,
+            "AUD_PIPELINE_PAUSES",
+            audit_mirror,
+            audit_columns,
+        )
+        with warehouse.connect() as conn:
+            assert conn.execute(text(f"SELECT COUNT(*) FROM {audit_mirror}")).scalar_one() == 0
     finally:
         with warehouse.begin() as conn:
             conn.execute(text(f"DROP TABLE IF EXISTS {mirror}"))
             conn.execute(text(f"DROP TABLE IF EXISTS {accounts_mirror}"))
+            conn.execute(text(f"DROP TABLE IF EXISTS {audit_mirror}"))
         warehouse.dispose()
         engine_db.dispose()
 

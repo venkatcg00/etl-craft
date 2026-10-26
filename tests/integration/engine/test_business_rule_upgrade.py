@@ -75,7 +75,14 @@ def test_conversion_preserves_results_and_exports_the_new_form(legacy_rules, tmp
     before_rules, before_results = state(db)
     migrations.apply_pending_migrations(db.engine, warehouse_dialect="duckdb")
     after_rules, after_results = state(db)
-    assert after_results == before_results
+    assert [
+        {key: row[key] for key in original}
+        for row, original in zip(after_results, before_results, strict=True)
+    ] == before_results
+    assert all(
+        next(value for key, value in row.items() if key.lower() == "updated_at") is not None
+        for row in after_results
+    )
     sql_key = next(key for key in after_rules[0] if key.lower() == "business_rule_sql")
     assert after_rules[0][sql_key] == (
         'SELECT t."id" FROM $$rows_in_scope t WHERE EXISTS (\n'
@@ -279,7 +286,10 @@ def test_shared_projects_convert_with_each_warehouse_dialect(legacy_rules):
         actual[snow]
         == 'SELECT t."ID" FROM $$rows_in_scope t WHERE EXISTS (\nSELECT 1 WHERE t.amount<0\n)'
     )
-    assert state(db)[1] == before_results
+    assert [
+        {key: row[key] for key in original}
+        for row, original in zip(state(db)[1], before_results, strict=True)
+    ] == before_results
 
 
 def connector(path, db, project):

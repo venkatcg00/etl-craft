@@ -27,6 +27,7 @@ from etl_craft.core.outage import OutageBudget
 from etl_craft.core.text import JdbcUrl, parse_jdbc_url, public_url_query
 from etl_craft.dialects import credentials
 from etl_craft.dialects.engine.base import EngineDialect
+from etl_craft.dialects.engine.cloning import refresh_postgres
 from etl_craft.dialects.engine.connections import SerialConnections
 from etl_craft.dialects.engine.postgres.audit import refresh_metadata_triggers
 
@@ -121,6 +122,7 @@ class PostgresEngineDialect(EngineDialect):
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install this database's metadata capture and write guards."""
         refresh_metadata_triggers(conn)
+        refresh_postgres(conn)
 
     def build_engine(
         self,

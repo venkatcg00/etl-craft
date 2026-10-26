@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from etl_craft.config.loader_helpers import parse_bool, profiled_settings, reject_unknown
+from etl_craft.config.loader_helpers import (
+    parse_bool,
+    profiled_settings,
+    reject_unknown,
+    whole_number,
+)
 from etl_craft.config.model import CloningConfig
 from etl_craft.config.resolve import Resolver
 from etl_craft.core.enums import CloningScope, enum_value
 from etl_craft.core.errors import ConfigurationError
 
-CLONING_KEYS = frozenset({"Enabled", "Scope", "External_volume", "Base_location"})
+CLONING_KEYS = frozenset(
+    {"Enabled", "Scope", "External_volume", "Base_location", "Every_minutes", "Lock_wait_seconds"}
+)
 
 
 def parse_cloning(
@@ -40,4 +47,10 @@ def parse_cloning(
         scope=scope,
         external_volume=profiled.text("External_volume") or "",
         base_location=profiled.text("Base_location") or "",
+        every_minutes=whole_number(
+            profiled, "Every_minutes", default=15, path=path, minimum=1, maximum=525600
+        ),
+        lock_wait_seconds=whole_number(
+            profiled, "Lock_wait_seconds", default=60, path=path, minimum=1, maximum=3600
+        ),
     )

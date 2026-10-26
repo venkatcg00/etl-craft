@@ -29,6 +29,7 @@ from etl_craft.core.errors import (
 from etl_craft.core.filelock import file_lock
 from etl_craft.core.text import is_only_comments
 from etl_craft.dialects.engine.base import EngineDialect
+from etl_craft.dialects.engine.cloning import refresh_sqlite
 from etl_craft.dialects.engine.connections import SerialConnections
 from etl_craft.dialects.engine.sqlite.audit import refresh_metadata_triggers
 
@@ -98,6 +99,7 @@ class SqliteEngineDialect(EngineDialect):
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install this database's metadata capture and write guards."""
         refresh_metadata_triggers(conn)
+        refresh_sqlite(conn)
 
     def build_engine(
         self,

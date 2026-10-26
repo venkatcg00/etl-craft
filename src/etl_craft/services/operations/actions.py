@@ -500,7 +500,7 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     claims = sso_groups.set(ctx.sso_group_ids)
     try:
         with using(None), selected_project(ctx.project_id), admitted(ctx, name, request):
-            result = call(_project_settings(ctx, name, request), request)
+            result = call(project_settings(ctx, name, request), request)
             return (
                 visible_result(ctx, result)
                 if ACTIONS[name].scope == ActionScope.PIPELINE
@@ -510,7 +510,7 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
         sso_groups.reset(claims)
 
 
-def _project_settings(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
+def project_settings(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
     """Use approved project connections for operations that inspect warehouse resources."""
     if ctx.transport == Transport.LOCAL and not ctx.config.artifacts.store:
         return ctx

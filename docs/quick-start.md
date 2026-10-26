@@ -114,7 +114,7 @@ etl-craft generate-docs
   business rules and last runs.
 
 The data is in `warehouse.duckdb`, in the `lnd`, `prs`, `ds`, `cdc`, `pre_dm` and `dm` schemas,
-and after every run the Engine DB's tables are cloned into its `aud` schema.
+and on its own schedule the Engine DB's tables are cloned into its `aud` schema.
 
 ## Next
 

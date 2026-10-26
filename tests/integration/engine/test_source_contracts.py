@@ -46,9 +46,11 @@ def test_conversion_preserves_ids_stamps_and_old_evidence(legacy_sources_db, tmp
         rows = conn.execute(
             text("SELECT * FROM CFG_SOURCE_COLUMNS ORDER BY SOURCE_COLUMN_ID")
         ).all()
-        history = conn.execute(
-            text("SELECT * FROM AUD_CFG_SOURCE_COLUMNS_HISTORY ORDER BY CHANGE_ID")
-        ).all()
+        history = (
+            conn.execute(text("SELECT * FROM AUD_CFG_SOURCE_COLUMNS_HISTORY ORDER BY CHANGE_ID"))
+            .mappings()
+            .all()
+        )
         evidence = conn.execute(
             text("SELECT * FROM AUD_METADATA_CHANGES WHERE TABLE_NAME='CFG_SOURCE_COLUMNS'")
         ).all()
@@ -75,12 +77,15 @@ def test_conversion_preserves_ids_stamps_and_old_evidence(legacy_sources_db, tmp
                 " ORDER BY COLUMN_ID"
             )
         ).all() == [(row[0], *row[2:]) for row in rows]
-        assert (
-            conn.execute(
-                text("SELECT * FROM AUD_CFG_SOURCE_COLUMNS_HISTORY ORDER BY CHANGE_ID")
-            ).all()
-            == history
+        retained = (
+            conn.execute(text("SELECT * FROM AUD_CFG_SOURCE_COLUMNS_HISTORY ORDER BY CHANGE_ID"))
+            .mappings()
+            .all()
         )
+        assert [
+            {key: row[key] for key in original}
+            for row, original in zip(retained, history, strict=True)
+        ] == history
         assert (
             conn.execute(
                 text("SELECT * FROM AUD_METADATA_CHANGES WHERE TABLE_NAME='CFG_SOURCE_COLUMNS'")

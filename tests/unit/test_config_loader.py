@@ -1048,3 +1048,29 @@ def test_warehouse_query_limit_is_selected_with_the_warehouse_profile(tmp_path, 
         warehouse["Max_warehouse_queries"] = limit
     path = _write(tmp_path, _minimal(Warehouse=warehouse))
     assert load_config(path).max_warehouse_queries == limit
+
+
+def test_cloning_schedule_defaults_and_explicit_settings(tmp_path):
+    raw = _minimal(Cloning={"Enabled": True})
+    default = load_config(_write(tmp_path, raw)).cloning
+    assert default.every_minutes == 15 and default.lock_wait_seconds == 60
+    raw["Cloning"].update(Every_minutes=7, Lock_wait_seconds=3)
+    selected = load_config(_write(tmp_path, raw)).cloning
+    assert selected.every_minutes == 7 and selected.lock_wait_seconds == 3
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("Every_minutes", 0),
+        ("Every_minutes", True),
+        ("Lock_wait_seconds", -1),
+        ("Lock_wait_seconds", 1.5),
+    ],
+)
+def test_cloning_schedule_refuses_invalid_values(tmp_path, key, value):
+    with pytest.raises(ConfigurationError) as error:
+        load_config(_write(tmp_path, _minimal(Cloning={key: value})))
+    message = str(error.value)
+    assert f"Cloning.{key}" in message and repr(value) in message
+    assert "whole number" in message

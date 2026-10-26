@@ -472,3 +472,55 @@ ETL_CRAFT_REQUIRE_SERVICES=1 uv run pytest -q tests/acceptance/retention_volume.
 
 It purges one million PostgreSQL attempts within five minutes and finishes a real pipeline
 while the first deletion transaction is still open.
+
+## Incremental warehouse mirrors
+
+Enable `Cloning` for a warehouse profile whose schema already exists. `Scope` remains `CFG`,
+`AUD`, `ALL` or `NONE`; team-owned config tables and credential columns are excluded as before.
+The controller checks its existing maintenance loop for due projects. `Every_minutes` defaults
+to 15 (1–525600 whole minutes). It uses each project's latest approved connection definitions;
+without a bundle, only the controller's own project can use its local connector. Start a
+controller for periodic clones; standalone `run` never clones during finalization.
+`etl-craft clone` still requests an immediate clone.
+
+```yaml
+Cloning:
+  Enabled: true
+  Scope: ALL
+  Every_minutes: 15
+  Lock_wait_seconds: 60
+```
+
+One clone holds the existing Engine DB clone lock. Missed schedule ticks coalesce into one
+cycle; they never form a backlog. A manual request covered by a cycle that finishes while it
+waits also coalesces. `Lock_wait_seconds` defaults to 60 (1–3600 whole seconds). On expiry the
+cycle skips, logging the lock, configured wait and next-cycle remedy, and recording the skip in
+`AUD_ACTIONS`. A clone failure leaves run outcomes unchanged and is retried at the next cycle;
+manual clone failures name the source table, mirror and recovery action.
+
+The first clone after upgrading does a full copy of each selected table, preserving existing
+mirror objects and views. Config tables continue to refresh in full. Subsequent audit copies
+read and upsert only changed primary keys, in bounded batches. Mutable audit rows gain
+`UPDATED_AT`: transitions and other engine writes are stamped by database triggers. Existing
+SQLite rows backfill to the UTC epoch; PostgreSQL backfills to upgrade transaction time. Both
+are covered by the mandatory first full copy. Append-only rows need no update timestamp.
+
+`AUD_CLONE_STATE` stores the destination/table baseline checkpoint; `AUD_CLONE_CHANGES` stores
+pending primary keys with opaque versions. Both are internal and excluded from mirrors.
+Gate waits use their existing unique run/task/kind identity, including a NULL task for a
+pipeline-level wait. Clone timestamps are excluded from metadata-history JSON.
+Changes are recorded in the source transaction, including insertions and retention deletions.
+A version is acknowledged only after its mirror commit. A concurrent update replaces that
+version, so acknowledging the older copy cannot discard it. A long transaction that commits
+later remains pending even when its timestamp or primary key precedes a completed cycle.
+There is no finite overlap window that could silently miss such a transaction.
+
+A crash between warehouse commit and acknowledgement replays an idempotent key replacement;
+no new row identity is allocated in the mirror. Source purges delete those exact mirror keys on
+the next clone. Retention's active/history protections therefore also govern the mirror: age
+alone does not remove a source row that S6.A retains. Dropping a mirror or adding source columns
+requires a new full baseline. Tables are never dropped by cloning. Removed source columns stay
+in the mirror and are NULL on rows subsequently refreshed.
+
+Managed Engine DB cloning stays refused: set `Cloning.Enabled: false`, because platform tools
+can already read those audit tables directly.
