@@ -12,7 +12,7 @@ back it up like any database that matters.
 
 The `CFG_` rows are best also kept as the SQL that writes them, in version control, so a pipeline
 change is reviewed like code. [Cloning](cloning.md) copies the Engine DB tables into the
-warehouse after every run, which gives analysts the history, but it is a copy, not a backup.
+warehouse on its own schedule, which gives analysts the history, but it is a copy, not a backup.
 
 The **warehouse** holds your data; back it up as your platform does. etl-craft keeps no copy of
 it.

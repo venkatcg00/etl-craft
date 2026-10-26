@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from etl_craft.controller.cloning import clone_due
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import ActionName
 from etl_craft.engine.queries import statement
@@ -27,6 +28,7 @@ class RetentionSchedule:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="etl-craft-retention")
         self.work: Future[None] | None = None
         self.next_check: datetime | None = None
+        self.clone_deadlines: dict[int, datetime] = {}
 
     def refresh(self, ctx: OperationContext, now: datetime, stop: threading.Event) -> None:
         """Retry log publication and failed purge days without blocking supervision."""
@@ -43,11 +45,23 @@ class RetentionSchedule:
         if self.next_check is not None and now < self.next_check:
             return
         self.next_check = now + timedelta(minutes=1)
-        self.work = self.executor.submit(contextvars.copy_context().run, purge_due, ctx, now, stop)
+        self.work = self.executor.submit(
+            contextvars.copy_context().run, maintain, ctx, now, stop, self.clone_deadlines
+        )
 
     def close(self) -> None:
         """Finish admitted maintenance before releasing controller leadership."""
         self.executor.shutdown(wait=True)
+
+
+def maintain(
+    ctx: OperationContext, now: datetime, stop: threading.Event, deadlines: dict[int, datetime]
+) -> None:
+    """Share the maintenance worker; coalesce elapsed clone ticks rather than queueing them."""
+    try:
+        purge_due(ctx, now, stop)
+    finally:
+        clone_due(ctx, now, stop, deadlines)
 
 
 def purge_due(ctx: OperationContext, now: datetime, stop: threading.Event) -> None:

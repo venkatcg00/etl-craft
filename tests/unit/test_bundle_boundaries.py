@@ -217,7 +217,7 @@ def test_resolved_host_values_never_escape_bundle_validation(tmp_path, monkeypat
         assert part in str(caught.value)
 
 
-def test_finalization_uses_pinned_cloning_even_when_bootstrap_cloning_is_off(tmp_path, monkeypatch):
+def test_finalization_never_loads_or_clones_a_pinned_warehouse(tmp_path, monkeypatch):
     from dataclasses import replace
 
     from etl_craft.config import CloningConfig
@@ -237,8 +237,10 @@ def test_finalization_uses_pinned_cloning_even_when_bootstrap_cloning_is_off(tmp
 
     monkeypatch.setattr("etl_craft.execution.bundle_files.run_config", retained)
     monkeypatch.setattr(cloning, "clone", lambda engine, selected: cloned.append(selected) or [])
-    cloning.run_hooks(host, None).on_finalized(PipelineOutcome(RunStatus.SUCCESS, "done", 7))
-    assert loaded == [7] and cloned == [pinned]
+    hooks = cloning.run_hooks(host, None)
+    if hooks.on_finalized is not None:
+        hooks.on_finalized(PipelineOutcome(RunStatus.SUCCESS, "done", 7))
+    assert loaded == [] and cloned == []
 
 
 def test_sla_email_uses_pinned_email_settings_and_enforcement(tmp_path, monkeypatch):

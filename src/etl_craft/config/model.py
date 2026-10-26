@@ -112,6 +112,8 @@ class CloningConfig:
     scope: CloningScope = CloningScope.CFG
     external_volume: str = ""
     base_location: str = ""
+    every_minutes: int = 15
+    lock_wait_seconds: int = 60
 
 
 @dataclass(frozen=True)

@@ -45,6 +45,10 @@ VALUES = {
     "use_bundles": False,
     "event_wait": False,
     "manifest": "{}",
+    "mirror_id": "plan-mirror",
+    "row_key": "[1]",
+    "signature": "schema",
+    "version": "version",
     **dict.fromkeys(
         (
             "warehouse_limit",
@@ -147,6 +151,8 @@ def bindings(sql, name=""):
         "lineage_cache_edges": {"confirmed_keys": [(1, "plan")]},
         "clear_rule_results": {"keys": ["key_1"]},
         "control_event_probes": {"keys": [1, 2]},
+        "insert_task_documentation": {"version": 1},
+        "save_target_hash_version": {"version": 1},
         "item_report": {"report_id": "plan-report"},
         "item_latest": {"key": "one"},
         "item_insert": {"key": "one", "number": 1, "report_id": "plan-report"},
@@ -273,6 +279,10 @@ FULL_READS = {
         "clone_project_scope",
         "cfg_pipelines",
     ): "Exports every pipeline in the selected project to the warehouse mirror.",
+    (
+        "clone_projects",
+        "aud_project_bundles",
+    ): "Enumerates every project whose current connection bundle was approved.",
     (
         "config_rows_pipelines",
         "cfg_pipelines",

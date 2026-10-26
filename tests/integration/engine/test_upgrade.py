@@ -42,6 +42,14 @@ def test_an_earlier_engine_db_upgrades_to_the_current_schema(
         engine, project_default=tmp_path / "migrations", warehouse_dialect="duckdb"
     )
     upgrade_ended = datetime.now(UTC)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_CLONE_STATE")).scalar_one() == 0
+        assert (
+            conn.execute(
+                text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG WHERE UPDATED_AT IS NULL")
+            ).scalar_one()
+            == 0
+        )
     assert {"AUD_TASK_EVENTS", "AUD_EVENT_FILES", "AUD_EVENT_KEYS"} <= {
         name.upper() for name in inspect(engine).get_table_names()
     }

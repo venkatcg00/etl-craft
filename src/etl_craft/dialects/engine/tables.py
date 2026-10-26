@@ -22,6 +22,8 @@ CONFIG_TABLES = frozenset(
 
 AUDIT_TABLES = frozenset(
     {
+        "AUD_CLONE_STATE",
+        "AUD_CLONE_CHANGES",
         "AUD_PIPELINES_RUN_LOG",
         "AUD_TASK_RUN_LOG",
         "AUD_RUN_INTERVENTIONS",

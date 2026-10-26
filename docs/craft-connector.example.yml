@@ -190,8 +190,10 @@ Warehouse:
     Auth_mode: WAREHOUSE_AUTH_MODE     # variable
     Secret: WAREHOUSE_SECRET           # variable, required: a secret is never used as written
 
-# Optional. Mirrors Engine DB tables into the warehouse after each pipeline run.
+# Optional. Mirrors Engine DB tables into the warehouse on the controller's independent schedule.
 Cloning:
+  Every_minutes: 15                    # independent controller schedule
+  Lock_wait_seconds: 60                # skip a cycle if another clone remains active
   # Profile: prod
   dev:
     Enabled: false                     # value — default false

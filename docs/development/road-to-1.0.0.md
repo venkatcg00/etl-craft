@@ -160,6 +160,7 @@ item's text, or work done early under another item.
 | S6.B Logs outside the Engine DB | Done | #254 | Full external logs, byte tails, stored/live streams and retention |
 | S6.C Catalog at scale | Done | #168 | Bulk catalog reads, bounded indexed history, incremental page manifest and separate logical-run KPIs |
 | S6.D Business rules that don't re-check everything | Done | #256 | Complete scoped SELECTs, one check per rule, serialized unique flags and per-project upgrades |
+| S6.E Cloning that keeps up | Done | #258 | Scheduled incremental audit mirrors, exact-version recovery and bounded coalesced locking |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
@@ -169,6 +170,7 @@ item's text, or work done early under another item.
 | S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
 | S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
+| S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -336,6 +338,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S6.E acceptance runs incremental insert/update/purge equality and changed-row copy volume on all
+four local warehouses, real controller-loss recovery on both Engine DBs, every released-schema
+upgrade with real rows, and twenty rounds of lock/coalescing races. Databricks and Snowflake each
+run one live incremental cloning acceptance; any provider unavailability is recorded in PR #258.
 
 S6.D validates complete-query shapes, scoped/forced clearing, output-key errors and counts on
 all four local warehouses, plus live Databricks and Snowflake. Both Engine DBs cover real-row
@@ -765,6 +772,23 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S6.E's derived Done when is: cloning runs only on its independent controller schedule with
+  coalesced requests and a bounded recorded lock skip; the first post-upgrade copy is full and
+  later audit copies are proportional to transactional changed keys, including late commits and
+  retention deletions; fresh and every released upgrade match in both Engine DBs; managed Engine
+  DB cloning remains refused. The owner approved `AUD_CLONE_STATE` and `AUD_CLONE_CHANGES` after
+  the implementation stopped with the required design note. They store per-destination/table
+  baselines and exact pending key versions, and are excluded from mirrors.
+- S6.E records changes transactionally instead of using a finite timestamp overlap. A mirror
+  commit acknowledges only the exact version copied, so a transaction that commits late remains
+  pending and a concurrent replacement cannot be erased by an older acknowledgement. Mutable
+  audit rows receive database-maintained `UPDATED_AT` stamps on both Engine DBs; this covers
+  transition and non-transition writers consistently. Append-only rows use their primary keys
+  through the same dirty-key ledger. Config tables retain their existing full scoped refresh.
+- At the owner's request, this implementation PR also records the plan-only S7.AE Pipeline
+  samples decision, its Planned Progress row and the Appendix B replacement. It adds no S7.AE
+  runtime code.
 
 - S6.D reuses the merged marker registry and both check timings, existing per-rule/task-run
   rows, retry/sequence handling, explicit force path, empty-task refusal and 1,000-key Engine DB
@@ -7482,6 +7506,49 @@ refreshes a report has no source position and no loaded rows.
 *Done when:* every Python task declares its kind, utility scripts carry no offset and no
 invented row counts, and ingestion scripts behave exactly as before.
 
+### S7.AE Pipeline samples
+
+Owner decision, 2026-10-26. Branch: `feat/services-pipeline-samples`. Samples are optional
+whole-pipeline tests, like dbt tests but through every step: mock source data goes in at the
+ingestion tasks and expected rows are compared at the end. They check wiring and regressions;
+they cannot prove the logic right for data nobody anticipated, which stays the job of business
+rules on real data.
+
+- *Command.* `etl-craft samples run [--pipeline P] [--case C] [--keep | --keep-on-failure]`.
+  It runs in CI before deploy and exits non-zero on any failed case, so the deploy job never
+  runs; nothing runs samples on a schedule or inside `config apply`. Projects may have samples
+  or not.
+- *Inputs.* `samples/<case>/inputs/<task_code>.csv`, one per ingestion task the case needs: the
+  file is written to that task's target table and the task is not run. Every other task runs for
+  real. A header-only file means no data. A case may give tables' starting state in
+  `given/<table>.csv` (merges into existing rows, event-wait signal rows). An ingestion task in
+  the run with no input file fails the case.
+- *Scope.* Nothing is tested in isolation: the case runs its pipeline end to end and then every
+  dependent pipeline (pipeline dependencies, triggered pipelines, and pipelines naming it in
+  `WATERMARK_SOURCE_PIPELINES`), each once, in dependency order, ignoring schedules.
+- *Expected.* `expected/<table>.csv` per table after the run and `expected/rules.csv` for rule
+  results. Declared columns only, typed from `columns.csv`, order-independent; engine columns
+  ignored. Numbered steps (`1/`, `2/`) run several loads in order.
+- *Isolation.* A throwaway SQLite Engine DB created by the command with the project's config
+  applied, and a separate warehouse connection, `Samples.Warehouse` in `craft-connector.yml`,
+  pointing to a sample database or catalog with the production schema names, created by the
+  team. No SQL is rewritten; SQL that names a database or catalog explicitly is refused in a
+  sample run with its file and line. `UTILITY` Python tasks (S7.AD) are skipped and reported;
+  email alerts are recorded, not sent.
+- *Every run starts clean.* Each run drops and recreates every table its pipelines touch in the
+  sample warehouse and creates a new Engine DB, whatever was left from an earlier run.
+- *After a run.* By default every table and the Engine DB are removed. `--keep` keeps them;
+  `--keep-on-failure` keeps them only when a case fails. The report names where they are kept.
+  Two runs against one sample warehouse collide; CI serializes them.
+- *Report.* Per case: pass or fail, per table missing, extra and differing rows with the
+  columns that differ, rule results, and the tasks and rules the case exercised. JSON output
+  for CI.
+- S8.C's CI runs the Support Insights samples before deploy; S8.H covers them.
+
+*Done when:* a case runs its pipelines and dependents end to end from input files, compares
+every expected table and rule result, starts clean every time, honours both keep options, and
+CI can gate a deploy on it.
+
 ## Release candidate: the Support Insights example
 
 **Goal.** Prove 1.0.0 on a real project before it is released. The
@@ -8139,7 +8206,7 @@ change it only by updating this table and the documentation together.
 | Views | `CREATE_VIEW` replaces only views, never a table; a secure view is created only where the warehouse has one (Snowflake, PostgreSQL), and refused elsewhere rather than created as an ordinary view | SQL views |
 | Authoring pipelines | SQL files plus explicit `CFG_` rows, kept as one CSV file per `CFG_` table in `config/` and merged by key with `etl-craft config apply`; `ACTIVE_FLAG` switches rows off and on, and rows keep their ids. Project migrations write the same rows with SQL. No dbt models or Jinja, and no template language beyond `$$` | Non-goals; Configuration files guide |
 | DuckDB's SQLAlchemy dialect | A core dependency, the one exception to optional warehouse extras: DuckDB is the default local warehouse of the quick start, the demo and the tests, so `pip install etl-craft` runs a whole local deployment. Engine code never imports it; SQLAlchemy loads it from the `duckdb:` URL | S4.I.6 |
-| Pipeline tests on sample data | Not added: fixtures are written to pass; business rules on real data and the dev environment profile test the real pipeline | Business rules; environment profiles |
+| Pipeline samples | Added as S7.AE (owner, 2026-10-26): optional CI tests through whole pipelines; they check wiring and regressions, not correctness on real data | Business rules on real data remain the correctness check |
 | Approval gates | Not added: operator overrides already audit actor and reason; config changes are reviewed in pull requests | Operator controls; config apply |
 | Built-in row-count drop checks | Not added: volumes vary; business rules express the checks a team needs | Business rules |
 | Support bundle | Not added: gathering confidential business data into one file for external sharing is unsafe; reporters share `--version`, `doctor` and chosen excerpts | Support guidance |

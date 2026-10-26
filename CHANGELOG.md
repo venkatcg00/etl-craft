@@ -6,6 +6,15 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Cloning runs on the controller's own schedule (`Cloning.Every_minutes`, default 15),
+  outside pipeline finalization. Concurrent requests coalesce; `Cloning.Lock_wait_seconds`
+  (default 60) bounds lock waits and records skipped cycles. Manual `clone` stays available.
+- Audit mirrors copy changed keys incrementally after one full baseline following upgrade.
+  Mutable audit rows gain `UPDATED_AT`, and transactional clone checkpoints/pending keys keep
+  late commits and crash retries safe. Actual retention purges propagate exact deletions;
+  retained active history stays mirrored. Config mirrors still refresh in full, and managed
+  Engine DB cloning remains refused. Run `migrate` before starting the upgraded controller.
+
 - `migrate --project-config PATH` is repeatable for other projects sharing the selected Engine
   DB (`MigrateInput.project_configs` in the shared operation). Rule conversion requires each
   project's own Warehouse dialect before any pending upgrade writes; missing, duplicate,

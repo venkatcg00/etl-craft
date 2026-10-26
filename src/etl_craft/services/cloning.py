@@ -1,26 +1,4 @@
-"""Cloning: copying the Engine DB tables into the warehouse after each pipeline run.
-
-With ``Cloning.Enabled``, every run ends by mirroring the Engine DB tables its ``Scope`` names
-(``cfg``: package config, ``aud``: audit tables, ``all``, or ``none``) into the
-warehouse profile's ``schema``, so a team can query its pipelines' configuration and history
-from inside its own warehouse.
-
-Each mirror has the Engine DB table's name and columns, with portable types: whole numbers
-``BIGINT``, other numbers ``DECIMAL(38, 10)``, timestamps the warehouse's timestamp with time
-zone, and everything else text; JSON values are copied as their text. A mirror is created when
-it is missing, and its rows replaced on every clone, one transaction per table where the
-warehouse has them, many rows to an INSERT. A mirror is never dropped, so views built on it keep
-working: a column an upgrade adds to the Engine DB table is added to the mirror, and a column
-the mirror has that the Engine DB table no longer does is left in place, NULL in every row.
-
-Cloning writes only the mirrors, and only in the warehouse profile's schema, which must already
-exist. It refuses a warehouse schema that is the Engine DB's own, where it would empty the
-tables it reads. Two clones never overlap: the second waits, then copies the newer state.
-
-After a run, a failed clone is logged with its cause and does not change how the run ended;
-``etl-craft clone`` runs it by hand and fails with the cause (``CloningError``, naming the
-table).
-"""
+"""Scheduled or explicit incremental mirrors of retained, project-scoped Engine DB state."""
 
 from __future__ import annotations
 
@@ -28,8 +6,9 @@ import json
 import logging
 import time
 from collections.abc import Iterator, Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -41,17 +20,22 @@ from sqlalchemy.types import TypeEngine
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.managed_engine import managed_cloning_problem
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import CloningScope
-from etl_craft.core.errors import CloningError, ConfigurationError
-from etl_craft.core.text import parse_jdbc_url, qualify
+from etl_craft.core.enums import ActionName, ActionOutcome, CloningScope
+from etl_craft.core.errors import CloningError, ConfigurationError, LockTimeoutError
+from etl_craft.core.faults import fault_point
+from etl_craft.core.text import parse_jdbc_url, qualify, sha256_hex
 from etl_craft.dialects.engine import for_engine
+from etl_craft.dialects.engine.cloning import INTERNAL, changed_statement
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.engine.tables import CONFIG_TABLES
 from etl_craft.dialects.warehouse import WarehouseDialect
-from etl_craft.dialects.warehouse.copying import MAX_BOUND_VALUES, insert_rows
-from etl_craft.engine import locks
+from etl_craft.dialects.warehouse.cloning import replace_keys, write_rows
+from etl_craft.dialects.warehouse.copying import MAX_BOUND_VALUES
+from etl_craft.engine import locks, resource_locks
+from etl_craft.engine.audit import ActionRequest
+from etl_craft.engine.cloning import CloneState
 from etl_craft.engine.repository.pipelines import current_project_id
-from etl_craft.execution.run_types import PipelineOutcome, RunHooks, default_hooks
+from etl_craft.execution.run_types import RunHooks, default_hooks
 from etl_craft.handlers.resources import LocalLocker
 from etl_craft.warehouse.connection import open_warehouse, warehouse_dialect
 
@@ -135,47 +119,58 @@ def clone(engine: Engine, config: ConnectorConfig) -> list[ClonedTable]:
     catalog = active_catalog(config)
     schema = config.warehouse.schema
     cloned: list[ClonedTable] = []
-    with locks.CLONE.hold(engine), open_warehouse(config, LocalLocker(engine, config)) as warehouse:
+    requested = datetime.now(UTC)
+    cycle = CloneState(
+        sha256_hex(f"{current_project_id()}:{config.warehouse}:{cloning.scope}:cycle".encode()), "*"
+    )
+    locker = LocalLocker(engine, config)
+    waiting = time.monotonic()
+    with ExitStack() as held:
+        try:
+            held.enter_context(locks.CLONE.hold(engine, cloning.lock_wait_seconds))
+            warehouse = held.enter_context(open_warehouse(config, locker))
+            with warehouse.connect():
+                pass
+            remaining = max(0.001, cloning.lock_wait_seconds - (time.monotonic() - waiting))
+            held.enter_context(
+                locks.ResourceLock(locks.CLONE.name, locks.CLONE.key).hold(locker, remaining)
+            )
+        except LockTimeoutError:
+            message = (
+                f"clone skipped: lock 'clone' remained held for Cloning.Lock_wait_seconds="
+                f"{cloning.lock_wait_seconds}; expected exclusive ownership; "
+                "the next scheduled cycle will retry"
+            )
+            logger.warning(message)
+            ActionRequest(
+                ActionName.CLONE,
+                {"skip": message},
+                datetime.now(UTC),
+                engine=engine,
+                outcome=ActionOutcome.SUCCESS,
+                project_id=current_project_id(),
+            ).record()
+            return []
+        if cycle.finished_since(engine, requested):
+            logger.info("clone coalesced: another cycle completed while this request waited")
+            return []
+        cycle = replace(cycle, holder=resource_locks.current_holder(locker.identity))
+        cycle.register(engine)
         for table, columns in _engine_tables(engine, config, PREFIXES[cloning.scope]):
             mirror = qualify(f"{schema}.{table}", catalog)
             cloned.append(_clone_table(engine, warehouse, dialect, config, table, mirror, columns))
+        cycle.complete(engine)
     return cloned
 
 
 def run_hooks(config: ConnectorConfig, engine: Engine) -> RunHooks:
-    """Compose child admission checks, SLA/finalization hooks and optional post-run cloning."""
+    """Compose child admission and finalization hooks without warehouse cloning."""
     from etl_craft.services.operations.child_admission import check_child_start
 
-    hooks = replace(
+    return replace(
         default_hooks(config, engine),
         before_admission=lambda conn, run_id: check_child_start(engine, config, conn, run_id),
     )
-    if not config.artifacts.store and (
-        not config.cloning.enabled or config.cloning.scope == CloningScope.NONE
-    ):
-        return hooks
-    before = hooks.on_finalized
-
-    def finalized(outcome: PipelineOutcome) -> None:
-        if before is not None:
-            before(outcome)
-        from etl_craft.execution.bundle_files import run_config
-
-        pinned = (
-            run_config(engine, config, outcome.pipeline_run_id)
-            if config.artifacts.store and outcome.pipeline_run_id is not None
-            else config
-        )
-        if not pinned.cloning.enabled or pinned.cloning.scope == CloningScope.NONE:
-            return
-        tables = clone(engine, pinned)
-        logger.info(
-            "cloned %d table(s), %d row(s), into the warehouse",
-            len(tables),
-            sum(t.rows for t in tables),
-        )
-
-    return replace(hooks, on_finalized=finalized)
 
 
 def _engine_tables(
@@ -188,7 +183,7 @@ def _engine_tables(
     for name in sorted(inspector.get_table_names(schema=schema), key=str.upper):
         if (
             name.upper().startswith(prefixes)
-            and name.upper() != "CFG_API_TOKENS"
+            and name.upper() not in INTERNAL | {"CFG_API_TOKENS"}
             and (not name.upper().startswith("CFG_") or name.upper() in CONFIG_TABLES)
         ):
             columns = [
@@ -230,44 +225,112 @@ def _clone_table(
 ) -> ClonedTable:
     started = time.monotonic()
     names = [name for name, _ in columns]
-    types = {name: mirror_type(kind, dialect) for name, kind in columns}
-    column_ddl = ", ".join(f"{name} {types[name]}" for name in names)
-    per_statement = max(1, MAX_BOUND_VALUES // len(names))
-    rows = 0
-    try:
-        with warehouse.begin() as conn:
-            existing = {name.upper() for name, _ in _mirror_columns(conn, dialect, mirror)}
-            if "_ETL_ARCHIVE_ENGINE_ID" in existing:
-                raise CloningError(
-                    f"{mirror}: immutable archive table; expected a replaceable mirror; "
-                    "choose another cloning schema"
-                )
-            created = not existing
-            added = () if created else tuple(n for n in names if n not in existing)
-            if created:
-                ddl = dialect.mirror_table_ddl(mirror, column_ddl, config.cloning)
-                conn.execute(text(ddl or f"CREATE TABLE {mirror} ({column_ddl})"))
-            else:
-                alter = f"{dialect.alter_table_keyword()} {mirror} ADD COLUMN"
-                for name in added:
-                    conn.execute(text(f"{alter} {name} {types[name]}"))
-                conn.execute(text(f"TRUNCATE TABLE {mirror}"))
-            for batch in _batches(engine, table, columns):
-                for start in range(0, len(batch), per_statement):
-                    chunk = batch[start : start + per_statement]
-                    conn.execute(*insert_rows(mirror, names, chunk))
-                rows += len(batch)
-    except SQLAlchemyError as error:
-        raise CloningError(f"cloning {table} into {mirror} failed: {error}") from error
-    logger.info(
-        "cloned %s into %s: %d row(s) in %.1fs%s",
+    identity = sha256_hex(f"{current_project_id()}:{mirror}:{config.warehouse}".encode())
+    state = CloneState(
+        identity,
         table,
-        mirror,
-        rows,
-        time.monotonic() - started,
-        " (created)" if created else (f" (added {', '.join(added)})" if added else ""),
+        resource_locks.current_holder("clone"),
+        sha256_hex(str([(name, str(kind)) for name, kind in columns]).encode()),
+    )
+    initialized = state.register(engine) if table.startswith("AUD_") else False
+    with engine.connect() as conn:
+        keys = [
+            str(k).upper()
+            for k in inspect(conn).get_pk_constraint(for_engine(conn).stored_name(table))[
+                "constrained_columns"
+            ]
+        ]
+    if table.startswith("AUD_") and not keys:
+        raise CloningError(
+            f"cloning {table} cannot track incremental changes: found no primary key; expected "
+            "a package audit-table primary key; add it through an Engine DB migration and retry"
+        )
+    try:
+        created, added = _prepare_mirror(warehouse, dialect, config, mirror, columns)
+        if not initialized or created or added:
+            with warehouse.begin() as conn:
+                conn.execute(text(f"TRUNCATE TABLE {mirror}"))
+                rows = 0
+                for batch in _batches(engine, table, columns):
+                    write_rows(conn, mirror, names, batch)
+                    rows += len(batch)
+            fault_point("clone.after_mirror_commit")
+        else:
+            rows = _incremental(engine, warehouse, state, (mirror, columns, keys))
+        if table.startswith("AUD_"):
+            state.complete(engine)
+    except SQLAlchemyError as error:
+        raise CloningError(
+            f"cloning {table} into {mirror} failed: {error}; expected a committed mirror "
+            "before acknowledging changes; restore the Engine DB/warehouse and retry clone"
+        ) from error
+    logger.info(
+        "cloned %s into %s: %d row(s) in %.1fs", table, mirror, rows, time.monotonic() - started
     )
     return ClonedTable(table, mirror, rows, created, added)
+
+
+def _prepare_mirror(
+    warehouse: Engine,
+    dialect: WarehouseDialect,
+    config: ConnectorConfig,
+    mirror: str,
+    columns: list[tuple[str, TypeEngine[Any]]],
+) -> tuple[bool, tuple[str, ...]]:
+    names = [name for name, _ in columns]
+    types = {name: mirror_type(kind, dialect) for name, kind in columns}
+    with warehouse.begin() as conn:
+        existing = {name.upper() for name, _ in _mirror_columns(conn, dialect, mirror)}
+        if "_ETL_ARCHIVE_ENGINE_ID" in existing:
+            raise CloningError(
+                f"{mirror}: immutable archive table; expected a replaceable mirror; "
+                "choose another cloning schema"
+            )
+        created = not existing
+        added = () if created else tuple(n for n in names if n not in existing)
+        if created:
+            column_ddl = ", ".join(f"{name} {types[name]}" for name in names)
+            ddl = dialect.mirror_table_ddl(mirror, column_ddl, config.cloning)
+            conn.execute(text(ddl or f"CREATE TABLE {mirror} ({column_ddl})"))
+        else:
+            for name in added:
+                conn.execute(
+                    text(
+                        f"{dialect.alter_table_keyword()} {mirror} ADD COLUMN {name} {types[name]}"
+                    )
+                )
+    return created, added
+
+
+def _incremental(
+    engine: Engine,
+    warehouse: Engine,
+    state: CloneState,
+    target: tuple[str, list[tuple[str, TypeEngine[Any]]], list[str]],
+) -> int:
+    mirror, columns, keys = target
+    names = [name for name, _ in columns]
+    size = min(BATCH_ROWS, MAX_BOUND_VALUES // max(1, len(keys)))
+    after = ""
+    rows = 0
+    while changes := state.pending(engine, after, size):
+        values = [json.loads(key) for key, _ in changes]
+        with engine.connect() as source:
+            query = changed_statement(
+                for_engine(source), state.table_name, names, keys, values
+            ).columns(*(column(name, kind) for name, kind in columns))
+            batch = [
+                tuple(_value(v) for v in row)
+                for row in source.execute(query, {"project_id": current_project_id()})
+            ]
+        with warehouse.begin() as destination:
+            replace_keys(destination, mirror, keys, values)
+            write_rows(destination, mirror, names, batch)
+        fault_point("clone.after_mirror_commit")
+        state.acknowledge(engine, changes)
+        rows += len(batch)
+        after = changes[-1][0]
+    return rows
 
 
 def _batches(
