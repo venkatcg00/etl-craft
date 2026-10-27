@@ -35,7 +35,13 @@ def project(cli_project, monkeypatch, cli_logging):
     identity = tokens.authenticate(bootstrap, os.environ["ETL_CRAFT_TOKEN"])
     ctx = replace(bootstrap, actor=identity.actor, role=identity.role)
     credentials = {
-        role: act(ctx, ActionName.TOKEN_CREATE, name="policy-" + role, role=role)
+        role: act(
+            ctx,
+            ActionName.TOKEN_CREATE,
+            name="policy-" + role,
+            role=role,
+            pool="default" if role == ApiRole.AGENT else None,
+        )
         for role in ApiRole
     }
     return p, ctx, credentials

@@ -47,7 +47,11 @@ def server(empty_engine_db, tmp_path, monkeypatch, cli_logging):
         invoke(admin, ActionName.ACCOUNT_ADD, add)
     service = {
         role: invoke(
-            admin, ActionName.TOKEN_CREATE, tokens.TokenCreate(name=f"ci-{role}", role=role)
+            admin,
+            ActionName.TOKEN_CREATE,
+            tokens.TokenCreate(
+                name=f"ci-{role}", role=role, pool="default" if role == ApiRole.AGENT else None
+            ),
         ).token
         for role in ApiRole
     }
@@ -200,6 +204,10 @@ def test_disabling_the_account_and_logging_out_revoke_its_server_session(
 def test_remote_reads_print_exactly_what_the_local_project_prints(server, monkeypatch, capsys):
     url = server["url"]
     with acting_as(SYSTEM_ACTOR), server["ctx"].engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_API_TOKENS SET LAST_USED_AT=:now"),
+            {"now": datetime.now(UTC)},
+        )
         conn.execute(
             text(
                 "UPDATE AUD_PIPELINES_RUN_LOG SET STATUS='SUCCESS', END_DATE=START_DATE "

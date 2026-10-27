@@ -10,11 +10,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
 
-def install_query_marker():
+def install_query_marker(path):
     """Mark entry to the long statement in a fresh task or probe interpreter."""
-    path = os.environ.get("ETL_CRAFT_TEST_QUERY_STARTED")
-    if not path:
-        return
 
     def started(conn, cursor, sql, parameters, context, many):
         if "cancel_slow" in sql.lower():

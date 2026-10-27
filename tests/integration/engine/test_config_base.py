@@ -75,10 +75,23 @@ def test_team_config_tables_do_not_need_the_package_base_contract(engine_db, tmp
         assert "CFG_PROJECT" in {name.upper() for name in inspect(conn).get_table_names()}
 
 
-def test_token_lifecycle_is_attributed_without_credentials(engine_db):
+def test_token_lifecycle_is_attributed_without_credentials(engine_db, monkeypatch):
+    import threading
+
+    used = threading.Event()
+    original = tokens._write_use
+
+    def write_use(*args):
+        try:
+            original(*args)
+        finally:
+            used.set()
+
+    monkeypatch.setattr(tokens, "_write_use", write_use)
     ctx = OperationContext(engine_db.engine, engine_db.config, ALICE, role=ApiRole.ADMIN)
     created = act(ctx, ActionName.TOKEN_CREATE, name="dashboard", role="viewer")
     assert tokens.authenticate(ctx, created.token)
+    assert used.wait(5)
     with acting_as(BOB), engine_db.engine.begin() as conn:
         conn.execute(text("UPDATE CFG_API_TOKENS SET ACTIVE_FLAG='N'"))
     assert tokens.authenticate(ctx, created.token) is None
@@ -104,6 +117,7 @@ def test_token_lifecycle_is_attributed_without_credentials(engine_db):
         ).all()
         assert [(r[0], r[2], r[3], r[4]) for r in rows] == [
             ("alice", "alice", "Y", "alice"),
+            ("alice", "dashboard", "Y", "dashboard"),
             ("alice", "bob", "N", "bob"),
             ("alice", "bob", "Y", "bob"),
             ("alice", "bob", "Y", "bob"),

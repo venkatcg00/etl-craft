@@ -265,6 +265,8 @@ def seeded_tables(db):
             for column in columns:
                 name = column["name"]
                 lower = name.lower()
+                if table.upper() == "CFG_API_TOKENS" and lower == "attempt_id":
+                    continue
                 if (
                     column.get("identity")
                     or column.get("autoincrement")
