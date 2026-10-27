@@ -502,3 +502,8 @@ def test_nested_argument_urls_keep_only_safe_connection_details(url, expected):
     from etl_craft.core.text import mask_arguments
 
     assert mask_arguments({"items": [{"url": url}]}) == {"items": [{"url": expected}]}
+
+
+def test_suggest_can_require_a_closest_name_without_changing_the_default():
+    assert text.suggest("zzzz", ["tasks.csv"]) == []
+    assert text.suggest("zzzz", ["tasks.csv"], cutoff=0, limit=1) == ["tasks.csv"]

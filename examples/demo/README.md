@@ -274,8 +274,8 @@ The script creates `demo_team_01` through `demo_team_10`, each with a `POOL_DEMO
 one `pool_demo.py` task, then runs each pipeline through the normal CLI. All ten use the Engine
 DB from that configuration. Existing projects and deployment pools are preserved. The generated
 CSV files are temporary; the project definitions and execution history remain in the Engine DB.
-Use these demo project names only for this example: reapplying their files retires other rows
-inside those same demo namespaces.
+Config files carry only changes: reapplying these files is a no-op and leaves other rows
+in each demo namespace untouched. Only explicit `ACTIVE_FLAG=N` retires a row.
 
 For another configuration path, copy `python_scripts/pool_demo.py` into that project's
 `python_scripts/` first. This example uses local execution without an artifact store; the

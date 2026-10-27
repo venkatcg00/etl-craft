@@ -37,7 +37,7 @@ def plan_config(ctx: OperationContext, request: ConfigDirectory) -> config_files
 
 
 def apply_config(ctx: OperationContext, request: ConfigDirectory) -> config_files.ConfigSync:
-    """Make the active ``CFG_`` rows match the config files, unless ``validate`` fails them."""
+    """Merge submitted ``CFG_`` changes, unless ``validate`` fails the result."""
     target = config_files.config_directory(ctx.config, request.config_dir)
     files = config_files.read_config_files(target)
     return config_files.sync_config(ctx.engine, ctx.config, files, apply=True)

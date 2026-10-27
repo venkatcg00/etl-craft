@@ -4,9 +4,8 @@
 DB. A project migration writes the same `CFG_` rows with SQL instead: a file in the project's
 `migrations/` folder, which `etl-craft migrate` applies once. Use migrations when a change is
 easier to say in SQL than in rows, such as copying a pipeline for a list of regions, and for
-the project's own tables. Keep a `CFG_` table in one place: `etl-craft config apply` retires
-active rows its files do not hold, so a project that keeps configuration files adds rows there,
-not in migrations.
+the project's own tables. Config files merge only the keys they contain; rows added by a
+migration remain unchanged unless a later file explicitly changes those keys.
 
 Each example below is a file in
 [`docs/examples/migrations/`](https://github.com/venkatcg00/etl-craft/tree/main/docs/examples/migrations),

@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Breaking: config files are optional change helpers. Missing rows or files no longer retire
+  metadata; submit `ACTIVE_FLAG=N` explicitly. Updates preserve omitted header fields, while
+  inserts use defaults. Unknown config CSV filenames are refused with a suggested known name.
+  References can use active metadata already in the Engine DB; export still writes full state.
+
+
 ### Changed
 
 - Project and pool administration now uses admin-only `project add|set|list|disable` and

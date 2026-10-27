@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Container
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -22,7 +23,9 @@ from etl_craft.engine.repository.config_rows import (
 )
 
 
-def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
+def row_problem(
+    table: ConfigTable, values: dict[str, Value], provided: Container[str] | None = None
+) -> str | None:
     """Return the remedy for an invalid row, before writing any config rows."""
     if table is OBJECT_TABLES:
         return _table_problem(values)
@@ -40,17 +43,25 @@ def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
         )
     if table is TASKS:
         schema, target = values["TARGET_SCHEMA_NAME"], values["TARGET_TABLE_NAME"]
-        if (schema is None) != (target is None) or (
-            schema is None and values["TARGET_CATALOG_NAME"] is not None
+        targets_given = provided is None or all(
+            key in provided
+            for key in ("TARGET_CATALOG_NAME", "TARGET_SCHEMA_NAME", "TARGET_TABLE_NAME")
+        )
+        if targets_given and (
+            (schema is None) != (target is None)
+            or (schema is None and values["TARGET_CATALOG_NAME"] is not None)
         ):
             return (
                 "a target needs both TARGET_SCHEMA_NAME and TARGET_TABLE_NAME; leave "
                 "all target components empty for a task without one"
             )
         condition, count = values["RUN_CONDITION"], values["RUN_CONDITION_COUNT"]
-        if condition == RunCondition.N and count is None:
+        conditions_given = provided is None or all(
+            key in provided for key in ("RUN_CONDITION", "RUN_CONDITION_COUNT")
+        )
+        if conditions_given and condition == RunCondition.N and count is None:
             return "RUN_CONDITION N needs a RUN_CONDITION_COUNT"
-        if condition != RunCondition.N and count is not None:
+        if conditions_given and condition != RunCondition.N and count is not None:
             return "RUN_CONDITION_COUNT goes with RUN_CONDITION N only; leave it empty"
     if (
         table is TASK_DEPENDENCIES

@@ -25,12 +25,22 @@ The files hold the selected project's pipeline metadata. An administrator create
 first with `etl-craft project add --project sales --reason "New team"`; config apply requires
 that project to exist. Dependency rows may set `DEPENDS_ON_PROJECT_CODE` for another project;
 an empty value selects this project. Applying them never retires another project's rows.
-There are four required files (pipelines, tasks, task_parameters, task_dependencies) and at most
-four more (tables, columns, business_rules, pipeline_dependencies). Other filenames are ignored.
+All eight files are optional. Submit any subset; a header-only file changes nothing. A folder
+with no known file fails with nothing to apply. Unknown CSV filenames are refused with a
+suggestion, so a misspelling cannot silently drop a change.
 
-The files are the whole configuration: every row of every table, active or not, each with an
-`ACTIVE_FLAG`. [`docs/examples/config/`](https://github.com/venkatcg00/etl-craft/tree/main/docs/examples/config)
-is a complete example to copy: three sales pipelines, with a fourth switched off.
+The Engine DB is the source of truth. Files are helpers carrying changes, not a complete
+snapshot. After deploying ten pipelines, a later deployment can contain only one new pipeline:
+
+```csv
+PIPELINE_CODE,PIPELINE_NAME,REFRESH_TYPE
+NEW_PIPELINE,New pipeline,FULL
+```
+
+Copy the [one-pipeline change](../examples/config-upserts/pipelines.csv) into
+`config/pipelines.csv`, then run `etl-craft config plan` and `etl-craft config apply`.
+Existing pipelines and their children stay unchanged. Export writes the full current state,
+including inactive rows, for inspection or bootstrapping an existing deployment's files.
 
 The Engine DB accepts writes only from etl-craft. A plain connection, such as the `sqlite3`
 shell, `psql`, a BI tool or a database's CSV import, is refused, so the files reach the tables
@@ -49,10 +59,9 @@ document (`etl-craft/config-sync/1`, or `etl-craft/config-export/1` from `export
 
 ```text
 $ etl-craft config plan
-config 6da809c4700d from /srv/sales/etl-craft/config: 6 change(s)
+config 6da809c4700d from /srv/sales/etl-craft/config: 5 change(s)
   retire     pipelines.csv              SALES_DAILY_EU  (ACTIVE_FLAG is N)
   insert     tasks.csv                  SALES_MART.archive
-  retire     task_parameters.csv        SALES_DAILY.load_orders DOCUMENTATION  (not in the file)
   update     task_parameters.csv        SALES_DAILY.fetch_orders RETRIES  (PARAMETER_VALUE: '2' -> '3')
   insert     task_parameters.csv        SALES_MART.archive SCRIPT_FILE
   insert     task_dependencies.csv      SALES_MART.archive on SALES_MART.publish SUCCESS
@@ -62,7 +71,7 @@ validate failed the result, so nothing was changed
 ```
 
 Setting the `SALES_MART on SALES_DAILY_EU` row of `pipeline_dependencies.csv` to `N`, and adding
-an `ALWAYS` dependency of `alert` on `archive`, makes the plan pass; `apply` then makes the eight
+an `ALWAYS` dependency of `alert` on `archive`, makes the plan pass; `apply` then makes the seven
 changes.
 
 ## How the merge works
@@ -94,8 +103,8 @@ For each row of a file, `apply`:
 - **reactivates** the row, with the same id, when the file sets `ACTIVE_FLAG` back to `Y`;
 - **retires** the row (`ACTIVE_FLAG = 'N'`) when the file sets `ACTIVE_FLAG` to `N`.
 
-An active row that no file holds any more is retired too. Keep a row in its file with `N`
-rather than deleting it: the change is clearer in review, and setting it back to `Y` restores it.
+Rows absent from a file, and absent files, are untouched. Only an explicit `ACTIVE_FLAG=N`
+retires a stored key. A new key with `N` is refused because no row exists to retire.
 
 All configuration keys retain one row across retirement and reactivation. Column ordinals
 are unique among active columns of a table; retiring a column releases its ordinal, while
@@ -120,8 +129,9 @@ shows them.
 
 UTF-8 CSV, with a header row of column names in any order. A cell holding a comma, a quote or a
 line break is quoted, with each quote inside it doubled, as spreadsheets write CSV; SQL can span
-lines that way. An empty cell is NULL, or the column's default. Columns not marked required can
-be left out of the header, which gives every row their default.
+lines that way. An empty cell is NULL, or the column's default. Key columns must be present.
+Other columns may be omitted: updates preserve their stored values, while inserts use defaults
+and require any remaining mandatory values.
 
 | File | Columns (required in bold) | Defaults |
 |---|---|---|
@@ -148,11 +158,13 @@ Each handler's guide lists its task parameters. Values are written as follows:
   are whole numbers;
 - a task parameter's value is text, stored as written, JSON included.
 
-A row may name only pipelines and tasks its project's files hold: a task's pipeline must be in
-`pipelines.csv`, and both tasks of a dependency in `tasks.csv`, whatever their flags.
-A column, task target or business-rule target names its parent in `tables.csv`; active columns require an active parent.
-Table and column files may be omitted when no file references them, preserving existing contracts. A header-only
-column file retires its active columns. Retire those columns before retiring their parent.
+References resolve against the Engine DB plus the submitted changes. New or changed active
+rows require active parents; unchanged children remain untouched when a pipeline is disabled.
+Stored-only pipelines, tasks and tables need not be repeated in files. Column positions are
+checked against all stored active columns too. Moving a column into an occupied position
+requires explicitly moving or retiring the conflicting column. To retire a table, submit its
+active columns with `ACTIVE_FLAG=N` as well; columns retire first. Missing and header-only
+column files retire nothing.
 `OBJECT_KIND` accepts `TABLE`/`VIEW`; `IS_NULLABLE` accepts `Y`/`N`. Components are stored
 separately, and column rows hold a `TABLE_ID` foreign key rather than a repeated object name. Rules use
 `TARGET_TABLE_ID` on the existing rule row; changing the target keeps the rule ID.
@@ -238,11 +250,10 @@ request bot can post it.
 
 ## Configuration files and migrations
 
-[Configuration migrations](configuration-migrations.md) write the same tables with SQL. Keep a
-table in one place: `apply` retires active rows its files do not hold, so in a project with
-configuration files, a row a migration adds is retired by the next `apply` unless the files hold
-it too. Migrations stay the way to create and change the project's own tables, and the Engine
-DB's schema is upgraded by `etl-craft migrate`.
+[Configuration migrations](configuration-migrations.md) write the same tables with SQL.
+Rows they create remain untouched by later file deployments unless those keys are submitted.
+Migrations also create and change the project's own tables; `etl-craft migrate` upgrades the
+Engine DB schema.
 
 ### Upgrading rule targets
 
