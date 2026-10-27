@@ -5,17 +5,13 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from etl_craft.core.cron import timezone
 from etl_craft.core.enums import RunCondition
-from etl_craft.core.errors import MetadataError, MetadataFileError
-from etl_craft.core.tags import valid_tag
+from etl_craft.core.errors import MetadataFileError
 from etl_craft.core.text import is_metadata_code, is_safe_identifier
 from etl_craft.engine.repository.config_rows import (
     BUSINESS_RULES,
     OBJECT_TABLES,
     PIPELINE_DEPENDENCIES,
-    PIPELINE_GRANTS,
-    PROJECTS,
     SOURCE_COLUMNS,
     TASK_DEPENDENCIES,
     TASK_PARAMETERS,
@@ -28,12 +24,8 @@ from etl_craft.engine.repository.config_rows import (
 
 def row_problem(table: ConfigTable, values: dict[str, Value]) -> str | None:
     """Return the remedy for an invalid row, before writing any config rows."""
-    if table in (PROJECTS, PIPELINE_GRANTS, OBJECT_TABLES):
-        return {
-            PROJECTS.file: _project_problem,
-            PIPELINE_GRANTS.file: _grant_problem,
-            OBJECT_TABLES.file: _table_problem,
-        }[table.file](values)
+    if table is OBJECT_TABLES:
+        return _table_problem(values)
     if table in (SOURCE_COLUMNS, BUSINESS_RULES, TASKS) and (
         problem := _identifier_problem(table, values)
     ):
@@ -100,14 +92,6 @@ def _identifier_problem(table: ConfigTable, values: dict[str, Value]) -> str | N
     return None
 
 
-def _grant_problem(values: dict[str, Value]) -> str | None:
-    if (values["PIPELINE_CODE"] is None) == (values["TAG"] is None):
-        return "set exactly one of PIPELINE_CODE or TAG"
-    if values["TAG"] is not None and not valid_tag(values["TAG"]):
-        return f"TAG={values['TAG']!r}: expected a valid pipeline tag"
-    return None
-
-
 def parse_cell(column: Column, cell: str) -> Value:
     """Return a cell's value in its column's type; ``MetadataFileError`` says what was expected."""
     if cell == "":
@@ -171,12 +155,3 @@ def parse_object(cell: str) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise MetadataFileError("is not a JSON object; write it as {...}")
     return parsed
-
-
-def _project_problem(values: dict[str, Value]) -> str | None:
-    """Require an IANA timezone even when the project has no scheduled pipelines."""
-    try:
-        timezone(str(values["TIMEZONE"]))
-    except MetadataError as error:
-        return f"TIMEZONE={values['TIMEZONE']!r}: {error}; choose an IANA timezone"
-    return None

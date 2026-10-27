@@ -9,8 +9,6 @@ tables by key: change a file, review the change, and the deployment applies it.
 etl-craft/
 ├── craft-connector.yml
 ├── config/
-│   ├── projects.csv               CFG_PROJECTS
-│   ├── pools.csv                  CFG_POOLS
 │   ├── pipelines.csv              CFG_PIPELINES
 │   ├── tasks.csv                  CFG_TASKS
 │   ├── task_parameters.csv        CFG_TASK_PARAMETERS
@@ -23,10 +21,12 @@ etl-craft/
 └── python_scripts/
 ```
 
-The files are the selected project's whole configuration; `pools.csv` is deployment-wide.
-Project files contain exactly one `projects.csv` row. Dependency rows may set
-`DEPENDS_ON_PROJECT_CODE` for another project; an empty value selects this project.
-Applying them never retires another project's rows.
+The files hold the selected project's pipeline metadata. An administrator creates the project
+first with `etl-craft project add --project sales --reason "New team"`; config apply requires
+that project to exist. Dependency rows may set `DEPENDS_ON_PROJECT_CODE` for another project;
+an empty value selects this project. Applying them never retires another project's rows.
+There are four required files (pipelines, tasks, task_parameters, task_dependencies) and at most
+four more (tables, columns, business_rules, pipeline_dependencies). Other filenames are ignored.
 
 The files are the whole configuration: every row of every table, active or not, each with an
 `ACTIVE_FLAG`. [`docs/examples/config/`](https://github.com/venkatcg00/etl-craft/tree/main/docs/examples/config)
@@ -72,9 +72,6 @@ development, test and production.
 
 | File | Key |
 |---|---|
-| `grants.csv` | `GROUP_NAME`, `PIPELINE_CODE`, `TAG` (exactly one pipeline or tag) |
-| `projects.csv` | `PROJECT_CODE` (exactly the selected project) |
-| `pools.csv` | `POOL_NAME` |
 | `pipelines.csv` | `PIPELINE_CODE` |
 | `tasks.csv` | `PIPELINE_CODE`, `TASK_CODE` |
 | `task_parameters.csv` | `PIPELINE_CODE`, `TASK_CODE`, `PARAMETER_NAME` |
@@ -84,10 +81,10 @@ development, test and production.
 | `tables.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME` |
 | `columns.csv` | `CATALOG_NAME`, `SCHEMA_NAME`, `TABLE_NAME`, `COLUMN_NAME` |
 
-`pools.csv` holds `POOL_NAME`, `DESCRIPTION` and `ACTIVE_FLAG`. Keep the seeded `default`
-pool available. Tasks without `POOL` use their project's `DEFAULT_POOL`. Pipelines also have `MAX_PARALLEL_TASKS` (default 8)
-and `PRIORITY` (default 0). [Placement](../deploying/agents.md#pools-limits-and-resource-placement)
-explains resource requests, priorities and the shared warehouse limit.
+Administrators manage pools with `etl-craft pool add|set|list|disable`, each with `--reason`.
+Tasks without `POOL` use their project's `DEFAULT_POOL`. Pipelines also have
+`MAX_PARALLEL_TASKS` (default 8) and `PRIORITY` (default 0).
+[Placement](../deploying/agents.md#pools-limits-and-resource-placement) explains the limits.
 
 For each row of a file, `apply`:
 
@@ -263,11 +260,9 @@ rejected. Pending project SQL must write `TARGET_TABLE_ID`; already-applied migr
 must remain unchanged. Original tutorial files are retained under `legacy-migrations/`, and
 new projects use the current `*_contracts.sql` examples.
 
-## Pipeline grants
+## Pipeline permissions
 
-`grants.csv` holds `GROUP_NAME,PIPELINE_CODE,TAG,ROLE,ACTIVE_FLAG`. Create groups with the
-admin-only `group` commands first. Choose one pipeline code or tag per row and `viewer` or
-`operator` as the role. Changing grants through `config apply` requires admin; a developer's
-entire apply is refused, including changes in other files. The file must exist, like the pipeline/task files; an empty file with its header retires
-the existing grants. Export the configuration to create it when upgrading.
-See [Pipeline permission groups](../deploying/security.md#pipeline-permission-groups).
+Permission changes use `etl-craft access grant|revoke|list` and their API actions, independently
+of configuration deployment. See [Pipeline permission groups](../deploying/security.md#pipeline-permission-groups)
+and the [bulk command input](../examples/access.csv). Configuration export writes only the eight
+metadata files; it does not export administrator identities or permissions.

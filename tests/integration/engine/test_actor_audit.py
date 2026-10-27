@@ -17,10 +17,12 @@ from etl_craft.core.enums import (
     AccountKind,
     AgentCommand,
     AgentStatus,
+    ApiRole,
     AttemptStatus,
     ControlAcknowledgement,
     ControlAction,
     ControlStatus,
+    Permission,
     ProcessRole,
 )
 from etl_craft.engine import migrations, transitions
@@ -191,6 +193,8 @@ def seeded_tables(db):
             "current_flag": "Y",
             "table_id": contract,
             "role": "viewer",
+            "permission": Permission.CAN_VIEW,
+            "grantee_role": ApiRole.VIEWER,
             "account_kind": AccountKind.SERVICE,
             "token_sha256": "0" * 64,
             "pipeline_id": p1,

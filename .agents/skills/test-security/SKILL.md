@@ -38,8 +38,8 @@ tests: `test_permissions.py`, `test_pipeline_permissions.py`, `test_action_route
    as by code.
 5. A `RUN_PIPELINE` child is started only when the starter may operate it, with the retained SSO
    groups checked again at each child start.
-6. A non-admin `config apply` that touches `grants.csv`, accounts or tokens is refused as a
-   whole.
+6. Project config cannot change administrator identities or permissions. Bulk access changes
+   require admin; delegated changes require CAN_MANAGE on the exact securable.
 
 ### Tokens and sessions
 

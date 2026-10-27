@@ -67,12 +67,16 @@ def test_every_engine_db_table_is_described_and_read_whole(dialect):
             for line in body.splitlines()
             if re.match(r"^\s+[A-Z_][A-Z_0-9]*\s", line)
             and line.split()[0]
-            not in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}
+            not in {"CONSTRAINT", "CHECK", "CASE", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}
         ]
         dropped = re.findall(rf"ALTER TABLE {table.name} DROP COLUMN (\w+);", text)
         assert [c.name for c in table.columns] == [
             name for name in declared if name not in dropped
         ], table.name
+        if table.name in {"CFG_PIPELINE_GRANTS", "AUD_CFG_PIPELINE_GRANTS_HISTORY"}:
+            columns = {column.name for column in table.columns}
+            assert {"PERMISSION", "ACCOUNT_ID", "GRANTEE_ROLE"} <= columns
+            assert not {"ROLE", "CASE"} & columns
         if table.name == "CFG_BUSINESS_RULES":
             assert "TARGET_TABLE_ID" in [column.name for column in table.columns]
             assert "TARGET_TABLE" not in [column.name for column in table.columns]

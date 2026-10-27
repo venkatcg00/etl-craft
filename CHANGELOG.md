@@ -6,6 +6,16 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Project and pool administration now uses admin-only `project add|set|list|disable` and
+  `pool add|set|list|disable`, with a required reason. Configuration plan/apply/export no
+  longer reads or writes the three admin CSV files. Create the project before config apply.
+- Pipeline permission commands/API support group, account and deployment-role principals with
+  `CAN_VIEW`, `CAN_RUN` and `CAN_MANAGE`. The upgrade converts existing viewer/operator grants
+  and history to CAN_VIEW/CAN_RUN. CAN_MANAGE holders may delegate on their pipeline or tag;
+  bulk access files remain admin-only, transactional and available with a dry-run diff.
+
 - Document coordinated Engine DB/store backups, PostgreSQL restore and the drain/stop/migrate/
   restart upgrade procedure; rolling upgrades remain unsupported. Registration, claim and renewal
   retain their existing agent/API version refusal.

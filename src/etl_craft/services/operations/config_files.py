@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from etl_craft.core.enums import ApiRole
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
@@ -41,9 +40,7 @@ def apply_config(ctx: OperationContext, request: ConfigDirectory) -> config_file
     """Make the active ``CFG_`` rows match the config files, unless ``validate`` fails them."""
     target = config_files.config_directory(ctx.config, request.config_dir)
     files = config_files.read_config_files(target)
-    return config_files.sync_config(
-        ctx.engine, ctx.config, files, apply=True, allow_grants=ctx.role == ApiRole.ADMIN
-    )
+    return config_files.sync_config(ctx.engine, ctx.config, files, apply=True)
 
 
 def export_config(ctx: OperationContext, request: ConfigExportInput) -> config_files.ConfigExport:

@@ -72,18 +72,7 @@ def generate(root: Path, template: Path, scale: Scale) -> list[Path]:
 
 def project_rows(index: int, scale: Scale) -> dict[str, list[dict]]:
     """Use forward-only dependencies and spread daily schedules across all 1440 minutes."""
-    project = f"bench_{index:03d}"
     rows = {table.file: [] for table in TABLES}
-    rows["pools.csv"] = [{"POOL_NAME": "default", "DESCRIPTION": "Benchmark", "ACTIVE_FLAG": "Y"}]
-    rows["projects.csv"] = [
-        {
-            "PROJECT_CODE": project,
-            "PROJECT_NAME": project,
-            "TIMEZONE": "UTC",
-            "DEFAULT_POOL": "default",
-            "ACTIVE_FLAG": "Y",
-        }
-    ]
     for pipeline in range(scale.pipelines):
         code = f"P_{pipeline:03d}"
         minute = (index * scale.pipelines + pipeline) * 1440 // (scale.projects * scale.pipelines)

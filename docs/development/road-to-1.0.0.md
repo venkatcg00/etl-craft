@@ -165,9 +165,9 @@ item's text, or work done early under another item.
 | S6.G Backup, restore, upgrade and the load benchmark | Done | #260 | Restore recovery, coordinated upgrade procedure and manual load harness; reference gate deferred until after S8 |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
-| S7.Y Command-managed pipeline access | Planned | | Remove grants.csv before S7.A; admin access grant/revoke/list and atomic bulk input. |
+| S7.Y Command-managed pipeline access | In progress | #261 | Owner 2026-10-26: PR A: admin commands, principal-based permission levels and atomic bulk; PR B project isolation follows S7.AF. |
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
-| S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; projects and pools become admin commands; direct `CFG_` SQL edits in RELAXED projects |
+| S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; extend S7.Y project/pool commands; direct `CFG_` SQL edits in RELAXED projects |
 | S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
 | S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
@@ -340,6 +340,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.Y A exercises both Engine DBs, permission delegation, atomic bulk changes, the generated
+HTTP/CLI actions and upgrade conversion from every released schema. Same-identity grant/grant
+and grant/revoke races pass twenty local rounds. Semgrep scans the permission, CLI and generated
+API boundary; warehouse SQL and cloud dialects are unchanged. Project-isolation acceptance is B.
 
 S6.G covers PostgreSQL container-matched dump/restore recovery, committed-task preservation,
 agent registration/claim/renewal version refusals and controller tick measurements. A two-project
@@ -788,6 +793,17 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.Y A intentionally audits access/project/pool lists even though they use GET; ordinary
+  read actions remain unaudited. The reference generator follows rebuilds and column renames,
+  so it describes the actual migrated permission schema.
+- S7.Y A follows the owner's 2026-10-26 expanded scope and two-PR decision: projects/pools move
+  from S7.Z to admin commands now; group/account/deployment-role principals and three permission
+  levels replace the old group role. Existing rows and history convert. The owner explicitly
+  replaces the original obsolete-file refusal with ordinary unknown-file handling; S7.AF will
+  subsequently refuse unknown CSVs as part of the helper model. Bulk submits content for locked
+  server-side validation and diff, without a digest flag. Project isolation and shared acceptance
+  remain PR B, after the owner's intervening S7.AF. S7.Y stays In progress.
 
 - S6.G derives Done when from its three parts: coordinated database/store backup and documented
   restore order with a bounded real restore regression; supported non-rolling upgrade steps and
@@ -6232,8 +6248,59 @@ before 1.0.0.
 
 ### S7.Y Command-managed pipeline access
 
+Owner split decision, 2026-10-26: two implementation PRs under S7.Y. PR A delivers
+admin project/pool commands, permission levels and principals, the grants migration and removal
+of the three admin CSVs. Merge A before PR B (`feat/services-project-isolation`) starts from
+origin/main. B delivers project grants, default deny, project selection, protected catalog and
+isolation upgrade/rechecks. S7.Y remains In progress until both merge; shared acceptance points
+are checked only in B. The owner approved recording these decisions in the implementation PRs.
+
 Owner decision, 2026-10-25. Implement before S7.A, without waiting for S7.B. Access is identity,
 not pipeline metadata: nobody gains access because a config change was merged.
+
+
+**Owner decision, 2026-10-26.** Widen this item and record the plan with implementation; the later
+approved split makes this PR A of two under S7.Y. Remove grants, projects and pools from config mapping and examples;
+leftover files follow the existing unknown-file behavior, without a refusal or migration note.
+Move admin-only `project add|set|list|disable` and `pool add|set|list|disable` from S7.Z here,
+with reasons and audited actions/routes; config apply requires a pre-existing project.
+Permissions become `CAN_VIEW`, `CAN_RUN`, `CAN_MANAGE`, on a pipeline or tag within one project,
+for exactly one group, account or deployment-role principal (`viewer`/`operator`, including
+higher deployment roles). Effective access is the highest applicable level; open pipelines
+still use deployment roles and admins always have access. A manager may delegate any level on
+that pipeline, but tag delegation requires management of that tag. Keep `access grant|revoke|list`
+and their routes; single-row input selects group/role/account, pipeline/tag and permission.
+Bulk input is admin-only, with columns `PROJECT,GROUP_NAME,ROLE,PIPELINE_CODE,TAG,PERMISSION,ACTION`;
+account rows are refused with the single-account command remedy. The CLI sends content, never a
+path; the server validates and diffs current rows within one atomic apply transaction, with no
+digest flag. Dry-run shows the full diff. Migrate grants and history in both dialects, converting
+viewer/operator to CAN_VIEW/CAN_RUN, with exactly-one-principal checks and unique active grants;
+update the existing permission query and admitted-run rechecks for account and role grants.
+
+**Owner addition, 2026-10-26 — project isolation.** Projects are securables in the same grants
+table/history (pipeline and tag both empty), with the same principals and levels. Non-admins
+are denied projects without a project grant, with identical missing/not-permitted replies,
+including CLI/API, related details, logs, lineage and served catalog. Pipelines default to the
+project level; pipeline/tag grants may elevate only an account already able to view the project.
+Project CAN_MANAGE delegates any level within that project, never deployment administration.
+Upgrade adds viewer→CAN_VIEW and operator→CAN_RUN project grants for every existing project,
+preserving existing access; newly added projects start without grants. Admitted-run rechecks
+also require project access; inaccessible cross-project upstreams expose only project/pipeline
+codes and recorded decisions. Project selection requires --project or Orchestration.Project,
+never a silent default; init writes the explicit setting. Recommend one configured folder per
+project, never deriving its code from the folder. Project writes require explicit --project;
+set changes only supplied fields and refuses no fields; disable accepts identity/reason only.
+Validate existing column rules and refuse pool disable while active project/task references
+remain, naming them. Project add defaults its pool to default.
+
+*Project-isolation Done when:* all principal/level/project boundaries, masked missing-project
+replies, project/pipeline elevation, admitted-run revocation and upgrade preservation are tested;
+no project fallback remains, and project folders explicitly name their project.
+
+*Additional Done when:* all three admin CSV mappings are gone; project/pool commands replace
+them; every principal/level/securable and delegation boundary is tested; old rows/history
+convert without changing effective access; bulk is atomic and refuses accounts; grant races
+pass twenty local rounds. S7.Z adds environment/governance columns to these same commands.
 
 - Remove `grants.csv` from `config plan`, `apply` and `export` and their config-file mapping.
   A project that still contains it fails plan/apply with its path and the remedy: import the
@@ -6268,6 +6335,8 @@ Owner decisions, 2026-10-25. Branch: `feat/engine-environments`. Before S7.A; af
 whose removal of `grants.csv` this item repeats for projects and pools. The design is
 [Environments and governance](metadata-and-ui.md#environments-and-governance) and
 [Direct config edits](metadata-and-ui.md#direct-config-edits).
+
+Owner decision, 2026-10-26: projects and pools commands moved to S7.Y; S7.Z adds its columns to them.
 
 - `CFG_PROJECTS` gains `ENVIRONMENT_TYPE` (`DEV`, `SIT`, `UAT`, `PROD`, `SANDBOX`, `CUSTOM`),
   an optional `ENVIRONMENT_NAME` and `GOVERNANCE` (`STRICT` default, or `RELAXED`), with a check

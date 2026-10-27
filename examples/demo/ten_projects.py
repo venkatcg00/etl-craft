@@ -28,19 +28,20 @@ def run_demo(config: Path) -> tuple[str, ...]:
         template = root / "template"
         command(config, "--project", "default", "config", "export", "--config-dir", str(template))
         for project in projects:
+            command(
+                config,
+                "--project",
+                project,
+                "project",
+                "add",
+                "--max-running-tasks",
+                "1",
+                "--reason",
+                "Ten-project demonstration",
+            )
             folder = root / project
             shutil.copytree(template, folder)
             wanted = {
-                "projects.csv": [
-                    {
-                        "PROJECT_CODE": project,
-                        "PROJECT_NAME": project,
-                        "TIMEZONE": "UTC",
-                        "DEFAULT_POOL": "default",
-                        "MAX_RUNNING_TASKS": 1,
-                        "ACTIVE_FLAG": "Y",
-                    }
-                ],
                 "pipelines.csv": [
                     {
                         "PIPELINE_CODE": "POOL_DEMO",
@@ -69,8 +70,6 @@ def run_demo(config: Path) -> tuple[str, ...]:
                 ],
             }
             for path in folder.glob("*.csv"):
-                if path.name == "pools.csv":
-                    continue
                 with path.open(encoding="utf-8", newline="") as stream:
                     fields = next(csv.reader(stream))
                 with path.open("w", encoding="utf-8", newline="") as stream:

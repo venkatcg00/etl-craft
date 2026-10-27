@@ -42,7 +42,7 @@ def config_as_of(conn: Connection, as_of: datetime) -> Engine:
     try:
         with scratch.begin() as out:
             legacy_rules = _copy_tables(conn, out, versions, as_of)
-            _copy_groups(conn, out, as_of)
+            _copy_admin_identity(conn, out, as_of)
             _rebuild_legacy_sources(conn, out, legacy_versions, as_of)
             _rebuild_rule_targets(out, legacy_rules, as_of)
             _rebuild_task_targets(out, as_of)
@@ -81,14 +81,6 @@ def _copy_tables(
         columns = list(current[0]) if current else dialect.column_names(conn, table.table)
         history = versions[table.table]
         rows = _at(current, history, key, table.table, as_of)
-        if table.table == "CFG_PROJECTS" and history:
-            first = min(history, key=lambda row: row["change_id"])
-            if (
-                first.get("project_id") == 1
-                and first.get("project_code") == "default"
-                and as_of < as_utc(first["valid_from"])
-            ):
-                rows = [first]
         if table.table == "CFG_BUSINESS_RULES":
             legacy_rules = [row for row in rows if row.get("target_table_id") is None]
         if table.table == "CFG_TASKS":
@@ -276,14 +268,22 @@ def _cell(value: object) -> object:
     return value
 
 
-def _copy_groups(conn: Connection, out: Connection, as_of: datetime) -> None:
-    """Keep exported grant names tied to their group identity at the requested time."""
+def _copy_admin_identity(conn: Connection, out: Connection, as_of: datetime) -> None:
+    """Retain historical project/pool resolution without exporting admin configuration."""
     dialect = for_engine(conn)
-    table = "CFG_GROUPS"
-    current = dialect.table_rows(conn, table)
-    versions = dialect.table_rows(conn, "AUD_CFG_GROUPS_HISTORY", order_by="CHANGE_ID")
-    columns = dialect.column_names(conn, table)
-    rows = _at(current, versions, "group_id", table, as_of)
-    for_engine(out).write_table(
-        out, table, columns, [{name: _cell(row.get(name)) for name in columns} for row in rows]
-    )
+    for table, key in (("CFG_PROJECTS", "project_id"), ("CFG_POOLS", "pool_name")):
+        current = dialect.table_rows(conn, table)
+        versions = dialect.table_rows(conn, f"AUD_{table}_HISTORY", order_by="CHANGE_ID")
+        columns = dialect.column_names(conn, table)
+        rows = _at(current, versions, key, table, as_of)
+        if table == "CFG_PROJECTS" and versions:
+            first = min(versions, key=lambda row: row["change_id"])
+            if (
+                first.get("project_id") == 1
+                and first.get("project_code") == "default"
+                and as_of < as_utc(first["valid_from"])
+            ):
+                rows = [first]
+        for_engine(out).write_table(
+            out, table, columns, [{name: _cell(row.get(name)) for name in columns} for row in rows]
+        )

@@ -917,8 +917,8 @@ def test_retained_claims_recheck_current_restrictions_before_each_child(trigger_
         )
         conn.execute(
             text(
-                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
-                "VALUES (:id, 'CHILD', 'operator')"
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, PERMISSION) "
+                "VALUES (:id, 'CHILD', 'CAN_RUN')"
             ),
             {"id": group.group_id},
         )
@@ -931,7 +931,9 @@ def test_retained_claims_recheck_current_restrictions_before_each_child(trigger_
         condition = f" WHERE GROUP_ID={other.group_id}" if disabled == "other-group" else ""
         conn.execute(text(f"UPDATE {target} SET ACTIVE_FLAG='N'{condition}"))
     request = owned(scene)
-    with pytest.raises(PermissionDeniedError, match=r"test-admin.*CHILD.*operator.*group grant"):
+    with pytest.raises(
+        PermissionDeniedError, match=r"test-admin.*CHILD.*operator.*(permission|group grant)"
+    ):
         invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with project.engine.connect() as conn:
         assert (
@@ -965,8 +967,8 @@ def test_children_and_grandchildren_copy_the_admitted_group_ids(trigger_scene):
         for code in ("CHILD", "GRANDCHILD"):
             conn.execute(
                 text(
-                    "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
-                    "VALUES (:id, :code, 'operator')"
+                    "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, PERMISSION) "
+                    "VALUES (:id, :code, 'CAN_RUN')"
                 ),
                 {"id": group.group_id, "code": code},
             )
@@ -1004,8 +1006,8 @@ def test_queued_child_rechecks_permission_when_it_reaches_admission(trigger_scen
         )
         conn.execute(
             text(
-                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, ROLE) "
-                "VALUES (:id, 'CHILD', 'operator')"
+                "INSERT INTO CFG_PIPELINE_GRANTS (GROUP_ID, PIPELINE_CODE, PERMISSION) "
+                "VALUES (:id, 'CHILD', 'CAN_RUN')"
             ),
             {"id": group.group_id},
         )

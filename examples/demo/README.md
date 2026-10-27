@@ -239,9 +239,9 @@ for the CSV rows to apply to a project copy; the default demo scenario remains u
 
 The demo starts with open pipelines. An admin can create a group with
 `etl-craft group add --name support` and add an account with
-`etl-craft group add-member --name support --account alice`. Export the config files, then
-edit `config/grants.csv` and apply it as admin to grant `viewer` or `operator` on one
-`PIPELINE_CODE` or `TAG` per row. Deployment viewers can then operate only their granted
+`etl-craft group add-member --name support --account alice`. Then run
+`etl-craft access grant --project default --group support --pipeline SUPPORT_DM --permission CAN_RUN --reason "Demo"`
+to grant access on a pipeline (or use `--tag` for a tag). Deployment viewers can then operate only their granted
 pipelines. The [permission guide](../../docs/deploying/security.md#pipeline-permission-groups)
 explains SSO group IDs, retained run claims and the whole-project static catalog boundary.
 

@@ -606,49 +606,6 @@ def test_config_apply_refuses_invalid_tags_with_no_history_changes(exported, tag
     assert changes_logged(exported) == before
 
 
-def test_pool_files_apply_history_and_retire_by_name(exported):
-    from sqlalchemy import text
-
-    path = exported.config_dir / "pools.csv"
-    edit(
-        path,
-        lambda rows: (
-            [*rows, {"POOL_NAME": "heavy-python", "DESCRIPTION": "large", "ACTIVE_FLAG": "Y"}]
-        ),
-    )
-    assert not sync(exported).failed
-    edit(
-        path,
-        lambda rows: [
-            dict(row, DESCRIPTION="larger") if row["POOL_NAME"] == "heavy-python" else row
-            for row in rows
-        ],
-    )
-    assert not sync(exported).failed
-    edit(path, lambda rows: [row for row in rows if row["POOL_NAME"] != "heavy-python"])
-    assert not sync(exported).failed
-    with exported.engine.connect() as conn:
-        row = conn.execute(
-            text(
-                "SELECT ACTIVE_FLAG AS active_flag, DESCRIPTION AS description "
-                "FROM CFG_POOLS WHERE POOL_NAME='heavy-python'"
-            )
-        ).one()
-        assert row.active_flag == "N"
-        assert row.description == "larger"
-        history = (
-            conn.execute(
-                text(
-                    "SELECT DESCRIPTION AS description FROM AUD_CFG_POOLS_HISTORY "
-                    "WHERE POOL_NAME='heavy-python'"
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert "large" in history and "larger" in history
-
-
 def test_auxiliary_retention_is_optional_and_roundtrips_with_history(exported):
     from sqlalchemy import text
 
@@ -749,3 +706,32 @@ def test_execution_snapshot_contains_complete_table_policy_rows(engine_db):
         assert row["snapshot_retention_days"] == 7
         assert row["orphan_retention_days"] == 14
         assert set(row) == set(snapshot.columns["CFG_TABLES"])
+
+
+def test_admin_files_never_apply_or_export(exported, tmp_path):
+    names = ("grants.csv", "projects.csv", "pools.csv")
+    for name in names:
+        assert not (exported.config_dir / name).exists()
+        (exported.config_dir / name).write_text("arbitrary ignored content\n")
+    before = changes_logged(exported)
+    assert sync(exported, apply=False).changes == ()
+    assert sync(exported, apply=True).changes == ()
+    assert changes_logged(exported) == before
+    destination = tmp_path / "export"
+    export_config(exported.engine, destination)
+    assert not any((destination / name).exists() for name in names)
+
+
+def test_config_apply_requires_a_preexisting_project(exported):
+    from dataclasses import replace
+
+    from etl_craft.core.errors import MetadataFileError
+
+    config = replace(exported.config, project="unprovisioned")
+    for apply in (False, True):
+        with pytest.raises(MetadataFileError) as caught:
+            sync_config(
+                exported.engine, config, read_config_files(exported.config_dir), apply=apply
+            )
+        for part in ("unprovisioned", "active", "etl-craft project add"):
+            assert part in str(caught.value)

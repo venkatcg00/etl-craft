@@ -113,10 +113,11 @@ def test_config_apply_keeps_other_projects_and_links_same_code_upstream(engine_d
         upstream_task = add_task(
             conn, upstream, "T", "PYTHON", SCRIPT_FILE="python_scripts/task.py"
         )
+    with engine_db.engine.begin() as conn:
+        project(conn, "second")
     folder = tmp_path / "config"
     export_config(engine_db.engine, folder)
     for name, changes in (
-        ("projects.csv", {"PROJECT_CODE": "second", "PROJECT_NAME": "Second"}),
         (
             "pipeline_dependencies.csv",
             {
@@ -354,8 +355,8 @@ def test_a_grant_for_a_code_cannot_restrict_the_same_code_in_another_project(eng
         ).scalar_one()
         conn.execute(
             text(
-                "INSERT INTO CFG_PIPELINE_GRANTS (PROJECT_ID,GROUP_ID,PIPELINE_CODE,ROLE) "
-                "VALUES (1,:group,'P','viewer')"
+                "INSERT INTO CFG_PIPELINE_GRANTS (PROJECT_ID,GROUP_ID,PIPELINE_CODE,PERMISSION) "
+                "VALUES (1,:group,'P','CAN_VIEW')"
             ),
             {"group": group},
         )

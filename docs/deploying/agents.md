@@ -144,8 +144,11 @@ before retrying a blocked action.
 
 ## Pools, limits and resource placement
 
-Define active pools in `config/pools.csv` (`POOL_NAME,DESCRIPTION,ACTIVE_FLAG`), including
-`default` for tasks without `POOL`. Apply the file with `etl-craft config apply`. Agents must
+Create pools with `etl-craft pool add --name heavy --description "Heavy tasks" --reason "Capacity"`.
+Use `pool set --name heavy --description "Updated" --reason "Review"`, `pool list --reason "Review"`,
+or `pool disable --name heavy --reason "Retired"`. These are administrator actions. Disable refuses
+active project DEFAULT_POOL or active task POOL references and names them; change those first.
+Keep `default` available for default projects. Agents must
 register in an existing active pool. Set task parameters `POOL`, `CPU_REQUEST` and
 `MEMORY_REQUEST_MB`; resource requests are positive whole numbers. Defaults are one CPU and
 512 MB for Python, and 0.25 CPU and 128 MB for warehouse work. Gates take no task slots.

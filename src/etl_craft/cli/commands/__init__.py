@@ -1,7 +1,9 @@
 """Commands in their order in ``etl-craft --help``."""
 
 from etl_craft.cli.commands import (
+    access,
     account,
+    admin_metadata,
     agent,
     audit,
     bundle,
@@ -49,6 +51,9 @@ COMMANDS: tuple[Command, ...] = (
     *login.COMMANDS,
     account.COMMAND,
     group.COMMAND,
+    access.COMMAND,
+    admin_metadata.PROJECT,
+    admin_metadata.POOL,
     run.COMMAND,
     controller.COMMAND,
     ui.COMMAND,

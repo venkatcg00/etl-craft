@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 from sqlalchemy import bindparam, text
 
+from etl_craft.core.enums import ApiRole, Permission
+
 UTILITIES = {
     "controller_listen": "LISTEN has no query plan.",
     "controller_unlisten": "UNLISTEN has no query plan.",
@@ -88,6 +90,9 @@ VALUES = {
     "ended_by_kind": "SYSTEM",
     "status": "SUCCESS",
     "role": "operator",
+    "grantee_role": ApiRole.VIEWER,
+    "permission": Permission.CAN_VIEW,
+    "max_running_tasks": 8,
     "retryable": True,
     "stopped": False,
     "overwrite": False,
@@ -130,6 +135,7 @@ VALUES = {
 
 def bindings(sql, name=""):
     overrides = {
+        "access_list": {"project": "default"},
         "connection_reservation_insert": {
             "pool": 10,
             "sessions": 2,

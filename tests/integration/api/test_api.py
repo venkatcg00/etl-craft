@@ -123,22 +123,36 @@ def audit_counts(engine):
         return {n: conn.execute(text(f'SELECT COUNT(*) FROM "{n}"')).scalar_one() for n in names}
 
 
-def test_no_read_route_records_an_audit_row(api):
+def test_read_routes_only_record_the_named_admin_access_audits(api):
     ctx, client, creds, run, attempt = api
     given = {"pipeline_code": "P", "task_code": "T", "run_id": run, "attempt_id": attempt}
-    given |= {"control_id": 1, "target": "staging.t"}
+    given |= {"control_id": 1, "target": "staging.t", "project": "default", "reason": "Review"}
+    audited = {ActionName.PROJECT_LIST, ActionName.POOL_LIST, ActionName.ACCESS_LIST}
     reads = [action for action in ACTIONS.values() if action.method == "GET"]
     before = audit_counts(ctx.engine)
     answered = {}
     for action in reads:
         names = {f.name for f in fields(action.request)}
         values = {k: v for k, v in given.items() if k in names}
-        path = action_path(action).format(project="default", **values)
+        path = action_path(action).format(**{"project": "default", **values})
         query = {k: v for k, v in values.items() if "{" + k + "}" not in action_path(action)}
         response = client.get(path, params=query, headers=headers(creds[ApiRole.ADMIN]))
         answered[action.name] = response.status_code
-        assert audit_counts(ctx.engine) == before, action.name
-    # Most reads answer; the rest refuse this fixture's data, and neither records a row.
+        expected = dict(before)
+        if action.name in audited:
+            table = next(name for name in before if name.upper() == "AUD_ACTIONS")
+            expected[table] += 1
+            with ctx.engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT COMMAND AS command,ACTOR AS actor FROM AUD_ACTIONS "
+                        "ORDER BY ACTION_ID DESC LIMIT 1"
+                    )
+                ).one()
+                assert row.command == action.name and row.actor == ApiRole.ADMIN
+        assert audit_counts(ctx.engine) == expected, action.name
+        before = expected
+    # Most reads answer; the rest refuse this fixture's data without additional writes.
     assert sum(code == 200 for code in answered.values()) > len(reads) // 2, answered
     assert all(code < 500 for code in answered.values()), answered
 

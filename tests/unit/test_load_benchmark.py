@@ -254,3 +254,25 @@ def test_metrics_probe_refuses_files_and_external_plain_http(monkeypatch, url):
     with pytest.raises(UsageError):
         runner.metrics_document(url, 1)
     assert not opened
+
+
+def test_prepare_provisions_only_missing_admin_projects(tmp_path, monkeypatch):
+    runner = runpy.run_path(str(ROOT / "run.py"))
+    calls = []
+    for project in ("bench_000", "bench_001"):
+        folder = tmp_path / project
+        folder.mkdir()
+        (folder / "craft-connector.yml").write_text("{}")
+
+    def command(config, project, *args):
+        calls.append((project, args))
+        if args[:2] == ("project", "list"):
+            return '{"projects":[{"project":"bench_000"}]}'
+        return ""
+
+    monkeypatch.setitem(runner["prepare"].__globals__, "command", command)
+    runner["prepare"](tmp_path)
+    assert [project for project, args in calls if args[:2] == ("project", "add")] == ["bench_001"]
+    for project in ("bench_000", "bench_001"):
+        assert (project, ("config", "apply")) in calls
+        assert (project, ("bundle", "publish")) in calls

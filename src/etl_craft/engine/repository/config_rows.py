@@ -26,7 +26,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config.model import DEFAULT_MAX_PARALLEL_TASKS
-from etl_craft.core.enums import ApiRole, DependencyType, Handler, RefreshType, RunCondition, YesNo
+from etl_craft.core.enums import DependencyType, Handler, RefreshType, RunCondition, YesNo
 from etl_craft.core.errors import MetadataFileError
 from etl_craft.engine.queries import statement
 
@@ -131,46 +131,6 @@ class StoredRow:
     parents: tuple[int | None, ...]
     well_formed: bool
     values: dict[str, Value]
-
-
-POOLS = ConfigTable(
-    file="pools.csv",
-    table="CFG_POOLS",
-    id_column="POOL_NAME",
-    key=("POOL_NAME",),
-    columns=(Column("POOL_NAME", required=True), Column("DESCRIPTION"), ACTIVE_FLAG),
-    stored=("POOL_NAME", "DESCRIPTION"),
-    parents=(),
-    links=(),
-    label_format="{POOL_NAME}",
-    read_query="config_rows_pools",
-)
-
-PROJECTS = ConfigTable(
-    file="projects.csv",
-    table="CFG_PROJECTS",
-    id_column="PROJECT_ID",
-    key=("PROJECT_CODE",),
-    columns=(
-        Column("PROJECT_CODE", "code", required=True),
-        Column("PROJECT_NAME", required=True),
-        Column("TIMEZONE", required=True, default="UTC"),
-        Column("DEFAULT_POOL", required=True, default="default"),
-        Column("MAX_RUNNING_TASKS", "int", default=8, minimum=1),
-        ACTIVE_FLAG,
-    ),
-    stored=(
-        "PROJECT_CODE",
-        "PROJECT_NAME",
-        "TIMEZONE",
-        "DEFAULT_POOL",
-        "MAX_RUNNING_TASKS",
-    ),
-    parents=(),
-    links=(),
-    label_format="{PROJECT_CODE}",
-    read_query="config_rows_projects",
-)
 
 
 PIPELINES = ConfigTable(
@@ -413,33 +373,9 @@ SOURCE_COLUMNS = ConfigTable(
     read_query="config_rows_columns",
 )
 
-PIPELINE_GRANTS = ConfigTable(
-    file="grants.csv",
-    table="CFG_PIPELINE_GRANTS",
-    id_column="PIPELINE_GRANT_ID",
-    key=("GROUP_NAME", "PIPELINE_CODE", "TAG"),
-    columns=(
-        Column("GROUP_NAME", required=True),
-        Column("PIPELINE_CODE", "code"),
-        Column("TAG"),
-        Column(
-            "ROLE", "choice", required=True, choices=(ApiRole.VIEWER.value, ApiRole.OPERATOR.value)
-        ),
-        ACTIVE_FLAG,
-    ),
-    stored=("PIPELINE_CODE", "TAG", "ROLE"),
-    parents=(),
-    links=("PROJECT_ID", "GROUP_ID"),
-    label_format="{GROUP_NAME} pipeline={PIPELINE_CODE} tag={TAG}",
-    read_query="config_rows_pipeline_grants",
-)
-
 
 TABLES = (
-    POOLS,
-    PROJECTS,
     PIPELINES,
-    PIPELINE_GRANTS,
     OBJECT_TABLES,
     TASKS,
     TASK_PARAMETERS,
@@ -494,7 +430,7 @@ def read_rows(
             values["COLUMN_NAME"] = str(values["COLUMN_NAME"]).lower()
         rows.append(
             StoredRow(
-                str(row["row_id"]) if table is POOLS else int(row["row_id"]),
+                int(row["row_id"]),
                 row["active_flag"] == YesNo.YES,
                 tuple(
                     int(row[name]) if row[name] is not None else None for name, _ in table.parents
@@ -508,11 +444,7 @@ def read_rows(
 
 def _bound(table: ConfigTable, sql: str, names: tuple[str, ...]) -> TextClause:
     types = [
-        _BIND_TYPES[table.column(name).kind]
-        if name in table.stored
-        else String()
-        if table is POOLS
-        else Integer()
+        _BIND_TYPES[table.column(name).kind] if name in table.stored else Integer()
         for name in names
     ]
     return text(sql).bindparams(
