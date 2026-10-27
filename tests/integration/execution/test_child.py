@@ -41,7 +41,7 @@ def bound(engine_db, tmp_path, request):
     )
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {"dev": block},
     }
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")

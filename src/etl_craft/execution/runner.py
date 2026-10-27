@@ -20,6 +20,7 @@ import socket
 import sys
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy.engine import Connection, Engine
 
@@ -57,9 +58,9 @@ from etl_craft.execution import control_flow, leases
 from etl_craft.execution.attempt_admission import admit_attempt as admit_attempt
 from etl_craft.execution.attempt_records import (
     CancelWatch,
-    attempt_log_path,
     attempt_started,
     record_attempt,
+    refuse_attempt,
     run_cancelled,
 )
 from etl_craft.execution.attempt_types import (
@@ -564,25 +565,25 @@ def _try_local_attempt(
                 resources=local_headroom(conn, config),
             )
             return None
-        conn.execute(
-            statement(conn, "attempt_log_path"),
-            {
-                "attempt_id": spec.attempt_id,
-                "owner": owner,
-                "log_path": str(
-                    attempt_log_path(
-                        config,
-                        spec.pipeline_code,
-                        spec.pipeline_run_id,
-                        spec.task_code,
-                        spec.attempt_number,
-                    )
-                ),
-            },
+        refusal = (
+            None if child.before_start is None else child.before_start(conn, spec.pipeline_run_id)
+        )
+        if refusal is not None:
+            refuse_attempt(conn, spec.attempt_id, refusal, config.logs.tail_bytes)
+            return TaskOutcome(RunStatus.CANCELLED, refusal, spec.task_run_id)
+        log_path = Path(
+            conn.execute(
+                statement(conn, "attempt_log_path"),
+                {
+                    "attempt_id": spec.attempt_id,
+                    "owner": owner,
+                    "log_dir": str(config.log_dir.absolute()),
+                },
+            ).scalar_one()
         )
     try:
         fault_point("runner.after_bind")
-        return _start_and_record(engine, config, spec, child, owner)
+        return _start_and_record(engine, config, spec, child, (owner, log_path))
     except BaseException as error:
         _fail_after_bind(engine, spec, error, config, owner)
         raise
@@ -627,13 +628,15 @@ def _fail_after_bind(
 
 
 def _start_and_record(
-    engine: Engine, config: ConnectorConfig, spec: AttemptSpec, child: ChildOptions, owner: str
+    engine: Engine,
+    config: ConnectorConfig,
+    spec: AttemptSpec,
+    child: ChildOptions,
+    claim: tuple[str, Path],
 ) -> TaskOutcome:
     """Start the bound attempt's task process, wait for it, and record how it ended."""
     assert config.config_path is not None
-    log_path = attempt_log_path(
-        config, spec.pipeline_code, spec.pipeline_run_id, spec.task_code, spec.attempt_number
-    )
+    owner, log_path = claim
     argv = _child_argv(config, spec, child, owner)
     logger.info(
         "starting %s attempt %d (task_run_id=%d), time limit %s, log %s",

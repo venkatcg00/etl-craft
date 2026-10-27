@@ -182,6 +182,7 @@ def test_recipient_refusal_is_recorded_on_the_alert_attempt(
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {
+            "Project": "default",
             "Email": {
                 "Host": relay.host,
                 "Port": relay.port,
@@ -218,7 +219,9 @@ def test_recipient_refusal_is_recorded_on_the_alert_attempt(
             text("SELECT TASK_LOG AS task_log FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID = :id"),
             {"id": outcome.task_run_id},
         ).scalar_one()
-    attempt = next(config.log_dir.glob("PARTIAL/run-*/notify.attempt-1.log")).read_text("utf-8")
+    attempt = next(config.log_dir.glob("project-1/PARTIAL/run-*/notify.attempt-1.log")).read_text(
+        "utf-8"
+    )
     if status == "SUCCESS":
         assert "EMAIL_WARNING = " in log and "bad@example.com (550: no such recipient)" in log
         assert "WARNING etl_craft.handlers.mail" in attempt and "bad@example.com" in attempt

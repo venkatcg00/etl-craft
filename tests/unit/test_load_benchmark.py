@@ -262,7 +262,12 @@ def test_prepare_provisions_only_missing_admin_projects(tmp_path, monkeypatch):
     for project in ("bench_000", "bench_001"):
         folder = tmp_path / project
         folder.mkdir()
-        (folder / "craft-connector.yml").write_text("{}")
+        (folder / "craft-connector.yml").write_text(
+            yaml.safe_dump(
+                {"Secrets": {"Source_type": "ENVIRONMENT"}, "Orchestration": {"Project": project}},
+                sort_keys=False,
+            )
+        )
 
     def command(config, project, *args):
         calls.append((project, args))

@@ -9,11 +9,11 @@ from pathlib import Path
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.errors import ConfigurationError, ResourceNotFoundError
 from etl_craft.core.faults import fault_point
 from etl_craft.engine.logs import log_key, log_location, read_log_attempt, remove_log
 from etl_craft.engine.queries import statement
-from etl_craft.execution.attempt_records import attempt_log_path
+from etl_craft.execution.attempt_records import local_attempt_log
 
 
 def expire_logs(engine: Engine, config: ConnectorConfig, cutoff: datetime, now: datetime) -> int:
@@ -80,19 +80,12 @@ def retire_log_rows(
                     f"{expected_location!r}; restore Logs.Store before purge"
                 )
         elif path_value is not None:
-            expected = attempt_log_path(
-                config,
-                row.pipeline_code,
-                row.pipeline_run_id,
-                row.task_code,
-                row.attempt_number,
-            )
-            path = Path(path_value)
-            if path.absolute() != expected.absolute():
+            try:
+                path = local_attempt_log(config, current)
+            except ResourceNotFoundError as error:
                 raise ConfigurationError(
-                    f"attempt_id={row.attempt_id}: LOG_PATH={path_value!r}; expected "
-                    f"{str(expected)!r}; restore the canonical attempt path before purge"
-                )
+                    f"{error}; restore the recorded log before purge"
+                ) from error
             checked_relative(config, path)
             path_value = str(path.absolute())
         if path_value is not None:

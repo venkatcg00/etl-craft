@@ -12,15 +12,19 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import current_actor
+from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.enums import (
     AttemptStatus,
     ControlAction,
     RunStatus,
 )
+from etl_craft.core.errors import ResourceNotFoundError
+from etl_craft.core.text import byte_tail
 from etl_craft.engine import attempt_cancellation, attempt_starts, controls, runlog, transitions
+from etl_craft.engine.logs import LogAttempt
 from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_types import ChildOptions, TaskOutcome
 from etl_craft.execution.processes import (
@@ -32,15 +36,44 @@ STOP_ACTIONS = frozenset({ControlAction.STOP, ControlAction.ABORT})
 
 
 def attempt_log_path(
-    config: ConnectorConfig, pipeline_code: str, pipeline_run_id: int, task_code: str, attempt: int
+    config: ConnectorConfig,
+    pipeline_code: str,
+    pipeline_run_id: int,
+    task_code: str,
+    attempt: int,
+    *,
+    project_id: int | None = None,
 ) -> Path:
     """Return the log file of one task attempt, under ``Orchestration.Log_dir``."""
     return (
         config.log_dir
+        / f"project-{project_id if project_id is not None else current_project_id()}"
         / pipeline_code
         / f"run-{pipeline_run_id}"
         / f"{task_code}.attempt-{attempt}.log"
     )
+
+
+def local_attempt_log(config: ConnectorConfig, row: LogAttempt) -> Path:
+    """Accept recorded canonical project paths and the original canonical local layout."""
+    expected = attempt_log_path(
+        config,
+        row.pipeline_code,
+        row.pipeline_run_id,
+        row.task_code,
+        row.attempt_number,
+        project_id=row.project_id,
+    ).absolute()
+    root = config.log_dir.absolute()
+    legacy = root / expected.relative_to(root / f"project-{row.project_id}")
+    path = None if row.log_path is None else Path(row.log_path).absolute()
+    if path not in (expected, legacy):
+        raise ResourceNotFoundError(
+            f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected {str(expected)!r} "
+            f"or recorded legacy path {str(legacy)!r}; restore the canonical attempt path"
+        )
+    assert path is not None
+    return path
 
 
 class CancelWatch:
@@ -245,3 +278,16 @@ def _handoff_outcome(
             waiting=recorded.status == RunStatus.IN_PROGRESS,
         )
     return None
+
+
+def refuse_attempt(conn: Connection, attempt_id: int, reason: str, tail_bytes: int) -> None:
+    """End only a claimed attempt whose process has not been dispatched."""
+    with acting_as(SYSTEM_ACTOR):
+        transitions.cancel_attempt(
+            conn,
+            attempt_id,
+            SYSTEM_ACTOR,
+            error_message=reason,
+            task_log=byte_tail(reason, tail_bytes),
+        )
+    logger.error("attempt_id=%s: %s", attempt_id, reason)

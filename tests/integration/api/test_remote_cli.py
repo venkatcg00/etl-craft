@@ -76,7 +76,7 @@ def _write_project(tmp_path, db):
         block.update(User=profile.user, Auth_mode=profile.auth_mode, Secret=profile.secret_var)
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {"dev": block},
     }
     path = tmp_path / "craft-connector.yml"

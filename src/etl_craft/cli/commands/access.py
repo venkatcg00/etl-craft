@@ -3,7 +3,13 @@
 import argparse
 from pathlib import Path
 
-from etl_craft.cli.commands.common import Command, call, configure_output, request_from
+from etl_craft.cli.commands.common import (
+    Command,
+    call,
+    command_project,
+    configure_output,
+    request_from,
+)
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import UsageError
@@ -40,6 +46,8 @@ def configure(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace, out: Output) -> int:
     """Read a bulk file once, then let the service validate and diff the submitted content."""
+    if getattr(args, "file", None) is None:
+        args.project = command_project(args)
     if not args.project and getattr(args, "file", None) is None:
         raise UsageError(
             "access: project is missing; expected an explicit scope; supply --project P"
@@ -87,13 +95,15 @@ def render(out: Output, done: AccessView) -> None:
             (
                 g.project,
                 g.group or g.account or g.role,
-                g.pipeline or g.tag,
+                g.pipeline or g.tag or "project",
                 g.permission,
                 g.active_flag,
             )
             for g in done.grants
         ]
     )
+    if done.project_permission is not None:
+        out.rows([("caller project", done.project_permission, ", ".join(done.project_sources))])
     out.rows(
         ("caller effective", code, level, ", ".join(sources))
         for code, level, sources in done.effective

@@ -26,7 +26,7 @@ from etl_craft.services.operations.sessions import Session, TokenInput
 class ApiClient:
     """One API endpoint, and the credential that proves who calls it."""
 
-    def __init__(self, url: str, project: str = "default") -> None:
+    def __init__(self, url: str, project: str = "") -> None:
         """Use ``ETL_CRAFT_TOKEN`` for a service account, else this person's stored session."""
         self.url = server_url(url)
         self.project = project
@@ -40,6 +40,11 @@ class ApiClient:
         fields = encode(request)
         assert isinstance(fields, dict)
         route = action_path(action)
+        if "{project}" in route and not self.project:
+            raise UsageError(
+                "craft-connector.yml: missing Orchestration.Project; supply --project P "
+                "or set Orchestration.Project in this file"
+            )
         path = route.format(
             project=quote(self.project, safe=""),
             **{

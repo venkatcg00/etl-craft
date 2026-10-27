@@ -19,7 +19,7 @@ def visible_result(ctx: OperationContext, result: object) -> object:
     if ctx.role == ApiRole.ADMIN or not is_dataclass(result):
         return result
     with ctx.engine.connect() as conn:
-        return _visible(conn, pipeline_access(conn, ctx), result)
+        return _visible(conn, ctx, pipeline_access(conn, ctx), result)
 
 
 def _run_allowed(conn: Connection, access: PipelineAccess, run_id: int | None) -> bool:
@@ -29,23 +29,11 @@ def _run_allowed(conn: Connection, access: PipelineAccess, run_id: int | None) -
     return code is not None and access.permits(code)
 
 
-def _visible(conn: Connection, access: PipelineAccess, value: object) -> object:
-    if (
-        isinstance(value, DependencyView)
-        and (
-            not access.permits(value.upstream.partition(".")[0])
-            or (value.pipeline_dependency_id is not None and "." in value.upstream)
-            or (value.task_dependency_id is not None and value.upstream.count(".") > 1)
-        )
-        and ("." in value.upstream or value.pipeline_dependency_id is not None)
-    ):
-        return DependencyView(
-            value.upstream.partition(".")[0],
-            value.dependency_type,
-            None,
-            value.met,
-            "Related pipeline details require a viewer grant.",
-        )
+def _visible(
+    conn: Connection, ctx: OperationContext, access: PipelineAccess, value: object
+) -> object:
+    if isinstance(value, DependencyView):
+        return _dependency_view(conn, ctx, access, value)
     if isinstance(value, (TaskLineage, Edge)):
         label = value.task
         if label and not access.permits(label.partition(".")[0]):
@@ -85,14 +73,15 @@ def _visible(conn: Connection, access: PipelineAccess, value: object) -> object:
         )
     if is_dataclass(value) and not isinstance(value, type):
         return replace(
-            value, **{f.name: _visible(conn, access, getattr(value, f.name)) for f in fields(value)}
+            value,
+            **{f.name: _visible(conn, ctx, access, getattr(value, f.name)) for f in fields(value)},
         )
     if isinstance(value, tuple):
-        return tuple(_visible(conn, access, item) for item in value)
+        return tuple(_visible(conn, ctx, access, item) for item in value)
     if isinstance(value, list):
-        return [_visible(conn, access, item) for item in value]
+        return [_visible(conn, ctx, access, item) for item in value]
     if isinstance(value, dict):
-        return {key: _visible(conn, access, item) for key, item in value.items()}
+        return {key: _visible(conn, ctx, access, item) for key, item in value.items()}
     return value
 
 
@@ -102,4 +91,31 @@ def _related_label(access: PipelineAccess, label: str) -> str:
         label
         if "." not in label or access.permits(label.partition(".")[0])
         else label.partition(".")[0]
+    )
+
+
+def _dependency_view(
+    conn: Connection, ctx: OperationContext, access: PipelineAccess, value: DependencyView
+) -> DependencyView:
+    """Retain recorded decisions without disclosing inaccessible upstream execution details."""
+    if value.pipeline_dependency_id is None and value.task_dependency_id is None:
+        return value
+    parts = value.upstream.split(".")
+    cross = (value.pipeline_dependency_id is not None and len(parts) > 1) or (
+        value.task_dependency_id is not None and len(parts) > 2
+    )
+    allowed = access.permits(parts[0])
+    if cross:
+        row = conn.execute(statement(conn, "project_by_code"), {"code": parts[0]}).one_or_none()
+        scoped = None if row is None else replace(ctx, project=parts[0], project_id=row.project_id)
+        allowed = scoped is not None and pipeline_access(conn, scoped).permits(parts[1])
+    if allowed:
+        return value
+    return DependencyView(
+        ".".join(parts[:2]) if cross else parts[0],
+        value.dependency_type,
+        None,
+        value.met,
+        "Related pipeline details require project and pipeline CAN_VIEW.",
+        recorded=value.recorded,
     )

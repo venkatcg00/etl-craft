@@ -15,7 +15,8 @@
 Secrets:
   Source_type: ENVIRONMENT             # value
 
-Orchestration: {}  # value
+Orchestration:
+  Project: default  # value — explicit metadata namespace
 
 Engine:
   dev:

@@ -6,6 +6,19 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+- Breaking: project grants now gate CLI/API metadata access. Missing and hidden projects or
+  pipelines share a not-found response. Open pipelines inherit project permission; restricted
+  pipelines retain their matching-grant rules. Project CAN_MANAGE covers restricted pipelines,
+  delegates within the project and authorizes deploys. Migration 0064 preserves existing access
+  with viewer/operator project grants; newly added projects start without grants.
+- Breaking: project-owned commands require `--project` or `Orchestration.Project`; conflicting
+  selections fail, and no implicit `default` remains. Config plan/apply accept `--project-dir`.
+- Config plan/apply report grants that start or stop matching pipeline tag edits, plus
+  open/restricted switches, in text and JSON; ungranted tag edits report no access change.
+- New local logs use `Log_dir/project-<id>/<PIPELINE>/run-<id>/...`; recorded legacy paths stay
+  readable. Revoked project access prevents later local and agent task starts. Public metrics
+  aggregate across projects instead of exposing project labels.
+
 - Breaking: config files are optional change helpers. Missing rows or files no longer retire
   metadata; submit `ACTIVE_FLAG=N` explicitly. Updates preserve omitted header fields, while
   inserts use defaults. Unknown config CSV filenames are refused with a suggested known name.

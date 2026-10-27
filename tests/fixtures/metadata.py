@@ -10,15 +10,19 @@ def insert(conn, sql, id_column, **params):
     return conn.execute(text(f"{sql} RETURNING {id_column}"), params).scalar_one()
 
 
-def add_pipeline(conn, code, *, refresh_type="FULL", sla_in_hours=None):
+def add_pipeline(conn, code, *, refresh_type="FULL", sla_in_hours=None, project_id=None):
     return insert(
         conn,
-        "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE, SLA_IN_HOURS) "
-        "VALUES (:code, :code, :refresh, :sla)",
+        "INSERT INTO CFG_PIPELINES (PIPELINE_CODE, PIPELINE_NAME, REFRESH_TYPE, SLA_IN_HOURS"
+        + (", PROJECT_ID" if project_id is not None else "")
+        + ") VALUES (:code, :code, :refresh, :sla"
+        + (", :project" if project_id is not None else "")
+        + ")",
         "PIPELINE_ID",
         code=code,
         refresh=refresh_type,
         sla=sla_in_hours,
+        **({"project": project_id} if project_id is not None else {}),
     )
 
 

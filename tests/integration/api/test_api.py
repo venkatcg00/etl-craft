@@ -123,7 +123,7 @@ def audit_counts(engine):
         return {n: conn.execute(text(f'SELECT COUNT(*) FROM "{n}"')).scalar_one() for n in names}
 
 
-def test_read_routes_only_record_the_named_admin_access_audits(api):
+def test_read_routes_record_only_named_admin_access_or_explicit_refusals(api):
     ctx, client, creds, run, attempt = api
     given = {"pipeline_code": "P", "task_code": "T", "run_id": run, "attempt_id": attempt}
     given |= {"control_id": 1, "target": "staging.t", "project": "default", "reason": "Review"}
@@ -139,7 +139,7 @@ def test_read_routes_only_record_the_named_admin_access_audits(api):
         response = client.get(path, params=query, headers=headers(creds[ApiRole.ADMIN]))
         answered[action.name] = response.status_code
         expected = dict(before)
-        if action.name in audited:
+        if action.name in audited or action.name == ActionName.CONTROL_REQUEST:
             table = next(name for name in before if name.upper() == "AUD_ACTIONS")
             expected[table] += 1
             with ctx.engine.connect() as conn:
@@ -150,6 +150,9 @@ def test_read_routes_only_record_the_named_admin_access_audits(api):
                     )
                 ).one()
                 assert row.command == action.name and row.actor == ApiRole.ADMIN
+                if action.name == ActionName.CONTROL_REQUEST:
+                    assert response.status_code == 404
+                    assert response.json()["error"] == "ResourceNotFoundError"
         assert audit_counts(ctx.engine) == expected, action.name
         before = expected
     # Most reads answer; the rest refuse this fixture's data without additional writes.

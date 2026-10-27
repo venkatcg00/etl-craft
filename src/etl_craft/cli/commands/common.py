@@ -8,6 +8,7 @@ import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from sqlalchemy.engine import Engine
@@ -20,7 +21,7 @@ from etl_craft.config.discovery import CONFIG_PATH_ENV_VAR
 from etl_craft.config.loader import load_project
 from etl_craft.config.sizing import start_role
 from etl_craft.core.actor import current_actor
-from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.core.enums import ActionName, ActionScope, ApiRole
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.engine.connection import check_reachable, engine_db
@@ -55,12 +56,24 @@ class Command:
     """The actions the command calls, whichever its options select."""
 
 
+def command_config_path(args: argparse.Namespace) -> Path:
+    """Select one folder's config before authentication or project selection."""
+    directory = getattr(args, "project_dir", None)
+    if directory is not None and args.config is not None:
+        raise UsageError("--project-dir and --config both given; choose one project source")
+    return (
+        directory / "craft-connector.yml"
+        if directory is not None
+        else resolve_config_path(args.config)
+    )
+
+
 def load_command_config(args: argparse.Namespace) -> ConnectorConfig:
     """Find and load craft-connector.yml: ``--config``, ``$ETL_CRAFT_CONFIG``, or a search."""
     scoped = command_identity.get()
     if scoped is not None:
         return scoped.config
-    path = resolve_config_path(args.config)
+    path = command_config_path(args)
     logger.debug("reading %s", path)
     return load_config(path)
 
@@ -119,7 +132,13 @@ def command_context(
     engine = connect_engine_db(config)
     try:
         project = args.project or config.project
-        if not is_metadata_code(project):
+        if args.project and config.project and args.project != config.project:
+            raise UsageError(
+                f"--project={args.project!r} conflicts with "
+                f"Orchestration.Project={config.project!r} "
+                f"in {config.config_path}; select that project's own craft-connector.yml"
+            )
+        if project and not is_metadata_code(project):
             raise UsageError(
                 f"project={project!r}; expected a letter followed by at most 127 letters, "
                 "numbers or underscores; pass --project with a valid code"
@@ -161,21 +180,36 @@ def call(
 ) -> object:
     """Run one action: through the API with ``--api``, else on this project."""
     if args.api:
-        return ApiClient(args.api, command_project(args)).invoke(name, request)
+        return ApiClient(
+            args.api, command_project(args, required=ACTIONS[name].scope != ActionScope.DEPLOYMENT)
+        ).invoke(name, request)
     with command_context(args, role=role) as ctx:
         return invoke(ctx, name, request)
 
 
-def command_project(args: argparse.Namespace) -> str:
+def command_project(args: argparse.Namespace, *, required: bool = False) -> str:
     """Select an API project without loading any connection credentials."""
-    if args.project is not None:
-        return str(args.project)
-    path = resolve_config_path(args.config)
-    return (
+    path = command_config_path(args)
+    configured = (
         load_project(path)
-        if args.config is not None or os.environ.get(CONFIG_PATH_ENV_VAR) or path.is_file()
-        else "default"
+        if getattr(args, "project_dir", None) is not None
+        or args.config is not None
+        or os.environ.get(CONFIG_PATH_ENV_VAR)
+        or path.is_file()
+        else ""
     )
+    if args.project and configured and args.project != configured:
+        raise UsageError(
+            f"--project={args.project!r} conflicts with Orchestration.Project={configured!r} "
+            f"in {path}; select that project's own craft-connector.yml"
+        )
+    selected = args.project or configured
+    if required and not selected:
+        raise UsageError(
+            f"{path}: missing Orchestration.Project; supply --project P "
+            "or set Orchestration.Project in this file"
+        )
+    return selected
 
 
 def on_host(args: argparse.Namespace, name: ActionName) -> None:

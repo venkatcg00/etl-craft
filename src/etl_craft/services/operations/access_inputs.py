@@ -172,8 +172,8 @@ def row_problems(
         )
     if values["ACTION"] not in tuple(AccessIntent):
         bad.append(f"ACTION={values['ACTION']!r}; expected GRANT or REVOKE; fix the intent")
-    if bool(values["PIPELINE_CODE"]) == bool(values["TAG"]):
-        bad.append("expected exactly one PIPELINE_CODE or TAG; clear one or supply one")
+    if values["PIPELINE_CODE"] and values["TAG"]:
+        bad.append("expected a project, pipeline or tag; PIPELINE_CODE and TAG cannot both be set")
     if project_id is not None:
         bad.extend(target_problems(conn, values, project_id))
     if not row.well_formed or (

@@ -89,7 +89,7 @@ def project(engine_db, tmp_path, request):
     (root / "python_scripts" / "load.py").write_text(SCRIPT, encoding="utf-8")
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {"Task_timeout_seconds": 60},
+        "Orchestration": {"Project": "default", "Task_timeout_seconds": 60},
         "Engine": {"dev": block},
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"}},
     }
@@ -133,7 +133,7 @@ def test_a_script_runs_in_the_task_process_and_resumes_from_its_offset(project):
         "SOURCE_COUNT = 2\nTARGET_COUNT = 2\nINSERT_COUNT = 2\nOFFSET = 2 (NUMBER)\nREGION = eu"
     )
     # What the script printed and logged is in the attempt's log, with the task's context.
-    log = next(config.log_dir.glob("P/run-*/load.attempt-1.log")).read_text("utf-8")
+    log = next(config.log_dir.glob("project-1/P/run-*/load.attempt-1.log")).read_text("utf-8")
     assert "reading eu after 0" in log
     assert "INFO my_ingestion [task_run_id=" in log and "the source has 2 new rows" in log
     assert "WARNING etl_craft_script.load [" in log
@@ -424,7 +424,7 @@ def with_script(project, script, **params):
 
 
 def attempt_log(config):
-    return next(config.log_dir.glob("P/run-*/load.attempt-1.log")).read_text("utf-8")
+    return next(config.log_dir.glob("project-1/P/run-*/load.attempt-1.log")).read_text("utf-8")
 
 
 def test_the_task_process_exits_once_its_outcome_is_recorded(project):
@@ -544,7 +544,7 @@ def test_http_request_logs_do_not_expose_query_keys_in_attempt_log(project, libr
     )
     outcome = run_task(engine, config, "P", "load", child=ChildOptions(log_level="INFO"))
     assert outcome.status == RunStatus.SUCCESS, outcome.message
-    contents = next(config.log_dir.glob("P/run-*/load.attempt-1.log")).read_text("utf-8")
+    contents = next(config.log_dir.glob("project-1/P/run-*/load.attempt-1.log")).read_text("utf-8")
     assert "hidden-key" not in contents
     assert "GET https://example.test/" not in contents
     assert "finished request" in contents

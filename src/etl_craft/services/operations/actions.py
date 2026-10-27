@@ -21,6 +21,7 @@ from etl_craft.core.enums import (
     ApiRole,
     Audit,
     HttpMethod,
+    Permission,
     Placement,
     Transport,
     YesNo,
@@ -72,7 +73,12 @@ from etl_craft.services.operations import (
     values,
 )
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.permissions import pipeline_access, require_child_groups
+from etl_craft.services.operations.permissions import (
+    pipeline_access,
+    project_not_found,
+    require_child_groups,
+    require_project,
+)
 from etl_craft.services.operations.recording import record_refusal, recorded
 from etl_craft.services.operations.requests import (
     AttemptId,
@@ -306,7 +312,7 @@ _ROWS = (
            ADMIN, POST, f"{API}/projects/set", REQUEST),
     Action(ActionName.PROJECT_LIST, admin_metadata.list_projects, admin_metadata.ProjectIdentity,
            admin_metadata.Projects,
-           ADMIN, GET, f"{API}/projects", REQUEST),
+           VIEWER, GET, f"{API}/projects", REQUEST),
     Action(ActionName.PROJECT_DISABLE, admin_metadata.disable_project,
            admin_metadata.ProjectIdentity,
            admin_metadata.Projects,
@@ -407,6 +413,16 @@ _ROWS = (
            placement=HOST, remedy=STARTED_ON_HOST, scope=ActionScope.PROJECT),
 )  # fmt: skip
 
+PROJECT_MANAGE_ACTIONS = frozenset(
+    {
+        ActionName.CONFIG_PLAN,
+        ActionName.CONFIG_APPLY,
+        ActionName.MIGRATE,
+        ActionName.BUNDLE_PUBLISH,
+        ActionName.GENERATE_DOCS,
+    }
+)
+
 ACTIONS: dict[ActionName, Action] = {row.name: row for row in _ROWS}
 """Every action, by name."""
 
@@ -428,7 +444,7 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
     of the actions the table marks as provisioning.
     """
     action = ACTIONS[name]
-    ctx = _project_context(ctx, action)
+    ctx = _project_context(ctx, action, request)
     if not isinstance(request, action.request):
         raise UsageError(
             f"{name}: request is {type(request).__name__}; expected {action.request.__name__}"
@@ -438,7 +454,7 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
         required = action.required_role(ctx, request)
         try:
             _authorize(ctx, action, request, required)
-        except PermissionDeniedError as error:
+        except (PermissionDeniedError, ResourceNotFoundError) as error:
             record_refusal(ctx, name, given, error)
             raise
         if action.audit == Audit.REQUEST:
@@ -459,31 +475,59 @@ def _authorize(
     _require_project_identity(ctx, action, request)
     if ctx.role == ApiRole.ADMIN or (action.provisioning and ctx.provisioning):
         return
-    if action.scope == ActionScope.PIPELINE and required is not None:
+    scoped = action.scope != ActionScope.DEPLOYMENT or isinstance(request, access.AccessFilter)
+    bulk = isinstance(request, access.AccessWrite) and request.content is not None
+    if scoped and not bulk:
         with ctx.engine.connect() as conn:
-            access = pipeline_access(conn, ctx)
+            needed = (
+                Permission.CAN_MANAGE
+                if action.name in PROJECT_MANAGE_ACTIONS
+                else Permission.CAN_VIEW
+            )
+            require_project(conn, ctx, needed)
+        if action.name in PROJECT_MANAGE_ACTIONS and required != ApiRole.ADMIN:
+            return
+    if _authorize_pipeline(ctx, action, request, required):
+        return
+    _require_role(ctx, action, required)
+
+
+def _authorize_pipeline(
+    ctx: OperationContext, action: Action, request: object, required: ApiRole | None
+) -> bool:
+    """Apply pipeline grants without granting deployment-wide privileges."""
+    if action.scope == ActionScope.PIPELINE and required is not None:
+        if action.name == ActionName.LINEAGE_REFRESH:
+            _require_role(ctx, action, required)
+            required = ApiRole.VIEWER
+        with ctx.engine.connect() as conn:
+            policy = pipeline_access(conn, ctx)
             if isinstance(request, BulkControlRequest):
                 if has_role(ctx.role, required) or any(
-                    access.permits(selection.pipeline_code, required)
+                    policy.permits(selection.pipeline_code, required)
                     for selection in request.requests
                 ):
-                    return
-                access.require(ctx, request.requests[0].pipeline_code, required)
+                    return True
+                policy.require(ctx, request.requests[0].pipeline_code, required)
             codes = _request_codes(conn, action, request)
-            existing = [selected for selected in codes if selected in access.roles]
+            existing = codes
             for selected in existing:
-                access.require(ctx, selected, required)
+                policy.require(ctx, selected, required)
             if existing:
-                return
+                return True
             if action.name in (ActionName.RECONCILE, ActionName.LINEAGE_REFRESH):
-                for selected in access.roles:
-                    access.require(ctx, selected, required)
-                if access.roles:
-                    return
+                if any(not policy.permits(code, required) for code in policy.roles):
+                    raise PermissionDeniedError(
+                        f"account {ctx.actor.name!r}: {action.name} requires {required} role "
+                        f"on every pipeline in project {ctx.project!r}; ask its project manager "
+                        "for the required permission or select an accessible pipeline"
+                    )
+                if policy.roles:
+                    return True
             # Aggregate reads filter their selections; bulk controls invoke CONTROL per object.
             if not codes and required == ApiRole.VIEWER and ctx.role is not None:
-                return
-    _require_role(ctx, action, required)
+                return True
+    return False
 
 
 def _require_project_identity(ctx: OperationContext, action: Action, request: object) -> None:
@@ -528,8 +572,13 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     call = ACTIONS[name].call
     if call is None:
         raise UsageError(f"{name} is a long-running process; its interface starts it")
-    ctx = _project_context(ctx, ACTIONS[name])
     ctx = _request_context(ctx, name, request)
+    try:
+        ctx = _project_context(ctx, ACTIONS[name], request)
+    except (PermissionDeniedError, ResourceNotFoundError) as error:
+        assert isinstance(request, ACTIONS[name].request)
+        record_refusal(ctx, name, arguments(request), error)
+        raise
     claims = sso_groups.set(ctx.sso_group_ids)
     try:
         with using(None), selected_project(ctx.project_id), admitted(ctx, name, request):
@@ -590,23 +639,58 @@ def project_settings(ctx: OperationContext, name: ActionName, request: object) -
     return replace(ctx, config=replace(pinned, project=ctx.project, timezone=ctx.config.timezone))
 
 
-def _project_context(ctx: OperationContext, action: Action) -> OperationContext:
+def _access_project(ctx: OperationContext, request: object) -> OperationContext:
+    """Access uses its body/query project because its established route is deployment-scoped."""
+    if (
+        isinstance(request, access.AccessFilter)
+        and request.project is not None
+        and ctx.project != request.project
+    ):
+        return replace(ctx, project=request.project, project_id=None)
+    return ctx
+
+
+def _legacy_project(conn: Connection, ctx: OperationContext, action: Action) -> bool:
+    """Only the explicitly selected legacy project can bootstrap project metadata."""
+    from etl_craft.dialects.engine import for_engine
+
+    if action.name != ActionName.MIGRATE or for_engine(conn).has_table(conn, "CFG_PROJECTS"):
+        return False
+    if ctx.project == "default":
+        return True
+    raise UsageError(
+        "project metadata is absent; migrate --project default before selecting another project"
+    )
+
+
+def _project_context(ctx: OperationContext, action: Action, request: object) -> OperationContext:
     """Resolve one active project before a project-owned operation reads any object."""
-    if action.scope == ActionScope.DEPLOYMENT or ctx.project_id is not None:
+    ctx = _access_project(ctx, request)
+    if action.scope == ActionScope.DEPLOYMENT and not isinstance(request, access.AccessFilter):
+        return ctx
+    if isinstance(request, access.AccessWrite) and request.content is not None:
+        return ctx
+    if not ctx.project:
+        ctx = replace(ctx, project=ctx.config.project)
+    if not ctx.project:
+        raise UsageError(
+            f"{ctx.config.config_path or 'craft-connector.yml'}: missing Orchestration.Project; "
+            "supply --project P or set Orchestration.Project in this file"
+        )
+    if ctx.project_id is not None:
         return ctx
     if ctx.transport == Transport.LOCAL:
         ctx = replace(ctx, config=replace(ctx.config, project=ctx.project))
     with ctx.engine.connect() as conn:
-        if action.name == ActionName.MIGRATE:
-            from etl_craft.dialects.engine import for_engine
-
-            if not for_engine(conn).has_table(conn, "CFG_PROJECTS"):
-                if ctx.project == "default":
-                    return ctx
-                raise UsageError(
-                    "project metadata is absent; migrate default before selecting another project"
-                )
+        if _legacy_project(conn, ctx, action):
+            return ctx
         row = conn.execute(statement(conn, "project_by_code"), {"code": ctx.project}).one_or_none()
+        if (
+            row is not None
+            and ctx.role not in (ApiRole.ADMIN, ApiRole.AGENT)
+            and not (action.provisioning and ctx.provisioning)
+        ):
+            require_project(conn, replace(ctx, project_id=int(row.project_id)))
     if row is None or (
         row.active_flag == YesNo.NO
         and action.name
@@ -617,6 +701,8 @@ def _project_context(ctx: OperationContext, action: Action) -> OperationContext:
             ActionName.PURGE,
         }
     ):
+        if ctx.role not in (ApiRole.ADMIN, ApiRole.AGENT):
+            raise project_not_found(ctx.project)
         if action.name in (ActionName.CONFIG_PLAN, ActionName.CONFIG_APPLY):
             return ctx
         raise UsageError(
@@ -633,7 +719,7 @@ def _project_context(ctx: OperationContext, action: Action) -> OperationContext:
 
 def _request_context(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
     """Restore admitted claims for trigger tasks, and authenticated claims for other callers."""
-    if ACTIONS[name].scope == ActionScope.PIPELINE and ctx.credential_token_id is not None:
+    if ctx.credential_token_id is not None:
         with ctx.engine.connect() as conn:
             ctx = replace(ctx, sso_group_ids=token_groups(conn, ctx.credential_token_id))
     if name == ActionName.TRIGGER_PIPELINE and isinstance(request, triggers.TriggerRequest):

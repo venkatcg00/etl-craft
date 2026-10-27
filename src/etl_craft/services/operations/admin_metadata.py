@@ -1,17 +1,18 @@
 """Deployment administrator project and pool identities."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.cron import timezone
-from etl_craft.core.enums import YesNo
+from etl_craft.core.enums import ApiRole, YesNo
 from etl_craft.core.errors import MetadataError, UsageError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.permissions import project_permission
 from etl_craft.services.operations.requests import Request
 
 
@@ -125,7 +126,14 @@ def list_projects(ctx: OperationContext, request: ProjectIdentity) -> Projects:
                     r.active_flag,
                 )
                 for r in rows
-                if request.project is None or r.project_code == request.project
+                if (request.project is None or r.project_code == request.project)
+                and (
+                    ctx.role == ApiRole.ADMIN
+                    or project_permission(
+                        conn, replace(ctx, project=r.project_code, project_id=r.project_id)
+                    )
+                    is not None
+                )
             )
         )
 

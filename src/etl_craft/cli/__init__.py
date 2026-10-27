@@ -50,7 +50,7 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
     group.add_argument(
         "--project",
         metavar="CODE",
-        help="Project code (default: Orchestration.Project, else default).",
+        help="Project code (otherwise required in Orchestration.Project).",
         default=default(None),
     )
     group.add_argument(

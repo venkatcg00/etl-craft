@@ -27,15 +27,15 @@ FAMILIES = {
         "Seconds since this leader's recorded heartbeat.",
         "gauge",
     ),
-    "runs": ("Current nonterminal pipeline runs by project and status.", "gauge"),
-    "attempts": ("Current nonterminal attempts by project and status.", "gauge"),
-    "queue_depth": ("Queued attempts by project, pool and slot kind.", "gauge"),
+    "runs": ("Current nonterminal pipeline runs by status.", "gauge"),
+    "attempts": ("Current nonterminal attempts by status.", "gauge"),
+    "queue_depth": ("Queued attempts by pool and slot kind.", "gauge"),
     "queue_oldest_age_seconds": ("Age of the oldest queued attempt.", "gauge"),
     "active_agents": ("Fresh ACTIVE agents by pool.", "gauge"),
     "agent_slots": ("Advertised, occupied and available agent slots.", "gauge"),
     "agent_running_children": ("RUNNING attempts owned by an agent.", "gauge"),
     "agent_heartbeat_age_seconds": ("Age of each current agent registration's heartbeat.", "gauge"),
-    "gate_waits": ("Persisted active gate waits by project.", "gauge"),
+    "gate_waits": ("Persisted active gate waits.", "gauge"),
     "runs_ended_total": ("Terminal run transitions observed by this process.", "counter"),
     "attempts_ended_total": ("Terminal attempt outcomes observed by this process.", "counter"),
     "lease_expiries_total": ("Attempts reconciled after ownership lease expiry.", "counter"),
@@ -195,7 +195,7 @@ def lifecycle(conn: Connection, kind: str, row_id: int, status: str = "") -> Non
         return
     query = "run" if kind in {"run", "admission"} else "attempt"
     row = conn.execute(statement(conn, "metrics_event_" + query), {"row_id": row_id}).one()
-    labels: Labels = (("project", str(row.project_id)),)
+    labels: Labels = ()
     samples: list[tuple[str, Labels, float]] = []
     now = datetime.now(UTC)
     if kind == "run":

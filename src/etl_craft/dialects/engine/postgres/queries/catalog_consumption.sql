@@ -1,4 +1,4 @@
--- Consumption touching a shown run, preserving both directions of its explanation.
+-- Consumption between runs of the selected project, touching its shown history.
 WITH shown AS (
     SELECT r.PIPELINE_RUN_ID AS pipeline_run_id
     FROM CFG_PIPELINES p
@@ -29,4 +29,5 @@ JOIN CFG_PIPELINES up ON up.PIPELINE_ID = c.DEPENDS_ON_PIPELINE_ID
 LEFT JOIN CFG_TASKS dt ON dt.TASK_ID = c.TASK_ID
 LEFT JOIN AUD_TASK_RUN_LOG ur ON ur.TASK_RUN_ID = c.CONSUMED_TASK_RUN_ID
 LEFT JOIN CFG_TASKS ut ON ut.TASK_ID = ur.TASK_ID
+WHERE dp.PROJECT_ID=:project_id AND up.PROJECT_ID=:project_id
 ORDER BY c.CONSUMPTION_ID

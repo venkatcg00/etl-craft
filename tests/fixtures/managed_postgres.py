@@ -30,7 +30,7 @@ def managed_project(config, directory, monkeypatch, *, timeout=30):
         fields["Listen_jdbc_url"] = profile.listen_jdbc_url
     raw = {
         "Secrets": {"Source_type": str(config.source.type)},
-        "Orchestration": {"Local_python_slots": 1, "Log_dir": "logs"},
+        "Orchestration": {"Project": "default", "Local_python_slots": 1, "Log_dir": "logs"},
         "Engine": {"dev": fields},
     }
     if config.source.path:

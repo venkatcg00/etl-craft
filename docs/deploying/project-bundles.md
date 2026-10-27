@@ -45,7 +45,7 @@ etl-craft bundle publish --project-dir ./project --api https://craft.example.com
 etl-craft run --pipeline-code SALES --api https://craft.example.com
 ```
 
-The publishing CI runner needs a developer API token and the project files; it needs no
+The publishing CI runner needs project CAN_MANAGE on its API token and the project files; it needs no
 Engine DB or artifact-store credentials. The API validates and stores the upload. Publication
 contains `craft-connector.yml` and every regular file under `sql_scripts/`, `python_scripts/`
 and `seeds/`, with a SHA-256 per file. Symlinks, traversal and special files are refused.
@@ -98,8 +98,9 @@ admin to establish their connection approvals before admitting new bundled runs.
 
 ## Several projects in one Engine DB
 
-Select `--project CODE`; its default is `Orchestration.Project`, then `default`.
-`--project-dir` selects a filesystem directory for publication or agent bootstrap.
+Select `--project CODE` or set `Orchestration.Project` explicitly. There is no implicit default;
+a conflicting flag and file value are refused, naming both.
+`--project-dir` selects a filesystem directory for config plan/apply, publication or agent bootstrap.
 Each project has its own warehouse. Deployment roles remain shared, with pipeline grants
 scoped to their project. Pools remain deployment-wide.
 
@@ -116,7 +117,8 @@ etl-craft project list --reason "Review projects"
 fields; no field is an error. `disable` takes the identity and reason, preserving metadata.
 Add defaults to pool `default`; the pool must be active. `DEFAULT_POOL` is used for tasks with
 no `POOL`; `MAX_RUNNING_TASKS` caps claims across the project's pipelines. A full project does
-not prevent another from claiming work. All project/pool administration requires deployment admin.
+not prevent another from claiming work. Project mutations and pool administration require deployment admin; project lists show only
+projects the caller can view.
 
 Publish and run with the same selection:
 

@@ -1,5 +1,8 @@
 Secrets:
   Source_type: ENVIRONMENT  # value
+Orchestration:
+  Project: default  # value — explicit metadata namespace
+
 Engine:
   dev:
     Jdbc_url: jdbc:sqlite:engine.db  # value

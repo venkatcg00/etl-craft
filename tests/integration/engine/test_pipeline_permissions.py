@@ -13,7 +13,7 @@ from etl_craft.api.app import create_app
 from etl_craft.cli import main
 from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.enums import ActionName, ApiRole, Transport
-from etl_craft.core.errors import ExitCode, PermissionDeniedError
+from etl_craft.core.errors import ExitCode, PermissionDeniedError, ResourceNotFoundError
 from etl_craft.engine import transitions
 from etl_craft.services.oidc import IdentityClaims
 from etl_craft.services.operations import OperationContext, sessions
@@ -60,13 +60,13 @@ def test_direct_and_tag_grants_filter_lists_and_elevate_only_members(scene, tag)
     ctx, reader, token, _, _, _, run_id, _ = scene
     grant(ctx, tag=tag)
     assert {p.pipeline_code for p in act(reader, ActionName.PIPELINES).pipelines} == {"OPEN"}
-    with pytest.raises(PermissionDeniedError, match=r"reader.*PRIVATE.*viewer.*permission"):
+    with pytest.raises(ResourceNotFoundError, match=r"PRIVATE.*missing or not permitted"):
         act(reader, ActionName.RUN_DETAIL, run_id=run_id)
     assert act(reader, ActionName.HISTORY, all=True).entries == ()
     assert act(reader, ActionName.STATUS).runs == ()
     api = TestClient(create_app(ctx))
     headers = {"Authorization": "Bearer " + token}
-    assert api.get(f"/api/v1/projects/default/runs/{run_id}", headers=headers).status_code == 403
+    assert api.get(f"/api/v1/projects/default/runs/{run_id}", headers=headers).status_code == 404
     assert [
         p["pipeline_code"]
         for p in api.get("/api/v1/projects/default/pipelines", headers=headers).json()["pipelines"]
@@ -79,7 +79,7 @@ def test_direct_and_tag_grants_filter_lists_and_elevate_only_members(scene, tag)
     with pytest.raises(PermissionDeniedError, match="admin role is required"):
         act(reader, ActionName.GROUP_DISABLE, name="sales")
     act(ctx, ActionName.GROUP_REMOVE_MEMBER, name="sales", account="reader")
-    with pytest.raises(PermissionDeniedError, match=r"PRIVATE.*viewer"):
+    with pytest.raises(ResourceNotFoundError, match=r"PRIVATE.*missing or not permitted"):
         act(reader, ActionName.PIPELINE, pipeline_code="PRIVATE")
 
 
@@ -88,7 +88,7 @@ def test_disabled_groups_keep_pipelines_restricted_and_changes_are_audited(scene
     grant(ctx)
     act(ctx, ActionName.GROUP_ADD_MEMBER, name="sales", account="reader")
     act(ctx, ActionName.GROUP_DISABLE, name="sales")
-    with pytest.raises(PermissionDeniedError, match=r"PRIVATE.*viewer"):
+    with pytest.raises(ResourceNotFoundError, match=r"PRIVATE.*missing or not permitted"):
         act(reader, ActionName.PIPELINE, pipeline_code="PRIVATE")
     with ctx.engine.connect() as conn:
         changed = conn.execute(
@@ -97,7 +97,10 @@ def test_disabled_groups_keep_pipelines_restricted_and_changes_are_audited(scene
         assert len(changed) == 2 and all(row.actor == "owner" for row in changed)
         assert (
             conn.execute(
-                text("SELECT COUNT(*) AS n FROM AUD_CFG_PIPELINE_GRANTS_HISTORY")
+                text(
+                    "SELECT COUNT(*) AS n FROM AUD_CFG_PIPELINE_GRANTS_HISTORY "
+                    "WHERE PIPELINE_CODE IS NOT NULL OR TAG IS NOT NULL"
+                )
             ).scalar_one()
             == 1
         )
@@ -160,7 +163,7 @@ def test_sso_ids_survive_rename_refresh_and_logout_but_current_restrictions_appl
     assert refreshed.metadata.expires_at == refresh_end
     caller = authenticated_context(ctx, refreshed.metadata)
     assert act(caller, ActionName.PIPELINE, pipeline_code="PRIVATE").pipeline_code == "PRIVATE"
-    with pytest.raises(PermissionDeniedError, match=r"OTHER.*viewer"):
+    with pytest.raises(ResourceNotFoundError, match=r"OTHER.*missing or not permitted"):
         act(caller, ActionName.PIPELINE, pipeline_code="OTHER")
     with ctx.engine.connect() as conn:
         ids = conn.execute(
@@ -173,7 +176,7 @@ def test_sso_ids_survive_rename_refresh_and_logout_but_current_restrictions_appl
         ).all()
         assert any("unknown" in str(row.arguments) for row in audit)
     act(ctx, ActionName.GROUP_DISABLE, name="renamed")
-    with pytest.raises(PermissionDeniedError, match=r"PRIVATE.*viewer"):
+    with pytest.raises(ResourceNotFoundError, match=r"PRIVATE.*missing or not permitted"):
         act(caller, ActionName.PIPELINE, pipeline_code="PRIVATE")
 
 
@@ -216,7 +219,7 @@ def test_ids_cannot_bypass_restrictions_for_attempts_logs_or_controls(scene):
         (ActionName.LOGS, {"attempt_id": attempt}),
         (ActionName.CONTROL_REQUEST, {"control_id": control.control_id}),
     ):
-        with pytest.raises(PermissionDeniedError, match=r"PRIVATE.*viewer"):
+        with pytest.raises(ResourceNotFoundError, match=r"PRIVATE.*missing or not permitted"):
             act(reader, action, **fields)
 
 
@@ -253,7 +256,7 @@ def test_unproven_identity_cannot_use_an_existing_group_membership(scene):
     ctx, reader, _, _, _, _, _, _ = scene
     grant(ctx)
     act(ctx, ActionName.GROUP_ADD_MEMBER, name="sales", account="reader")
-    with pytest.raises(PermissionDeniedError, match=r"reader.*PRIVATE.*viewer"):
+    with pytest.raises(ResourceNotFoundError, match=r"project.*default.*missing or not permitted"):
         act(replace(reader, role=None), ActionName.PIPELINE, pipeline_code="PRIVATE")
 
 

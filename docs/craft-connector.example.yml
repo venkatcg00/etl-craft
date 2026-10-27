@@ -2,8 +2,8 @@
 #
 # Sections, in this order (the loader refuses any other): Secrets, Orchestration
 # (execution defaults and the Email relay live inside it), Engine, Warehouse, and
-# optional Cloning and Docs_site sections. Orchestration may be left out: every
-# setting in it has a default.
+# optional Cloning and Docs_site sections. Project-owned commands require an explicit
+# Orchestration.Project or --project; there is no implicit project.
 #
 # Each section that differs by environment holds one block per profile — dev,
 # sit, uat, prod here, but any names work. The active one is the section's own

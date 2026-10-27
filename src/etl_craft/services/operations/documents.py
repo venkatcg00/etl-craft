@@ -14,7 +14,7 @@ from etl_craft.services.catalog.collect import build_catalog
 from etl_craft.services.catalog.site import write_site
 from etl_craft.services.documentation import DocumentationVersion, refresh_versions
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.permissions import pipeline_access
+from etl_craft.services.operations.permissions import pipeline_access, visible_dependents
 from etl_craft.services.operations.requests import NoInput, Request
 
 DEFAULT_FOLDER = "catalog"
@@ -96,6 +96,9 @@ def generate_docs(ctx: OperationContext, request: DocsInput) -> DocsBuild:
     )
     try:
         catalog = build_catalog(ctx.engine, ctx.config, with_warehouse=request.with_warehouse)
+        with ctx.engine.connect() as conn:
+            for code, pipeline in catalog.pipelines.items():
+                pipeline.depended_on_by.extend(visible_dependents(conn, ctx, code))
         untraced = tuple(
             UntracedTask(task.label, task.lineage_error or "") for task in catalog.untraced
         )

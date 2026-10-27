@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.request import Request
 
 from benchmarks.budgets import buckets, evaluate, histogram, percentile, quantile, samples
+from etl_craft.config.loader import load_project
 from etl_craft.config.remote import server_url
 from etl_craft.core.http_client import open_request
 
@@ -45,10 +46,11 @@ def prepare(root: Path) -> Path:
     if not projects:
         raise SystemExit(f"{root}: no generated projects; run benchmarks.generate first")
     for config in projects:
+        project = load_project(config)
         current = json.loads(
             command(
                 config,
-                config.parent.name,
+                project,
                 "project",
                 "list",
                 "--reason",
@@ -57,10 +59,10 @@ def prepare(root: Path) -> Path:
                 "json",
             )
         )
-        if not any(row["project"] == config.parent.name for row in current["projects"]):
-            command(config, config.parent.name, "project", "add", "--reason", "Benchmark setup")
-        command(config, config.parent.name, "config", "apply")
-        command(config, config.parent.name, "bundle", "publish")
+        if not any(row["project"] == project for row in current["projects"]):
+            command(config, project, "project", "add", "--reason", "Benchmark setup")
+        command(config, project, "config", "apply")
+        command(config, project, "bundle", "publish")
     return projects[0]
 
 
@@ -261,7 +263,7 @@ def seed(root: Path, manifest: dict, scale: dict, count: int) -> None:
         path, pipeline = request
         command(
             path,
-            path.parent.name,
+            load_project(path),
             "run",
             "--pipeline-code",
             pipeline,

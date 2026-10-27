@@ -44,12 +44,9 @@ def test_live_work_and_committed_lost_retry_and_terminal_events(engine_db):
         )
     body = operation.scrape(ctx, now=now).body
     parse(body)
-    assert value(body, "runs", project="1", status=RunStatus.IN_PROGRESS) == 1
-    assert value(body, "queue_depth", project="1", pool="default", slot_kind="warehouse") == 1
-    assert (
-        value(body, "queue_oldest_age_seconds", project="1", pool="default", slot_kind="warehouse")
-        == 10
-    )
+    assert value(body, "runs", status=RunStatus.IN_PROGRESS) == 1
+    assert value(body, "queue_depth", pool="default", slot_kind="warehouse") == 1
+    assert value(body, "queue_oldest_age_seconds", pool="default", slot_kind="warehouse") == 10
     with ctx.engine.begin() as conn:
         transitions.claim_attempt(
             conn,
@@ -58,7 +55,7 @@ def test_live_work_and_committed_lost_retry_and_terminal_events(engine_db):
             owner="local-owner",
             lease_expires_at=now + timedelta(seconds=60),
         )
-    assert value(operation.scrape(ctx).body, "dispatch_latency_seconds_count", project="1") == 1
+    assert value(operation.scrape(ctx).body, "dispatch_latency_seconds_count") == 1
     with ctx.engine.begin() as conn:
         conn.execute(
             text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:at"),
@@ -66,19 +63,16 @@ def test_live_work_and_committed_lost_retry_and_terminal_events(engine_db):
         )
         transitions.lose_attempt(conn, attempt, SYSTEM_ACTOR, owner="local-owner")
     body = operation.scrape(ctx).body
-    assert value(body, "lost_attempts_total", project="1") == 1
-    assert value(body, "lease_expiries_total", project="1") == 1
+    assert value(body, "lost_attempts_total") == 1
+    assert value(body, "lease_expiries_total") == 1
     with ctx.engine.begin() as conn:
         transitions.queue_attempt(conn, summary, SYSTEM_ACTOR)
-    assert value(operation.scrape(ctx).body, "retries_total", project="1") == 1
+    assert value(operation.scrape(ctx).body, "retries_total") == 1
     with ctx.engine.begin() as conn:
         active = transitions.active_attempt(conn, summary)
         transitions.cancel_attempt(conn, active.attempt_id, SYSTEM_ACTOR, error_message="test")
         transitions.finish_run(conn, run, RunStatus.FAILED, SYSTEM_ACTOR)
-    assert (
-        value(operation.scrape(ctx).body, "runs_ended_total", project="1", status=RunStatus.FAILED)
-        == 1
-    )
+    assert value(operation.scrape(ctx).body, "runs_ended_total", status=RunStatus.FAILED) == 1
     registry.leader = False
     body = operation.scrape(ctx).body
     assert value(body, "controller_leader") == 0
@@ -98,7 +92,6 @@ def test_rollback_and_nested_rollback_do_not_publish_events(engine_db):
         value(
             operation.scrape(ctx).body,
             "attempts_ended_total",
-            project="1",
             status=AttemptStatus.CANCELLED,
         )
         == 0
@@ -112,7 +105,6 @@ def test_rollback_and_nested_rollback_do_not_publish_events(engine_db):
         value(
             operation.scrape(ctx).body,
             "attempts_ended_total",
-            project="1",
             status=AttemptStatus.CANCELLED,
         )
         == 0
@@ -133,11 +125,11 @@ def test_gate_waits_and_heartbeat_age_use_explicit_times(engine_db):
             {"run": run, "now": now},
         )
     body = operation.scrape(ctx, now=now).body
-    assert value(body, "gate_waits", project="1") == 1
+    assert value(body, "gate_waits") == 1
     assert value(body, "controller_heartbeat_age_seconds") == 46
     with ctx.engine.begin() as conn:
         conn.execute(text("UPDATE AUD_GATE_WAITS SET NEXT_CHECK_AT=NULL"))
-    assert value(operation.scrape(ctx, now=now).body, "gate_waits", project="1") == 0
+    assert value(operation.scrape(ctx, now=now).body, "gate_waits") == 0
 
 
 def test_fixed_scrape_statement_count_and_no_audit_writes(engine_db):
@@ -166,7 +158,9 @@ def test_fixed_scrape_statement_count_and_no_audit_writes(engine_db):
                 transitions.finish_run(conn, run, RunStatus.SUCCESS, SYSTEM_ACTOR)
             before = conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one()
         counts.clear()
-        assert operation.scrape(ctx).status == 200
+        response = operation.scrape(ctx)
+        assert response.status == 200
+        assert "project=" not in response.body
         assert len(counts) == first
         assert first <= 5
         with ctx.engine.connect() as conn:
@@ -224,7 +218,9 @@ def test_scrape_uses_system_actor_and_never_checks_out_a_work_connection(engine_
     event.listen(ctx.engine, "after_cursor_execute", observe)
     try:
         with acting_as(Actor("unsigned visitor", ActorKind.USER)):
-            assert operation.scrape(ctx).status == 200
+            response = operation.scrape(ctx)
+        assert response.status == 200
+        assert "project=" not in response.body
         assert seen and all(actor == SYSTEM_ACTOR and count == baseline for actor, count in seen)
     finally:
         event.remove(ctx.engine, "after_cursor_execute", observe)
@@ -252,9 +248,9 @@ def test_enabling_metrics_inside_an_existing_savepoint_preserves_its_outcome(eng
             nested.rollback()
         else:
             nested.commit()
-    assert value(
-        registry.render({}), "attempts_ended_total", project="1", status=AttemptStatus.CANCELLED
-    ) == (0 if rollback else 1)
+    assert value(registry.render({}), "attempts_ended_total", status=AttemptStatus.CANCELLED) == (
+        0 if rollback else 1
+    )
 
 
 @pytest.mark.parametrize("failed", [False, True])

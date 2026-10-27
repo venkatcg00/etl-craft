@@ -30,6 +30,7 @@ def project(engine_db, tmp_path):
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "ENVIRONMENT"},
+                "Orchestration": {"Project": "default"},
                 "Engine": {"dev": block},
                 "Warehouse": {
                     "dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"}
@@ -159,7 +160,7 @@ def test_script_failure_uses_retry_policy_and_audits_the_failing_statement(
         assert row.failure_class == "PERMANENT"
         assert "bad.sql" in row.error_message and "statement 1" in row.error_message
         assert "absent" in row.error_message
-    logs = list(config.log_dir.glob("P/run-*/bad.attempt-*.log"))
+    logs = list(config.log_dir.glob("project-1/P/run-*/bad.attempt-*.log"))
     assert len(logs) == count
     for log in logs:
         output = log.read_text("utf-8")
@@ -284,7 +285,7 @@ def test_driver_failure_and_debug_logs_do_not_expose_bound_values(project):
         ).one()
     assert hidden not in attempt.error_message
     assert hidden not in (attempt.task_log or "")
-    log = next(config.log_dir.glob("P/run-*/cast.attempt-1.log")).read_text("utf-8")
+    log = next(config.log_dir.glob("project-1/P/run-*/cast.attempt-1.log")).read_text("utf-8")
     assert hidden not in log
     assert "[REDACTED]" in log
 

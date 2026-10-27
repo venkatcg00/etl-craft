@@ -169,7 +169,7 @@ def test_pipeline_releases_downstream_scripts_and_sql(world):
 
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {
             "dev": {
                 "Jdbc_url": config.engine.jdbc_url,

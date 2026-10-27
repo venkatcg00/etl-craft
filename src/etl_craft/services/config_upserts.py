@@ -1,6 +1,6 @@
 """Apply submitted configuration changes against the selected Engine DB snapshot."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 
 from sqlalchemy.engine import Connection
@@ -511,11 +511,18 @@ def upsert_table(
     return changes
 
 
-def merge_rows(conn: Connection, files: ConfigFiles, config: ConnectorConfig) -> list[Change]:
+def merge_rows(
+    conn: Connection,
+    files: ConfigFiles,
+    config: ConnectorConfig,
+    authorize: Callable[[Connection, ConfigFiles], None] | None = None,
+) -> list[Change]:
     """Validate the final snapshot, then retire explicitly and upsert in one transaction."""
     current = snapshot(conn, files, config)
     files = resolved_files(complete_files(files, current), config)
     final = final_rows(files, current)
+    if authorize is not None:
+        authorize(conn, files)
     check_references(files, final, current)
     check_columns(files, final)
     changes = normalize_submitted_tables(conn, files, current)

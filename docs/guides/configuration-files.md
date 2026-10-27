@@ -46,6 +46,14 @@ The Engine DB accepts writes only from etl-craft. A plain connection, such as th
 shell, `psql`, a BI tool or a database's CSV import, is refused, so the files reach the tables
 through `etl-craft config apply`, which records who changed what.
 
+## Project selection and deployment rights
+
+Use `--project P` or set `Orchestration.Project` in that folder's `craft-connector.yml`.
+A conflict is refused; the folder name never selects a project. `config plan` and `config apply`
+require project CAN_MANAGE. Use `config apply --project-dir sales/` to load `sales/`'s own file;
+`--config-dir` may select a subset of change CSVs without changing the project's identity.
+Missing files and rows remain untouched. See the [multi-project layout and CI example](../deploying/project-layout.md#several-projects-in-one-repository).
+
 ## The commands
 
 | Command | Does |
@@ -277,3 +285,18 @@ Permission changes use `etl-craft access grant|revoke|list` and their API action
 of configuration deployment. See [Pipeline permission groups](../deploying/security.md#pipeline-permission-groups)
 and the [bulk command input](../examples/access.csv). Configuration export writes only the eight
 metadata files; it does not export administrator identities or permissions.
+
+## Tag edits and access
+
+Tags are the only pipeline grouping; there are no pipeline folders. Editing `TAGS` in a
+pipeline's `PIPELINE_PARAMETERS` can change which access grants match it. Both `config plan`
+and `config apply` report each grant that starts or stops matching, naming its principal,
+tag, permission and pipeline. JSON returns these under `tag_access_changes`.
+
+The report also names open/restricted switches. When a pipeline becomes restricted,
+project-level access no longer applies: only matching pipeline/tag grants and project
+CAN_MANAGE reach it. When its last matching grant disappears, the project level applies again.
+An ungranted tag edit reports no access change. This report neither changes grants nor refuses
+a deploy. It reports grants rather than accounts, because SSO group membership cannot be
+completely enumerated at plan time. Per-project repository folders are deployment layout,
+not pipeline grouping.

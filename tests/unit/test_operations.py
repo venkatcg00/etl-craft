@@ -48,7 +48,7 @@ def ctx(tmp_path, monkeypatch, engine_actor):
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "ENVIRONMENT"},
-                "Orchestration": {},
+                "Orchestration": {"Project": "default"},
                 "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
             },
             sort_keys=False,

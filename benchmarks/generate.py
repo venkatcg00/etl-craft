@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import math
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,7 +53,18 @@ def generate(root: Path, template: Path, scale: Scale) -> list[Path]:
     for index in range(scale.projects):
         folder = root / f"bench_{index:03d}"
         folder.mkdir()
-        (folder / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False))
+        written = deepcopy(raw)
+        orchestration = written.pop("Orchestration", {})
+        orchestration["Project"] = f"bench_{index:03d}"
+        for block in orchestration.values():
+            if isinstance(block, dict) and "Project" in block:
+                block["Project"] = orchestration["Project"]
+        written = {
+            **({"Secrets": written.pop("Secrets")} if "Secrets" in written else {}),
+            "Orchestration": orchestration,
+            **written,
+        }
+        (folder / "craft-connector.yml").write_text(yaml.safe_dump(written, sort_keys=False))
         (folder / "python_scripts").mkdir()
         (folder / "python_scripts/work.py").write_text(FAKE)
         config = folder / "config"

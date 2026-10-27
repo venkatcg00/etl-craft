@@ -68,6 +68,8 @@ def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
             )
         if done.retry_at is not None:
             out.line(f"retry_at={done.retry_at.isoformat()}")
+        if done.dependents:
+            out.line("Cross-project dependents: " + ", ".join(done.dependents))
         out.line(done.next_action)
 
     out.result(done, args.output_format, text=render)

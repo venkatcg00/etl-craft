@@ -53,6 +53,12 @@ def _uploaded(
         config_file = Path(scratch) / "craft-connector.yml"
         config_file.write_bytes(content["craft-connector.yml"])
         digest = connection_sha256(config_file)
+        declared = project_config(ctx.config, config_file).project
+        if declared and declared != ctx.project:
+            raise ConfigurationError(
+                f"craft-connector.yml: Orchestration.Project={declared!r} conflicts with "
+                f"selected project={ctx.project!r}; publish the selected project's own folder"
+            )
     return manifest, content, digest
 
 

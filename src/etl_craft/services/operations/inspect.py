@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Generator, Iterator
 from dataclasses import replace
-from pathlib import Path
 
 from sqlalchemy import Boolean
 
@@ -40,7 +39,7 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.engine.run_definitions import for_run
 from etl_craft.engine.runlog import select_run
-from etl_craft.execution.attempt_records import attempt_log_path
+from etl_craft.execution.attempt_records import local_attempt_log
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import (
     ActionView,
@@ -385,20 +384,7 @@ def attempt_log(ctx: OperationContext, request: LogInput) -> Iterator[bytes]:
 
 def local_log(ctx: OperationContext, row: LogAttempt, offset: int) -> Generator[bytes, None, None]:
     """Hold each local path ancestor while reading, refusing symlinks and special files."""
-    expected = attempt_log_path(
-        ctx.config,
-        row.pipeline_code,
-        row.pipeline_run_id,
-        row.task_code,
-        row.attempt_number,
-    ).absolute()
-    assert row.log_path is not None
-    path = Path(row.log_path).absolute()
-    if path != expected or not path.is_relative_to(ctx.config.log_dir.absolute()):
-        raise ResourceNotFoundError(
-            f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected {str(expected)!r}; "
-            "restore the configured canonical attempt path"
-        )
+    path = local_attempt_log(ctx.config, row)
     try:
         with open_regular(
             ctx.config.log_dir.absolute(),

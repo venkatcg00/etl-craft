@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from etl_craft.core.enums import YesNo
+from etl_craft.core.enums import Permission, YesNo
 from etl_craft.engine.repository.config_rows import ACTIVE_FLAG, Key, Value
 from etl_craft.services.validate import Finding
 
@@ -57,6 +57,27 @@ class Change:
 
 
 @dataclass(frozen=True)
+class TagGrantMatch:
+    """One existing grant that starts or stops matching a pipeline's tags."""
+
+    principal: str
+    tag: str
+    permission: Permission
+    starts_matching: bool
+
+
+@dataclass(frozen=True)
+class TagAccessChange:
+    """Grant matches and open/restricted policy changed by a submitted tag edit."""
+
+    pipeline: str
+    was_restricted: bool
+    is_restricted: bool
+    grants: tuple[TagGrantMatch, ...]
+    policy_change: str | None = None
+
+
+@dataclass(frozen=True)
 class ConfigSync:
     """What loading the config files changed, or would change, and what ``validate`` found."""
 
@@ -68,6 +89,7 @@ class ConfigSync:
     """Whether ``validate`` failed the resulting rows, so nothing was applied."""
     changes: tuple[Change, ...]
     findings: tuple[Finding, ...] = ()
+    tag_access_changes: tuple[TagAccessChange, ...] = ()
 
 
 @dataclass(frozen=True)

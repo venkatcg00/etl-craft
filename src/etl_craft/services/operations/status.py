@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import ClassVar
 
@@ -36,7 +36,7 @@ from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.agents import AgentsView, list_agents
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import PipelineView, RunView, TaskRunView
-from etl_craft.services.operations.permissions import visible_codes
+from etl_craft.services.operations.permissions import visible_codes, visible_dependents
 from etl_craft.services.operations.requests import NoInput, RunFilter, RunSelection, TaskSelection
 from etl_craft.services.operations.snapshots import (
     pipeline_view,
@@ -112,6 +112,7 @@ class Explanation:
     retry_at: datetime | None
     state: str
     next_action: str
+    dependents: tuple[str, ...] = ()
 
 
 def explain(snapshot: TaskSnapshot) -> Explanation:
@@ -573,7 +574,8 @@ def explain_task(ctx: OperationContext, request: TaskSelection) -> Explanation:
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates, task_code)
-    return explain(snapshots[0])
+        dependents = visible_dependents(conn, ctx, pipeline_code)
+    return replace(explain(snapshots[0]), dependents=dependents)
 
 
 def item_action(task: TaskRunView | None, action: str) -> str:

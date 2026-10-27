@@ -119,7 +119,7 @@ def test_controller_no_ui_exposes_probes_and_still_supervises(cli_project, monke
     response = httpx.get(url + "/metrics")
     assert response.status_code == 200
     assert "etl_craft_controller_leader 1" in response.text
-    assert 'etl_craft_runs_ended_total{project="1",status="SUCCESS"} 1' in response.text
+    assert 'etl_craft_runs_ended_total{status="SUCCESS"} 1' in response.text
     controller.signal(signal.SIGTERM)
     assert controller.wait() == 0, controller.output
 

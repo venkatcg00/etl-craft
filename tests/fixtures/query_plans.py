@@ -124,6 +124,7 @@ VALUES = {
     "catalog": "",
     "catalog_name": "",
     "target_catalog_name": "",
+    "project_only": True,
     "schema": "plan",
     "schema_name": "plan",
     "target_schema_name": "plan",
@@ -329,6 +330,10 @@ FULL_READS = {
         "cfg_pipelines",
     ): "Enumerates parameters across active pipelines.",
     ("active_pipelines", "cfg_pipelines"): "Loads every active pipeline definition.",
+    (
+        "catalog_pipeline_edges",
+        "cfg_pipelines",
+    ): "Enumerates pipeline definitions on both ends of the selected project's catalog edges.",
     (
         "active_schedule_definitions",
         "cfg_pipelines",

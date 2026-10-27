@@ -14,8 +14,8 @@ agents remain API clients and open no HTTP port.
 
 ## Series
 
-All names below include the `etl_craft_` prefix. `project` is the Engine DB project ID, `agent`
-is the registered agent ID, and `slot_kind` uses the existing `python` and `warehouse` values.
+All names below include the `etl_craft_` prefix. Public scrapes aggregate across projects and
+never expose project labels. `agent` is the registered agent ID, and `slot_kind` uses the existing `python` and `warehouse` values.
 These are the only identity dimensions; individual pipelines, runs, tasks and attempts are
 never labels. `query` is the catalog query name or `unknown`, never SQL or bind values.
 
@@ -24,22 +24,22 @@ never labels. `query` is the catalog query name or `unknown`, never SQL or bind 
 | `controller_tick_duration_seconds` | histogram | No labels: supervision work per tick, including failed ticks and excluding the notification/poll wait |
 | `controller_leader` | gauge | 1 while this process holds leadership, otherwise 0 |
 | `controller_heartbeat_age_seconds` | gauge | Seconds since the leader committed its heartbeat |
-| `runs` | gauge | `project`, `status`: current QUEUED and IN-PROGRESS logical runs |
-| `attempts` | gauge | `project`, `status`: QUEUED, CLAIMED and RUNNING attempts |
-| `queue_depth` | gauge | `project`, `pool`, `slot_kind`: queued attempt count |
+| `runs` | gauge | `status`: current QUEUED and IN-PROGRESS logical runs |
+| `attempts` | gauge | `status`: QUEUED, CLAIMED and RUNNING attempts |
+| `queue_depth` | gauge | `pool`, `slot_kind`: queued attempt count |
 | `queue_oldest_age_seconds` | gauge | Same labels: seconds since the oldest queued attempt was recorded |
 | `active_agents` | gauge | `pool`: ACTIVE registrations with a heartbeat less than 30 seconds old |
 | `agent_slots` | gauge | `pool`, `agent`, `slot_kind`, `status`: capacity, used or free slots; free uses the admission accountant's CPU, memory and overlapping-host limits |
 | `agent_running_children` | gauge | `pool`, `agent`: owned RUNNING attempts |
 | `agent_heartbeat_age_seconds` | gauge | `pool`, `agent`: age of the current ACTIVE or DRAINING registration; reconciled GONE registrations leave the exposition |
-| `gate_waits` | gauge | `project`: persisted waits with NEXT_CHECK_AT under a nonterminal run |
-| `runs_ended_total` | counter | `project`, `status`: terminal logical-run transitions observed by this leader process |
-| `attempts_ended_total` | counter | `project`, `status`: terminal attempt outcomes observed by this leader process |
-| `lease_expiries_total` | counter | `project`: attempt ownership expiries committed as LOST |
-| `lost_attempts_total` | counter | `project`: committed LOST attempts; uncertain side effects require investigation |
-| `retries_total` | counter | `project`: additional attempts queued under an existing task run |
-| `admission_latency_seconds` | histogram | `project`: recorded run creation to successful admission; already-active creations have near-zero waiting time |
-| `dispatch_latency_seconds` | histogram | `project`: queued attempt to successful ownership claim |
+| `gate_waits` | gauge | No labels: persisted waits with NEXT_CHECK_AT under a nonterminal run |
+| `runs_ended_total` | counter | `status`: terminal logical-run transitions observed by this leader process |
+| `attempts_ended_total` | counter | `status`: terminal attempt outcomes observed by this leader process |
+| `lease_expiries_total` | counter | No labels: attempt ownership expiries committed as LOST |
+| `lost_attempts_total` | counter | No labels: committed LOST attempts; uncertain side effects require investigation |
+| `retries_total` | counter | No labels: additional attempts queued under an existing task run |
+| `admission_latency_seconds` | histogram | No labels: recorded run creation to successful admission; already-active creations have near-zero waiting time |
+| `dispatch_latency_seconds` | histogram | No labels: queued attempt to successful ownership claim |
 | `engine_db_statement_latency_seconds` | histogram | `query`: controller-engine cursor execution duration |
 
 Histograms expose cumulative `_bucket` samples, including `le="+Inf"`, plus `_sum` and `_count`.
