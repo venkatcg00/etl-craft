@@ -133,6 +133,7 @@ class Demo:
         raw = {
             "Secrets": {"Source_type": "ENVIRONMENT"},
             "Orchestration": {
+                "Project": "default",
                 "Task_timeout_seconds": 600,
                 "Local_warehouse_slots": 4,
                 "Enforce_sla": True,

@@ -13,13 +13,15 @@ pytestmark = pytest.mark.unit
 
 
 def send(sig=signal.SIGTERM):
-    os.kill(os.getpid(), sig)
+    if threading.current_thread() is threading.main_thread():
+        signal.raise_signal(sig)
+    else:
+        os.kill(os.getpid(), sig)
 
 
 def test_a_signal_during_work_is_held_until_the_next_checkpoint():
     with interrupts.deferred(signal.SIGTERM):
         send()
-        time.sleep(0.01)  # work: the handler ran and held the signal
         with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
             interrupts.checkpoint()
         interrupts.checkpoint()  # raised once
@@ -59,18 +61,20 @@ def test_a_signal_still_held_is_raised_when_the_block_ends_and_handlers_are_rest
 
 def test_waiting_in_another_thread_does_not_expose_the_main_thread():
     release = threading.Event()
+    entered = threading.Event()
 
     def wait():
         with interrupts.interruptible():
+            entered.set()
             release.wait(10)
 
     with interrupts.deferred(signal.SIGTERM):
         waiter = threading.Thread(target=wait)
         waiter.start()
-        time.sleep(0.05)
+        assert entered.wait(10)
         send()  # the main thread is working, whatever the other thread does
-        time.sleep(0.01)
         release.set()
-        waiter.join()
+        waiter.join(timeout=10)
+        assert not waiter.is_alive()
         with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
             interrupts.checkpoint()

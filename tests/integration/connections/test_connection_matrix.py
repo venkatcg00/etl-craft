@@ -63,7 +63,7 @@ def write(tmp_path: Path, **sections) -> Path:
     settings = sections.pop("warehouse_settings", {})
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {**sections.pop("orchestration", {})},
+        "Orchestration": {"Project": "default", **sections.pop("orchestration", {})},
         "Engine": {"dev": sections.pop("engine", SQLITE_ENGINE)},
         **{name: {"dev": block} for name, block in sections.items()},
     }

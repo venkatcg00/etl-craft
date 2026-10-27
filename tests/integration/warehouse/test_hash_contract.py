@@ -147,7 +147,7 @@ def test_rehash_command_validates_dry_run_then_upgrades(sql_world, capsys, monke
     fields = profile_block(profile, profile.schema)
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {
             "dev": {"Jdbc_url": f"jdbc:sqlite:{w.engine_db.url.database}", "Schema": "main"}
         },

@@ -22,7 +22,7 @@ def save_project(world):
 
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {"Task_timeout_seconds": 60},
+        "Orchestration": {"Project": "default", "Task_timeout_seconds": 60},
         "Engine": {
             "dev": profile_block(
                 config.engine, config.engine.schema or world.engine_db.dialect.default_schema_name

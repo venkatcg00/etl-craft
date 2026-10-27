@@ -172,6 +172,7 @@ def _config(tmp_path: Path, profile: ConnectionProfile) -> ConnectorConfig:
     (project / "sql_scripts").mkdir(parents=True, exist_ok=True)
     engine = ConnectionProfile("ENGINE", "dev", "jdbc:sqlite:engine.db", "", "NONE")
     return ConnectorConfig(
+        project="default",
         source=SourceConfig(type=SecretsSource.ENVIRONMENT),
         engine=engine,
         warehouse=profile,

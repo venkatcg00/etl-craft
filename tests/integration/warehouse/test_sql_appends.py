@@ -140,7 +140,7 @@ def test_upgrade_command_validates_then_adds_and_records_requests(sql_world, cap
     fields = profile_block(profile, profile.schema)
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {
             "dev": {"Jdbc_url": f"jdbc:sqlite:{w.engine_db.url.database}", "Schema": "main"}
         },

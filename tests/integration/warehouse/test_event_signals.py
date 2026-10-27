@@ -208,7 +208,7 @@ def test_retry_and_recovery_keep_the_successful_waits_original_keys(signal_world
     send_signal(w, "signals")
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {"dev": profile_block(w.config.engine, w.config.engine.schema or "main")},
         "Warehouse": {
             "Name": warehouse_dialect(w.config).spec.display_name,

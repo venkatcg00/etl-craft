@@ -74,7 +74,7 @@ REQUESTS = {
     [
         (ActionName.PIPELINES, ApiRole.VIEWER),
         (ActionName.RUN, ApiRole.OPERATOR),
-        (ActionName.CONFIG_APPLY, ApiRole.DEVELOPER),
+        (ActionName.CONFIG_APPLY, ApiRole.ADMIN),
         (ActionName.ACCOUNT_LIST, ApiRole.ADMIN),
         (ActionName.ACCOUNT_RESET_PASSWORD, ApiRole.ADMIN),
         (ActionName.CLONE, ApiRole.ADMIN),
@@ -82,7 +82,7 @@ REQUESTS = {
         (ActionName.CONTROLLER, ApiRole.ADMIN),
         (ActionName.PUBLISH_DOCS, ApiRole.ADMIN),
         (ActionName.DOCS_VERSION, ApiRole.ADMIN),
-        (ActionName.GENERATE_DOCS, ApiRole.DEVELOPER),
+        (ActionName.GENERATE_DOCS, ApiRole.ADMIN),
         (ActionName.LINEAGE_REFRESH, ApiRole.DEVELOPER),
     ],
 )
@@ -108,7 +108,12 @@ def test_role_inheritance_and_refusal_records(project, role, name, required):
         with pytest.raises(PermissionDeniedError) as error, admitted(caller, name, REQUESTS[name]):
             pass
         message = str(error.value)
-        assert caller.actor.name in message and role in message and required in message
+        assert caller.actor.name in message and role in message
+        assert (
+            "CAN_MANAGE"
+            if name in {ActionName.CONFIG_APPLY, ActionName.GENERATE_DOCS} and role != ApiRole.AGENT
+            else ACTIONS[name].role
+        ) in message
         assert "administrator" in message
         record = actions(p.engine)[-1]
         assert record.actor == caller.actor.name
@@ -185,14 +190,14 @@ def test_changing_the_shared_policy_changes_every_transport(project, monkeypatch
 
 
 def test_services_reject_unproven_roles_and_metadata_writes_before_io(project):
-    from etl_craft.core.errors import PermissionDeniedError
+    from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError
 
     _, ctx, creds = project
-    with pytest.raises(PermissionDeniedError, match="unproven"):
+    with pytest.raises(ResourceNotFoundError, match="missing or not permitted"):
         act(replace(ctx, role=None), ActionName.PIPELINES)
     for role in (ApiRole.VIEWER, ApiRole.OPERATOR):
         caller = replace(ctx, role=role, actor=creds[role].metadata.actor)
-        with pytest.raises(PermissionDeniedError, match="developer role is required"):
+        with pytest.raises(PermissionDeniedError, match="CAN_MANAGE"):
             act(caller, ActionName.CONFIG_APPLY, config_dir=Path("does-not-exist"))
 
 
@@ -200,6 +205,14 @@ def test_developer_can_apply_project_migrations_but_not_engine_migrations(
     project, tmp_path, monkeypatch, capsys
 ):
     p, _, creds = project
+    act(
+        project[1],
+        ActionName.ACCESS_GRANT,
+        project="default",
+        account="policy-developer",
+        permission="CAN_MANAGE",
+        reason="Manage project migrations",
+    )
     directory = tmp_path / "migrations"
     directory.mkdir()
     (directory / "0001_project.sql").write_text("CREATE TABLE PROJECT_NOTE (ID INTEGER)\n")

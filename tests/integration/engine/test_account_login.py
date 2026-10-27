@@ -36,7 +36,7 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "ENVIRONMENT"},
-                "Orchestration": {},
+                "Orchestration": {"Project": "default"},
                 "Engine": {"dev": block},
             },
             sort_keys=False,

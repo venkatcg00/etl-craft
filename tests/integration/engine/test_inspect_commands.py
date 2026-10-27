@@ -46,7 +46,7 @@ def project(engine_db, tmp_path, monkeypatch):
     root = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {"dev": block},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
