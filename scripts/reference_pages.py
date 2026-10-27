@@ -166,6 +166,14 @@ def schema_text(schema: Path) -> str:
     text = schema.read_text(encoding="utf-8")
     for match in list(re.finditer(r"CREATE TABLE (\w+)_new \((.*?)\n\);", text, re.S)):
         name, body = match.groups()
+        before, rebuild, after = text.partition(match.group())
+        before = re.sub(
+            rf"ALTER TABLE {name} (?:ADD COLUMN|ALTER COLUMN|RENAME COLUMN|DROP COLUMN)\b.*?;",
+            "",
+            before,
+            flags=re.S,
+        )
+        text = before + rebuild + after
         original = re.search(rf"CREATE TABLE {name} \(.*?\n\);", text, re.S)
         if original is not None:
             text = text.replace(original[0], f"CREATE TABLE {name} ({body}\n);", 1)
@@ -186,6 +194,11 @@ def schema_text(schema: Path) -> str:
             )
             updated = line.rstrip(",") + " " + change + ("," if line.endswith(",") else "")
             text = text.replace(original[0], original[0].replace(line, updated), 1)
+    for name, old, new in re.findall(r"ALTER TABLE (\w+) RENAME COLUMN (\w+) TO (\w+);", text):
+        original = re.search(rf"CREATE TABLE {name} \(.*?\n\);", text, re.S)
+        if original is not None:
+            updated = re.sub(rf"\b{old}\b", new, original[0])
+            text = text.replace(original[0], updated, 1)
     for name in re.findall(r"DROP INDEX (\w+);", text):
         indexes = list(re.finditer(rf"CREATE (?:UNIQUE )?INDEX {name}\s+.*?;", text, re.S))
         for index in indexes[:-1]:
@@ -210,7 +223,7 @@ def schema_tables(schema: Path = SCHEMA) -> list[Table]:
             if not re.match(r"^[A-Z_][A-Z_0-9]*\s", line):
                 continue
             name, rest = line.split(None, 1)
-            if name in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}:
+            if name in {"CONSTRAINT", "CHECK", "CASE", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}:
                 continue
             type_ = re.split(
                 r"\s+(NOT NULL|DEFAULT|REFERENCES|GENERATED|PRIMARY|CONSTRAINT|CHECK)", rest

@@ -8,6 +8,9 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.Permission: {"CAN_VIEW", "CAN_RUN", "CAN_MANAGE"},
+    enums.AccessIntent: {"GRANT", "REVOKE"},
+    enums.AccessChange: {"added", "changed permission", "revoked", "unchanged"},
     enums.IcebergMaintenance: {"expire_snapshots", "remove_orphan_files"},
     enums.ArchiveKind: {
         "TEXT",

@@ -120,7 +120,7 @@ def schema_columns(path: Path) -> dict[str, list[str]]:
                 first
                 and first.isupper()
                 and first
-                not in {"CONSTRAINT", "CHECK", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}
+                not in {"CONSTRAINT", "CHECK", "CASE", "OR", "AND", "PRIMARY", "FOREIGN", "UNIQUE"}
             ):
                 columns.append(first)
         tables[match[1]] = columns
@@ -151,6 +151,10 @@ def test_both_schemas_define_the_same_tables_and_columns_in_order():
         "AUD_LINEAGE_VERSION_EDGES",
     } <= postgres.keys()
     assert postgres == sqlite
+    grants = postgres["CFG_PIPELINE_GRANTS"]
+    assert {"PERMISSION", "GROUP_ID", "ACCOUNT_ID", "GRANTEE_ROLE"} <= set(grants)
+    assert not {"ROLE", "CASE"} & set(grants)
+    assert len(grants) == len(set(grants))
 
 
 def without_comments(statement):

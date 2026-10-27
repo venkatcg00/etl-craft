@@ -794,6 +794,9 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.Y A intentionally audits access/project/pool lists even though they use GET; ordinary
+  read actions remain unaudited. The reference generator follows rebuilds and column renames,
+  so it describes the actual migrated permission schema.
 - S7.Y A follows the owner's 2026-10-26 expanded scope and two-PR decision: projects/pools move
   from S7.Z to admin commands now; group/account/deployment-role principals and three permission
   levels replace the old group role. Existing rows and history convert. The owner explicitly
