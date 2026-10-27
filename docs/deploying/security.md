@@ -158,8 +158,8 @@ signed out. A stolen refresh token can be used for that entire time. Use a short
 `Auth.Refresh_days` lifetime and run `etl-craft logout` for a lost device.
 
 Refreshed access tokens retain the group set from the last SSO sign-in; they do not fetch new
-provider claims. Access expiry is capped at the refresh token's expiry, so `Auth.Refresh_days`
-bounds retained claims in a server session. A local session is bounded by `Auth.Session_hours`.
+provider claims. Access expiry is capped at the refresh token's expiry, so `Auth.Session_hours` from original sign-in
+bounds retained SSO claims in a server session. A local session is bounded by `Auth.Session_hours`.
 Removing someone from a group at the identity provider is seen at their next SSO sign-in,
 not by an already admitted session or run. Disable the account or the local group, or retire
 its grant, to withdraw its contribution immediately under the current policy.
@@ -179,10 +179,11 @@ An organization-hosted static catalog is **one site per project**. Its host is r
 access control; IP restrictions alone are not project authorization. Projects on one instance
 share a code trust boundary; use separate instances for separate security domains.
 
-Signed-in, project-filtered serving by `publish-docs` needs an approved integration with API/UI
-sessions. Its separate stdlib server currently has no sign-in context; that part of project
-isolation is pending a design decision. `Docs_site.Allowed_ips` remains an extra network layer,
-not a substitute for account/project checks.
+S7.A.7 will move signed-in, project-filtered catalog serving into the API using the UI's
+browser session. Until then `publish-docs` keeps its separate stdlib server, serves one
+configured project per process, and is protected only by `Docs_site.Allowed_ips`. That network
+allow list does not provide account/project authorization; deploy a separate process and URL
+for each project.
 
 Local first-admin/recovery, pre-account initialization/migration, diagnostic doctor, and
 login/logout remain the explicit credential/bootstrap entry points described above.
@@ -298,3 +299,40 @@ bypass every role check.
 
 Triggered child pipelines from a manual run are refused once the initiating account is disabled.
 Use service accounts for long manual chains.
+
+## Audit hardening
+
+Agent tokens are bound to one pool: create them with
+`etl-craft token create --name worker --role agent --pool default`. Registration and claims
+refuse another pool. Service and agent tokens default to 365 days; `--expires 36500d` is the
+maximum. Existing tokens retain their expiry, shown as `never` when unset. Token lists show
+last use; this timestamp updates at most hourly and a failed telemetry write cannot refuse a
+valid request.
+
+A claim issues a hashed, attempt-only credential for the child's own renewal, report and log actions.
+The agent normally supervises renewal; an attempt credential can renew only its own lease,
+without changing agent capacity or acknowledging controls; the credential stops working when the attempt ends or its lease
+expires. It cannot claim work or address another attempt. Local and agent task interpreters
+use the same environment allowlist: PATH, PYTHONPATH, HOME, LANG, LANGUAGE, LC_* locale variables, TZ,
+TMPDIR/TMP/TEMP, USER/LOGNAME, SYSTEMROOT and TLS certificate locations, plus variables
+explicitly named by the loaded connection configuration. Local tasks require their configured
+Engine DB connection as well as warehouse connections. Deployment tokens and refresh/session
+credentials are not inherited. The task's attempt credential is passed in its private work
+file, never as ETL_CRAFT_TOKEN. Projects still share the instance's executable-code trust
+boundary; this is credential scoping, not a sandbox.
+
+SSO sessions, including refreshes, expire absolutely within Auth.Session_hours from original
+sign-in. Refreshing never resets that boundary. Password-only local accounts retain
+Auth.Refresh_days for server refresh sessions. OIDC permits 120 seconds of clock skew and
+caches successful discovery per issuer for ten minutes. ID tokens are accepted only from our
+own direct, TLS-validated token-endpoint response, as permitted by OIDC Core 3.1.3.7. Any future
+path accepting an ID token from a client must verify its signature.
+
+Until S7.A.7, publish-docs has no account sign-in: its IP allow list is its only visitor access
+check. Run one process for one configured project's generated catalog; a catalog for a different
+project is refused, including after a folder swap. For example, run
+`etl-craft publish-docs --project-dir sales/ --local-only` and a separate process for finance/.
+Ngrok publishing requires Docs_site.Allowed_ips; local and organization External_url hosting
+remain available. S7.A.7 will serve catalogs through the API with the UI's shared browser
+session and project checks. Organization-hosted static catalogs remain one site per project;
+the host controls access.

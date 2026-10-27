@@ -63,6 +63,15 @@ def test_catalog_bounds_history_and_separates_scheduled_backfill_and_repair(engi
                 ),
                 {"id": recent[1]["id"]},
             )
+            conn.execute(
+                text(
+                    "INSERT INTO AUD_RUN_INTERVENTIONS (PIPELINE_ID,PIPELINE_RUN_ID,ACTION,"
+                    "FROM_STATUS,TO_STATUS,REASON,REQUESTED_BY) SELECT PIPELINE_ID,PIPELINE_RUN_ID,"
+                    "'REOPEN','FAILED','IN-PROGRESS','repair','owner' FROM AUD_PIPELINES_RUN_LOG "
+                    "WHERE PIPELINE_RUN_ID=:id"
+                ),
+                {"id": recent[1]["id"]},
+            )
         catalog = build_catalog(engine, config)
     runs = catalog.pipelines["METRIC_0"].runs
     assert len(runs) == 30
@@ -75,13 +84,14 @@ def test_catalog_bounds_history_and_separates_scheduled_backfill_and_repair(engi
         run.pipeline_run_id: run.run_kind.value for run in catalog.tasks["METRIC_0.task_0"].runs
     } == kinds
     assert kinds[recent[0]["id"]] == "BACKFILL"
-    assert kinds[recent[1]["id"]] == "REPAIR"
+    assert kinds[recent[1]["id"]] == "SCHEDULED"
     assert kinds[recent[2]["id"]] == "SCHEDULED"
     site = write_site(catalog, config, tmp_path / "catalog")
     page = (site.folder / "pipelines/METRIC_0.html").read_text()
-    assert "<td>Scheduled</td><td>28</td><td>100% of 28</td>" in page
+    assert "<td>Scheduled</td><td>29</td><td>97% of 29</td>" in page
     assert "<td>Backfill</td><td>1</td><td>100% of 1</td>" in page
-    assert "<td>Repair</td><td>1</td><td>100% of 1</td>" in page
+    assert "<th>Repaired</th>" in page
+    assert "<td>Repair</td>" not in page
     for table, index_name, columns in (
         ("AUD_PIPELINES_RUN_LOG", "ix_catalog_pipeline_runs", ["pipeline_id", "pipeline_run_id"]),
         ("AUD_TASK_RUN_LOG", "ix_catalog_task_runs", ["task_id", "task_run_id"]),

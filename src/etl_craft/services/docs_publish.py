@@ -22,6 +22,7 @@ shared would break, so it fails naming both, unless told to accept the new one.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import threading
 from collections.abc import Callable, Iterator
@@ -65,6 +66,8 @@ EXTRA = "publish"
 
 class _Server(ThreadingHTTPServer):
     """The web server, with who may read the site and whether requests come through ngrok."""
+
+    project: str | None = None
 
     allowed: tuple[IPv4Network | IPv6Network, ...] = ()
     trusted_proxies: tuple[IPv4Network | IPv6Network, ...] = ()
@@ -139,6 +142,19 @@ class _Handler(SimpleHTTPRequestHandler):
             return None
 
     def _open_response(self) -> BinaryIO | None:
+        if self.server.project is not None:
+            try:
+                identity = json.loads((Path(self.directory) / MARKER).read_text(encoding="utf-8"))
+                matches = (
+                    isinstance(identity, dict) and identity.get("project") == self.server.project
+                )
+            except (OSError, ValueError):
+                matches = False
+            if not matches:
+                self.send_error(
+                    HTTPStatus.SERVICE_UNAVAILABLE, "catalog project changed; regenerate"
+                )
+                return None
         if not self._visitor_allowed():
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
@@ -182,7 +198,7 @@ def serve(
     allowed: tuple[str, ...] = (),
     behind_tunnel: bool = False,
     site: DocsSiteConfig | None = None,
-) -> ThreadingHTTPServer:
+) -> _Server:
     """Return a web server for the site in ``folder``, not yet serving.
 
     ``allowed`` are the CIDR ranges visitors may come from, every address when empty.
@@ -236,6 +252,23 @@ def published(
     site = config.docs_site
     organization = site.external_url if not local_only else None
     tunnel = not local_only and organization is None
+    if tunnel and not site.allowed_ips:
+        raise ConfigurationError(
+            "Docs_site.Allowed_ips is empty: ngrok would expose the catalog to everyone; "
+            "set an explicit IP/CIDR allow list or publish with --local-only"
+        )
+    if config.project:
+        try:
+            identity = json.loads((folder / MARKER).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            identity = None
+        if not isinstance(identity, dict) or identity.get("project") != config.project:
+            raise ConfigurationError(
+                f"catalog {folder}: expected project={config.project!r}; "
+                "generated project is missing "
+                "or different; run `etl-craft generate-docs` first "
+                "for this project's craft-connector.yml"
+            )
     server = serve(
         folder,
         "127.0.0.1" if tunnel else host,
@@ -244,6 +277,7 @@ def published(
         behind_tunnel=tunnel,
         site=site if organization else None,
     )
+    server.project = config.project
     local = f"{server.server_address[0]!s}:{server.server_port}"
     thread = threading.Thread(target=server.serve_forever, name="catalog-site", daemon=True)
     thread.start()

@@ -3,14 +3,23 @@
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import YesNo
-from etl_craft.core.errors import MetadataError
+from etl_craft.core.errors import MetadataError, PermissionDeniedError
 from etl_craft.engine.queries import statement
 
 
-def require_pool(conn: Connection, pool: str, task: str) -> None:
+def require_pool(conn: Connection, pool: str, task: str, *, token_id: int | None = None) -> None:
     """Refuse a missing or inactive pool before admitting work or an agent."""
     row = conn.execute(statement(conn, "placement_pool"), {"pool": pool}).one_or_none()
     check_pool(pool, None if row is None else row.active_flag, task)
+    if token_id is not None:
+        bound = conn.execute(
+            statement(conn, "agent_token_pool"), {"token_id": token_id}
+        ).scalar_one_or_none()
+        if bound != pool:
+            raise PermissionDeniedError(
+                f"{task}: token pool={bound!r}, requested pool={pool!r}; expected its bound pool; "
+                "use a token created with --role agent --pool " + pool
+            )
 
 
 def check_pool(pool: str, active: str | None, task: str) -> None:

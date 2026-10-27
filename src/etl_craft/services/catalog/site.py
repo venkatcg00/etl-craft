@@ -98,7 +98,7 @@ def _write_site(catalog: Catalog, config: ConnectorConfig, folder: Path) -> Site
         shutil.rmtree(building)
     building.mkdir(parents=True)
     (building / MARKER).write_text(
-        "Written by `etl-craft generate-docs`, which replaces this folder each time.\n",
+        json.dumps({"project": config.project}),
         encoding="utf-8",
     )
     try:

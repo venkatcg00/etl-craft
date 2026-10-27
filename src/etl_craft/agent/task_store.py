@@ -1,5 +1,6 @@
 """Handler metadata and ownership through the agent API; never through an Engine DB engine."""
 
+import base64
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -10,8 +11,6 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import ActionName, AgentReport
 from etl_craft.core.errors import ServerError
 from etl_craft.core.items import ItemRecord, ItemState
-from etl_craft.core.ownership import attempt_holder
-from etl_craft.core.text import sha256_hex
 from etl_craft.engine.alerts import AlertState
 from etl_craft.engine.repository.business_rules import RuleRunBinding
 from etl_craft.engine.resource_locks import confirm_stale, holder_tag
@@ -31,14 +30,9 @@ class RemoteTaskStore:
     client: AgentClient
     attempt_id: int
     confirm: Callable[[str], None]
+    holder_id: str
     held: set[int] = field(default_factory=set)
     contracts: dict[str, TargetState] = field(default_factory=dict)
-
-    @property
-    def holder_id(self) -> str:
-        """Identify the attempt within its credential namespace."""
-        assert self.client.token is not None
-        return attempt_holder(self.attempt_id, sha256_hex(self.client.token.encode()))
 
     @property
     def session_tag(self) -> str:
@@ -159,8 +153,6 @@ class RemoteTaskStore:
 
     def project(self, config: ConnectorConfig, bundle_id: str) -> ConnectorConfig:
         """Download only this attempt's bundle through the API, retaining host credentials."""
-        import base64
-
         from etl_craft.config.project import project_config
         from etl_craft.engine.project_files import materialize
 
@@ -179,20 +171,21 @@ class RemoteTaskStore:
                 f"hashes; check the API version"
             )
 
-        def read(path: str) -> bytes:
-            value = self.call(replace(self.request(AgentReport.BUNDLE), bundle_path=path))
-            if not isinstance(value, dict) or not isinstance(value.get("content"), str):
-                raise ServerError(
-                    f"bundle {bundle_id}, file {path}: invalid bytes; expected "
-                    f"base64 content; check the API"
-                )
-            try:
-                return base64.b64decode(value["content"], validate=True)
-            except ValueError as error:
-                raise ServerError(
-                    f"bundle {bundle_id}, file {path}: invalid encoding; expected "
-                    f"base64; restore its artifact"
-                ) from error
-
-        root = materialize(bundle_id, files, read)
+        root = materialize(bundle_id, files, self.bundle_file)
         return project_config(config, root / "craft-connector.yml")
+
+    def bundle_file(self, path: str) -> bytes:
+        """Read one validated file from this attempt's pinned bundle."""
+        value = self.call(replace(self.request(AgentReport.BUNDLE), bundle_path=path))
+        if not isinstance(value, dict) or not isinstance(value.get("content"), str):
+            raise ServerError(
+                f"attempt {self.attempt_id}, file {path}: invalid bytes; expected "
+                f"base64 content; check the API"
+            )
+        try:
+            return base64.b64decode(value["content"], validate=True)
+        except ValueError as error:
+            raise ServerError(
+                f"attempt {self.attempt_id}, file {path}: invalid encoding; expected "
+                f"base64; restore its artifact"
+            ) from error

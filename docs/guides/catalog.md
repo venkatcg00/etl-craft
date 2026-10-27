@@ -372,3 +372,10 @@ The overview's labelled checkboxes apply the same AND filter in the browser, kee
 in the URL and restore it on Back/Forward. Unknown tags show no pipelines. Tag edits invalidate
 the pipeline and overview pages on the next catalog build. Filtering needs JavaScript; the
 complete table remains readable without it.
+
+### Reading run rates
+
+Success rates count each logical run's first ending. One clean success, one failure and one
+failure later repaired mean 1 of 3 succeeded (33%), 2 failed, and 1 repaired. Repair does not
+turn the initial failure into a success. Error messages appear only beside a failed or
+cancelled status, not beside a later successful repair.

@@ -210,9 +210,20 @@ async def _wait_lock(ctx: OperationContext, request: AgentTask) -> AgentReply:
             await hub.wait_async(generation, min(1, remaining), ctx.shutdown)
 
 
+def _credential_context(ctx: OperationContext) -> OperationContext:
+    if ctx.credential_attempt_id is not None:
+        with ctx.engine.connect() as conn:
+            digest = conn.execute(
+                statement(conn, "api_token_digest"), {"token_id": ctx.credential_token_id}
+            ).scalar_one()
+        ctx = replace(ctx, credential_digest=digest)
+    return ctx
+
+
 def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[AgentReply]:
     """Apply this token's bounded task operation; no route accepts SQL or another task's ids."""
     check_agent(ctx, request)
+    ctx = _credential_context(ctx)
     if request.operation in {AgentReport.END, AgentReport.CANCEL}:
         return {AgentReport.END: _end, AgentReport.CANCEL: _cancel}[request.operation](ctx, request)
     if request.operation == AgentReport.LOCK:

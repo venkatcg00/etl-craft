@@ -18,3 +18,7 @@ Project-owned commands require `--project` or `Orchestration.Project` in the loa
 `craft-connector.yml`; both must agree when present. There is no implicit `default` project.
 Deployment commands (accounts, groups, pools and `project list`) need no project selection.
 See [Project layout](../deploying/project-layout.md#several-projects-in-one-repository).
+
+Audit hardening adds `token create --pool P` (required only for agent tokens), a default
+`--expires 365d`, and pool/last-used metadata in `token list`. Setup accepts
+`--admin-name N --password-stdin` only for first-admin provisioning; stdin must be a pipe.

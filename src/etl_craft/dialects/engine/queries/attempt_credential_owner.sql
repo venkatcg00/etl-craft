@@ -1,0 +1,1 @@
+SELECT CAST(OWNER_ID AS bigint) AS owner_token_id FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:attempt_id

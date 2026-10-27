@@ -80,3 +80,17 @@ directory. Symlinked configs use the link's directory.
 `setup --print-grants` prints PostgreSQL owner, engine and reader role statements for review and
 executes nothing. On SQLite it explains the file-permission boundary. See
 [Actors and write guards](engine-db.md#actors-and-write-guards) for deployment privileges.
+
+## Unattended first admin
+
+Without a terminal, setup refuses to leave an installation without an administrator. Pipe one
+password line from your secret manager (never put the value in an argument):
+
+```sh
+printf '%s\n' "$BOOTSTRAP_ADMIN_PASSWORD" | etl-craft setup --admin-name owner --password-stdin
+```
+
+The existing password policy applies. This works only while no active admin exists; afterwards
+use `account add` or `account reset-password`. Terminal stdin is refused with --password-stdin,
+so passwords cannot accidentally be typed visibly. Interactive setup retries a password that
+fails the policy up to three times.

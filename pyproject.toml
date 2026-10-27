@@ -20,13 +20,13 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "psutil>=6.0",
-    "duckdb-engine>=0.13",
-    "psycopg[binary]>=3.3.6",
-    "pyyaml>=6.0.3",
-    "sqlalchemy>=2.0.54",
-    "sqlglot>=26",
-    "watchdog>=6",
+    "psutil>=6.0,<7",
+    "duckdb-engine>=0.13,<1",
+    "psycopg[binary]>=3.3.6,<4",
+    "pyyaml>=6.0.3,<7",
+    "sqlalchemy>=2.0.54,<3",
+    "sqlglot>=30.22,<30.23",
+    "watchdog>=6,<7",
 ]
 
 [project.scripts]
@@ -38,25 +38,25 @@ Repository = "https://github.com/venkatcg00/etl-craft"
 Issues = "https://github.com/venkatcg00/etl-craft/issues"
 
 [project.optional-dependencies]
-ui = ["fastapi>=0.115", "pydantic>=2", "uvicorn>=0.35", "jinja2>=3.1"]
+ui = ["fastapi>=0.115,<1", "pydantic>=2.9.2,<3", "uvicorn>=0.35,<1", "jinja2>=3.1,<4"]
 all = ["etl-craft[ui,aws,databricks,snowflake,trino]"]
 aws = [
-    "boto3>=1.28",
+    "boto3>=1.28,<2",
 ]
 databricks = [
-    "databricks-sqlalchemy>=2",
-    "databricks-sql-connector>=4.5.0",
+    "databricks-sqlalchemy>=2,<3",
+    "databricks-sql-connector>=4.5.0,<5",
     # databricks-sql-connector's rows are not the tuples SQLAlchemy 2.1 requires.
     "sqlalchemy>=2.0.54,<2.1",
 ]
 publish = [
-    "ngrok>=1.4",
+    "ngrok>=1.4,<2",
 ]
 snowflake = [
-    "snowflake-sqlalchemy>=1.7",
+    "snowflake-sqlalchemy>=1.7,<2",
 ]
 trino = [
-    "trino[sqlalchemy]>=0.330",
+    "trino[sqlalchemy]>=0.330,<1",
 ]
 
 [build-system]
@@ -82,7 +82,7 @@ dev = [
     "pytest-cov>=6",
     "pytest-timeout>=2.3",
     "ruff>=0.16.8",
-    "types-psutil>=6.0",
+    "types-psutil>=6.0,<7",
     "types-pyyaml>=6.0.12",
 ]
 docs = [

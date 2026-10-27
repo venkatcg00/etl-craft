@@ -116,10 +116,13 @@ def _sign_in(
     ``Auth.Session_hours``.
     """
     refreshable = ctx.transport == Transport.HTTP
+    with ctx.engine.connect() as conn:
+        row = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
+    proven = _proven(row, password, None if claims is None else claims.subject)
     with locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30):
         with ctx.engine.connect() as conn:
-            row = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
-        proven = _proven(row, password, None if claims is None else claims.subject)
+            current = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
+        proven = proven and row is not None and current is not None and row == current
         if row is None or not proven:
             with recorded(ctx, ActionName.LOGIN, {"name": name}):
                 raise UsageError(
@@ -151,7 +154,11 @@ def _sign_in(
                     ),
                 )
                 return Session(created.token, created.metadata)
-            refresh_end = now + timedelta(days=ctx.config.auth.refresh_days)
+            refresh_end = now + (
+                timedelta(hours=ctx.config.auth.session_hours)
+                if claims is not None
+                else timedelta(days=ctx.config.auth.refresh_days)
+            )
             refresh = issue_token(
                 conn,
                 name,
@@ -166,7 +173,7 @@ def _sign_in(
                     row.account_id,
                     name,
                     TokenKind.ACCESS,
-                    now + ACCESS_LIFETIME,
+                    min(now + ACCESS_LIFETIME, refresh_end),
                     refresh.metadata.token_id,
                     matched,
                 ),
@@ -236,6 +243,18 @@ def refresh(ctx: OperationContext, request: TokenInput) -> Session:
         raise UsageError(
             "refresh token is unknown, expired or revoked; run `etl-craft login` again"
         )
+    with ctx.engine.connect() as conn:
+        retained_groups = token_groups(conn, found.token_id)
+    if retained_groups:
+        absolute_end = found.created_at + timedelta(hours=ctx.config.auth.session_hours)
+        found = replace(found, expires_at=min(found.expires_at, absolute_end))
+        assert found.expires_at is not None
+        if found.expires_at <= datetime.now(UTC):
+            raise UsageError(
+                "SSO refresh token exceeded Auth.Session_hours from sign-in; "
+                "run `etl-craft login` again to refresh group membership"
+            )
+    assert found.expires_at is not None
     caller = replace(ctx, actor=found.actor)
     with acting_as(caller.actor), ctx.engine.begin() as conn:
         account_id = (
@@ -252,7 +271,7 @@ def refresh(ctx: OperationContext, request: TokenInput) -> Session:
                 TokenKind.ACCESS,
                 min(datetime.now(UTC) + ACCESS_LIFETIME, found.expires_at),
                 found.token_id,
-                token_groups(conn, found.token_id),
+                retained_groups,
             ),
         )
     return Session(access.token, access.metadata, refresh_expires_at=found.expires_at)

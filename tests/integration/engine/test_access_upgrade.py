@@ -168,7 +168,12 @@ def seed_project_isolation(db):
             token = "preservation-" + name
             account = conn.execute(statement(conn, "account_find"), {"name": name}).one()
             conn.execute(
-                statement(conn, "api_token_create"),
+                text(
+                    "INSERT INTO CFG_API_TOKENS (NAME,TOKEN_SHA256,ACCOUNT_ID,CREATED_"
+                    "BY,CREATE_DATE,EXPIRES_AT,TOKEN_KIND,REFRESH_TOKEN_ID,SSO_GROUP_I"
+                    "DS) VALUES (:name,:digest,:account_id,:actor,:now,:expires_at,:ki"
+                    "nd,:refresh_token_id,:sso_group_ids)"
+                ),
                 {
                     "name": name,
                     "account_id": account.account_id,

@@ -14,7 +14,7 @@ from etl_craft.api import routes
 from etl_craft.api.app import create_app
 from etl_craft.cli.client import ApiClient
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ActionScope, ApiRole, Audit, HttpMethod, Permission
+from etl_craft.core.enums import ActionScope, ApiRole, Audit, HttpMethod, Permission, TokenKind
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.services.operations import OperationContext, actions
 from etl_craft.services.operations.actions import ACTIONS, action_path, invoke
@@ -58,7 +58,13 @@ def server(monkeypatch):
     monkeypatch.setattr(
         routes,
         "authenticate",
-        lambda ctx, token: types.SimpleNamespace(actor=ADMIN, role=ApiRole.ADMIN.value, token_id=1),
+        lambda ctx, token: types.SimpleNamespace(
+            actor=ADMIN,
+            role=ApiRole.ADMIN.value,
+            token_id=1,
+            token_kind=TokenKind.SERVICE,
+            attempt_id=None,
+        ),
     )
     return TestClient(create_app(context())), calls
 

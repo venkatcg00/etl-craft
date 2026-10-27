@@ -6,12 +6,18 @@ import math
 import secrets
 import time
 from dataclasses import dataclass
+from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from etl_craft.config.model import AuthConfig
 from etl_craft.core.errors import ConfigurationError
+
+CLOCK_LEEWAY_SECONDS = 120
+DISCOVERY_SECONDS = 600
+_DISCOVERY: dict[str, tuple[float, dict[str, object]]] = {}
+_DISCOVERY_LOCK = Lock()
 
 
 class _NoRedirects(HTTPRedirectHandler):
@@ -111,12 +117,25 @@ def _client(auth: AuthConfig) -> tuple[str, str, dict[str, object]]:
         raise ConfigurationError(
             "SSO requires Auth.Oidc_issuer and Auth.Oidc_client_id; configure both"
         )
-    metadata = _request(auth.oidc_issuer.rstrip("/") + "/.well-known/openid-configuration")
-    if metadata.get("issuer") != auth.oidc_issuer:
+    metadata = _discovery(auth.oidc_issuer)
+    return auth.oidc_issuer, auth.oidc_client_id, metadata
+
+
+def _discovery(issuer: str) -> dict[str, object]:
+    with _DISCOVERY_LOCK:
+        cached = _DISCOVERY.get(issuer)
+        if cached is not None and time.monotonic() < cached[0]:
+            return cached[1]
+    metadata = _request(issuer.rstrip("/") + "/.well-known/openid-configuration")
+    if metadata.get("issuer") != issuer:
         raise ConfigurationError(
             "OIDC discovery issuer differs from Auth.Oidc_issuer; correct the setting"
         )
-    return auth.oidc_issuer, auth.oidc_client_id, metadata
+    for key in ("token_endpoint", "device_authorization_endpoint"):
+        _endpoint(_text(metadata, key))
+    with _DISCOVERY_LOCK:
+        _DISCOVERY[issuer] = (time.monotonic() + DISCOVERY_SECONDS, metadata)
+    return metadata
 
 
 def start_device(auth: AuthConfig) -> DeviceGrant:
@@ -174,7 +193,8 @@ def poll_device(auth: AuthConfig, device_code: str, nonce: str) -> IdentityClaim
 
 
 def _claims(token: str, issuer: str, client: str, nonce: str) -> dict[str, object]:
-    # OIDC Core 3.1.3.7 permits authenticated token-endpoint TLS instead of a signature check.
+    # OIDC Core 3.1.3.7 permits TLS instead of signature verification only for ID tokens
+    # obtained by our own direct token-endpoint call; never accept client-supplied ID tokens.
     try:
         header, payload, signature = token.split(".")
         head = json.loads(base64.urlsafe_b64decode(header + "=" * (-len(header) % 4)))
@@ -220,5 +240,9 @@ def _valid_time(value: object, now: float, *, future: bool) -> bool:
         not isinstance(value, bool)
         and isinstance(value, (int, float))
         and math.isfinite(value)
-        and (value > now if future else 0 < value <= now)
+        and (
+            value > now - CLOCK_LEEWAY_SECONDS
+            if future
+            else 0 < value <= now + CLOCK_LEEWAY_SECONDS
+        )
     )

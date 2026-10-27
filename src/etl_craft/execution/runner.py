@@ -15,7 +15,6 @@ aborts it (``etl-craft abort``), the task process is stopped and the task is ``C
 from __future__ import annotations
 
 import logging
-import os
 import socket
 import sys
 from dataclasses import dataclass, replace
@@ -70,6 +69,7 @@ from etl_craft.execution.attempt_types import (
     TaskOutcome,
     TaskRun,
 )
+from etl_craft.execution.child_environment import child_environment
 from etl_craft.execution.events import check_event
 from etl_craft.execution.gates import CrossPipelineCheck, TrackedGate
 from etl_craft.execution.interventions import (
@@ -657,7 +657,7 @@ def _start_and_record(
                 log_path=log_path,
                 # Output reaches the log as it is written, so a hang or a kill loses none of it.
                 env={
-                    **os.environ,
+                    **child_environment(config),
                     "PYTHONUNBUFFERED": "1",
                     "ETL_CRAFT_ATTEMPT_ID": str(spec.attempt_id),
                     "ETL_CRAFT_ATTEMPT_OWNER": owner,

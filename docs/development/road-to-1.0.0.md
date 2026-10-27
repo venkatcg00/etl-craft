@@ -165,7 +165,7 @@ item's text, or work done early under another item.
 | S6.G Backup, restore, upgrade and the load benchmark | Done | #260 | Restore recovery, coordinated upgrade procedure and manual load harness; reference gate deferred until after S8 |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
-| S7.Y Command-managed pipeline access | In progress | #261, #263 | A merged; B implements project isolation and explicit selection; catalog sign-in awaits its public-surface decision in open #263. |
+| S7.Y Command-managed pipeline access | Done | #261, #263, #264 | Project isolation complete; owner moved catalog sign-in to S7.A.7. |
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
 | S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; extend S7.Y project/pool commands; direct `CFG_` SQL edits in RELAXED projects |
 | S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Planned | | Guard project rows, admin/audit data and owned team-table DDL |
 | S7.AH Renames keep identity | Planned | | Rename command preserves IDs, offsets and consumed events |
-| S7.AI Fixes from the 2026-10-27 audit | Planned | | Pool-bound/attempt credentials, sessions, publishing, sign-in, dependency bounds, setup and honest catalog metrics |
+| S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -389,14 +389,23 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
+S7.AI validates pool/attempt credentials, lease expiry and renewal, credential-free child
+processes (including pinned config secret names), SSO age, concurrent sign-in, OIDC TLS/cache,
+publishing, setup and first-ending catalog numbers. Both Engine DBs upgrade real token rows
+from every released schema. Grant/claim/sign-in/ending races run twenty rounds; security and
+Semgrep dispositions are in #264. Browser catalog sign-in is explicitly S7.A.7; one-project
+IP-restricted publishing is the interim contract. Warehouse SQL is unchanged, so cloud SQL
+acceptance is not required. Complete coverage and installed-wheel demos remain CI gates.
+
+
 S7.Y B validates project boundaries, permission precedence, explicit selection, full exports,
 per-project catalog artifacts and log paths on both Engine DBs. Real grants and history upgrade
 from every released schema without changing effective access; negative controls reject the old
 source and a missing compatibility backfill. Grant/revoke and claim races pass twenty local
 rounds. Static/strict docs, Semgrep and the security/code reviews run; discovered metadata
 leaks are corrected with regressions. Warehouse SQL is unchanged, so cloud acceptance is not
-required. Signed-in catalog serving remains at the owner's public-surface design gate; the PR
-stays open without auto-merge, and S7.Y remains In progress until that gate and CI are complete.
+required. Owner decision, 2026-10-27: signed-in catalog serving moves to S7.A.7; #263
+merged and S7.Y is Done. S7.AI verifies the interim publisher serves one configured project.
 
 S7.AF passes static/strict docs, partial-config and project-preservation checks on both Engine
 DBs, existing source/target upgrade callers, all four local warehouse source-contract cases,
@@ -872,13 +881,22 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   deployment-admin API snapshots retain their cross-project trigger links. Lineage refresh
   keeps its deployment developer requirement and checks pipeline visibility separately.
 
-- S7.Y B catalog design gate: publish-docs owns a separate stdlib HTTP server; API sign-in
-  returns bearer sessions, with no shared browser cookie. Signed-in catalog pages therefore
-  need approved public surface. The implementation PR stays open without auto-merge and S7.Y
-  stays In progress. Options: serve catalog through the API with its session identity, or add
-  browser-session sharing and sign-in routes to the separate server. Prefer API hosting to
-  reuse authorization and avoid a second authentication implementation. No catalog-server
-  changes ship before that decision.
+- S7.Y B owner decision, 2026-10-27: catalog-sign-in acceptance moves to S7.A.7.
+  API-hosted catalogs reuse the UI browser session, cookie/CSRF/SameSite, Session_hours expiry
+  and logout, built once there. Until then the separate publisher serves one configured project
+  per process behind its IP allow list. S7.Y's shared acceptance is complete in #263.
+
+- S7.A.7 owner decision, 2026-10-27: build the browser session once for UI sign-in/sign-out
+  (HTTP-only cookie, CSRF, SameSite, expiry within Auth.Session_hours and logout), then serve
+  project-filtered catalogs from the API through that same session. Until then publish-docs
+  remains one configured project per process, protected only by its IP allow list.
+
+- S7.AI owner decision, 2026-10-27: OIDC receives ID tokens only from its own direct TLS token
+  endpoint response; Core 3.1.3.7 permits that validation without signature checking. No JWT
+  dependency or signing-key refresh is added. test_oidc_clock_leeway_and_discovery_cache covers
+  leeway/cache; non-HTTPS discovery endpoints are refused. Future client-supplied tokens need
+  signature verification. SQLGlot uses a next-minor cap because minor releases may break APIs.
+  Sign-in currently has no lockout counter; S7.A.7 adds it, retaining write serialization.
 
 - S7.Y B owner decision, 2026-10-27: there is no `etl-craft init` command. Do not add
   scaffolding; shipped templates/examples explicitly set Orchestration.Project. A project-owned
@@ -7488,17 +7506,18 @@ release candidate.
      | Local log names collide across projects | Project-ID log directory, readable legacy locations; test_project_log_paths | S7.Y B |
      | Arbitrary SQL/utility side effects retried after disconnect | Default RETRY_ON=NONE; planned test_unmanaged_default_retry_policy | S7.AD |
      | All active admins become locked or disabled | Refuse last unlocked admin removal; planned test_last_unlocked_admin_guard | S7.A.7 |
-     | Agent token registers in another pool | Bind tokens to pool; planned test_agent_token_pool_binding | S7.AI |
-     | Task inherits agent authority | Attempt-only expiring credential; planned test_children_never_receive_agent_token and test_attempt_credentials_are_fenced | S7.AI |
-     | SSO group claims refresh for weeks | Absolute Session_hours boundary; planned test_sso_group_session_absolute_age | S7.AI |
-     | ngrok exposes catalog without allow list | Refuse without Allowed_ips; planned test_ngrok_catalog_requires_allow_list | S7.AI |
-     | Unused or stolen service/agent tokens never expire | Default expiry and hourly LAST_USED_AT; planned test_service_token_expiry_and_last_used | S7.AI |
-     | One failing sign-in blocks other accounts | Verify outside write lock; planned test_sign_ins_do_not_serialize | S7.AI |
-     | OIDC clock skew rejects sign-in and discovery repeats | 120-second leeway, ten-minute cache; planned test_oidc_clock_leeway_and_discovery_cache | S7.AI |
-     | Unbounded dependency major upgrade breaks install | Upper caps and lower/cap install matrix; planned test_dependency_bounds_install_matrix | S7.AI |
-     | Unattended setup exits 0 without an admin | Explicit nonterminal bootstrap or remedy; planned test_unattended_setup_admin_contract | S7.AI |
-     | Bad interactive password aborts setup immediately | Retry policy three times; planned test_setup_retries_password_policy | S7.AI |
-     | Repair hides first failure in catalog metrics/messages | Count first endings and separate repairs; planned test_catalog_first_endings_and_repair_labels | S7.AI |
+     | Served catalog has no sign-in | API-hosted, project-filtered, same browser session | S7.A.7 |
+     | Agent token registers in another pool | Bind tokens to pool; test_agent_token_pool_binding | S7.AI |
+     | Task inherits agent authority | Attempt-only expiring credential; test_children_never_receive_agent_token and test_attempt_credentials_are_fenced | S7.AI |
+     | SSO group claims refresh for weeks | Absolute Session_hours boundary; test_sso_group_session_absolute_age | S7.AI |
+     | ngrok exposes catalog without allow list | Refuse without Allowed_ips; test_ngrok_catalog_requires_allow_list | S7.AI |
+     | Unused or stolen service/agent tokens never expire | Default expiry and hourly LAST_USED_AT; test_service_token_expiry_and_last_used | S7.AI |
+     | One failing sign-in blocks other accounts | Verify outside write lock; test_sign_ins_do_not_serialize | S7.AI |
+     | OIDC clock skew rejects sign-in and discovery repeats | 120-second leeway, ten-minute cache; test_oidc_clock_leeway_and_discovery_cache | S7.AI |
+     | Unbounded dependency major upgrade breaks install | Upper caps and lower/cap install matrix; test_dependency_bounds_install_matrix | S7.AI |
+     | Unattended setup exits 0 without an admin | Explicit nonterminal bootstrap or remedy; test_unattended_setup_admin_contract | S7.AI |
+     | Bad interactive password aborts setup immediately | Retry policy three times; test_setup_retries_password_policy | S7.AI |
+     | Repair hides first failure in catalog metrics/messages | Count first endings and separate repairs; test_catalog_first_endings_and_repair_labels | S7.AI |
 
   2. Audit each row marked by a finished item. Name its regression test here, or add one. A row
      without a passing test is an open defect for the 1.0.0 checklist, not a pass.

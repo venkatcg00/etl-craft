@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from etl_craft.core.enums import DependencyType
+from etl_craft.core.enums import DependencyType, RunStatus
 from etl_craft.engine.repository.catalog import Consumption, RunSummary
 from etl_craft.services.catalog.collect import (
     Catalog,
@@ -247,7 +247,8 @@ class Pages:
             return '<h2 id="runs">Runs</h2><p class="note">It has not run yet.</p>'
         summary = (
             f'<p class="note">Runs shown: the latest {len(p.runs)} logical runs; '
-            "repairs are counted separately from their original trigger.</p>" + kpi_summary(p.runs)
+            "success rates count first endings; repaired runs are counted separately.</p>"
+            + kpi_summary(p.runs)
         )
         chart = _bars(
             [
@@ -354,7 +355,9 @@ class Pages:
                         if task_run.watermark_from is not None
                         else ""
                     ),
-                    failure_messages(task_run.error_message, task_run.failure_reasons),
+                    failure_messages(task_run.error_message, task_run.failure_reasons)
+                    if task_run.status in (RunStatus.FAILED, RunStatus.CANCELLED)
+                    else "",
                 ]
                 for label in p.tasks
                 for task_run in self.catalog.tasks[label].runs
@@ -414,7 +417,7 @@ class Pages:
             return ""
         summary = (
             f'<p class="note">Runs shown: the latest {len(task.runs)} logical runs; '
-            "repairs are counted separately from their original trigger.</p>"
+            "success rates count first endings; repaired runs are counted separately.</p>"
             + kpi_summary(task.runs)
         )
         chart = _bars(
@@ -444,7 +447,9 @@ class Pages:
                         if r.watermark_from is not None
                         else ""
                     ),
-                    failure_messages(r.error_message, r.failure_reasons),
+                    failure_messages(r.error_message, r.failure_reasons)
+                    if r.status in (RunStatus.FAILED, RunStatus.CANCELLED)
+                    else "",
                 ]
                 for r in task.runs
             ),
@@ -520,7 +525,12 @@ class Pages:
                     if run
                     else "never run",
                 ),
-                ("Error", _e(run.error_message) if run else ""),
+                (
+                    "Error",
+                    _e(run.error_message)
+                    if run and run.status in (RunStatus.FAILED, RunStatus.CANCELLED)
+                    else "",
+                ),
             ]
         )
         documentation = ""

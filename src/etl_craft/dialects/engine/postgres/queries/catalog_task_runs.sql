@@ -1,7 +1,10 @@
 -- Indexed top-N history for each active definition.
 SELECT r.TASK_RUN_ID AS task_run_id, r.TASK_ID AS task_id, r.PIPELINE_RUN_ID AS pipeline_run_id, r.STATUS AS status,
-       CASE WHEN pr.OUTPUT_REVISION > 1 OR pr.REPAIR_PENDING = 'Y' THEN 'REPAIR'
-            WHEN pr.BACKFILL = 'Y' THEN 'BACKFILL'
+       COALESCE((SELECT i.FROM_STATUS FROM AUD_RUN_INTERVENTIONS i
+        WHERE i.PIPELINE_RUN_ID=r.PIPELINE_RUN_ID AND i.TASK_ID=r.TASK_ID
+        AND i.FROM_STATUS IN ('SUCCESS','FAILED','CANCELLED')
+        ORDER BY i.INTERVENTION_ID LIMIT 1), r.STATUS) AS first_status,
+       CASE WHEN pr.BACKFILL = 'Y' THEN 'BACKFILL'
             WHEN pr.TRIGGER_KIND = 'SCHEDULE' THEN 'SCHEDULED' ELSE 'OTHER' END AS run_kind,
        r.ATTEMPT_COUNT AS attempts, r.START_DATE AS "start", r.END_DATE AS "end",
        r.SOURCE_COUNT AS source_count, r.TARGET_COUNT AS target_count,

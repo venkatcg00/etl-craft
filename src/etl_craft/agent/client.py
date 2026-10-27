@@ -18,10 +18,10 @@ from etl_craft.services.operations.serialization import encode, from_json
 class AgentClient:
     """Use the same action table and error documents as every other interface."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, token: str | None = None) -> None:
         """Require a token explicitly; an agent never reads a person's stored session."""
         self.url = server_url(url)
-        self.token = os.environ.get("ETL_CRAFT_TOKEN")
+        self.token = token or os.environ.get("ETL_CRAFT_TOKEN")
         if not self.token:
             raise UsageError(
                 "agent requires ETL_CRAFT_TOKEN; issue a distinct "

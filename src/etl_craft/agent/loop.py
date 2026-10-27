@@ -17,7 +17,9 @@ from pathlib import Path
 
 from etl_craft import __version__
 from etl_craft.agent.client import AgentClient
+from etl_craft.agent.task_store import RemoteTaskStore
 from etl_craft.config import ConnectorConfig
+from etl_craft.config.project import project_config
 from etl_craft.core.agent_resources import NO_DECLARATION, DeclaredCapacity, report
 from etl_craft.core.enums import (
     ActionName,
@@ -34,6 +36,7 @@ from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.resources import Ceilings
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.resource_locks import holder_tag
+from etl_craft.execution.child_environment import child_environment
 from etl_craft.execution.control_flow import process_local_queries
 from etl_craft.execution.leases import process_start
 from etl_craft.execution.processes import ChildResult, ChildSpec, run_child
@@ -71,6 +74,8 @@ class Work:
     task: dict[str, object]
     lease_seconds: float
     timeout_seconds: int
+    credential: str
+    holder_id: str
 
 
 @dataclass
@@ -251,6 +256,21 @@ class AgentLoop:
             ),
         )
 
+    def _environment(self, work: Work, folder: Path) -> dict[str, str]:
+        """Resolve allowed secret names from the pinned config before stripping the environment."""
+        if work.task.get("bundle_id") is None:
+            return child_environment(self.config)
+        store = RemoteTaskStore(
+            AgentClient(self.options.api, token=work.credential),
+            int(str(work.task["attempt_id"])),
+            lambda holder: None,
+            work.holder_id,
+        )
+        path = folder / "craft-connector.yml"
+        path.write_bytes(store.bundle_file("craft-connector.yml"))
+        pinned = project_config(self.config, path)
+        return child_environment(self.config) | child_environment(pinned)
+
     def _start(self, work: Work, started: float) -> None:
         attempt_id = int(str(work.task["attempt_id"]))
         temporary = tempfile.TemporaryDirectory(prefix=f"etl-craft-agent-{attempt_id}-")
@@ -262,7 +282,15 @@ class AgentLoop:
         task.trigger = work.task["handler"] == Handler.RUN_PIPELINE
         task.lease(task.deadline)
         (folder / "work").write_text(
-            json.dumps({"task": work.task, "parent": os.getpid(), "birth": self.birth}),
+            json.dumps(
+                {
+                    "task": work.task,
+                    "parent": os.getpid(),
+                    "birth": self.birth,
+                    "credential": work.credential,
+                    "holder_id": work.holder_id,
+                }
+            ),
             encoding="utf-8",
         )
         assert self.config.config_path is not None
@@ -285,6 +313,7 @@ class AgentLoop:
             timeout_seconds=work.timeout_seconds,
             log_path=folder / "output",
             cwd=self.config.project_dir,
+            env=self._environment(work, folder),
         )
         with self.lock:
             self.tasks[attempt_id] = task

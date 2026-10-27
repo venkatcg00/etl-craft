@@ -14,11 +14,17 @@ from sqlalchemy.engine import Connection, Row
 from etl_craft import __version__
 from etl_craft.core.agent_resources import AgentResources, capacity
 from etl_craft.core.enums import AgentStatus, DeploymentProfile, SlotKind
-from etl_craft.core.errors import ConfigurationError, RunRefusedError, UsageError
+from etl_craft.core.errors import (
+    ConfigurationError,
+    RunRefusedError,
+    StaleTransitionError,
+    UsageError,
+)
 from etl_craft.core.resources import MIB, TASK_COST, size_agent
 from etl_craft.core.time import as_utc
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import agent_transitions, resource_locks
+from etl_craft.engine.agent_state import fence
 from etl_craft.engine.notifications import agent_channel
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.agent_capacity import available
@@ -138,7 +144,7 @@ def register(ctx: OperationContext, request: AgentRegister) -> AgentReply:
     with ctx.engine.begin() as conn:
         from etl_craft.engine.placement import require_pool
 
-        require_pool(conn, request.pool, f"agent {agent_id}")
+        require_pool(conn, request.pool, f"agent {agent_id}", token_id=agent_id)
         row = agent_transitions.register_agent(
             conn,
             {
@@ -187,6 +193,8 @@ def deregister(ctx: OperationContext, request: AgentRequest) -> AgentReply:
 def renew(ctx: OperationContext, request: AgentRenew) -> AgentReply:
     """Renew the known live attempts using the database clock and return pending controls."""
     agent_id = check_agent(ctx, request)
+    if ctx.credential_attempt_id is not None:
+        return _renew_child(ctx, agent_id)
     with ctx.engine.begin() as conn:
         row = conn.execute(statement(conn, "agent_get"), {"agent_id": agent_id}).one_or_none()
         if row is None or row.status == AgentStatus.GONE:
@@ -256,6 +264,23 @@ def renew(ctx: OperationContext, request: AgentRenew) -> AgentReply:
     return AgentReply(
         {"renewed": renewed, "cancel": cancel, "commands": commands, "lease_seconds": 60}
     )
+
+
+def _renew_child(ctx: OperationContext, agent_id: int) -> AgentReply:
+    """Renew one fenced lease without accepting agent capacity or control changes."""
+    attempt_id = ctx.credential_attempt_id
+    assert attempt_id is not None
+    with ctx.engine.begin() as conn:
+        fence(conn, attempt_id, str(agent_id))
+        parameters = {"attempt_id": attempt_id, "owner": str(agent_id)}
+        renewed = conn.execute(statement(conn, "agent_renew_attempt"), parameters).one_or_none()
+        if renewed is None:
+            raise StaleTransitionError(
+                f"attempt {attempt_id}: lease expired during renewal; expected a live lease; "
+                "stop the child and reconcile before retrying"
+            )
+        conn.execute(statement(conn, "agent_renew_locks"), parameters)
+    return AgentReply({"renewed": [attempt_id], "lease_seconds": 60})
 
 
 def command(ctx: OperationContext, request: AgentControl) -> AgentReply:

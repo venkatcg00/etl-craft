@@ -5,6 +5,7 @@ Only a synthetic site is exposed; no project metadata or credentials are publish
 """
 
 import importlib.util
+import json
 import os
 import socket
 import subprocess
@@ -27,10 +28,10 @@ BODY = "ETL Craft synthetic publication acceptance"
 
 
 @pytest.fixture
-def synthetic_site(tmp_path):
+def synthetic_site(tmp_path, engine_db):
     folder = tmp_path / "catalog"
     folder.mkdir()
-    (folder / MARKER).touch()
+    (folder / MARKER).write_text(json.dumps({"project": engine_db.config.project}))
     (folder / "index.html").write_text(f'<html>{BODY}<link href="catalog.css"></html>')
     (folder / "catalog.css").write_text("body { color: black; }")
     return folder

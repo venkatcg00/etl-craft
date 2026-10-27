@@ -153,6 +153,7 @@ class TokenKind(StrEnum):
     """What a stored credential is for: automation, a request, or renewing a user's access."""
 
     AGENT = "AGENT"
+    ATTEMPT = "ATTEMPT"
     SERVICE = "SERVICE"
     ACCESS = "ACCESS"
     REFRESH = "REFRESH"

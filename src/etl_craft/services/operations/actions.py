@@ -18,6 +18,7 @@ from etl_craft.core.definitions import using
 from etl_craft.core.enums import (
     ActionName,
     ActionScope,
+    AgentStatus,
     ApiRole,
     Audit,
     HttpMethod,
@@ -567,11 +568,32 @@ def _require_trigger_groups(ctx: OperationContext, action: Action, request: obje
                 require_child_groups(conn, ctx, selected)
 
 
+def _attempt_request(ctx: OperationContext, name: ActionName, request: object) -> bool:
+    if name in (ActionName.AGENT_REPORT, ActionName.AGENT_LOG):
+        return getattr(request, "attempt_id", None) == ctx.credential_attempt_id
+    return (
+        name == ActionName.AGENT_RENEW
+        and isinstance(request, agent_models.AgentRenew)
+        and request.attempts == (ctx.credential_attempt_id,)
+        and not request.acknowledged_commands
+        and request.status == AgentStatus.ACTIVE
+    )
+
+
 def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     """Run one action for ``ctx``'s caller: the only way an interface reaches an operation."""
     call = ACTIONS[name].call
     if call is None:
         raise UsageError(f"{name} is a long-running process; its interface starts it")
+    if ctx.credential_attempt_id is not None and not _attempt_request(ctx, name, request):
+        error = PermissionDeniedError(
+            f"attempt {ctx.credential_attempt_id}: credential cannot perform {name}; "
+            "use it only to renew, report or log its own live attempt; "
+            "use an agent token for claims"
+        )
+        assert isinstance(request, ACTIONS[name].request)
+        record_refusal(ctx, name, arguments(request), error)
+        raise error
     ctx = _request_context(ctx, name, request)
     try:
         ctx = _project_context(ctx, ACTIONS[name], request)
