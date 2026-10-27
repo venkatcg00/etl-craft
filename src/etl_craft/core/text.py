@@ -589,14 +589,16 @@ def sha256_hex(payload: bytes) -> str:
 # Suggestions
 
 
-def suggest(unknown: str, candidates: Iterable[str], *, limit: int = 3) -> list[str]:
+def suggest(
+    unknown: str, candidates: Iterable[str], *, limit: int = 3, cutoff: float = 0.5
+) -> list[str]:
     """Return the ``candidates`` closest to ``unknown``, for a "did you mean" hint.
 
     Case-insensitive, since codes are routinely typed in the wrong case; candidates starting
     with ``unknown`` follow the close matches.
     """
     folded = {candidate.lower(): candidate for candidate in candidates}
-    matches = difflib.get_close_matches(unknown.lower(), list(folded), n=limit, cutoff=0.5)
+    matches = difflib.get_close_matches(unknown.lower(), list(folded), n=limit, cutoff=cutoff)
     ranked = [folded[match] for match in matches]
     for lowered, candidate in folded.items():
         if lowered.startswith(unknown.lower()) and candidate not in ranked:

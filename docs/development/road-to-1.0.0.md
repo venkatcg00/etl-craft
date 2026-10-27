@@ -31,7 +31,7 @@ items (`S2.A.3`). Every item has the same parts:
 
 **Branches.** One branch per workstream, or per item when an item is large, named
 `<type>/<area>-<topic>` as `CONTRIBUTING.md` requires (for example `fix/execution-run-admission`).
-Squash-merge by pull request. After 0.3.0 the next release is 1.0.0: each later milestone ends
+Squash-merge by pull request. After 0.3.0 the next release is 0.9.0: each later milestone ends
 when its workstreams are merged and its gate passes on `main`, with no tag, version or evidence
 files (see [Release overview](#release-overview)).
 
@@ -173,6 +173,10 @@ item's text, or work done early under another item.
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
 | S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
+| S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
+| S7.AG Project migrations stay in their project | Planned | | Guard project rows, admin/audit data and owned team-table DDL |
+| S7.AH Renames keep identity | Planned | | Rename command preserves IDs, offsets and consumed events |
+| S7.AI Fixes from the 2026-10-27 audit | Planned | | Pool-bound/attempt credentials, sessions, publishing, sign-in, dependency bounds, setup and honest catalog metrics |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -214,6 +218,50 @@ while the service account remains the actor.
 the client chain; DM takes corrections only through SI_DM. S7.A.7 adds account lockout (not a
 growing delay) and server-side personal settings; personal subscriptions stay out. The
 deployment is usually internal: weigh security choices against that, not public exposure.
+
+
+**Owner decisions, 2026-10-26/27 — config helpers, risks and release.** The owner explicitly
+requests this plan text together with S7.AF's code; only S7.AF is implemented in that PR.
+
+Owner clarification for S7.AF: disabling a parent preserves unchanged existing children.
+New or changed active children require active parents. Columns must still retire before their table.
+
+Run order is S7.AF, S7.Y B, S7.AI, S7.Z, S7.AA, S7.AB. S7.Y stays In progress until B merges.
+
+- S7.Z: Engine DB truth replaces file drift reporting; direct edits need no drift report.
+  Reuse S7.AG's project/admin/team-table guards for direct edits; its bullets remain unchanged.
+- S7.Y B: CI may apply changed files only; whole folders are not required and unchanged files
+  are no-ops. Project code comes from the folder's explicit Orchestration.Project, never its
+  name; a conflicting --project fails naming both. Keep one configured folder per project, no
+  multi-project apply or git-aware option; CI chooses folders/files. Deleted folders apply
+  nothing; project disable remains explicit. Config apply, project migrations, bundle publish
+  and generate-docs require project CAN_MANAGE. Cross-project dependencies require upstream
+  project CAN_VIEW at apply time; upstream pages list cross-project dependents. Local logs move
+  to <Log_dir>/project-<id>/<PIPELINE>/run-<id>/...; existing locations stay readable. Served
+  catalog uses API/UI sign-in and project filtering; static organization catalogs are one site
+  per project under host access control. Stop if further public surface is needed.
+- S7.AE: start sample Engine DBs from an export of the target Engine DB, then apply the change's
+  files; the repository may not contain all rows. This supersedes the config-only bootstrap.
+- Trust boundary: projects in one instance trust each other's executable code; separate
+  security domains require separate instances.
+- S7.AD: SQL_SCRIPT and UTILITY Python default RETRY_ON=NONE; explicit task parameters override.
+  Repeating arbitrary SQL/side effects after disconnect is unsafe. Existing implicit defaults
+  change and must be called out in CHANGELOG when implemented.
+- S7.A.7: recovery treats locked admins as unavailable; refuse locking/disabling the last
+  unlocked active admin and name the recovery remedy.
+- Release gate: read every item's 1.0.0 gate as 0.9.0. 0.9.0 is the first public stable release
+  (PyPI, images, announcement), with no alpha. 1.0.0 follows real-user feedback. Keep this file's
+  name and the `(road to 1.0.0, <id>)` commit convention. Breaking changes remain allowed before
+  0.9.0; the compatibility guarantee begins with it.
+- S7.G: every later 0.x/1.x reads 0.9.0 Engine DBs, YAML, CSVs, CLI invocations, JSON and /api/v1.
+  Removal waits for 2.0 after one minor of warnings. Mixed-version controller/UI/agent/CLI
+  rolling upgrades replace S7.F's same-release rule: same-major compatible ranges and additive
+  API changes replace exact-version checks. Post-0.9 migrations add tables, nullable columns or
+  indexes only, so previous binaries run on upgraded DBs and rollback is a reinstall. Older
+  versions refuse newer-only settings/columns/parameters naming their required release, never
+  silently ignore them. test-upgrades adds old/new agent-controller combinations and the
+  previous suite on upgraded DBs as release gates, never PR CI. S6.G's non-rolling procedure
+  remains for pre-0.9 releases. Item bullets remain unchanged.
 
 **UI plan, 2026-10-25 (owner).** S7.Y, S7.Z, S7.AA and S7.AB come before S7.A page code, after
 S6 completes. `GOVERNANCE` (`STRICT`/`RELAXED`) is the single switch for relaxed rules; the
@@ -340,6 +388,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.AF passes static/strict docs, partial-config and project-preservation checks on both Engine
+DBs, existing source/target upgrade callers, all four local warehouse source-contract cases,
+permission/action checks and the ten-project CLI demo. Its new regressions fail on the old
+source. Semgrep and the security self-review report no findings. No warehouse SQL or schema
+changed; cloud acceptance and new schema migrations are not required. Full matrix coverage and
+installed-wheel demos remain CI gates. S7.AG/AH/AI and the release changes here are plan only.
 
 S7.Y A exercises both Engine DBs, permission delegation, atomic bulk changes, the generated
 HTTP/CLI actions and upgrade conversion from every released schema. Same-identity grant/grant
@@ -793,6 +848,15 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AF follows the owner's exception combining its implementation with the new risk items,
+  release decision and S7.AI plan text; only S7.AF has code. Key-based merging, ID preservation,
+  explicit flags, transactional validation, export and the migration lock already existed and
+  are reused. Files no longer own the complete row set. The owner chose to preserve unchanged
+  children of disabled parents, while new/changed active children need active references;
+  columns must retire before their table. Source identity resolution writes only submitted
+  table keys and supplied fields, so normalization cannot change an absent row. Bootstrap
+  examples contain active inserts; full exports still retain inactive state.
 
 - S7.Y A intentionally audits access/project/pool lists even though they use GET; ordinary
   read actions remain unaudited. The reference generator follows rebuilds and column renames,
@@ -2393,7 +2457,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    R2[0.2.0 Stabilize] --> R3[0.3 Identity] --> R4[0.4 Overseer] --> R5[0.5 Cluster] --> R6[0.6 At load] --> R7[0.7-0.9 UI and finish] --> RC[Release candidates: Support Insights example] --> R1[1.0.0]
+    R2[0.2.0 Stabilize] --> R3[0.3 Identity] --> R4[0.4 Overseer] --> R5[0.5 Cluster] --> R6[0.6 At load] --> R7[0.7-0.9 UI and finish] --> RC[0.9.0 candidate: Support Insights example] --> R9[0.9.0 First public, stable release] --> R1[1.0.0 Real-user feedback]
 ```
 
 | Milestone | Theme | Workstreams | Gate to leave the milestone |
@@ -2404,22 +2468,19 @@ flowchart LR
 | 0.5 | Operational basics, then the cluster: row-level rejects, SQL watermarks, event waits, source definitions and schema-aware lineage, normalized metadata, accounts, login and roles; resource discovery and deployment profiles, pool interface, worker agents, project namespaces in one Engine DB, connection budget, managed PostgreSQL | S5.A to S5.T (S5.K to S5.N right after S5.B; S5.O to S5.T before S5.C) | Pool contract tests pass for both providers; many projects share one Engine DB; the chaos suite passes |
 | 0.6 | At load: retention, bounded catalog, incremental cloning, metrics, backup and restore, benchmark | S6.A to S6.G | A sustained-load benchmark stays within its stated budgets; a restore is tested |
 | 0.7 to 0.9 | UI and finish: web UI with its sign-in, stewardship uploads, per-project roles, redaction, webhooks, secrets providers, packaging, compatibility policy, soak, faster complete PR checks, package and demo repositories, the obvious-failure catalog | S7.A to S7.P | A month-long soak of a real deployment passes; complete PR checks meet the ten-minute target |
-| 1.0.0 release candidates | The Support Insights example rebuilt on etl-craft, configured through CI, with its views, UI and every-feature scenarios | S8.A to S8.H | Every pipeline, view and feature scenario passes, with verified README walkthroughs |
-| 1.0.0 | Supported contract | | Every item of the [1.0.0 checklist](#100-release-checklist) has evidence |
+| 0.9.0 candidate | First public, stable release: the Support Insights example rebuilt on etl-craft, configured through CI, with its views, UI and every-feature scenarios | S8.A to S8.H | Every pipeline, view and feature scenario passes, with verified README walkthroughs |
+| 0.9.0 | First public, stable release | | Every item of the [0.9.0 checklist](#090-release-checklist) has evidence |
+| 1.0.0 | Shaped by real users' feedback on 0.9.0 | | Scope follows public use |
 
 Milestones are ordered by dependency. Do not start 0.4 before 0.3's chaos suite passes: the
 overseer, the API and remote workers each add processes that race on the Engine DB, and only 0.3
 makes those races safe.
 
-**Only 1.0.0 is released after 0.3.0.** Nothing is published before 1.0.0, so a 0.x release would
-only add a tag, a gate run, cloud evidence and a soak that no installation uses, and a released
-schema every later version must upgrade from. The milestones above keep their order and their
-gates, which run on `main` without a tag; cloud acceptance runs at a milestone only with budget
-the owner approves. The version stays 0.3.0 and `CHANGELOG.md` collects every change under
-`[Unreleased]` until the 1.0.0 release pull request. 1.0.0 upgrades from 0.3.0, the soaked release
-the owner's deployment runs, with nothing lost, and its gate is the full release gate (cloud
-evidence, chaos, the Support Insights run and the 72-hour endurance run) on exactly the code
-it tags.
+**0.9.0 is the first public, stable release after 0.3.0 (owner, 2026-10-27).** There is no
+alpha. Milestones retain their dependency order; candidate gates certify exactly the code that
+is published to PyPI and container registries and announced. Until that release the package
+version remains 0.3.0 and CHANGELOG collects changes under [Unreleased]. The candidate upgrades
+from the owner's 0.3.0 deployment with nothing lost. 1.0.0 comes later, shaped by real users.
 
 ## Shared foundations
 
@@ -7370,6 +7431,26 @@ release candidate.
      | A agent cut off from the API, or clocks that disagree | Lease expiry and fenced writes stop a cut-off agent. Lease times come from the Engine DB's clock, not the agent's | S5.C |
      | Upgrading from any 0.x release | Migrations upgrade, or refuse naming the object and the remedy | S2.K, S7.G |
      | A port already in use, or a second server on one host | The server refuses to start, naming the port or the running server | S7.P |
+     | Truncated or partial config retires unrelated rows | Absent rows/files are untouched; test_partial_files_preserve_all_metadata | S7.AF |
+     | Unknown config CSV silently ignored | Refuse with filename/suggestion; test_unknown_csv_names_the_suggestion | S7.AF |
+     | Project migration writes another project or admin/audit data | Guard rows/admin/DDL; planned test_project_migrations_are_scoped | S7.AG |
+     | Team CFG_ table collision or cross-project write/DDL | Record ownership, refuse access and doctor collisions; planned test_team_table_project_ownership | S7.AG |
+     | Task/pipeline rename replays offsets or consumed events | Preserve IDs and refuse active runs; planned test_rename_preserves_offsets_and_events | S7.AH |
+     | Pipeline manager reaches project editing or hidden upstreams | Project CAN_MANAGE and upstream CAN_VIEW; planned test_project_edit_and_dependency_permissions | S7.Y B |
+     | Local log names collide across projects | Project-ID log directory, readable legacy locations; planned test_project_log_paths | S7.Y B |
+     | Arbitrary SQL/utility side effects retried after disconnect | Default RETRY_ON=NONE; planned test_unmanaged_default_retry_policy | S7.AD |
+     | All active admins become locked or disabled | Refuse last unlocked admin removal; planned test_last_unlocked_admin_guard | S7.A.7 |
+     | Agent token registers in another pool | Bind tokens to pool; planned test_agent_token_pool_binding | S7.AI |
+     | Task inherits agent authority | Attempt-only expiring credential; planned test_children_never_receive_agent_token and test_attempt_credentials_are_fenced | S7.AI |
+     | SSO group claims refresh for weeks | Absolute Session_hours boundary; planned test_sso_group_session_absolute_age | S7.AI |
+     | ngrok exposes catalog without allow list | Refuse without Allowed_ips; planned test_ngrok_catalog_requires_allow_list | S7.AI |
+     | Unused or stolen service/agent tokens never expire | Default expiry and hourly LAST_USED_AT; planned test_service_token_expiry_and_last_used | S7.AI |
+     | One failing sign-in blocks other accounts | Verify outside write lock; planned test_sign_ins_do_not_serialize | S7.AI |
+     | OIDC clock skew rejects sign-in and discovery repeats | 120-second leeway, ten-minute cache; planned test_oidc_clock_leeway_and_discovery_cache | S7.AI |
+     | Unbounded dependency major upgrade breaks install | Upper caps and lower/cap install matrix; planned test_dependency_bounds_install_matrix | S7.AI |
+     | Unattended setup exits 0 without an admin | Explicit nonterminal bootstrap or remedy; planned test_unattended_setup_admin_contract | S7.AI |
+     | Bad interactive password aborts setup immediately | Retry policy three times; planned test_setup_retries_password_policy | S7.AI |
+     | Repair hides first failure in catalog metrics/messages | Count first endings and separate repairs; planned test_catalog_first_endings_and_repair_labels | S7.AI |
 
   2. Audit each row marked by a finished item. Name its regression test here, or add one. A row
      without a passing test is an open defect for the 1.0.0 checklist, not a pass.
@@ -7664,6 +7745,104 @@ rules on real data.
 *Done when:* a case runs its pipelines and dependents end to end from input files, compares
 every expected table and rule result, starts clean every time, honours both keep options, and
 CI can gate a deploy on it.
+
+### S7.AF Config files are helpers
+
+Owner decision, 2026-10-26. Branch: `feat/services-config-upserts`. Plan text and implementation
+ship together by the owner's request. Run after S7.Y A and before S7.Y B. The Engine DB is the
+source of truth; config files are optional helpers carrying changes. A later deployment may
+hold one new pipeline after an earlier deployment held ten. Projects sharing an instance trust
+one another's code, as Airflow DAGs on shared workers do; separate security domains use
+separate instances.
+
+- Plan/apply upsert only submitted keys: insert Y, update changed values in place, reactivate Y,
+  retire explicit N, retaining IDs. A new key with N fails with its file/line/key and remedy.
+  Absent rows and absent files are untouched; delete retirement by absence.
+- Any subset of the eight known files is valid; a header-only file changes nothing. A folder
+  with no known files fails naming the folder and nothing to apply. Unknown CSVs fail with their
+  name and a suggestion from the shared close-match helper.
+- Resolve references against stored rows plus submitted changes. A task may reference a pipeline
+  found only in the Engine DB. Missing or finally inactive references fail with file, line and
+  key. Omitted header columns retain stored values on update; defaults apply only on insert.
+  Present empty cells retain their column's existing meaning.
+- Keep column ordinals, required children and column-before-table retirement correct for partial
+  submissions. Fail ambiguities clearly; ask the owner before choosing observable semantics.
+  Duplicate keys still fail naming both lines. Plan predicts apply; reapplying is a no-op.
+- Export still writes the selected project's full current state. Update config/migration guides,
+  security trust guidance, examples/demo and CHANGELOG. No deploy-ordering advice is needed.
+
+*Done when:* partial/header-only files preserve every absent row and ID; explicit retirement and
+reactivation work; stored references and omitted header values work; unknown files, empty folders,
+new inactive keys, duplicates and invalid final references fail with exact remedies; ordinal and
+parent/child cases are tested on both Engine DBs; plan equals apply and a second apply is a no-op;
+docs/examples and the owner-approved plan-only risk/release decisions are recorded.
+
+### S7.AG Project migrations stay in their project
+
+Owner decision, 2026-10-26. Plan only here. Project SQL currently runs as written under a developer;
+examples matching PIPELINE_CODE alone can affect the same code in other projects.
+
+- During project migrations, Engine DB guards refuse rows outside the migrating PROJECT_ID;
+  all writes to accounts, groups, grants, projects, pools, tokens and AUD_ tables; and DDL except
+  on that project's team tables. Every refusal names file, statement, table and project.
+- Record ownership of team-created CFG_ tables. Refuse another project's writes and DDL, and
+  have doctor name table-name collisions. Examples filter on project; S7.Z direct edits reuse
+  these guards. Test both Engine DBs.
+
+*Done when:* project SQL and direct-edit guards enforce row/admin/DDL boundaries on both Engine
+DBs, team-table ownership and collisions are diagnosed, and examples scope every lookup.
+
+### S7.AH Renames keep identity
+
+Owner decision, 2026-10-26. Plan only here. Code-key matching currently creates a new identity
+on rename, leaving TASK_ID-scoped offsets and consumed events behind and re-reading data.
+
+- One attributed action, `etl-craft rename --project P --pipeline OLD [--task OLD] --to NEW
+  --reason R`, keeps IDs, history, offsets and consumption and records old/new codes in metadata
+  history. Refuse while the pipeline has a non-terminal run.
+- Config plan warns when one apply retires an ingestion/event task and inserts one in the same
+  pipeline with the same script, SQL or event definition, naming the rename command.
+
+*Done when:* renames retain execution/consumption identity and history, active runs refuse them,
+and likely replacement-by-rename plans name the safe command, with tests on both Engine DBs.
+
+### S7.AI Fixes from the 2026-10-27 audit
+
+Owner approved all public surface below on 2026-10-27. Plan only in S7.AF. Run after S7.Y B and
+before S7.Z, S7.AA and S7.AB.
+
+1. Agent tokens belong to one pool: `token create --role agent --pool P` requires pool for agent
+   tokens and refuses it for others. Registration into another pool names both and refuses.
+   Upgrade binds existing tokens to their last registered pool; never-registered tokens are
+   revoked, disclosed in upgrade notes. Test `test_agent_token_pool_binding`.
+2. Claims issue an attempt credential valid only for that attempt's renew/report/log actions,
+   until ending or lease expiry. Children receive it and never ETL_CRAFT_TOKEN; today's
+   `agent/loop.py` env=None inherits everything. Test `test_children_never_receive_agent_token`
+   and `test_attempt_credentials_are_fenced` against other attempts and ended attempts.
+3. SSO group sessions cannot refresh beyond Auth.Session_hours from sign-in; sign in again.
+   Today's refresh retains groups through Refresh_days. Test `test_sso_group_session_absolute_age`.
+4. Refuse ngrok publish-docs without Docs_site.Allowed_ips, naming the setting; local and
+   External_url publishing stay unchanged. Test `test_ngrok_catalog_requires_allow_list`.
+5. Service/agent tokens default to `--expires 365d`, still allowing up to 36500d. Add LAST_USED_AT
+   in both dialects, update at most hourly per token, and show it in token list. Test
+   `test_service_token_expiry_and_last_used`.
+6. Password/subject verification runs outside locks.ACCOUNTS; the lock covers writes only.
+   Test `test_sign_ins_do_not_serialize` with two successful accounts and a third failing.
+7. OIDC accepts 120 seconds' iat/nbf/exp leeway and caches discovery per process for ten minutes.
+   Test `test_oidc_clock_leeway_and_discovery_cache`.
+8. Cap every core/extra dependency at its next major version; Dependabot raises caps through CI.
+   verify-package installs lower bounds and caps. Test `test_dependency_bounds_install_matrix`.
+9. Setup without a terminal and with no admin fails with a remedy instead of skipping admin
+   and exiting 0.
+   `setup --admin-name N --password-stdin` creates the first admin without a terminal under the
+   existing password policy. In a terminal retry an invalid password up to three times. Test
+   `test_unattended_setup_admin_contract` and `test_setup_retries_password_policy`.
+10. Catalog success rates use each run's first ending; repaired runs have separate plain labels.
+    Messages appear only beside the status they explain. Correct services/catalog/metrics.py
+    and pages.py; test `test_catalog_first_endings_and_repair_labels`.
+
+*Done when:* each fix has a test failing on old code, docs/CHANGELOG describe user-visible changes,
+and test-security plus the built-in security-review run with dispositions in the PR.
 
 ## Release candidate: the Support Insights example
 
@@ -8152,9 +8331,9 @@ package bug or missing feature demonstration remains hidden behind a project wor
 reference queries and UI checks pass, every S8.H feature/scenario and README walkthrough is verified,
 and the endurance run on the example passed. A partial coverage matrix cannot pass the release gate.
 
-## 1.0.0 release checklist
+## 0.9.0 release checklist
 
-1.0.0 is tagged when each of these has evidence recorded the way `release/README.md` describes:
+0.9.0 is tagged when each of these has evidence recorded the way `release/README.md` describes:
 
 - [ ] Every reported defect is triaged and every confirmed bug is resolved before 1.0.0,
       including Appendix A and bugs found later in reviews, CI, cloud acceptance, soaks and
@@ -8195,9 +8374,15 @@ and the endurance run on the example passed. A partial coverage matrix cannot pa
 - [ ] Every required suite, cloud included, has evidence matched to the release commit and wheel,
       and the release gate rejects incomplete evidence.
 
-## Post-1.0.0 possibilities
+- [ ] S7.I endurance, the S6.G load benchmark and cloud evidence pass on the 0.9.0 candidate.
+- [ ] The owner and agents audit the candidate end to end as new users: install, setup, sign-in,
+      running/failing/recovery, CLI, UI, catalog and docs; every finding is fixed.
+- [ ] Context-free agents, given only published docs and package, install and set up controller,
+      UI copy and agent, run the demo and recover a failure; every sticking point is fixed.
 
-These are possible enhancements, not commitments or requirements for 1.0.0.
+## After 0.9.0
+
+These are possible enhancements after the first public release, shaped by user feedback.
 
 - **Business-row retention with explicit eligibility.** Consider project-scoped table policies
   in `CFG_TABLES`/`tables.csv`: a nullable retention period (`NULL` keeps rows forever) plus a

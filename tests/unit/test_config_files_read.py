@@ -79,21 +79,20 @@ def test_a_byte_order_mark_is_ignored(tmp_path):
 def test_a_missing_folder_and_a_missing_file_are_named(tmp_path):
     with pytest.raises(MetadataFileError, match=r"no config folder at .*config export"):
         read_config_files(tmp_path / "config")
-    found = problems(tmp_path, tasks=None)
-    assert "tasks.csv is missing: every config file must exist" in found
-    assert "TASK_CODE,TASK_TYPE" in found
+    read = read_config_files(folder(tmp_path, tasks=None))
+    assert "tasks.csv" not in read.rows
 
 
 def test_every_header_problem_is_named(tmp_path):
     found = problems(
         tmp_path,
-        tasks="PIPELINE_CODE,TASK_CODE,HANDLER,OWNER,HANDLER\n",
+        tasks="PIPELINE_CODE,HANDLER,OWNER,HANDLER\n",
         pipelines="",
     )
     assert "pipelines.csv is empty: write its header row (PIPELINE_CODE," in found
     assert "tasks.csv line 1: unknown column 'OWNER'; its columns are PIPELINE_CODE," in found
     assert "tasks.csv line 1: column HANDLER appears more than once" in found
-    assert "tasks.csv line 1: column TASK_TYPE is missing; it needs a value in every row" in found
+    assert "tasks.csv line 1: column TASK_CODE is missing; it needs a value in every row" in found
 
 
 @pytest.mark.parametrize(
@@ -158,20 +157,6 @@ def test_duplicate_keys_self_dependencies_and_missing_references_are_named(tmp_p
     assert "pipeline_dependencies.csv line 2: pipeline MART depends on itself" in found
     assert "task_dependencies.csv line 2: SALES.load depends on itself" in found
 
-    missing = problems(
-        tmp_path,
-        task_dependencies="PIPELINE_CODE,TASK_CODE,DEPENDS_ON_PIPELINE_CODE,DEPENDS_ON_TASK_CODE,"
-        "DEPENDENCY_TYPE\nSALES,check,SALES,lod,SUCCESS\n",
-        tasks=GOOD["tasks.csv"] + "SALSE,extra,ETL,SQL,,,Y\n",
-        task_parameters="PIPELINE_CODE,TASK_CODE,PARAMETER_NAME,PARAMETER_VALUE\n"
-        "SALES,load,SELECT_QUERY,SELECT 1\n",
-        pipeline_dependencies="PIPELINE_CODE,DEPENDS_ON_PIPELINE_CODE,DEPENDENCY_TYPE\n"
-        "MART,SALES,SUCCESS\n",
-    )
-    assert "tasks.csv line 5: pipeline SALSE is not in pipelines.csv" in missing
-    assert "task_dependencies.csv line 2: task SALES.lod is not in tasks.csv" in missing
-    assert missing.startswith("2 problem(s) in ")
-
 
 def test_every_file_holds_its_table_with_active_flag_last():
     positions = {table.file: position for position, table in enumerate(TABLES)}
@@ -212,7 +197,9 @@ def test_the_config_option_after_a_verb_is_refused_not_taken_for_the_folder(verb
 def test_legacy_source_file_requires_explicit_conversion(tmp_path):
     folder(tmp_path)
     (tmp_path / "source_columns.csv").write_text("TABLE_NAME,COLUMN_NAME\nraw.orders,id\n")
-    with pytest.raises(MetadataFileError, match="retired source layout"):
+    with pytest.raises(
+        MetadataFileError, match=r"unknown config CSV.*source_columns.csv.*columns.csv"
+    ):
         read_config_files(tmp_path)
 
 
@@ -221,8 +208,6 @@ def test_legacy_source_file_requires_explicit_conversion(tmp_path):
     [
         ("raw,orders,id,INT,0,Y\n", "0 is less than 1"),
         ("raw,orders,id,INT,1,Y\nraw,orders,id,INT,2,Y\n", "both hold raw.orders.id"),
-        ("raw,orders,id,INT,1,Y\nraw,orders,name,TEXT,1,Y\n", "COLUMN_POSITION"),
-        ("raw,missing,id,INT,1,Y\n", "table raw.missing is not in tables.csv"),
     ],
 )
 def test_column_file_names_bad_definitions(tmp_path, rows, message):
@@ -257,8 +242,10 @@ def test_target_parameter_is_refused_even_when_disabled(tmp_path, name):
 
 
 @pytest.mark.parametrize("name", ["grants.csv", "projects.csv", "pools.csv"])
-def test_admin_files_are_ignored_like_unknown_files(tmp_path, name):
+def test_admin_files_are_refused_as_unknown_files(tmp_path, name):
     path = folder(tmp_path) / name
     path.write_text("deliberately not CSV\n")
-    result = read_config_files(tmp_path)
-    assert name not in result.rows
+    with pytest.raises(MetadataFileError) as caught:
+        read_config_files(tmp_path)
+    assert name in str(caught.value)
+    assert "unknown config CSV" in str(caught.value)

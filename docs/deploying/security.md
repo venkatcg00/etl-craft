@@ -255,3 +255,13 @@ Python callers must explicitly scope library writes with `core.actor.acting_as`;
 `current_actor()` raises `ConfigurationError` outside a scope. Unauthenticated connection reads
 remain available for sign-in, while Engine DB guards reject unscoped writes. Token metadata
 returns the registered `account_kind`; a service token never claims to be a person.
+
+## Shared instance trust boundary
+
+Projects on one instance trust each other's executable code, as Airflow DAGs on shared workers
+do. Use separate instances for separate security domains. In production, people use `--api`;
+Engine DB writer credentials belong only on controller and API hosts because those credentials
+bypass every role check.
+
+Triggered child pipelines from a manual run are refused once the initiating account is disabled.
+Use service accounts for long manual chains.

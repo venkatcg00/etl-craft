@@ -108,7 +108,11 @@ def test_exported_files_load_back_without_a_change(exported):
     ]
 
 
-def test_apply_inserts_updates_and_retires_by_key(exported):
+def test_apply_inserts_updates_and_preserves_absent_keys(exported):
+    europe_tasks = exported.rows(
+        "SELECT COUNT(*) AS n FROM CFG_TASKS t JOIN CFG_PIPELINES p ON p.PIPELINE_ID=t.PIPELINE_ID "
+        "WHERE p.PIPELINE_CODE='SALES_DAILY_EU' AND t.ACTIVE_FLAG='Y'"
+    )
     folder = exported.config_dir
     (parameter_id,) = exported.rows(
         "SELECT x.TASK_PARAMETER_ID AS id FROM CFG_TASK_PARAMETERS x "
@@ -221,32 +225,21 @@ def test_apply_inserts_updates_and_retires_by_key(exported):
             "ops@example.com",
         )
     ]
-    retired = by_operation["retire"]
-    assert ("pipelines.csv", "SALES_DAILY_EU") in retired
-    assert ("pipeline_dependencies.csv", "SALES_MART on SALES_DAILY_EU SUCCESS") in retired
-    assert (
-        "task_dependencies.csv",
-        "SALES_DAILY.check_orders on SALES_DAILY.load_orders SUCCESS",
-    ) in retired
-    assert {file for file, _ in retired} == {
-        "pipelines.csv",
-        "tasks.csv",
-        "task_parameters.csv",
-        "task_dependencies.csv",
-        "pipeline_dependencies.csv",
-        "business_rules.csv",
-    }
+    assert "retire" not in by_operation
 
     assert exported.rows(
         "SELECT TASK_PARAMETER_ID AS id, PARAMETER_VALUE AS value FROM CFG_TASK_PARAMETERS "
         "WHERE TASK_PARAMETER_ID = :id",
         id=parameter_id,
     ) == [(parameter_id, "ops@example.com")]
-    assert exported.rows(
-        "SELECT COUNT(*) AS n FROM CFG_TASKS t "
-        "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
-        "WHERE p.PIPELINE_CODE = 'SALES_DAILY_EU' AND t.ACTIVE_FLAG = 'Y'"
-    ) == [(0,)]
+    assert (
+        exported.rows(
+            "SELECT COUNT(*) AS n FROM CFG_TASKS t "
+            "JOIN CFG_PIPELINES p ON p.PIPELINE_ID = t.PIPELINE_ID "
+            "WHERE p.PIPELINE_CODE = 'SALES_DAILY_EU' AND t.ACTIVE_FLAG = 'Y'"
+        )
+        == europe_tasks
+    )
     labels = exported.rows(
         "SELECT DISTINCT ACTOR AS actor, MIGRATION AS migration FROM AUD_METADATA_CHANGES "
         "WHERE CHANGE_ID > (SELECT MAX(CHANGE_ID) - :n FROM AUD_METADATA_CHANGES)",
@@ -274,10 +267,7 @@ def test_plan_reports_what_apply_would_do_and_changes_nothing(exported):
     done = sync(exported, apply=False)
 
     assert (done.applied, done.failed) == (False, False)
-    assert {change.row for change in done.changes if change.file == "pipelines.csv"} == {
-        "SALES_DAILY_EU",
-        "SALES_MART",
-    }
+    assert done.changes == ()
     assert (active(exported, "CFG_PIPELINES"), changes_logged(exported)) == (
         pipelines,
         logged,
@@ -430,7 +420,8 @@ def test_flags_turn_rows_off_and_on_again_keeping_their_ids(exported):
             {**rows[0], "PIPELINE_CODE": "NEVER_LOADED", "ACTIVE_FLAG": "N"},
         ],
     )
-    assert sync(exported).changes == ()
+    with pytest.raises(MetadataFileError, match=r"NEVER_LOADED.*ACTIVE_FLAG=N.*no stored key"):
+        sync(exported)
 
 
 def test_an_active_row_under_a_pipeline_without_a_row_is_refused(exported):
@@ -447,9 +438,7 @@ def test_an_active_row_under_a_pipeline_without_a_row_is_refused(exported):
         ],
     )
 
-    with pytest.raises(
-        MetadataFileError, match="pipeline NEVER_LOADED has no row in the Engine DB"
-    ):
+    with pytest.raises(MetadataFileError, match=r"NEVER_LOADED.*ACTIVE_FLAG=N.*no stored key"):
         sync(exported, apply=False)
 
 
@@ -457,7 +446,10 @@ def test_the_example_folder_is_the_migration_examples_exported(metadata_project,
     metadata_project.load_examples()
     export_config(metadata_project.engine, tmp_path / "exported")
     for path in sorted(EXAMPLE.glob("*.csv")):
-        assert (tmp_path / "exported" / path.name).read_text("utf-8") == path.read_text("utf-8")
+        with (tmp_path / "exported" / path.name).open() as stream:
+            expected = [row for row in csv.DictReader(stream) if row["ACTIVE_FLAG"] == "Y"]
+        with path.open() as stream:
+            assert list(csv.DictReader(stream)) == expected
 
 
 def test_the_example_folder_loads_into_a_new_engine_db(metadata_project):
@@ -714,8 +706,12 @@ def test_admin_files_never_apply_or_export(exported, tmp_path):
         assert not (exported.config_dir / name).exists()
         (exported.config_dir / name).write_text("arbitrary ignored content\n")
     before = changes_logged(exported)
-    assert sync(exported, apply=False).changes == ()
-    assert sync(exported, apply=True).changes == ()
+    for applying in (False, True):
+        with pytest.raises(MetadataFileError) as caught:
+            sync(exported, apply=applying)
+        for name in names:
+            assert name in str(caught.value)
+        assert "unknown config CSV" in str(caught.value)
     assert changes_logged(exported) == before
     destination = tmp_path / "export"
     export_config(exported.engine, destination)

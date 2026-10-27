@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import shutil
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,8 +24,6 @@ def run_demo(config: Path) -> tuple[str, ...]:
     projects = tuple(f"demo_team_{number:02d}" for number in range(1, 11))
     with TemporaryDirectory(prefix="etl-craft-ten-projects-") as temporary:
         root = Path(temporary)
-        template = root / "template"
-        command(config, "--project", "default", "config", "export", "--config-dir", str(template))
         for project in projects:
             command(
                 config,
@@ -40,7 +37,7 @@ def run_demo(config: Path) -> tuple[str, ...]:
                 "Ten-project demonstration",
             )
             folder = root / project
-            shutil.copytree(template, folder)
+            folder.mkdir()
             wanted = {
                 "pipelines.csv": [
                     {
@@ -69,13 +66,11 @@ def run_demo(config: Path) -> tuple[str, ...]:
                     }
                 ],
             }
-            for path in folder.glob("*.csv"):
-                with path.open(encoding="utf-8", newline="") as stream:
-                    fields = next(csv.reader(stream))
-                with path.open("w", encoding="utf-8", newline="") as stream:
-                    writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
+            for name, rows in wanted.items():
+                with (folder / name).open("w", encoding="utf-8", newline="") as stream:
+                    writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
                     writer.writeheader()
-                    writer.writerows(wanted.get(path.name, []))
+                    writer.writerows(rows)
             command(config, "--project", project, "config", "apply", "--config-dir", str(folder))
             command(config, "--project", project, "run", "--pipeline-code", "POOL_DEMO")
     return projects
