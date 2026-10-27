@@ -70,9 +70,10 @@ def main() -> int:
     config = load_config(args.config, agent=True)
     context = from_json(TaskContext, work["task"] | {"config": encode(config)})
     store = RemoteTaskStore(
-        AgentClient(args.api),
+        AgentClient(args.api, token=work.pop("credential")),
         args.attempt_id,
         lambda holder_id: confirm_stopped(config, holder_tag(holder_id)),
+        work["holder_id"],
     )
     started = store.call(
         replace(

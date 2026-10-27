@@ -6,6 +6,32 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Agent tokens are pool-bound; tasks receive only attempt-scoped credentials and an explicit
+  environment allowlist. Service/agent tokens default to 365 days and list hourly last use.
+- SSO refreshes retain the original Session_hours limit. Sign-in verification runs outside the
+  account write lock. OIDC adds 120-second leeway and a ten-minute per-issuer discovery cache.
+- Ngrok catalog publishing requires Allowed_ips. Each publisher refuses another project's
+  generated catalog; browser sign-in moves to S7.A.7.
+
+### Changed
+
+- Unattended setup requires explicit first-admin input through --admin-name and --password-stdin;
+  interactive setup retries invalid password lengths up to three times.
+- Catalog success rates count first endings, list repaired runs separately and hide stale errors
+  beside successful statuses. Core/extra dependencies have upper compatibility bounds.
+
+### Upgrade notes
+
+- Migration 0065 binds existing agent tokens to their last recorded registration's pool and
+  revokes agent tokens that never registered. Issue replacements with --role agent --pool P.
+  AUD_AGENTS keeps the latest registration per token; earlier pool names remain in registration
+  request audit history. Review those prior registrations when rotating tokens used across pools.
+  Existing service/agent expiry dates are unchanged; token list shows never for unset expiry.
+  Regenerate catalogs before publishing so their project identity is recorded in the site marker.
+
+
 - Breaking: project grants now gate CLI/API metadata access. Missing and hidden projects or
   pipelines share a not-found response. Open pipelines inherit project permission; restricted
   pipelines retain their matching-grant rules. Project CAN_MANAGE covers restricted pipelines,

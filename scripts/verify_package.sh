@@ -85,4 +85,15 @@ uv venv --quiet --python "$python_bin" "$work/uv-sdist"
 uv pip install --quiet --python "$work/uv-sdist/bin/python" "$sdist"
 check_install "$work/uv-sdist" "uv pip install <sdist>"
 
-echo "==> etl-craft $expected: wheel and sdist install with pip and uv"
+echo "==> installing all extras at direct lower bounds and highest versions below caps"
+"$python_bin" "$root/scripts/dependency_bounds.py" "$root/pyproject.toml" > "$work/lower.txt"
+for bounds in lower caps; do
+    uv venv --quiet --python "$python_bin" "$work/$bounds"
+    constraints=()
+    if [[ "$bounds" == lower ]]; then constraints=(--requirement "$work/lower.txt" --resolution lowest-direct); fi
+    uv pip install --quiet --python "$work/$bounds/bin/python" "${constraints[@]}" "$wheel[all,publish]"
+    uv pip check --python "$work/$bounds/bin/python"
+    check_install "$work/$bounds" "all extras: $bounds"
+done
+
+echo "==> etl-craft $expected: wheel, sdist and dependency bounds verified"

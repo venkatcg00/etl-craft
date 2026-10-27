@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
-from etl_craft.core.errors import ConfigurationError
+from etl_craft.core.errors import ConfigurationError, UsageError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.services.credentials import database_key, read_session
@@ -54,6 +54,15 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
         with acting_as(SYSTEM_ACTOR):
             identity = None
             provisioning = local_provisioning(engine, args.command)
+            if (
+                args.command == "setup"
+                and getattr(args, "password_stdin", False)
+                and not provisioning
+            ):
+                raise UsageError(
+                    "setup: an active admin already exists; --password-stdin requires no active "
+                    "admin; use etl-craft account add or account reset-password"
+                )
             if args.command not in _SIGN_IN and not provisioning:
                 token = os.environ.get("ETL_CRAFT_TOKEN")
                 if token is None:

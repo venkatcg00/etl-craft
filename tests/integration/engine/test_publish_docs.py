@@ -100,7 +100,11 @@ def ngrok(monkeypatch):
 
 
 def publishing(engine_db, **site):
-    settings = {"authtoken_var": "ETL_CRAFT_TEST_NGROK", **site}
+    settings = {
+        "authtoken_var": "ETL_CRAFT_TEST_NGROK",
+        "allowed_ips": () if site.get("external_url") else ("127.0.0.1/32",),
+        **site,
+    }
     return replace(engine_db.config, docs_site=DocsSiteConfig(**settings))
 
 
@@ -146,7 +150,11 @@ def test_ngrok_problems_say_what_to_do_and_never_show_the_token(
     assert "ngrok could not open the tunnel" in str(failed.value)
     assert TOKEN not in str(failed.value) and failed.value.__cause__ is None
     with pytest.raises(ConfigurationError, match=r"needs Docs_site\.Authtoken"):
-        publish(engine_db.engine, engine_db.config, site)
+        publish(
+            engine_db.engine,
+            replace(engine_db.config, docs_site=DocsSiteConfig(allowed_ips=("127.0.0.1/32",))),
+            site,
+        )
     monkeypatch.delenv("ETL_CRAFT_TEST_NGROK")
     with pytest.raises(ConfigurationError, match="ETL_CRAFT_TEST_NGROK', which is not set"):
         publish(engine_db.engine, publishing(engine_db), site)
@@ -462,3 +470,18 @@ def test_busy_publication_is_reported_as_unavailable(engine_db, site, monkeypatc
         monkeypatch.setattr(filelock, "_try_lock", lambda *_args, **_kwargs: False)
         assert fetch(served.url)[0] == 503
     assert "publication lock" in caplog.text and "retry the request" in caplog.text
+
+
+def test_ngrok_catalog_requires_allow_list(engine_db, site):
+    with pytest.raises(ConfigurationError, match=r"Docs_site.Allowed_ips.*empty.*ngrok"):
+        publish(engine_db.engine, engine_db.config, site)
+
+
+def test_served_catalog_is_one_project_per_process(engine_db, site):
+    other = replace(engine_db.config, project="finance")
+    with pytest.raises(ConfigurationError, match="expected project='finance'"):
+        publish(engine_db.engine, other, site, local_only=True)
+    with published(engine_db.engine, engine_db.config, site, local_only=True) as served:
+        write_site(build_catalog(engine_db.engine, other), other, site)
+        assert fetch(served.url)[0] == 503
+        assert fetch(served.url + "search.json")[0] == 503

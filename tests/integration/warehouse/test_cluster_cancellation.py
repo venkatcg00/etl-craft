@@ -82,14 +82,14 @@ def test_operator_cancel_confirms_long_query_ended(
     )
     instrumentation = tmp_path / "instrumentation"
     instrumentation.mkdir()
-    (instrumentation / "sitecustomize.py").write_text(
-        "from fixtures.cancellation import install_query_marker\ninstall_query_marker()\n"
-    )
     marker = tmp_path / "query-started"
+    (instrumentation / "sitecustomize.py").write_text(
+        "from fixtures.cancellation import install_query_marker\n"
+        f"install_query_marker({str(marker)!r})\n"
+    )
     monkeypatch.setenv(
         "PYTHONPATH", os.pathsep.join((str(instrumentation), str(Path(__file__).parents[2])))
     )
-    monkeypatch.setenv("ETL_CRAFT_TEST_QUERY_STARTED", str(marker))
     ctx = OperationContext(world.engine_db, world.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
 
     def execute():

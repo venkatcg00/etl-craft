@@ -15,7 +15,7 @@ from etl_craft.services.catalog.html import render_table
 def kpi_groups(
     runs: Sequence[RunSummary | TaskRunSummary],
 ) -> dict[CatalogRunKind, RunKpis]:
-    """Keep repaired runs out of their original trigger's aggregate."""
+    """Group first endings by original trigger, retaining repairs as a separate count."""
     return {
         kind: run_kpis(group)
         for kind in CatalogRunKind
@@ -31,6 +31,7 @@ def kpi_summary(runs: Sequence[RunSummary | TaskRunSummary]) -> str:
             "Runs",
             "Succeeded",
             "Failed or cancelled",
+            "Repaired",
             "Average run",
             "Longest run",
             "SLA breached",
@@ -42,6 +43,7 @@ def kpi_summary(runs: Sequence[RunSummary | TaskRunSummary]) -> str:
                 str(kpis.runs),
                 rate(kpis),
                 str(kpis.failed),
+                str(kpis.repaired),
                 duration(kpis.average_seconds),
                 duration(kpis.longest_seconds),
                 str(kpis.sla_breached)
@@ -59,7 +61,10 @@ def kpi_values(runs: Sequence[RunSummary | TaskRunSummary]) -> tuple[str, str]:
     """Compact, labelled group rates and durations for the pipeline overview."""
     groups = kpi_groups(runs)
     return (
-        "; ".join(f"{kind.value.title()}: {rate(kpis)}" for kind, kpis in groups.items()),
+        "; ".join(
+            f"{kind.value.title()}: {rate(kpis)}; repaired {kpis.repaired}"
+            for kind, kpis in groups.items()
+        ),
         "; ".join(
             f"{kind.value.title()}: {duration(kpis.average_seconds)}"
             for kind, kpis in groups.items()

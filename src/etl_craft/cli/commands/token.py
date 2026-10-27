@@ -17,7 +17,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     create = verbs.add_parser("create", help="Create a token and print its value once.")
     create.add_argument("--name", required=True)
     create.add_argument("--role", type=ApiRole, choices=tuple(ApiRole), required=True)
-    create.add_argument("--expires", help="Lifetime in days, such as 90d.")
+    create.add_argument("--expires", default="365d", help="Lifetime in days (default 365d).")
+    create.add_argument("--pool", help="Required pool binding for an agent token.")
     configure_output(create)
     revoke = verbs.add_parser("revoke", help="Revoke a token immediately.")
     revoke.add_argument("--token-id", type=int, required=True)
@@ -46,7 +47,8 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         for token in listed.tokens:
             out.line(
                 f"{token.token_id} {token.name} {token.role} "
-                f"expires={token.expires_at} revoked={token.revoked_at}"
+                f"pool={token.pool} expires={token.expires_at or 'never'} "
+                f"last_used={token.last_used_at or 'never'} revoked={token.revoked_at}"
             )
     return ExitCode.SUCCESS
 

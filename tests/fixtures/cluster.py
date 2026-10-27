@@ -34,7 +34,9 @@ def cluster(cli_project, monkeypatch, tmp_path):
     p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     p.config = load_config(p.config.config_path)
     ctx = OperationContext(p.engine, p.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
-    token = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="host-a", role=ApiRole.AGENT))
+    token = invoke(
+        ctx, ActionName.TOKEN_CREATE, TokenCreate(name="host-a", role=ApiRole.AGENT, pool="default")
+    )
     _, url = start_ui(p)
     raw["Orchestration"]["Api_address"] = "127.0.0.1:0"
     agent_dir = tmp_path / "agent-project"

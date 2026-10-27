@@ -101,7 +101,7 @@ EXPECTED = {
     },
     enums.ProtectionEvent: {"ENABLE", "BASELINE", "WRITE", "DELETE", "LOCK", "UNLOCK"},
     enums.ActorKind: {"USER", "SERVICE", "SYSTEM"},
-    enums.TokenKind: {"SERVICE", "ACCESS", "REFRESH", "AGENT"},
+    enums.TokenKind: {"SERVICE", "ACCESS", "REFRESH", "AGENT", "ATTEMPT"},
     enums.AccountKind: {"USER", "SERVICE"},
     enums.ActionOutcome: {"REQUESTED", "REFUSED", "SUCCESS", "FAILURE"},
     enums.ApiRole: {"viewer", "operator", "developer", "admin", "agent"},

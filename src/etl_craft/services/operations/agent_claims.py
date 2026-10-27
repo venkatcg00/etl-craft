@@ -5,15 +5,17 @@ import json
 import time
 from dataclasses import fields, replace
 
-from sqlalchemy.engine import Row
+from sqlalchemy.engine import Connection, Row
 
 from etl_craft.core.actor import ActorKind, acting_as
 from etl_craft.core.agent_resources import AgentResources
-from etl_craft.core.enums import AgentStatus, SlotKind, TriggerKind, YesNo
+from etl_craft.core.enums import AgentStatus, SlotKind, TokenKind, TriggerKind, YesNo
 from etl_craft.core.errors import PermissionDeniedError, RunRefusedError
 from etl_craft.core.faults import fault_point
+from etl_craft.core.ownership import attempt_holder
 from etl_craft.engine import agent_transitions
 from etl_craft.engine.notifications import agent_channel, notification_hub, pool_channel
+from etl_craft.engine.placement import require_pool
 from etl_craft.engine.queries import statement
 from etl_craft.execution.attempt_records import refuse_attempt
 from etl_craft.execution.context import build_task_context
@@ -24,6 +26,7 @@ from etl_craft.services.operations.agents import check_agent
 from etl_craft.services.operations.child_admission import check_child_start
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.serialization import from_json
+from etl_craft.services.operations.tokens import TokenGrant, issue_token
 
 
 def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> AgentReply | None:
@@ -32,6 +35,7 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
         agent = conn.execute(statement(conn, "agent_get"), {"agent_id": agent_id}).one_or_none()
         if agent is None or agent.status == AgentStatus.GONE:
             raise RunRefusedError(f"agent {agent_id}: GONE or missing; stop children and register")
+        require_pool(conn, agent.pool, f"agent {agent_id}", token_id=agent_id)
         hub = notification_hub(ctx.config, ctx.engine)
         hub.subscribe(pool_channel(agent.pool), agent_channel(agent_id))
         resources = from_json(AgentResources, json.loads(agent.resource_report))
@@ -93,11 +97,32 @@ def claim_once(ctx: OperationContext, request: AgentClaim, agent_id: int) -> Age
         if refusal is not None:
             refuse_attempt(conn, claimed.attempt_id, refusal, ctx.config.logs.tail_bytes)
             return None
-    return _reply(ctx, claimed, work)
+        credential = _issue_credential(ctx, conn, int(claimed.attempt_id))
+    return _reply(ctx, claimed, work, credential)
+
+
+def _issue_credential(ctx: OperationContext, conn: Connection, attempt_id: int) -> str:
+    account = conn.execute(
+        statement(conn, "agent_credential_account"), {"token_id": ctx.credential_token_id}
+    ).one()
+    return issue_token(
+        conn,
+        ctx.actor.name,
+        TokenGrant(
+            account.account_id,
+            account.name,
+            TokenKind.ATTEMPT,
+            None,
+            attempt_id=attempt_id,
+        ),
+    ).token
 
 
 def _reply(
-    ctx: OperationContext, claimed: Row[tuple[object, ...]], work: Row[tuple[object, ...]]
+    ctx: OperationContext,
+    claimed: Row[tuple[object, ...]],
+    work: Row[tuple[object, ...]],
+    credential: str,
 ) -> AgentReply:
     """Build dispatched task metadata only after the claim and permission check commit."""
     task_run_id = int(work.task_run_id)
@@ -114,6 +139,8 @@ def _reply(
     return AgentReply(
         {
             "task": metadata,
+            "credential": credential,
+            "holder_id": attempt_holder(int(claimed.attempt_id), ctx.credential_digest or ""),
             "lease_seconds": budget,
             "timeout_seconds": task_timeout_seconds(context.task_params, ctx.config),
         }

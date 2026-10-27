@@ -77,3 +77,55 @@ def test_configured_group_claim_refuses_missing_or_malformed_values(issuer, grou
     grant = start_device(auth)
     with pytest.raises(ConfigurationError, match=r"groups.*expected a list of group names"):
         poll_device(auth, grant.device_code, grant.nonce)
+
+
+def test_oidc_clock_leeway_and_discovery_cache(issuer, monkeypatch):
+    from etl_craft.services import oidc
+
+    auth, state = issuer
+    clock = [1000.0]
+    monkeypatch.setattr(oidc.time, "monotonic", lambda: clock[0])
+    original = oidc._request
+    discoveries = []
+
+    def counted(url, data=None):
+        if url.endswith("openid-configuration"):
+            discoveries.append(url)
+        return original(url, data)
+
+    monkeypatch.setattr(oidc, "_request", counted)
+    grant = start_device(auth)
+    state["extra_claims"] = {
+        "iat": oidc.time.time() + 119,
+        "nbf": oidc.time.time() + 119,
+        "exp": oidc.time.time() - 119,
+    }
+    assert poll_device(auth, grant.device_code, grant.nonce).subject == "known-subject"
+    assert len(discoveries) == 1
+    clock[0] += 601
+    start_device(auth)
+    assert len(discoveries) == 2
+    state["extra_claims"] = {"exp": oidc.time.time() - 121}
+    with pytest.raises(ConfigurationError, match="exp"):
+        poll_device(auth, grant.device_code, state["nonce"])
+
+
+def test_oidc_refuses_non_https_token_endpoint_and_does_not_cache_failure(issuer, monkeypatch):
+    from etl_craft.services import oidc
+
+    auth, _state = issuer
+    original = oidc._request
+    invalid = [True]
+
+    def discovery(url, data=None):
+        value = original(url, data)
+        if url.endswith("openid-configuration") and invalid[0]:
+            value["token_endpoint"] = "http://localhost/token"
+        return value
+
+    monkeypatch.setattr(oidc, "_request", discovery)
+    with pytest.raises(ConfigurationError, match="HTTPS URL"):
+        start_device(auth)
+    assert auth.oidc_issuer not in oidc._DISCOVERY
+    invalid[0] = False
+    assert start_device(auth).device_code

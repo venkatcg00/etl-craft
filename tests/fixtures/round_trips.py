@@ -172,9 +172,5 @@ def count_round_trips(engine_db, *, path=None, include_threads=False, driver_sta
         counter.remove()
 
 
-def install_child_counter():
-    path = os.environ.get("ETL_CRAFT_TEST_ROUND_TRIPS")
-    if path:
-        RoundTrips(
-            path, json.loads(os.environ["ETL_CRAFT_TEST_ROUND_TRIPS_ENGINE"]), include_threads=True
-        ).install()
+def install_child_counter(path, engine_database):
+    RoundTrips(path, engine_database, include_threads=True).install()

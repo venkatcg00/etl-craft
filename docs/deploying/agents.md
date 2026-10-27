@@ -14,7 +14,7 @@ open no listening ports and need no Engine DB account, URL or credentials.
 Issue a distinct credential for each agent, as an administrator:
 
 ```sh
-etl-craft token create --name host-a --role agent --api https://craft.example.com
+etl-craft token create --name host-a --role agent --pool default --api https://craft.example.com
 ```
 
 Keep the returned token secret. An agent credential cannot invoke a person's actions, and a
@@ -175,3 +175,20 @@ an agent single-kind. Slots remain upper bounds alongside CPU and memory.
 withdraws free capacity. Endings, LOST reconciliation and fenced lease expiry release active
 reservations. Keep measured-host agents' scopes accurate: overlapping host allocations share
 one resource budget.
+
+### Existing token upgrade
+
+Migration 0065 binds each agent token to AUD_AGENTS' latest recorded pool. Unregistered agent
+tokens are revoked. Before rotating a token used across pools, list its earlier successful
+registrations (the ARGUMENTS document includes each pool):
+
+```sql
+SELECT ACTOR, STARTED_AT, ARGUMENTS
+FROM AUD_ACTIONS
+WHERE COMMAND = 'agent register' AND OUTCOME = 'SUCCESS'
+ORDER BY ACTOR, STARTED_AT;
+```
+
+The last registered pool is retained; earlier pools do not retain authority. Use a distinct
+pool-bound token per agent. Existing token expiry is preserved; `never` in token list means
+it needs an explicit rotation policy.

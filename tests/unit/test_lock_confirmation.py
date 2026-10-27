@@ -37,7 +37,7 @@ def locks(client):
 
 def test_an_agent_confirms_a_stale_holder_before_taking_its_lock():
     client, confirmed = Client(), []
-    with RemoteTaskStore(client, 9, confirmed.append).hold(5, "s.target", 30):
+    with RemoteTaskStore(client, 9, confirmed.append, "attempt:9:parent").hold(5, "s.target", 30):
         assert confirmed == ["attempt:7"]
     assert locks(client) == [None, "attempt:7"]
 
@@ -48,7 +48,7 @@ def test_an_unconfirmed_stop_keeps_the_agent_out_of_the_lock():
     def refuse(holder_id):
         raise LockTimeoutError("2 warehouse statement(s) still run")
 
-    store = RemoteTaskStore(client, 9, refuse)
+    store = RemoteTaskStore(client, 9, refuse, "attempt:9:parent")
     with (
         pytest.raises(LockTimeoutError, match=r"s\.target: the lock stays with attempt:7"),
         store.hold(5, "s.target", 30),
@@ -107,7 +107,7 @@ def test_failed_agent_warehouse_work_confirms_before_unlocking(confirmable):
         if holder != "attempt:7" and not confirmable:
             raise LockTimeoutError("warehouse still running")
 
-    store = RemoteTaskStore(client, 9, confirm)
+    store = RemoteTaskStore(client, 9, confirm, "attempt:9:parent")
     expected = ConnectionError if confirmable else LockTimeoutError
     with pytest.raises(expected), store.hold(5, "s.target", 30):
         raise ConnectionError("warehouse connection dropped")
@@ -127,8 +127,15 @@ def test_local_attempt_tags_are_distinct_between_deployments():
 
 
 def test_agent_attempt_tags_are_distinct_between_deployments():
+    from etl_craft.core.ownership import attempt_holder
+
     tags = [
-        RemoteTaskStore(SimpleNamespace(token=token), 7, lambda holder: None).session_tag
+        RemoteTaskStore(
+            SimpleNamespace(token="attempt-secret"),
+            7,
+            lambda holder: None,
+            attempt_holder(7, token),
+        ).session_tag
         for token in ("agent-one", "agent-two")
     ]
     assert tags[0] != tags[1]
@@ -166,3 +173,16 @@ def test_agent_checks_its_warehouse_fencing_before_registering(monkeypatch):
             SimpleNamespace(api="http://localhost"),
             threading.Event(),
         )
+
+
+def test_attempt_credential_keeps_the_parent_warehouse_holder_identity():
+    from etl_craft.core.ownership import attempt_holder
+    from etl_craft.core.text import sha256_hex
+    from etl_craft.engine.resource_locks import holder_tag
+
+    parent_holder = attempt_holder(42, sha256_hex(b"parent-agent-token"))
+    child = RemoteTaskStore(
+        SimpleNamespace(token="attempt-credential"), 42, lambda holder: None, parent_holder
+    )
+    assert child.holder_id == parent_holder
+    assert child.session_tag == holder_tag(parent_holder)

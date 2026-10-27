@@ -893,3 +893,20 @@ def run(task):
             ).scalar_one()
             == 1
         )
+
+
+def test_local_children_never_receive_deployment_credentials(project, monkeypatch):
+    engine, config, _, _ = project
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", "deployment-token-must-stay-in-parent")
+    monkeypatch.setenv("ETL_CRAFT_REFRESH_TOKEN", "refresh-token-must-stay-in-parent")
+    (config.python_scripts_dir / "load.py").write_text(
+        "import os\nfrom etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n"
+        "    assert 'ETL_CRAFT_TOKEN' not in os.environ\n"
+        "    assert 'ETL_CRAFT_REFRESH_TOKEN' not in os.environ\n"
+        "    assert 'PATH' in os.environ\n"
+        "    return ScriptResult(1)\n"
+    )
+    outcome = run_task(engine, config, "P", "load")
+    assert outcome.status == RunStatus.SUCCESS
+    assert task_row(engine, outcome.task_run_id).target == 1

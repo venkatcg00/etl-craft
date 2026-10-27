@@ -690,6 +690,7 @@ class RunKpis:
     average_seconds: float | None
     longest_seconds: float | None
     average_rows: float | None = None
+    repaired: int = 0
 
     @property
     def success_rate(self) -> float | None:
@@ -704,7 +705,10 @@ def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
     runs did no work and ``IN-PROGRESS`` ones have not ended, so neither counts either way.
     """
     finished = [
-        r for r in runs if r.status in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED)
+        r
+        for r in runs
+        if (r.first_status or r.status)
+        in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED)
     ]
     seconds = [s for r in finished if (s := r.seconds) is not None]
     rows = [
@@ -717,14 +721,19 @@ def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
     return RunKpis(
         runs=len(runs),
         finished=len(finished),
-        succeeded=sum(1 for r in finished if r.status == RunStatus.SUCCESS),
-        failed=sum(1 for r in finished if r.status != RunStatus.SUCCESS),
+        succeeded=sum(1 for r in finished if (r.first_status or r.status) == RunStatus.SUCCESS),
+        failed=sum(1 for r in finished if (r.first_status or r.status) != RunStatus.SUCCESS),
         sla_breached=sum(
             1 for r in runs if isinstance(r, RunSummary) and r.sla_status == SlaStatus.BREACHED
         ),
         average_seconds=sum(seconds) / len(seconds) if seconds else None,
         longest_seconds=max(seconds) if seconds else None,
         average_rows=sum(rows) / len(rows) if rows else None,
+        repaired=sum(
+            r.first_status in (RunStatus.FAILED, RunStatus.CANCELLED)
+            and r.status == RunStatus.SUCCESS
+            for r in runs
+        ),
     )
 
 

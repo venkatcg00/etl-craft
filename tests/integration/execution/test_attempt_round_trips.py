@@ -54,14 +54,13 @@ def test_sql_attempt_round_trips_include_supervisor_and_child(
         start_run(conn, pipeline)
     instrumentation = tmp_path / "instrumentation"
     instrumentation.mkdir()
-    (instrumentation / "sitecustomize.py").write_text(
-        "from fixtures.round_trips import install_child_counter\ninstall_child_counter()\n"
-    )
     records = tmp_path / "round-trips.jsonl"
+    (instrumentation / "sitecustomize.py").write_text(
+        "from fixtures.round_trips import install_child_counter\n"
+        f"install_child_counter({str(records)!r}, {database(db.engine.url)!r})\n"
+    )
     tests = Path(__file__).parents[2]
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join((str(instrumentation), str(tests))))
-    monkeypatch.setenv("ETL_CRAFT_TEST_ROUND_TRIPS", str(records))
-    monkeypatch.setenv("ETL_CRAFT_TEST_ROUND_TRIPS_ENGINE", json.dumps(database(db.engine.url)))
     with count_round_trips(db.engine, path=records, include_threads=True):
         result = run_task(
             db.engine, config, "P", "create", child=ChildOptions(cancel_poll_seconds=60)

@@ -189,7 +189,7 @@ def test_account_cli_and_local_recovery(project, monkeypatch, capsys):
     monkeypatch.delenv("ETL_CRAFT_TOKEN")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     assert main(["setup"]) == 2
-    assert "interactive terminal required" in capsys.readouterr().err
+    assert "--admin-name N --password-stdin" in capsys.readouterr().err
     assert not accounts.has_admin(ctx.engine)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "recovery-owner")
@@ -276,6 +276,9 @@ def test_cli_sso_against_the_local_tls_issuer(project, issuer, monkeypatch, caps
         before = conn.execute(
             text("SELECT COUNT(*) AS count FROM AUD_ACTIONS WHERE COMMAND='login'")
         ).scalar_one()
+    from etl_craft.services import oidc
+
+    oidc._DISCOVERY.clear()
     state["wrong_issuer"] = True
     assert main(["login"]) == 3
     assert "discovery issuer differs" in capsys.readouterr().err
@@ -347,3 +350,59 @@ def test_a_refused_password_costs_one_check_whether_or_not_the_account_exists(pr
             act(ctx, ActionName.LOGIN, name=name, password="not the right password")
     assert len(checks) == 4
     assert checks[:3] == [sessions.DECOY] * 3 and checks[3] != sessions.DECOY
+
+
+def test_sso_group_session_absolute_age(project, monkeypatch):
+    from etl_craft.core.enums import Transport
+
+    ctx = replace(project, transport=Transport.HTTP)
+    user(ctx, subject="external-id")
+    act(ctx, ActionName.GROUP_ADD, name="team")
+    now = datetime(2026, 10, 27, tzinfo=UTC)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(sessions, "datetime", Clock)
+    monkeypatch.setattr(tokens, "datetime", Clock)
+    signed = sessions.sign_in_subject(ctx, IdentityClaims("external-id", ("team",)))
+    assert signed.refresh_expires_at == now + timedelta(hours=ctx.config.auth.session_hours)
+    now += timedelta(hours=ctx.config.auth.session_hours - 1)
+    refreshed = sessions.refresh(ctx, sessions.TokenInput(token=signed.refresh_token))
+    assert refreshed.metadata.expires_at <= signed.refresh_expires_at
+    now += timedelta(hours=2)
+    with pytest.raises(UsageError, match=r"expired.*login"):
+        sessions.refresh(ctx, sessions.TokenInput(token=signed.refresh_token))
+    local = act(ctx, ActionName.LOGIN, name="owner", password=PASSWORD)
+    assert local.refresh_expires_at == now + timedelta(days=ctx.config.auth.refresh_days)
+
+
+def test_sign_ins_do_not_serialize(project, monkeypatch):
+    from fixtures.races import two_at_once
+
+    user(project, name="first")
+    user(project, name="second")
+    original = sessions.verify_password
+
+    def check(password, encoded):
+        if password == PASSWORD:
+            with pytest.raises(UsageError, match="sign-in refused"):
+                act(project, ActionName.LOGIN, name="missing", password="incorrect")
+        return original(password, encoded)
+
+    monkeypatch.setattr(sessions, "verify_password", check)
+
+    def login(name):
+        return act(project, ActionName.LOGIN, name=name, password=PASSWORD)
+
+    first, second = two_at_once(
+        lambda: login("first"),
+        lambda: login("second"),
+        at="etl_craft.services.operations.sessions.verify_password",
+    )
+    assert tokens.authenticate(project, first.access_token).name == "first"
+    assert tokens.authenticate(project, second.access_token).name == "second"
+    with pytest.raises(UsageError, match="sign-in refused"):
+        act(project, ActionName.LOGIN, name="missing", password=PASSWORD)

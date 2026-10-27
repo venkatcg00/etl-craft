@@ -280,3 +280,81 @@ def test_agent_killed_after_upload_leaves_chunks_for_a_restarted_controller(clus
     )
     restarted.signal(signal.SIGTERM)
     assert restarted.wait(timeout=20) == 0, restarted.output
+
+
+def test_children_never_receive_agent_token(cluster, monkeypatch):
+    import yaml
+
+    from fixtures.cluster import start_ui
+
+    p, url, token, agent_dir = cluster
+    bootstrap = agent_dir / "craft-connector.yml"
+    raw = yaml.safe_load(bootstrap.read_text())
+    raw["Orchestration"]["Email"] = {
+        "Host": "localhost",
+        "Port": 1025,
+        "From_address": "demo@example.test",
+        "Auth_mode": "PASSWORD",
+        "User": "demo",
+        "Secret": "PINNED_EMAIL_PASSWORD",
+    }
+    bootstrap.write_text(yaml.safe_dump(raw, sort_keys=False))
+    monkeypatch.setenv("PINNED_EMAIL_PASSWORD", "pinned-example-only")
+    monkeypatch.setenv("CURRENT_EMAIL_PASSWORD", "current-example-only")
+    _, url = start_ui(p)
+    (agent_dir / "python_scripts" / "load.py").write_text(
+        "import os, sys, json\n"
+        "from pathlib import Path\n"
+        "from urllib.request import Request, urlopen\n"
+        "from urllib.error import HTTPError\n"
+        "from etl_craft import __version__\n"
+        "from etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n"
+        "    assert 'ETL_CRAFT_TOKEN' not in os.environ\n"
+        "    assert 'ETL_CRAFT_REFRESH_TOKEN' not in os.environ\n"
+        "    assert os.environ['PINNED_EMAIL_PASSWORD'] == 'pinned-example-only'\n"
+        "    work = json.loads(Path(sys.argv[sys.argv.index('--work-file')+1]).read_text())\n"
+        "    attempt = work['task']['attempt_id']\n"
+        "    api = sys.argv[sys.argv.index('--api')+1]\n"
+        "    request = Request(api+'/api/v1/agent/log', method='POST',\n"
+        "        headers={'Authorization':'Bearer '+work['credential'], 'C"
+        "ontent-Type':'application/json'},\n"
+        "        data=json.dumps({'version':__version__,'attempt_id':attem"
+        "pt+1,'sequence':0,'content':'foreign'}).encode())\n"
+        "    try:\n"
+        "        urlopen(request, timeout=5)\n"
+        "    except HTTPError as error:\n"
+        "        assert error.code == 403\n"
+        "    else:\n"
+        "        raise AssertionError('foreign attempt accepted')\n"
+        "    print('attempt boundary checked')\n"
+        "    return ScriptResult(7)\n"
+    )
+    publish_project(p, agent_dir)
+    raw["Orchestration"]["Email"]["Secret"] = "CURRENT_EMAIL_PASSWORD"
+    bootstrap.write_text(yaml.safe_dump(raw, sort_keys=False))
+    controller = p.start("controller", "--no-ui")
+    code, output = p.run(
+        "run", "--pipeline-code", "P", "--init-only", "--run-key", "credential-test"
+    )
+    assert code == 0, output
+    p.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="QUEUED")
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
+    monkeypatch.setenv("ETL_CRAFT_REFRESH_TOKEN", "must-not-reach-the-task")
+    agent = p.start("agent", "--api", url, "--project-dir", str(agent_dir), "--drain-seconds", "0")
+    try:
+        p.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="SUCCESS", timeout=25)
+    except AssertionError as error:
+        with p.engine.connect() as conn:
+            messages = conn.execute(
+                text("SELECT ERROR_MESSAGE AS message FROM AUD_TASK_RUN_LOG")
+            ).all()
+            chunks = conn.execute(
+                text("SELECT CONTENT AS content FROM AUD_ATTEMPT_LOG_CHUNKS")
+            ).all()
+        raise AssertionError(
+            f"{error}\n{messages}\n{chunks}\n{agent.output}\n{controller.output}"
+        ) from error
+    finally:
+        agent.signal(signal.SIGTERM)
+        agent.wait(timeout=40)

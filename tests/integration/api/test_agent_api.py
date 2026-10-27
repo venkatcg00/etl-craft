@@ -41,7 +41,11 @@ def agent_scene(engine_db, tmp_path):
         log_dir=tmp_path / "logs",
     )
     ctx = OperationContext(engine_db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
-    agent = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="agent-a", role=ApiRole.AGENT))
+    agent = invoke(
+        ctx,
+        ActionName.TOKEN_CREATE,
+        TokenCreate(name="agent-a", role=ApiRole.AGENT, pool="default"),
+    )
     human = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="person", role=ApiRole.ADMIN))
     with TestClient(create_app(ctx)) as client:
         headers = {"Authorization": f"Bearer {agent.token}"}
@@ -162,7 +166,7 @@ def test_a_queued_attempt_is_claimed_by_its_token_identity(agent_scene):
     with count_round_trips(db.engine) as counter:
         reply = claim_available(agent_scene)
     assert reply.data["task"]["attempt_id"] == attempt
-    assert counter.counts["engine_statements"] == 12, counter.queries
+    assert counter.counts["engine_statements"] == 17, counter.queries
     assert counter.counts["engine_transactions"] == 2
     assert counter.counts["engine_connections"] == 0
     with db.engine.connect() as conn:
@@ -319,7 +323,11 @@ def second_agent(scene, *, measured=None, pool="default"):
         SYSTEM_ACTOR,
         role=ApiRole.ADMIN,
     )
-    token = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="agent-b", role=ApiRole.AGENT))
+    token = invoke(
+        ctx,
+        ActionName.TOKEN_CREATE,
+        TokenCreate(name="agent-b", role=ApiRole.AGENT, pool=pool),
+    )
     headers = {"Authorization": f"Bearer {token.token}"}
     answer = client.post(
         "/api/v1/agent/register",
@@ -877,7 +885,9 @@ def test_large_python_work_is_claimed_only_by_the_agent_that_fits(agent_scene):
     db, client, _, _, _, config = agent_scene
     ctx = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     large = invoke(
-        ctx, ActionName.TOKEN_CREATE, TokenCreate(name="large-agent", role=ApiRole.AGENT)
+        ctx,
+        ActionName.TOKEN_CREATE,
+        TokenCreate(name="large-agent", role=ApiRole.AGENT, pool="default"),
     )
     headers = {"Authorization": f"Bearer {large.token}"}
     large_resources = resources(cpus=8, memory=8 * GIB, node="large-host", host="large")
@@ -922,7 +932,11 @@ def test_agent_registration_requires_an_active_pool(agent_scene, pool):
                 text("INSERT INTO CFG_POOLS (POOL_NAME,ACTIVE_FLAG) VALUES ('disabled','N')")
             )
     ctx = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
-    token = invoke(ctx, ActionName.TOKEN_CREATE, TokenCreate(name="new-agent", role=ApiRole.AGENT))
+    token = invoke(
+        ctx,
+        ActionName.TOKEN_CREATE,
+        TokenCreate(name="new-agent", role=ApiRole.AGENT, pool="default"),
+    )
     answer = client.post(
         "/api/v1/agent/register",
         headers={"Authorization": f"Bearer {token.token}"},
@@ -1021,6 +1035,7 @@ def test_missing_default_pool_cannot_bypass_custom_pool_admission(agent_scene):
     attempt = queue_pipeline_work(db, "CUSTOM_POOL", POOL="heavy")[0]
     with db.engine.begin() as conn:
         conn.execute(text("UPDATE CFG_PROJECTS SET DEFAULT_POOL='heavy'"))
+        conn.execute(text("UPDATE CFG_API_TOKENS SET POOL='heavy' WHERE POOL='default'"))
         conn.execute(text("DELETE FROM CFG_POOLS WHERE POOL_NAME='default'"))
     assert (
         claim_once(
@@ -1633,3 +1648,120 @@ def test_project_revocation_refuses_agent_dispatch(agent_scene):
     assert row.status == "CANCELLED"
     assert "default" in row.message and "not permitted" in row.message
     assert row.task_log == row.message
+
+
+@pytest.mark.parametrize("ending", ["lease", "ended"])
+def test_attempt_credentials_are_fenced(agent_scene, ending):
+    db, client, headers, _, _owner, _ = agent_scene
+    attempt = queue(db, "PYTHON")
+    reply = client.post(
+        "/api/v1/agent/claim",
+        headers=headers,
+        json={"version": __version__, "free_kinds": ["python"]},
+    )
+    assert reply.status_code == 200, reply.text
+    credential = reply.json()["data"]["credential"]
+    scoped = {"Authorization": f"Bearer {credential}"}
+    response = client.post(
+        "/api/v1/agent/log",
+        headers=scoped,
+        json={"version": __version__, "attempt_id": attempt, "sequence": 0, "content": "own log"},
+    )
+    assert response.status_code == 200, response.text
+    response = client.post(
+        "/api/v1/agent/log",
+        headers=scoped,
+        json={
+            "version": __version__,
+            "attempt_id": attempt + 1,
+            "sequence": 0,
+            "content": "foreign log",
+        },
+    )
+    assert response.status_code == 403, response.text
+    assert (
+        client.post(
+            "/api/v1/agent/claim",
+            headers=scoped,
+            json={"version": __version__, "free_kinds": ["python"]},
+        ).status_code
+        == 403
+    )
+    renewal = {"version": __version__, "attempts": [attempt], "resources": encode(resources())}
+    renewed = client.post("/api/v1/agent/renew", headers=scoped, json=renewal)
+    assert renewed.status_code == 200, renewed.text
+    assert renewed.json()["data"]["renewed"] == [attempt]
+    renewal["attempts"] = [attempt, attempt + 1]
+    assert client.post("/api/v1/agent/renew", headers=scoped, json=renewal).status_code == 403
+    with db.engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT TOKEN_SHA256 AS digest FROM CFG_API_TOKENS WHERE ATTEMPT_ID=:id"),
+            {"id": attempt},
+        ).one()
+        assert row.digest == sha256_hex(credential.encode())
+        if ending == "lease":
+            conn.execute(
+                text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:expired WHERE ATTEMPT_ID=:id"),
+                {"id": attempt, "expired": datetime.now(UTC) - timedelta(seconds=1)},
+            )
+    if ending == "ended":
+        assert (
+            post(agent_scene, "report", attempt_id=attempt, operation="START", pid=123).status_code
+            == 200
+        )
+        assert (
+            post(
+                agent_scene,
+                "report",
+                attempt_id=attempt,
+                operation="END",
+                status="SUCCESS",
+                exit_code=0,
+            ).status_code
+            == 200
+        )
+    assert (
+        client.post(
+            "/api/v1/agent/log",
+            headers=scoped,
+            json={
+                "version": __version__,
+                "attempt_id": attempt,
+                "sequence": 1,
+                "content": "expired",
+            },
+        ).status_code
+        == 401
+    )
+
+
+def test_attempt_renewal_at_lease_boundary_is_refused(agent_scene, monkeypatch):
+    from etl_craft.services.operations import agents
+
+    db, client, headers, _, _, _ = agent_scene
+    attempt = queue(db, "PYTHON")
+    claim = client.post(
+        "/api/v1/agent/claim",
+        headers=headers,
+        json={"version": __version__, "free_kinds": ["python"]},
+    )
+    credential = claim.json()["data"]["credential"]
+    original = agents.fence
+
+    def expires_after_fence(conn, attempt_id, owner):
+        result = original(conn, attempt_id, owner)
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:expired WHERE ATTEMPT_ID=:id"),
+            {"expired": datetime.now(UTC) - timedelta(seconds=1), "id": attempt_id},
+        )
+        return result
+
+    monkeypatch.setattr(agents, "fence", expires_after_fence)
+    response = client.post(
+        "/api/v1/agent/renew",
+        headers={"Authorization": f"Bearer {credential}"},
+        json={"version": __version__, "attempts": [attempt], "resources": encode(resources())},
+    )
+    assert response.status_code == 409, response.text
+    for detail in (f"attempt {attempt}", "lease expired", "expected a live lease", "reconcile"):
+        assert detail in response.text

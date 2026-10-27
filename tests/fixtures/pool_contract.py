@@ -173,7 +173,11 @@ class Provider:
             self.project.engine, self.project.config, SYSTEM_ACTOR, role=ApiRole.ADMIN
         )
         token = (
-            invoke(admin, ActionName.TOKEN_CREATE, TokenCreate(name=name, role=ApiRole.AGENT))
+            invoke(
+                admin,
+                ActionName.TOKEN_CREATE,
+                TokenCreate(name=name, role=ApiRole.AGENT, pool="default"),
+            )
             if name
             else self.token
         )

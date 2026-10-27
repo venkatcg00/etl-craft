@@ -40,6 +40,7 @@ GIVEN = {
     "ControlRequest": {"run_id": 1, "request_key": "k"},
     "AccountAdd": {"password": "secret", "role": ApiRole.ADMIN},
     "AccountRole": {"role": ApiRole.ADMIN},
+    "TokenCreate": {"role": ApiRole.VIEWER},
     "AgentRegister": {"resources": resources()},
     "AgentRenew": {"resources": resources()},
 }

@@ -33,6 +33,7 @@ class OperationContext:
     sso_group_ids: tuple[int, ...] = ()
     credential_token_id: int | None = None
     credential_digest: str | None = None
+    credential_attempt_id: int | None = None
     client_address: str | None = None
     client_scheme: HttpScheme | None = None
     shutdown: threading.Event | None = None

@@ -32,7 +32,7 @@ ROLES = tuple(role for role in ApiRole if role != ApiRole.AGENT)
 
 
 def create_token(ctx, name, role, expires=None):
-    request = tokens.TokenCreate(name=name, role=role, expires=expires)
+    request = tokens.TokenCreate(name=name, role=role, expires=expires or "365d")
     return invoke(ctx, ActionName.TOKEN_CREATE, request)
 
 
@@ -129,6 +129,9 @@ def test_read_routes_record_only_named_admin_access_or_explicit_refusals(api):
     given |= {"control_id": 1, "target": "staging.t", "project": "default", "reason": "Review"}
     audited = {ActionName.PROJECT_LIST, ActionName.POOL_LIST, ActionName.ACCESS_LIST}
     reads = [action for action in ACTIONS.values() if action.method == "GET"]
+    # Hourly token-use history is covered separately; these reads start inside that hour.
+    with ctx.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_API_TOKENS SET LAST_USED_AT=CURRENT_TIMESTAMP"))
     before = audit_counts(ctx.engine)
     answered = {}
     for action in reads:

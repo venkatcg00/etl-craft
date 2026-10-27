@@ -174,6 +174,7 @@ class RunSummary:
     bundle_id: str | None = None
     metadata_version: str | None = None
     newer_metadata_available: bool = False
+    first_status: str | None = None
 
     @property
     def seconds(self) -> float | None:
@@ -202,6 +203,7 @@ class TaskRunSummary:
     run_kind: CatalogRunKind = CatalogRunKind.OTHER
     failure_reasons: tuple[str, ...] = ()
     item_progress: str | None = None
+    first_status: str | None = None
 
     @property
     def seconds(self) -> float | None:

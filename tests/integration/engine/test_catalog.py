@@ -699,3 +699,58 @@ def test_runs_have_pages_with_what_they_were_built_from_and_used_by(project, tmp
     assert "Rows written of each run" in task and "Average rows written" in task
     dags = (folder / "dags.html").read_text("utf-8")
     assert "<th>Succeeded</th>" in dags and "100% of 1" in dags and "0% of 1" in dags
+
+
+def test_catalog_first_endings_and_repair_labels(engine_db, tmp_path):
+    from etl_craft.services.catalog.collect import run_kpis
+    from etl_craft.services.catalog.metrics import kpi_summary
+
+    with engine_db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "COUNTS")
+        task = add_task(conn, pipeline, "load", "PYTHON")
+        for index, status in enumerate(("SUCCESS", "FAILED", "SUCCESS")):
+            run = conn.execute(
+                text(
+                    "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID,STATUS) VALUES (:p"
+                    "ipeline,:status) RETURNING PIPELINE_RUN_ID AS id"
+                ),
+                {"pipeline": pipeline, "status": status},
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "INSERT INTO AUD_TASK_RUN_LOG (TASK_ID,PIPELINE_RUN_ID,STATUS,ERRO"
+                    "R_MESSAGE) VALUES (:task,:run,:status,:error)"
+                ),
+                {
+                    "task": task,
+                    "run": run,
+                    "status": status,
+                    "error": "old failure" if index == 2 else None,
+                },
+            )
+            if index == 2:
+                conn.execute(
+                    text(
+                        "INSERT INTO AUD_RUN_INTERVENTIONS (PIPELINE_ID,PIPELINE_RUN_ID,AC"
+                        "TION,FROM_STATUS,TO_STATUS,REASON,REQUESTED_BY) VALUES (:pipeline"
+                        ",:run,'REOPEN','FAILED','IN-PROGRESS','repair','owner')"
+                    ),
+                    {"pipeline": pipeline, "run": run},
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO AUD_RUN_INTERVENTIONS (PIPELINE_ID,PIPELINE_RUN_ID,TA"
+                        "SK_ID,ACTION,FROM_STATUS,TO_STATUS,REASON,REQUESTED_BY) VALUES (:"
+                        "pipeline,:run,:task,'RESET','FAILED',NULL,'repair','owner')"
+                    ),
+                    {"pipeline": pipeline, "run": run, "task": task},
+                )
+    catalog = build_catalog(engine_db.engine, engine_db.config)
+    counts = run_kpis(catalog.pipelines["COUNTS"].runs)
+    assert (counts.runs, counts.succeeded, counts.failed, counts.repaired) == (3, 1, 2, 1)
+    assert counts.success_rate == pytest.approx(1 / 3)
+    html = kpi_summary(catalog.pipelines["COUNTS"].runs)
+    assert "33% of 3" in html and "<th>Repaired</th>" in html
+    folder = write_site(catalog, engine_db.config, tmp_path / "audit-catalog").folder
+    task_page = (folder / "tasks/COUNTS.load.html").read_text()
+    assert "old failure" not in task_page
