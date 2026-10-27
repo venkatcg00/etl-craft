@@ -34,7 +34,7 @@ def write_config(directory, name, fields, table_format):
     fields = {key.capitalize(): value for key, value in fields.items()}
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
         "Warehouse": {"Name": name, "Table_format": str(table_format), "dev": fields},
     }

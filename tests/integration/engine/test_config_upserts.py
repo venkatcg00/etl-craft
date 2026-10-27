@@ -33,7 +33,7 @@ def write(folder: Path, name: str, header: str, rows: list[tuple]) -> None:
 
 
 def apply(project, folder, *, plan=False):
-    ctx = OperationContext(project.engine, project.config, DEPLOYER, role=ApiRole.DEVELOPER)
+    ctx = OperationContext(project.engine, project.config, DEPLOYER, role=ApiRole.ADMIN)
     return act(ctx, ActionName.CONFIG_PLAN if plan else ActionName.CONFIG_APPLY, config_dir=folder)
 
 

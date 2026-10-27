@@ -108,16 +108,16 @@ def cluster_gauges(conn: Connection, now: datetime) -> dict[str, dict[Labels, fl
     """Four shared reads, independent of project count and terminal history."""
     gauges: dict[str, dict[Labels, float]] = defaultdict(dict)
     for row in conn.execute(statement(conn, "metrics_runs")):
-        gauges["runs"][(("project", str(row.project_id)), ("status", str(row.status)))] = row.value
+        labels: Labels = (("status", str(row.status)),)
+        gauges["runs"][labels] = gauges["runs"].get(labels, 0) + row.value
     attempts = list(conn.execute(statement(conn, "agent_attempts"), {"owner": None}))
     counts: Counter[Labels] = Counter()
     queues: Counter[Labels] = Counter()
     ages: dict[Labels, float] = {}
     for row in attempts:
-        project = (("project", str(row.project_id)),)
-        counts[(*project, ("status", str(row.status)))] += 1
+        counts[(("status", str(row.status)),)] += 1
         if row.status == AttemptStatus.QUEUED:
-            labels = (*project, ("pool", row.pool), ("slot_kind", row.slot_kind))
+            labels = (("pool", row.pool), ("slot_kind", row.slot_kind))
             queues[labels] += 1
             ages[labels] = max(
                 ages.get(labels, 0), (now - as_utc(row.queued_at)).total_seconds(), 0
@@ -126,7 +126,7 @@ def cluster_gauges(conn: Connection, now: datetime) -> dict[str, dict[Labels, fl
     gauges["queue_depth"] = dict(queues)
     gauges["queue_oldest_age_seconds"] = ages
     for row in conn.execute(statement(conn, "metrics_gates")):
-        gauges["gate_waits"][(("project", str(row.project_id)),)] = row.value
+        gauges["gate_waits"][()] = gauges["gate_waits"].get((), 0) + row.value
     gauges.update(agent_gauges(conn, now, attempts))
     return dict(gauges)
 

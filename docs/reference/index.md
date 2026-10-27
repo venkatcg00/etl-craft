@@ -13,3 +13,8 @@ Generated from the code, so they always match the release:
 And:
 
 - [Exit codes](exit-codes.md): what each `etl-craft` exit status means.
+
+Project-owned commands require `--project` or `Orchestration.Project` in the loaded
+`craft-connector.yml`; both must agree when present. There is no implicit `default` project.
+Deployment commands (accounts, groups, pools and `project list`) need no project selection.
+See [Project layout](../deploying/project-layout.md#several-projects-in-one-repository).

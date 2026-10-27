@@ -57,13 +57,13 @@ def test_scrape_during_admission_or_expiry_reads_only_committed_state(engine_db,
     with paused_after(change, owner=Connection, name="execute", when=at_boundary):
         body = scrape(ctx).body
         status = AttemptStatus.CLAIMED if expiry else AttemptStatus.QUEUED
-        assert value(body, "attempts", project="1", status=status) == 1
-        assert value(body, "lost_attempts_total", project="1") == 0
+        assert value(body, "attempts", status=status) == 1
+        assert value(body, "lost_attempts_total") == 0
     body = scrape(ctx).body
     if expiry:
-        assert value(body, "lost_attempts_total", project="1") == 1
+        assert value(body, "lost_attempts_total") == 1
     else:
-        assert value(body, "attempts", project="1", status=AttemptStatus.CLAIMED) == 1
+        assert value(body, "attempts", status=AttemptStatus.CLAIMED) == 1
 
 
 def test_scrape_during_run_admission_keeps_old_gauge_until_commit(engine_db):
@@ -86,11 +86,11 @@ def test_scrape_during_run_admission_keeps_old_gauge_until_commit(engine_db):
 
     with paused_after(admit, owner=Connection, name="execute", when=at_boundary):
         body = scrape(ctx).body
-        assert value(body, "runs", project="1", status=RunStatus.QUEUED) == 1
-        assert value(body, "admission_latency_seconds_count", project="1") == 0
+        assert value(body, "runs", status=RunStatus.QUEUED) == 1
+        assert value(body, "admission_latency_seconds_count") == 0
     body = scrape(ctx).body
-    assert value(body, "runs", project="1", status=RunStatus.IN_PROGRESS) == 1
-    assert value(body, "admission_latency_seconds_count", project="1") == 1
+    assert value(body, "runs", status=RunStatus.IN_PROGRESS) == 1
+    assert value(body, "admission_latency_seconds_count") == 1
 
 
 def test_enabling_metrics_during_transaction_start_does_not_mutate_listeners(engine_db):

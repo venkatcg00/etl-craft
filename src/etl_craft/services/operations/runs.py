@@ -16,6 +16,7 @@ from etl_craft.execution.attempt_types import Override
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.run_types import PipelineOutcome
 from etl_craft.services.cloning import run_hooks
+from etl_craft.services.operations.child_admission import guarded_children
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import BackfillView, OperationResult, ReconciliationView
 from etl_craft.services.operations.requests import MarkRequest, ReconcileInput, RunRequest
@@ -57,6 +58,7 @@ def execute_run(ctx: OperationContext, request: RunRequest) -> OperationResult |
     """
     from etl_craft.services.operations.processes import connection_process
 
+    ctx = replace(ctx, child=guarded_children(ctx))
     local = ctx.transport == Transport.LOCAL and not request.init_only
     with connection_process(ctx, ProcessRole.RUN) if local else nullcontext(ctx) as scoped:
         if ctx.transport == Transport.HTTP:

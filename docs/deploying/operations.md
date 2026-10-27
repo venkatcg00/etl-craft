@@ -102,7 +102,10 @@ See [Engine DB setup and upgrades](engine-db.md).
 ## Logs and history
 
 Local attempts keep complete files under
-`<Log_dir>/<PIPELINE>/run-<id>/<TASK>.attempt-<n>.log`. Agent logs are published by the API to
+`<Log_dir>/project-<id>/<PIPELINE>/run-<id>/<TASK>.attempt-<n>.log`. Existing recorded
+legacy paths remain readable through `logs`; paths are not inferred from the current project.
+A task refused before dispatch has no process log file: its cancellation reason is preserved
+in the attempt summary and `TASK_LOG`, and `logs` names that state explicitly. Agent logs are published by the API to
 `Logs.Store`, defaulting to `file://<Log_dir>/agents`; S3 locations require an explicit
 `Logs.Profile` naming an `Object_stores` profile. Configure the same host-owned store and
 credentials on every API and controller copy. Agents require neither credentials nor a mount.

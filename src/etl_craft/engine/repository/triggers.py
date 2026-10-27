@@ -21,14 +21,18 @@ class TriggerLink:
     task_code: str
 
 
-def fetch_trigger_links(conn: Connection, run_ids: Sequence[int]) -> list[TriggerLink]:
+def fetch_trigger_links(
+    conn: Connection, run_ids: Sequence[int], *, project_only: bool = False
+) -> list[TriggerLink]:
     """Read only links touching the requested run detail or bounded catalog history."""
     if not run_ids:
         return []
     query = statement(conn, "trigger_links").bindparams(bindparam("run_ids", expanding=True))
     links = {}
     for start in range(0, len(run_ids), 400):
-        for row in conn.execute(query, {"run_ids": list(run_ids[start : start + 400])}):
+        for row in conn.execute(
+            query, {"run_ids": list(run_ids[start : start + 400]), "project_only": project_only}
+        ):
             link = TriggerLink(**row._mapping)
             links[link.child_run_id] = link
     return [links[key] for key in sorted(links)]

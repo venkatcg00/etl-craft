@@ -195,6 +195,13 @@ def test_developer_cannot_change_a_projects_approved_connections(engine_db, tmp_
 
     original = upload("approved.db")
     invoke(ctx, ActionName.BUNDLE_PUBLISH, original)
+    with engine_db.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_PIPELINE_GRANTS SET PERMISSION='CAN_MANAGE' "
+                "WHERE GRANTEE_ROLE='operator' AND PIPELINE_CODE IS NULL AND TAG IS NULL"
+            )
+        )
     developer = replace(ctx, role=ApiRole.DEVELOPER)
     invoke(developer, ActionName.BUNDLE_PUBLISH, original)
     with pytest.raises(PermissionDeniedError, match="admin role is required"):
@@ -362,6 +369,14 @@ def test_a_grant_for_a_code_cannot_restrict_the_same_code_in_another_project(eng
         )
     ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR, role=ApiRole.VIEWER)
     assert invoke(ctx, ActionName.PIPELINES, TagFilter()).pipelines == ()
+    with engine_db.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO CFG_PIPELINE_GRANTS (PROJECT_ID,GRANTEE_ROLE,PERMISSION) "
+                "VALUES (:id,'viewer','CAN_VIEW')"
+            ),
+            {"id": other},
+        )
     other_view = invoke(replace(ctx, project="other"), ActionName.PIPELINES, TagFilter())
     assert [row.pipeline_id for row in other_view.pipelines] == [other_pipeline]
 
@@ -451,6 +466,14 @@ def test_delayed_developer_publication_cannot_restore_a_superseded_contract(
         return write(store, digest, data)
 
     with monkeypatch.context() as patch:
+        with engine_db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE CFG_PIPELINE_GRANTS SET PERMISSION='CAN_MANAGE' "
+                    "WHERE GRANTEE_ROLE='operator' AND PIPELINE_CODE IS NULL AND TAG IS NULL"
+                )
+            )
+
         # This interleaving occurs after role admission and before the developer's insert.
         def interleave(store, digest, data):
             patch.setattr(ArtifactStore, "write", write)

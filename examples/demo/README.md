@@ -257,12 +257,16 @@ For deployment with agents, configure artifact storage and publish the project w
 `etl-craft bundle publish --project-dir examples/demo --api URL` before admitting runs. Local
 working-tree execution needs no artifact store. See the pinned project bundles guide.
 
-`--project CODE` selects the metadata namespace (default `Orchestration.Project`, then
-`default`). Use `--project-dir` for a publication source directory. A shared Engine DB can
+`--project CODE` selects the metadata namespace and must agree with `Orchestration.Project`
+when the file sets it. There is no implicit project. Use `config apply --project-dir` for a
+project folder, whose own `craft-connector.yml` sets its project code. A shared Engine DB can
 hold another project with the same pipeline codes and its own approved Warehouse, Email and
 Cloning definitions; see the [project bundle guide](../../docs/deploying/project-bundles.md).
 
 ## Ten projects on one Engine DB
+
+The script creates one configured folder per project, including its change CSVs and task script;
+project codes come from `Orchestration.Project`, never the folder names.
 
 After setup, with an admin credential and the deployment's `default` pool active, run:
 

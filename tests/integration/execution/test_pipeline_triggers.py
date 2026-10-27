@@ -902,7 +902,7 @@ def test_inactive_trigger_parameters_do_not_create_phantom_cycles(trigger_scene)
 
 @pytest.mark.parametrize("disabled", ["account", "group", "grant", "other-group"])
 def test_retained_claims_recheck_current_restrictions_before_each_child(trigger_scene, disabled):
-    from etl_craft.core.errors import PermissionDeniedError
+    from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError
     from fixtures.actions import act
 
     scene = trigger_scene()
@@ -931,9 +931,13 @@ def test_retained_claims_recheck_current_restrictions_before_each_child(trigger_
         condition = f" WHERE GROUP_ID={other.group_id}" if disabled == "other-group" else ""
         conn.execute(text(f"UPDATE {target} SET ACTIVE_FLAG='N'{condition}"))
     request = owned(scene)
-    with pytest.raises(
-        PermissionDeniedError, match=r"test-admin.*CHILD.*operator.*(permission|group grant)"
-    ):
+    expected = ResourceNotFoundError if disabled in ("account", "grant") else PermissionDeniedError
+    message = (
+        r"project 'default' is missing or not permitted"
+        if disabled in ("account", "grant")
+        else r"test-admin.*CHILD.*operator.*(permission|group grant)"
+    )
+    with pytest.raises(expected, match=message):
         invoke(ctx, ActionName.TRIGGER_PIPELINE, request)
     with project.engine.connect() as conn:
         assert (
@@ -1034,7 +1038,10 @@ def test_queued_child_rechecks_permission_when_it_reaches_admission(trigger_scen
             text("SELECT REASON AS reason FROM AUD_RUN_INTERVENTIONS WHERE PIPELINE_RUN_ID=:id"),
             {"id": child.pipeline_run_id},
         ).scalar_one()
-        assert "test-admin" in reason and "CHILD" in reason and "operator" in reason
+        if disabled in ("account", "grant"):
+            assert "project 'default' is missing or not permitted" in reason
+        else:
+            assert "test-admin" in reason and "CHILD" in reason and "operator" in reason
 
 
 def test_admitted_trigger_edge_cannot_close_a_new_child_cycle(trigger_scene):

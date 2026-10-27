@@ -13,7 +13,11 @@ from etl_craft.services.config_files import ConfigExport, ConfigSync
 from etl_craft.services.operations.config_files import ConfigDirectory, ConfigExportInput
 
 
-def _directory(parser: argparse.ArgumentParser) -> None:
+def _directory(parser: argparse.ArgumentParser, *, project: bool = True) -> None:
+    if project:
+        parser.add_argument(
+            "--project-dir", type=Path, help="Project folder holding craft-connector.yml."
+        )
     parser.add_argument(
         "--config-dir",
         type=Path,
@@ -34,14 +38,12 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         )
     )
     _directory(
-        verbs.add_parser(
-            "apply", help="Make the CFG_ tables match the config files.", allow_abbrev=False
-        )
+        verbs.add_parser("apply", help="Merge the submitted config changes.", allow_abbrev=False)
     )
     export = verbs.add_parser(
         "export", help="Write the CFG_ rows as config files.", allow_abbrev=False
     )
-    _directory(export)
+    _directory(export, project=False)
     export.add_argument(
         "--force", action="store_true", help="Overwrite config files that already exist."
     )
@@ -67,6 +69,13 @@ def _render(out: Output, done: ConfigSync, verb: str) -> None:
             f"  {change.operation:<10} {change.file:<26} {change.row}"
             + (f"  ({'; '.join(details)})" if details else "")
         )
+    for access in done.tag_access_changes:
+        out.line(f"  access {access.pipeline}:")
+        for grant in access.grants:
+            match = "starts matching" if grant.starts_matching else "stops matching"
+            out.line(f"    {grant.principal} tag={grant.tag!r} {grant.permission}: {match}")
+        if access.policy_change is not None:
+            out.line(f"    {access.policy_change}")
     for finding in done.findings:
         out.line(f"[{finding.status.value:<4}] {finding.where}: {finding.message}")
     if done.failed:

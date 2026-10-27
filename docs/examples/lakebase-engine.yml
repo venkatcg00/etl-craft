@@ -1,6 +1,9 @@
 # All credential fields name variables; configure the instance and OAuth database role first.
 Secrets:
   Source_type: ENVIRONMENT  # value
+Orchestration:
+  Project: default  # value — explicit metadata namespace
+
 Engine:
   dev:
     Jdbc_url: LAKEBASE_JDBC_URL  # variable — jdbc:postgresql://host/database?sslmode=verify-full

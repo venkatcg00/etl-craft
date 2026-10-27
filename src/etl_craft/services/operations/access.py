@@ -13,7 +13,7 @@ from etl_craft.core.enums import (
     Permission,
     YesNo,
 )
-from etl_craft.core.errors import PermissionDeniedError, UsageError
+from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.engine import locks
 from etl_craft.engine.audit import command_request
 from etl_craft.engine.queries import statement
@@ -24,7 +24,13 @@ from etl_craft.services.operations.access_models import AccessView as AccessView
 from etl_craft.services.operations.access_models import AccessWrite as AccessWrite
 from etl_craft.services.operations.access_models import Diff, Grant
 from etl_craft.services.operations.context import OperationContext
-from etl_craft.services.operations.permissions import pipeline_access, tag_permission
+from etl_craft.services.operations.permissions import (
+    eligible_grants,
+    pipeline_access,
+    project_permission,
+    require_project,
+    tag_permission,
+)
 from etl_craft.services.operations.requests import arguments
 
 
@@ -43,6 +49,7 @@ def list_access(ctx: OperationContext, request: AccessFilter) -> AccessView:
         project_id = project(conn, request.project)
         assert request.project is not None
         scoped = replace(ctx, project=request.project, project_id=project_id)
+        require_project(conn, scoped)
         access = pipeline_access(conn, scoped)
         grants = tuple(
             Grant(
@@ -67,6 +74,8 @@ def list_access(ctx: OperationContext, request: AccessFilter) -> AccessView:
                     access.permits(row.pipeline)
                     if row.pipeline
                     else tag_permission(conn, scoped, row.tag) is not None
+                    if row.tag
+                    else project_permission(conn, scoped) is not None
                 )
             )
         )
@@ -85,7 +94,15 @@ def list_access(ctx: OperationContext, request: AccessFilter) -> AccessView:
             and code in tagged
             and (request.pipeline is None or code == request.pipeline)
         )
-    return AccessView(grants=grants, effective=effective)
+        level = project_permission(conn, scoped)
+        sources = tuple(
+            source
+            for pipeline, tag, _, source in eligible_grants(conn, scoped)
+            if pipeline is None and tag is None
+        )
+    return AccessView(
+        grants=grants, effective=effective, project_permission=level, project_sources=sources
+    )
 
 
 def grant_access(ctx: OperationContext, request: AccessWrite) -> AccessView:
@@ -107,15 +124,21 @@ def authorize(conn: Connection, ctx: OperationContext, row: Validated) -> None:
     if ctx.role == ApiRole.ADMIN:
         return
     scoped = replace(ctx, project=row.values["PROJECT"], project_id=row.project_id)
+    require_project(conn, scoped)
+    if project_permission(conn, scoped) == Permission.CAN_MANAGE:
+        return
     pipeline, tag = row.values["PIPELINE_CODE"], row.values["TAG"]
     level = (
         pipeline_access(conn, scoped).levels.get(pipeline)
         if pipeline
         else tag_permission(conn, scoped, tag)
+        if tag
+        else project_permission(conn, scoped)
     )
     if level != Permission.CAN_MANAGE:
         raise PermissionDeniedError(
-            f"account {ctx.actor.name!r}: {'pipeline' if pipeline else 'tag'} {pipeline or tag!r} "
+            f"account {ctx.actor.name!r}: securable "
+            f"{pipeline or tag or scoped.project!r} "
             f"in project {scoped.project!r}: effective level={level or 'none'}; "
             "expected CAN_MANAGE; ask an administrator or a CAN_MANAGE holder on this securable"
         )
@@ -182,7 +205,7 @@ def write(ctx: OperationContext, request: AccessWrite, intent: AccessIntent) -> 
         audit.engine = ctx.engine
         try:
             return apply_changes(ctx, request, intent)
-        except PermissionDeniedError as error:
+        except (PermissionDeniedError, ResourceNotFoundError) as error:
             audit.outcome = ActionOutcome.REFUSED
             audit.exit_code = error.exit_code
             raise
@@ -206,6 +229,12 @@ def apply_changes(ctx: OperationContext, request: AccessWrite, intent: AccessInt
         locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30),
         ctx.engine.begin() as conn,
     ):
+        if (
+            ctx.role != ApiRole.ADMIN
+            and request.pipeline
+            and project_permission(conn, ctx) != Permission.CAN_MANAGE
+        ):
+            pipeline_access(conn, ctx).require(ctx, request.pipeline, ApiRole.VIEWER)
         checked = validate(conn, request, rows)
         for row in checked:
             authorize(conn, ctx, row)

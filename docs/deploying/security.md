@@ -85,9 +85,10 @@ alice`, and `group list`. Matching HTTP actions use `/api/v1/groups` and its `di
 Pipeline permissions use three levels: `CAN_VIEW` reads, `CAN_RUN` adds execution and operator
 controls, and `CAN_MANAGE` adds permission delegation. Principals are an active group, an
 account, or a deployment role (`viewer` includes everyone with at least viewer; `operator`
-includes everyone with at least operator). Each grant names one project and one pipeline or tag.
+includes everyone with at least operator). Each grant names a project, optionally narrowed to one pipeline or tag.
 
 ```bash
+etl-craft access grant --project sales --group analysts --permission CAN_VIEW --reason "Project access"
 etl-craft access grant --project sales --group analysts --pipeline DAILY --permission CAN_VIEW --reason "Reporting"
 etl-craft access grant --project sales --account alice --tag reporting --permission CAN_MANAGE --reason "Reporting owner"
 etl-craft access revoke --project sales --group analysts --pipeline DAILY --reason "Team changed"
@@ -100,10 +101,14 @@ The exact HTTP actions are `POST /api/v1/access/grants`, `POST /api/v1/access/re
 and `GET /api/v1/access/grants`. Lists include the caller's effective levels and their contributing sources.
 An administrator or a holder of `CAN_MANAGE` on the pipeline can grant or revoke any level on
 it. Granting on a tag requires `CAN_MANAGE` on that tag; managing one tagged pipeline is
-insufficient. These permissions confer no deployment administration or project-wide editing.
+insufficient. A project CAN_MANAGE holder can administer all project, pipeline and tag grants there,
+including restricted pipelines, and can deploy that project's configuration. A pipeline or tag
+manager cannot edit the project or reach another project. Only deployment admins manage
+accounts, groups, pools and project creation/settings/disable.
 
 Bulk input is admin-only, with columns `PROJECT,GROUP_NAME,ROLE,PIPELINE_CODE,TAG,PERMISSION,ACTION`.
-Choose exactly one group or role and one pipeline or tag; `ACTION` is `GRANT` or `REVOKE`.
+Choose exactly one group or role; leave both pipeline and tag empty for a project grant,
+or select one pipeline or tag; `ACTION` is `GRANT` or `REVOKE`.
 Rows name their project; if --project is supplied, every row must match that scope. Account grants use the single-row `--account` form,
 never the bulk file. The CLI sends content; the server validates every row and diffs the current
 state inside the apply transaction. All bad lines are reported and nothing is applied.
@@ -111,13 +116,35 @@ Dry-run returns added, changed permission, revoked and unchanged rows without ch
 its request is still audited. Writes require a reason, retain attribution and history, and
 revocation marks `ACTIVE_FLAG=N` without deleting rows.
 
-A pipeline with no active direct or tag grant uses the deployment role. Otherwise the highest
-matching account, active group or deployment role permission applies; no match means no access.
-Disabled groups' grants keep pipelines restricted. Administrators always have access. Permission
-changes take effect on the next request, with no cache. Revoking the last active pipeline/tag
-grant restores the deployment-role fallback. Lists omit inaccessible pipelines before pagination.
-Direct reads, logs and changes fail with exit 26 / HTTP 403; dependency and lineage views may
-name restricted related pipelines but withhold their tasks, runs and logs.
+Project access is default deny. Deployment admins have CAN_MANAGE everywhere. Other accounts
+need a matching project grant even when they have a direct pipeline or tag grant. Missing and
+inaccessible projects answer identically, as do missing and inaccessible pipelines (exit 24,
+HTTP 404). Lists and searches omit hidden objects.
+
+Project CAN_MANAGE covers every pipeline in that project. Otherwise an open pipeline (no active
+pipeline/tag grants) uses the account's project level. A restricted pipeline uses only its
+highest matching pipeline/tag grant, with no project-level fallback; no match means hidden.
+Disabled groups' active grants keep pipelines restricted. Revocation takes effect on the next
+request, without a cache. Revoking the last active pipeline/tag grant restores the project-level
+fallback. An insufficient level on a visible object is a permission refusal (exit 26 / HTTP 403).
+
+Tags remain the only pipeline grouping. Config plan/apply report grants starting or stopping
+their match after tag edits, and open/restricted switches, in text and JSON. This is a report
+only; it does not enumerate accounts or change grant rows.
+
+Migration 0064 adds viewer/CAN_VIEW and operator/CAN_RUN project grants to existing projects,
+retaining restricted-pipeline access exactly. It adds no project CAN_MANAGE. Every authenticated
+account has a deployment role; service tokens and SSO sessions use that account role, so the
+viewer role grant covers every existing grantee. Projects created with `project add` have no
+grants: an admin must grant access explicitly.
+
+`config plan`, `config apply`, project migrations, `bundle publish` and `generate-docs` require
+project CAN_MANAGE. A full config export requires CAN_VIEW on every pipeline, so it cannot
+disclose a restricted pipeline. Engine migrations and changed connection approvals still require
+deployment admin. Declaring a cross-project dependency also requires CAN_VIEW on the upstream project.
+Without upstream access, a recorded dependency reveals only its project/pipeline code and
+decision, never upstream runs, logs or data. Incoming dependents are shown only when both sides
+are visible.
 
 With SSO, set optional `Auth.Oidc_groups_claim: groups` beside `Auth.Oidc_issuer` and
 `Auth.Oidc_client_id`. The configured claim must be a list of group names. Only names matching
@@ -139,17 +166,23 @@ its grant, to withdraw its contribution immediately under the current policy.
 
 Admitted runs retain their initiating group IDs after token expiry or revocation. A child
 copies its parent's `SSO_GROUP_IDS`, and grandchildren carry the same set. Before each child
-is admitted, and again immediately before a queued child starts, the engine checks that the
+is admitted, and again immediately before a queued child or task starts, the engine checks that the
 initiating account is active, every retained SSO group still has `ACTIVE_FLAG=Y`, and the
 account still has CAN_RUN through current group, account or deployment-role grants (or the current
-deployment role on an open pipeline). A refusal before admission
+project level on an open pipeline). A refusal before admission
 fails the trigger task; a queued child that loses permission is cancelled with the reason in
-its interventions. Already running children keep their admitted work. Current admins and the
+its interventions or attempt summary. Revoking project access also stops later task starts in
+manual runs, including service-account runs. Already running children keep their admitted work. Current admins and the
 controller's SERVICE account retain their existing access; scheduled execution is unaffected.
 
-The generated catalog is a **whole-project static site** and cannot enforce pipeline grants.
-Anyone who can reach it can read the project catalog. Restrict its hosting access accordingly;
-the API and live UI apply the pipeline policy.
+An organization-hosted static catalog is **one site per project**. Its host is responsible for
+access control; IP restrictions alone are not project authorization. Projects on one instance
+share a code trust boundary; use separate instances for separate security domains.
+
+Signed-in, project-filtered serving by `publish-docs` needs an approved integration with API/UI
+sessions. Its separate stdlib server currently has no sign-in context; that part of project
+isolation is pending a design decision. `Docs_site.Allowed_ips` remains an extra network layer,
+not a substitute for account/project checks.
 
 Local first-admin/recovery, pre-account initialization/migration, diagnostic doctor, and
 login/logout remain the explicit credential/bootstrap entry points described above.

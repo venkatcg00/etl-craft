@@ -91,13 +91,14 @@ class PipelineEdge:
     depends_on_pipeline_active: bool
 
 
-def fetch_pipeline_edges(conn: Connection) -> list[PipelineEdge]:
+def fetch_pipeline_edges(conn: Connection, *, project_only: bool = False) -> list[PipelineEdge]:
     """Return every active dependency of an active pipeline, upstream active or not."""
     return [
         PipelineEdge(**r._mapping)
         for r in conn.execute(
-            project_statement(conn, "active_pipeline_dependency_edges").columns(
-                depends_on_pipeline_active=Boolean
-            )
+            project_statement(
+                conn,
+                "catalog_pipeline_edges" if project_only else "active_pipeline_dependency_edges",
+            ).columns(depends_on_pipeline_active=Boolean)
         )
     ]

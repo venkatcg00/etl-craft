@@ -30,6 +30,7 @@ def test_sql_attempt_round_trips_include_supervisor_and_child(
         yaml.safe_dump(
             {
                 "Secrets": {"Source_type": "ENVIRONMENT"},
+                "Orchestration": {"Project": "default"},
                 "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
                 "Warehouse": {
                     "dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"}

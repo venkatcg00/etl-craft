@@ -225,12 +225,17 @@ class Pages:
                 (
                     "Depends on",
                     ", ".join(
-                        f"{self._link(pipeline_url(u), u)} ({_e(kind)})" for u, kind in p.depends_on
+                        (self._link(pipeline_url(u), u) if u in self.catalog.pipelines else _e(u))
+                        + f" ({_e(kind)})"
+                        for u, kind in p.depends_on
                     ),
                 ),
                 (
                     "Needed by",
-                    ", ".join(self._link(pipeline_url(d), d) for d in p.depended_on_by),
+                    ", ".join(
+                        self._link(pipeline_url(d), d) if d in self.catalog.pipelines else _e(d)
+                        for d in p.depended_on_by
+                    ),
                 ),
             ]
         )

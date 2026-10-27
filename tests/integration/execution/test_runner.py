@@ -55,7 +55,7 @@ def project(engine_db, tmp_path, request):
         }
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {"Task_timeout_seconds": 60},
+        "Orchestration": {"Project": "default", "Task_timeout_seconds": 60},
         "Engine": {"dev": block},
     }
     config_dir = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent
@@ -138,9 +138,9 @@ def run(project, task, **kwargs):
 
 def attempt_log(project, task, attempt=1):
     _, config, ids = project
-    return (config.log_dir / "P" / f"run-{ids['run']}" / f"{task}.attempt-{attempt}.log").read_text(
-        encoding="utf-8"
-    )
+    return (
+        config.log_dir / "project-1" / "P" / f"run-{ids['run']}" / f"{task}.attempt-{attempt}.log"
+    ).read_text(encoding="utf-8")
 
 
 def test_a_task_succeeds_and_records_its_counts_and_output(project):
@@ -388,7 +388,9 @@ def test_a_log_disk_without_room_fails_the_attempt_before_its_process_starts(pro
     assert found.status == "FAILED"
     assert found.error_message.startswith("could not run the task process: ConfigurationError:")
     assert "Orchestration.Log_dir" in found.error_message
-    assert not (config.log_dir / "P" / f"run-{ids['run']}" / "ok.attempt-1.log").exists()
+    assert not (
+        config.log_dir / "project-1" / "P" / f"run-{ids['run']}" / "ok.attempt-1.log"
+    ).exists()
 
 
 def test_recording_an_outcome_survives_a_dropped_connection(project, monkeypatch):

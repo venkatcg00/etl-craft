@@ -24,6 +24,7 @@ Secrets:
   Profile: ETL_CRAFT_AUTH              # variable — the profile names the authentication type to use
 
 Orchestration:
+  Project: default  # value — explicit metadata namespace
   none:
     Email:
       Host: EMAIL_HOST                 # variable

@@ -502,7 +502,7 @@ def test_cli_actor_requests_and_read_only_audit(
         jdbc = "jdbc:sqlite:" + engine_db.engine.url.database
     metadata = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
-        "Orchestration": {},
+        "Orchestration": {"Project": "default"},
         "Engine": {
             "test": {
                 "Jdbc_url": jdbc,

@@ -142,7 +142,7 @@ with the reason.
 Each local attempt writes to its own log file:
 
 ```
-<Log_dir>/<PIPELINE_CODE>/run-<pipeline_run_id>/<TASK_CODE>.attempt-<n>.log
+<Log_dir>/project-<project_id>/<PIPELINE_CODE>/run-<pipeline_run_id>/<TASK_CODE>.attempt-<n>.log
 ```
 
 `Orchestration.Log_dir` is `logs` beside `craft-connector.yml` unless set. The file holds everything

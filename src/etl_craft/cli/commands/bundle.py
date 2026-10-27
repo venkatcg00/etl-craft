@@ -33,6 +33,7 @@ def run(args: argparse.Namespace, out: Output) -> int:
         else resolve_config_path(args.config)
     )
     args.config = path
+    args.project_dir = None
     result = call(args, ActionName.BUNDLE_PUBLISH, PublishBundle(files=collect(path.parent)))
     assert isinstance(result, BundleView)
     out.result(

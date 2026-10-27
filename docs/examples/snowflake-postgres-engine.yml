@@ -1,6 +1,9 @@
 # Requires etl-craft[snowflake] and a mapped Snowflake/Postgres identity.
 Secrets:
   Source_type: ENVIRONMENT  # value
+Orchestration:
+  Project: default  # value — explicit metadata namespace
+
 Engine:
   dev:
     Jdbc_url: SNOWFLAKE_POSTGRES_JDBC_URL  # variable — jdbc:postgresql://host/database?sslmode=verify-full

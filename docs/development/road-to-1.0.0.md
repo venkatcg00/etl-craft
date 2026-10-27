@@ -165,7 +165,7 @@ item's text, or work done early under another item.
 | S6.G Backup, restore, upgrade and the load benchmark | Done | #260 | Restore recovery, coordinated upgrade procedure and manual load harness; reference gate deferred until after S8 |
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
-| S7.Y Command-managed pipeline access | In progress | #261 | Owner 2026-10-26: PR A: admin commands, principal-based permission levels and atomic bulk; PR B project isolation follows S7.AF. |
+| S7.Y Command-managed pipeline access | In progress | #261, #263 | A merged; B implements project isolation and explicit selection; catalog sign-in awaits its public-surface decision in open #263. |
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
 | S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; extend S7.Y project/pool commands; direct `CFG_` SQL edits in RELAXED projects |
 | S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
@@ -388,6 +388,15 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.Y B validates project boundaries, permission precedence, explicit selection, full exports,
+per-project catalog artifacts and log paths on both Engine DBs. Real grants and history upgrade
+from every released schema without changing effective access; negative controls reject the old
+source and a missing compatibility backfill. Grant/revoke and claim races pass twenty local
+rounds. Static/strict docs, Semgrep and the security/code reviews run; discovered metadata
+leaks are corrected with regressions. Warehouse SQL is unchanged, so cloud acceptance is not
+required. Signed-in catalog serving remains at the owner's public-surface design gate; the PR
+stays open without auto-merge, and S7.Y remains In progress until that gate and CI are complete.
 
 S7.AF passes static/strict docs, partial-config and project-preservation checks on both Engine
 DBs, existing source/target upgrade callers, all four local warehouse source-contract cases,
@@ -848,6 +857,45 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.Y B owner addition, 2026-10-27: no pipeline folders; tags remain the only pipeline
+  grouping. Config plan/apply report each existing grant that starts or stops matching after
+  submitted tag edits (principal, tag and level), plus open/restricted switches. Restriction
+  removes project-level fallback except project CAN_MANAGE; reopening restores project level.
+  Report grants, not accounts: external SSO group membership cannot be enumerated at plan time.
+  This is text/JSON reporting only, with no flag or refusal. Ungranted tag edits report no
+  access change. Project repository folders remain deployment layout, not pipeline groups.
+
+- S7.Y B retains the existing permission query and action admission path. Public metrics
+  aggregate across projects rather than exposing project labels through unsigned scrapes.
+  Per-project static catalogs include foreign dependency names, but not foreign run/task IDs;
+  deployment-admin API snapshots retain their cross-project trigger links. Lineage refresh
+  keeps its deployment developer requirement and checks pipeline visibility separately.
+
+- S7.Y B catalog design gate: publish-docs owns a separate stdlib HTTP server; API sign-in
+  returns bearer sessions, with no shared browser cookie. Signed-in catalog pages therefore
+  need approved public surface. The implementation PR stays open without auto-merge and S7.Y
+  stays In progress. Options: serve catalog through the API with its session identity, or add
+  browser-session sharing and sign-in routes to the separate server. Prefer API hosting to
+  reuse authorization and avoid a second authentication implementation. No catalog-server
+  changes ship before that decision.
+
+- S7.Y B owner decision, 2026-10-27: there is no `etl-craft init` command. Do not add
+  scaffolding; shipped templates/examples explicitly set Orchestration.Project. A project-owned
+  command with neither that setting nor --project names its file, missing setting and both
+  remedies. Deployment-wide commands need no project.
+
+- S7.Y B owner decision, 2026-10-27: pipeline/tag grants no longer only raise the project
+  level. Deployment admins have CAN_MANAGE everywhere; without a project grant an account
+  sees nothing, including through pipeline/tag grants. Project CAN_MANAGE covers every pipeline.
+  Open pipelines use project level; restricted pipelines use the highest matching pipeline/tag
+  grant, or are hidden exactly like missing pipelines. Upgrade adds viewer/CAN_VIEW and
+  operator/CAN_RUN project grants only, never project CAN_MANAGE, preserving existing restricted
+  access. Owner decision, 2026-10-27: no new migration marker. Every account has a closed-set,
+  non-null deployment role; viewer role grants cover all higher roles. Service tokens and SSO
+  sessions resolve through that account role, and groups supplement authenticated accounts.
+  Agent credentials had no pipeline access. Preservation tests cover every role, group and tag
+  grants, service tokens and retained SSO groups on both Engine DBs.
 
 - S7.AF follows the owner's exception combining its implementation with the new risk items,
   release decision and S7.AI plan text; only S7.AF has code. Key-based merging, ID preservation,
@@ -7436,8 +7484,8 @@ release candidate.
      | Project migration writes another project or admin/audit data | Guard rows/admin/DDL; planned test_project_migrations_are_scoped | S7.AG |
      | Team CFG_ table collision or cross-project write/DDL | Record ownership, refuse access and doctor collisions; planned test_team_table_project_ownership | S7.AG |
      | Task/pipeline rename replays offsets or consumed events | Preserve IDs and refuse active runs; planned test_rename_preserves_offsets_and_events | S7.AH |
-     | Pipeline manager reaches project editing or hidden upstreams | Project CAN_MANAGE and upstream CAN_VIEW; planned test_project_edit_and_dependency_permissions | S7.Y B |
-     | Local log names collide across projects | Project-ID log directory, readable legacy locations; planned test_project_log_paths | S7.Y B |
+     | Pipeline manager reaches project editing or hidden upstreams | Project access gates all grants; restricted pipelines retain matching-grant rules, project CAN_MANAGE administers its project, upstream CAN_VIEW is required; test_project_edit_and_dependency_permissions | S7.Y B |
+     | Local log names collide across projects | Project-ID log directory, readable legacy locations; test_project_log_paths | S7.Y B |
      | Arbitrary SQL/utility side effects retried after disconnect | Default RETRY_ON=NONE; planned test_unmanaged_default_retry_policy | S7.AD |
      | All active admins become locked or disabled | Refuse last unlocked admin removal; planned test_last_unlocked_admin_guard | S7.A.7 |
      | Agent token registers in another pool | Bind tokens to pool; planned test_agent_token_pool_binding | S7.AI |

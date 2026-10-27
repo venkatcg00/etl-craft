@@ -36,7 +36,9 @@ ORCHESTRATION_KEYS = frozenset(
 
 def parse_project(settings: Profiled, path: Path) -> str:
     """Read the project code used when a command does not pass ``--project``."""
-    code = settings.text("Project") or "default"
+    code = settings.text("Project") or ""
+    if not code:
+        return code
     if not is_metadata_code(code):
         raise ConfigurationError(
             f"{path}: Orchestration.Project={code!r}; expected a letter followed by at most "

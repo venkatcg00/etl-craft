@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
+
+from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import (
     InterventionAction,
@@ -71,6 +74,7 @@ class ChildOptions:
     kill_grace_seconds: float = KILL_GRACE_SECONDS
     cancel: threading.Event | None = None
     cancel_poll_seconds: float = CANCEL_POLL_SECONDS
+    before_start: Callable[[Connection, int], str | None] | None = None
 
 
 @dataclass(frozen=True)

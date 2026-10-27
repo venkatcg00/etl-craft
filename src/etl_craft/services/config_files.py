@@ -23,11 +23,11 @@ import csv
 import hashlib
 import io
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import migration as current_migration
@@ -226,6 +226,7 @@ def sync_config(
     files: ConfigFiles,
     *,
     apply: bool,
+    authorize: Callable[[Connection, ConfigFiles], None] | None = None,
 ) -> ConfigSync:
     """Merge ``files`` into the ``CFG_`` tables; with ``apply`` false, roll it all back.
 
@@ -249,7 +250,7 @@ def sync_config(
                         "use `etl-craft project add --project CODE --reason REASON` first"
                     )
                 with selected_project(int(project.project_id)):
-                    changes.extend(merge_rows(conn, files, config))
+                    changes.extend(merge_rows(conn, files, config, authorize))
                     findings = tuple(validate_on(conn, config).findings)
                 if not apply or any(f.status is Status.FAIL for f in findings):
                     raise _RollBackError

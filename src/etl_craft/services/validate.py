@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import ClassVar
 
-from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -190,17 +189,11 @@ def validate_on(
     )
     report = Report()
     dialect, catalog = dialect_and_catalog(config)
-    if pipeline_code is None:
+    if pipeline_code is None and not for_engine(conn).has_table(conn, "CFG_PROJECTS"):
         for readiness_problem in normalization_problems(conn, catalog=catalog, dialect=dialect):
             report.warn("metadata normalization", readiness_problem)
     if for_engine(conn).has_table(conn, "CFG_COLUMNS"):
-        for row in conn.execute(
-            text(
-                "SELECT c.COLUMN_ID AS column_id, t.TABLE_ID AS table_id FROM CFG_COLUMNS c "
-                "JOIN CFG_TABLES t ON t.TABLE_ID=c.TABLE_ID "
-                "WHERE c.ACTIVE_FLAG='Y' AND t.ACTIVE_FLAG='N'"
-            )
-        ):
+        for row in conn.execute(project_statement(conn, "inactive_table_columns")):
             report.fail(
                 "source contract",
                 f"COLUMN_ID={row.column_id} is active under inactive "

@@ -58,3 +58,53 @@ See [Configuration files](../guides/configuration-files.md).
 
 `etl-craft migrate` applies your migrations from `migrations/` when that folder exists. See
 [Engine DB setup and upgrades](engine-db.md).
+
+## Several projects in one repository
+
+Keep one folder per project. For example, `sales/` and `finance/` each contain their own
+`craft-connector.yml`, `config/`, `sql_scripts/`, `python_scripts/` and `migrations/`.
+Set `Orchestration.Project: sales` in the first file and `Orchestration.Project: finance` in
+the second. The code comes from that setting, never from the folder name. Both projects may
+use the same Engine DB, with separate warehouse connections.
+
+```bash
+etl-craft config plan --project-dir sales/
+etl-craft config apply --project-dir sales/
+```
+
+Project commands require `--project` or `Orchestration.Project`; there is no implicit `default`.
+If both are given they must agree. Deployment commands such as accounts, groups, pools and
+`project list` need no project selection. An administrator creates a project, then grants its
+team access explicitly. Deploying configuration requires project CAN_MANAGE.
+
+Configuration files carry changes, so CI may stage only changed CSV files. Absent rows and files
+are untouched; applying unchanged files is a no-op. The application has no git-aware or
+multi-project apply command. A trusted deployment job can choose folders with git, for example:
+
+```python
+import os
+import subprocess
+from pathlib import Path
+
+changed = (
+    subprocess.check_output(["git", "diff", "--name-only", "-z", os.environ["BASE_SHA"], "HEAD"])
+    .decode()
+    .split("\0")
+)
+projects = set()
+for filename in filter(None, changed):
+    for folder in Path(filename).parents:
+        if (folder / "craft-connector.yml").is_file():
+            projects.add(folder)
+            break
+for folder in sorted(projects):
+    for action in ("plan", "apply"):
+        subprocess.run(["etl-craft", "config", action, "--project-dir", str(folder)], check=True)
+```
+
+This example applies each existing touched folder's change files, including unchanged files as
+no-ops. A deleted project folder applies nothing. Disabling the project remains the explicit
+administrator command `project disable --project CODE --reason REASON`.
+
+Projects in an instance share a code trust boundary. Use separate instances for separate
+security domains; project permissions control application access, not arbitrary task code.

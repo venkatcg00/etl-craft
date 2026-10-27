@@ -18,6 +18,7 @@ Secrets:
   Profile: dev                         # value — the only profile: nothing to set
 
 Orchestration:
+  Project: default  # value — explicit metadata namespace
   Task_timeout_seconds: 21600          # value
   Enforce_sla: false                   # value
 

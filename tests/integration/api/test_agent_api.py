@@ -1593,3 +1593,43 @@ def test_registered_agent_stops_claiming_when_the_api_version_changes(agent_scen
         ).serve()
     assert stop.is_set()
     assert calls.count(ActionName.AGENT_CLAIM) <= 1
+
+
+def test_project_revocation_refuses_agent_dispatch(agent_scene):
+    from etl_craft.core.actor import Actor, ActorKind, acting_as
+    from etl_craft.core.enums import SlotKind
+    from etl_craft.services.operations.agent_claims import claim_once
+    from etl_craft.services.operations.agent_models import AgentClaim
+    from fixtures.actions import act
+
+    db, _, _, _, _, config = agent_scene
+    admin = OperationContext(db.engine, config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    token = act(admin, ActionName.TOKEN_CREATE, name="initiator", role=ApiRole.OPERATOR)
+    with acting_as(SYSTEM_ACTOR), db.engine.begin() as conn:
+        pipeline = add_pipeline(conn, "REVOKED")
+        task = add_task(conn, pipeline, "T", "PYTHON")
+        identity = Actor(token.metadata.name, ActorKind.SERVICE)
+        run = transitions.create_run(conn, pipeline, identity)
+        summary = transitions.find_or_create_task_run(conn, task, run).task_run_id
+        attempt = transitions.queue_attempt(conn, summary, identity)
+        agent_id = conn.execute(text("SELECT AGENT_ID AS agent_id FROM AUD_AGENTS")).scalar_one()
+    for role in (ApiRole.VIEWER, ApiRole.OPERATOR):
+        act(admin, ActionName.ACCESS_REVOKE, project="default", role=role, reason="Withdraw")
+    agent_ctx = replace(admin, actor=Actor("agent-a", ActorKind.SERVICE), role=ApiRole.AGENT)
+    assert (
+        claim_once(
+            agent_ctx, AgentClaim(version=__version__, free_kinds=(SlotKind.PYTHON,)), agent_id
+        )
+        is None
+    )
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STATUS AS status,ERROR_MESSAGE AS message,TASK_LOG AS task_log "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+    assert row.status == "CANCELLED"
+    assert "default" in row.message and "not permitted" in row.message
+    assert row.task_log == row.message

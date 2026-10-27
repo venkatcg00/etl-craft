@@ -274,7 +274,7 @@ def _pipeline_history(conn: Connection) -> tuple[dict[str, list[RunSummary]], li
     """Bound trigger links to the same recent runs as catalog history."""
     runs = fetch_pipeline_runs(conn)
     links = fetch_trigger_links(
-        conn, [run.pipeline_run_id for rows in runs.values() for run in rows]
+        conn, [run.pipeline_run_id for rows in runs.values() for run in rows], project_only=True
     )
     return runs, links
 
@@ -296,7 +296,7 @@ def collect_catalog(
         rule_rows = fetch_catalog_rules(conn)
         versions = fetch_documentation_versions(conn)
         params = fetch_all_task_parameters(conn)
-        pipeline_edges = fetch_pipeline_edges(conn)
+        pipeline_edges = fetch_pipeline_edges(conn, project_only=True)
         task_edges = fetch_task_dependency_edges(conn)
         paused = fetch_open_pauses(conn)
         pipeline_runs, trigger_links = _pipeline_history(conn)

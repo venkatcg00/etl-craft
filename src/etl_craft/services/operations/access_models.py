@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from etl_craft.core.enums import AccessChange
+from etl_craft.core.enums import AccessChange, Permission
 from etl_craft.services.operations.requests import Request
 
 FIELDS = ("PROJECT", "GROUP_NAME", "ROLE", "PIPELINE_CODE", "TAG", "PERMISSION", "ACTION")
@@ -62,5 +62,7 @@ class AccessView:
     SCHEMA: ClassVar[str] = "etl-craft/access/1"
     grants: tuple[Grant, ...] = ()
     effective: tuple[tuple[str, str | None, tuple[str, ...]], ...] = ()
+    project_permission: Permission | None = None
+    project_sources: tuple[str, ...] = ()
     changes: tuple[Diff, ...] = ()
     dry_run: bool = False

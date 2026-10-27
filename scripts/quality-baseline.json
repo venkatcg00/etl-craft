@@ -99,8 +99,7 @@
       "src/etl_craft/engine/repository/source_columns.py": 1,
       "src/etl_craft/execution/connections.py": 1,
       "src/etl_craft/services/catalog/collect.py": 1,
-      "src/etl_craft/services/cloning.py": 2,
-      "src/etl_craft/services/validate.py": 1
+      "src/etl_craft/services/cloning.py": 2
     },
     "module-lines": {
       "src/etl_craft/engine/transitions.py": 24

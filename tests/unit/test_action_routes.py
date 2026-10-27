@@ -1,11 +1,10 @@
 """Every action row, through every interface: the same request reaches the same operation."""
 
-import enum
 import re
 import types
 import typing
 from contextlib import contextmanager, nullcontext
-from dataclasses import MISSING, fields, is_dataclass, replace
+from dataclasses import fields, replace
 from urllib.parse import urlsplit
 
 import pytest
@@ -15,13 +14,13 @@ from etl_craft.api import routes
 from etl_craft.api.app import create_app
 from etl_craft.cli.client import ApiClient
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ApiRole, Audit, HttpMethod, RunStatus
-from etl_craft.core.errors import PermissionDeniedError, UsageError
+from etl_craft.core.enums import ActionScope, ApiRole, Audit, HttpMethod, Permission
+from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.services.operations import OperationContext, actions
 from etl_craft.services.operations.actions import ACTIONS, action_path, invoke
 from etl_craft.services.operations.permissions import PipelineAccess
 from etl_craft.services.operations.serialization import encode
-from fixtures.agents import resources
+from fixtures.actions import build
 
 pytestmark = pytest.mark.unit
 
@@ -31,47 +30,6 @@ AUDITED = [name for name in CALLED if ACTIONS[name].audit == Audit.REQUEST]
 ADMIN = Actor("owner", ActorKind.SERVICE)
 
 
-def sample(hint):
-    """Return a value of ``hint`` that its request type accepts."""
-    origin = typing.get_origin(hint)
-    if origin in (typing.Union, types.UnionType):
-        return sample(next(arg for arg in typing.get_args(hint) if arg is not type(None)))
-    if origin is tuple:
-        return (sample(typing.get_args(hint)[0]),)
-    if origin is dict:
-        return {"id": 1}
-    if isinstance(hint, type) and issubclass(hint, enum.Enum):
-        return next(iter(hint))
-    if is_dataclass(hint):
-        return build(hint)
-    return {str: "x", int: 1, bool: False}[hint]
-
-
-# Requests whose checks need more than one value of each required field's type.
-GIVEN = {
-    "PublishBundle": {"files": {"craft-connector.yml": "eA=="}},
-    "ItemControl": {"item_key": "x"},
-    "MarkRequest": {"status": RunStatus.SUCCESS},
-    "ControlRequest": {"run_id": 1, "request_key": "k"},
-    "AccountAdd": {"password": "secret", "role": ApiRole.ADMIN},
-    "AccountRole": {"role": ApiRole.ADMIN},
-    "AgentRegister": {"resources": resources()},
-    "AgentRenew": {"resources": resources()},
-}
-
-
-def build(cls):
-    hints = typing.get_type_hints(cls)
-    required = {
-        f.name: sample(hints[f.name])
-        for f in fields(cls)
-        if f.default is MISSING
-        and f.default_factory is MISSING
-        and f.name not in GIVEN.get(cls.__name__, {})
-    }
-    return cls(**{**required, **GIVEN.get(cls.__name__, {})})
-
-
 def context(role=ApiRole.ADMIN):
     return OperationContext(
         types.SimpleNamespace(connect=lambda: nullcontext(None)),
@@ -79,6 +37,7 @@ def context(role=ApiRole.ADMIN):
         ADMIN,
         role=role,
         project_id=1,
+        project="default",
     )
 
 
@@ -156,7 +115,7 @@ def test_the_client_and_the_route_hand_the_operation_the_same_request(server, mo
     monkeypatch.setattr("etl_craft.core.http_client.build_opener", lambda *handlers: Opener())
     request = build(ACTIONS[name].request)
     with pytest.raises(CapturedError):
-        result = ApiClient("http://127.0.0.1:8000").invoke(name, request)
+        result = ApiClient("http://127.0.0.1:8000", "default").invoke(name, request)
         list(result)  # a streamed action sends its request when read
     assert calls == [(name, request)]
 
@@ -214,6 +173,14 @@ def operations(monkeypatch):
     ran = []
     # Transport tests isolate identity lookup; grant resolution is exercised on both Engine DBs.
     monkeypatch.setattr(actions, "_request_context", lambda ctx, name, request: ctx)
+
+    def project_check(conn, ctx, needed=Permission.CAN_VIEW):
+        if ctx.role is None:
+            raise ResourceNotFoundError("project 'default' is missing or not permitted")
+        if needed == Permission.CAN_MANAGE and ctx.role not in (ApiRole.DEVELOPER, ApiRole.ADMIN):
+            raise PermissionDeniedError("project requires CAN_MANAGE")
+
+    monkeypatch.setattr(actions, "require_project", project_check)
     monkeypatch.setattr(actions, "_request_codes", lambda conn, action, request: ["x"])
     monkeypatch.setattr(
         actions, "pipeline_access", lambda conn, ctx: PipelineAccess({"x": ctx.role})
@@ -243,7 +210,8 @@ def no_record(*args):
 )
 def test_an_unaudited_action_records_no_request(operations, monkeypatch, name):
     monkeypatch.setattr(actions, "recorded", no_record)
-    invoke(context(ACTIONS[name].role), name, build(ACTIONS[name].request))
+    role = ApiRole.ADMIN if name in actions.PROJECT_MANAGE_ACTIONS else ACTIONS[name].role
+    invoke(context(role), name, build(ACTIONS[name].request))
     assert operations == [name]
 
 
@@ -263,7 +231,12 @@ def test_an_audited_change_is_recorded_once_and_a_refusal_never_runs(operations,
     assert (entered, operations) == ([name], [name])
     below = tuple(ApiRole)[: tuple(ApiRole).index(action.role)]
     for role in (None, *below):
-        with pytest.raises(PermissionDeniedError, match=rf"{action.role}( role is required| role)"):
+        pattern = (
+            rf"{action.role}( role is required| role)|CAN_MANAGE|missing or not permitted"
+            if action.scope != ActionScope.DEPLOYMENT
+            else rf"{action.role}( role is required| role)|missing or not permitted"
+        )
+        with pytest.raises((PermissionDeniedError, ResourceNotFoundError), match=pattern):
             invoke(context(role), name, build(action.request))
     assert operations == [name]
     assert refused == [name] * (1 + len(below))

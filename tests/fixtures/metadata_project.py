@@ -75,6 +75,7 @@ def metadata_project(empty_engine_db, tmp_path, monkeypatch) -> MetadataProject:
     raw = {
         "Secrets": {"Source_type": "ENVIRONMENT"},
         "Orchestration": {
+            "Project": "default",
             "Email": {"Host": "localhost", "Port": 1025, "From_address": "etl@x.io"},
         },
         "Engine": {"dev": block},

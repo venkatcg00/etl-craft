@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.enums import ActionName, ApiRole, Permission
-from etl_craft.core.errors import PermissionDeniedError, UsageError
+from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.permissions import pipeline_access
 from fixtures.actions import act
@@ -63,7 +63,8 @@ def test_principals_levels_and_securables(access_scene, principal, permission, t
         row = conn.execute(
             text(
                 "SELECT ACTOR AS actor,PERMISSION AS permission FROM "
-                "AUD_CFG_PIPELINE_GRANTS_HISTORY"
+                "AUD_CFG_PIPELINE_GRANTS_HISTORY "
+                "WHERE PIPELINE_CODE IS NOT NULL OR TAG IS NOT NULL"
             )
         ).one()
         assert row.actor == "owner" and row.permission == permission
@@ -112,7 +113,10 @@ def test_highest_level_and_immediate_revocation(access_scene):
         assert pipeline_access(conn, alice).levels["P"] == Permission.CAN_VIEW
         assert (
             conn.execute(
-                text("SELECT COUNT(*) FROM CFG_PIPELINE_GRANTS WHERE ACTIVE_FLAG='N'")
+                text(
+                    "SELECT COUNT(*) FROM CFG_PIPELINE_GRANTS WHERE (PIPELINE_CODE IS NOT "
+                    "NULL OR TAG IS NOT NULL) AND ACTIVE_FLAG='N'"
+                )
             ).scalar_one()
             == 1
         )
@@ -124,7 +128,9 @@ def test_bulk_validates_every_line_before_writes_and_dry_run(access_scene):
     valid = "default,team,,P,,CAN_RUN,GRANT\n"
     result = change(ctx, content=header + valid, dry_run=True)
     assert result.changes[0].change == "added"
-    assert not act(ctx, ActionName.ACCESS_LIST, project="default").grants
+    assert not any(
+        g.pipeline or g.tag for g in act(ctx, ActionName.ACCESS_LIST, project="default").grants
+    )
     bad = (
         "default,missing,,P,,CAN_RUN,GRANT\n"
         "default,,invalid,P,,CAN_RUN,GRANT\n"
@@ -139,7 +145,9 @@ def test_bulk_validates_every_line_before_writes_and_dry_run(access_scene):
     for line in range(3, 10):
         assert f"line {line}" in str(caught.value)
     assert "access grant --account" in str(caught.value)
-    assert not act(ctx, ActionName.ACCESS_LIST, project="default").grants
+    assert not any(
+        g.pipeline or g.tag for g in act(ctx, ActionName.ACCESS_LIST, project="default").grants
+    )
     with pytest.raises(PermissionDeniedError):
         change(alice, content=header + valid, dry_run=True)
     change(ctx, content=header + valid)
@@ -171,9 +179,22 @@ def test_competing_granters_publish_one_identity(access_scene, revoking):
 
     two_at_once(first, second, at="etl_craft.services.operations.access.inputs")
     with ctx.engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM CFG_PIPELINE_GRANTS")).scalar_one() == 1
         assert (
-            conn.execute(text("SELECT COUNT(*) FROM AUD_CFG_PIPELINE_GRANTS_HISTORY")).scalar_one()
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM CFG_PIPELINE_GRANTS WHERE PIPELINE_CODE IS NOT NULL "
+                    "OR TAG IS NOT NULL"
+                )
+            ).scalar_one()
+            == 1
+        )
+        assert (
+            conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM AUD_CFG_PIPELINE_GRANTS_HISTORY WHERE PIPELINE_CODE "
+                    "IS NOT NULL OR TAG IS NOT NULL"
+                )
+            ).scalar_one()
             == 3
         )
 
@@ -263,6 +284,8 @@ def test_cli_mutations_require_explicit_project_and_thin_api(metadata_project, m
     monkeypatch.setenv("ETL_CRAFT_TOKEN", credential.token)
     assert main(["project", "add", "--reason", "test"]) == ExitCode.USAGE
     assert "--project" in capsys.readouterr().err
+    config_path = metadata_project.root / "craft-connector.yml"
+    config_path.write_text(config_path.read_text().replace("Project: default", "Project: sales"))
     assert main(["project", "add", "--project", "sales", "--reason", "test"]) == ExitCode.SUCCESS
     capsys.readouterr()
     assert main(["project", "set", "--project", "sales", "--reason", "test"]) == ExitCode.USAGE
@@ -271,7 +294,8 @@ def test_cli_mutations_require_explicit_project_and_thin_api(metadata_project, m
     reader = {"Authorization": "Bearer " + viewer.token}
     admin = {"Authorization": "Bearer " + credential.token}
     for path in ("/api/v1/projects", "/api/v1/pools"):
-        assert api.get(path, params={"reason": "test"}, headers=reader).status_code == 403
+        expected = 200 if path.endswith("projects") else 403
+        assert api.get(path, params={"reason": "test"}, headers=reader).status_code == expected
         assert api.get(path, params={"reason": "test"}, headers=admin).status_code == 200
     with acting_as(OWNER), ctx.engine.begin() as conn:
         add_pipeline(conn, "P")
@@ -359,7 +383,7 @@ def test_permission_delegation_does_not_cross_projects(access_scene):
                 "PROJECT_CODE='other'"
             )
         )
-    with pytest.raises(PermissionDeniedError, match=r"alice.*P.*other.*CAN_MANAGE"):
+    with pytest.raises(ResourceNotFoundError, match=r"project 'other' is missing or not permitted"):
         act(
             alice,
             ActionName.ACCESS_GRANT,
@@ -390,7 +414,13 @@ def test_admin_bulk_projects_come_from_submitted_rows(access_scene):
     done = act(ctx, ActionName.ACCESS_GRANT, content=content, reason="Bulk onboarding")
     assert {d.grant.project for d in done.changes} == {"default", "other"}
     for project_code in ("default", "other"):
-        assert len(act(ctx, ActionName.ACCESS_LIST, project=project_code).grants) == 1
+        assert (
+            sum(
+                g.pipeline == "P"
+                for g in act(ctx, ActionName.ACCESS_LIST, project=project_code).grants
+            )
+            == 1
+        )
 
 
 def test_cli_bulk_reads_content_without_requiring_project_flag(
@@ -418,7 +448,12 @@ def test_cli_bulk_reads_content_without_requiring_project_flag(
         == ExitCode.SUCCESS
     )
     assert "added" in capsys.readouterr().out
-    assert act(ctx, ActionName.ACCESS_LIST, project="default").grants == ()
+    assert not any(
+        g.pipeline or g.tag for g in act(ctx, ActionName.ACCESS_LIST, project="default").grants
+    )
     assert main(["access", "grant", "--file", str(path), "--reason", "Apply"]) == ExitCode.SUCCESS
     capsys.readouterr()
-    assert len(act(ctx, ActionName.ACCESS_LIST, project="default").grants) == 1
+    assert (
+        sum(g.pipeline == "P" for g in act(ctx, ActionName.ACCESS_LIST, project="default").grants)
+        == 1
+    )

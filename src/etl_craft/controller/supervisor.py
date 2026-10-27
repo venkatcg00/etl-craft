@@ -35,6 +35,7 @@ from etl_craft.execution.reconcile import reconcile
 from etl_craft.execution.trigger_waits import settle_ended_parent_waits
 from etl_craft.services.cloning import run_hooks
 from etl_craft.services.operations import OperationContext
+from etl_craft.services.operations.child_admission import guarded_children
 from etl_craft.services.operations.trigger_controls import cascade_children
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ def serve(ctx: OperationContext, stop: threading.Event) -> None:
             f"controller account={ctx.actor.name!r}, kind={ctx.actor.kind}; expected SERVICE; "
             "set ETL_CRAFT_TOKEN to an administrator service account token"
         )
-    supervisor = _Supervisor(ctx, stop, create_pool(ctx.engine, ctx.config, ctx.child))
+    supervisor = _Supervisor(ctx, stop, create_pool(ctx.engine, ctx.config, guarded_children(ctx)))
     metrics = install(ctx.engine)
     outage = OutageBudget(ctx.config.limits.engine_db_outage_seconds)
     try:
