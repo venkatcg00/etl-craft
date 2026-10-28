@@ -920,6 +920,9 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   Every run now executes a materialized bundle. Locally supervised tasks keep the host project
   directory as their working directory, as runs without a bundle did, so relative writes by
   scripts or warehouse drivers never change the shared bundle cache that later tasks verify.
+  Owner, 2026-10-28: S7.AA merges with required CI at about 12 minutes (from 28). The
+  single-shard Python/OS jobs and the 20-concurrent-job limit set the wall time; reaching
+  10 minutes is follow-up CI work.
 
 - S7.Z owner decisions, 2026-10-27: direct SQL edits are PostgreSQL only. SQLite attribution
   and DML/history guards stay unchanged; ordinary SQLite clients fail with "no such function".
