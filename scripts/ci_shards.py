@@ -234,10 +234,9 @@ def check_profile(profile: str, reports: list[dict[str, Any]], count: int) -> li
         if not profile.startswith("coverage-") and details.get("services_required") is not True:
             problems.append(f"{profile}: service requirements were not enforced")
         selected = node_ids(report.get("collected"))
-        allow_skips = profile.startswith(("coverage-", "e2e-"))
         problems.extend(
             f"{profile}: {problem}"
-            for problem in check_outcomes(report, allow_skips=allow_skips, require_pass=False)
+            for problem in check_outcomes(report, allow_skips=False, require_pass=False)
         )
         if selected is None:
             continue

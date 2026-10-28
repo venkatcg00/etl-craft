@@ -292,7 +292,7 @@ def test_python_and_platform_are_checked_for_each_coverage_matrix():
     )
 
 
-def test_a_skipped_partition_does_not_hide_an_entirely_skipped_combination():
+def test_complete_suite_rejects_even_one_skipped_case():
     data = reports()
     for report in data:
         report.update(
@@ -303,7 +303,9 @@ def test_a_skipped_partition_does_not_hide_an_entirely_skipped_combination():
         report["ci"]["profile"] = "coverage-3.11-ubuntu-latest"
     data[0]["tests"][0]["outcome"] = "skipped"
     data[0]["counts"] = {"skipped": 1}
-    assert ci.check_profile("coverage-3.11-ubuntu-latest", data, 2) == []
+    assert any(
+        "skipped" in problem for problem in ci.check_profile("coverage-3.11-ubuntu-latest", data, 2)
+    )
     data[1]["tests"][0]["outcome"] = "skipped"
     data[1]["counts"] = {"skipped": 1}
     assert any(
