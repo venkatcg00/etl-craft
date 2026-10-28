@@ -737,6 +737,7 @@ name = "etl-craft"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "duckdb" },
     { name = "duckdb-engine" },
     { name = "psutil" },
     { name = "psycopg", extra = ["binary"] },
@@ -816,6 +817,7 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.28,<2" },
     { name = "databricks-sql-connector", marker = "extra == 'databricks'", specifier = ">=4.5.0,<5" },
     { name = "databricks-sqlalchemy", marker = "extra == 'databricks'", specifier = ">=2,<3" },
+    { name = "duckdb", specifier = ">=1.5.5,<2" },
     { name = "duckdb-engine", specifier = ">=0.13,<1" },
     { name = "etl-craft", extras = ["ui", "aws", "databricks", "snowflake", "trino"], marker = "extra == 'all'", editable = "." },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115,<1" },

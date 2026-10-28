@@ -9,13 +9,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   demo:
-    name: Iceberg reproduction (${{ matrix.copy }})
+    name: Iceberg reproduction (${{ matrix.duckdb }}, ${{ matrix.copy }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         copy: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        duckdb: [capped, forced-2.0.0]
     env:
       ETL_CRAFT_REQUIRE_SERVICES: "1"
       ETL_CRAFT_CI_DIAGNOSTICS: ${{ github.workspace }}/dist/demo-diagnostics
@@ -25,6 +26,9 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --all-groups --python 3.11
+      - name: Force unsupported runtime for comparison
+        if: matrix.duckdb == 'forced-2.0.0'
+        run: sed -i 's/duckdb>=1.5.5,<2/duckdb==2.0.0/' pyproject.toml
       - name: Build installed candidate
         run: |
           uv build --out-dir dist
@@ -47,7 +51,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: iceberg-failure-${{ matrix.copy }}
+          name: iceberg-failure-${{ matrix.duckdb }}-${{ matrix.copy }}
           path: |
             dist/demo-diagnostics/
             dist/service-failures.log
