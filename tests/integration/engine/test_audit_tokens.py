@@ -16,6 +16,13 @@ from etl_craft.services.operations import OperationContext, tokens
 from etl_craft.services.operations.actions import invoke
 
 
+@pytest.fixture(autouse=True)
+def idle_usage_writer():
+    """An earlier test's background LAST_USED_AT write holds the process-wide slot until done."""
+    assert tokens._USAGE_SLOT.acquire(timeout=30)
+    tokens._USAGE_SLOT.release()
+
+
 def test_agent_token_pool_binding(engine_db):
     ctx = OperationContext(engine_db.engine, engine_db.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
     with pytest.raises(UsageError, match="--pool P is required"):
