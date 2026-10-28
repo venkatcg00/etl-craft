@@ -917,10 +917,9 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   and the remedy to fix SQL or use SQL_SCRIPT for unsupported vendor syntax. The lexical
   fallback remains only a read-only check; pinned admitted execution is unchanged. SQL_SCRIPT
   remains exempt. Unseeded upgrade parse failures are listed without aborting the upgrade.
-  Every run now executes a materialized bundle, so a script that wrote relative files into the
-  shared bundle cache poisoned the next task's cache verification. The cache is sealed
-  read-only after verification: such a write fails at the script with `PermissionError`, and
-  the upgrade notes say to use `tempfile` or absolute output paths.
+  Every run now executes a materialized bundle. Locally supervised tasks keep the host project
+  directory as their working directory, as runs without a bundle did, so relative writes by
+  scripts or warehouse drivers never change the shared bundle cache that later tasks verify.
 
 - S7.Z owner decisions, 2026-10-27: direct SQL edits are PostgreSQL only. SQLite attribution
   and DML/history guards stay unchanged; ordinary SQLite clients fail with "no such function".

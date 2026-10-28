@@ -82,31 +82,10 @@ def test_missing_cache_files_are_not_repaired(tmp_path):
     data = b"Secrets: {}"
     manifest = {"craft-connector.yml": sha256_hex(data)}
     root = project_files.materialize("f" * 64, manifest, lambda _: data, cache=tmp_path / "cache")
-    root.chmod(0o700)
     (root / "craft-connector.yml").unlink()
     with pytest.raises(ConfigurationError, match=r"missing=.*craft-connector.yml"):
         project_files.materialize("f" * 64, manifest, lambda _: data, cache=tmp_path / "cache")
     assert not (root / "craft-connector.yml").exists()
-
-
-def test_cached_bundle_is_read_only_so_a_task_cannot_poison_later_tasks(tmp_path):
-    data = b"Secrets: {}"
-    manifest = {"python_scripts/load.py": sha256_hex(data)}
-    root = project_files.materialize("a" * 64, manifest, lambda _: data, cache=tmp_path / "cache")
-    for folder in (root, root / "python_scripts"):
-        with pytest.raises(PermissionError):
-            (folder / "marker").write_text("written by a task")
-    assert (
-        project_files.materialize("a" * 64, manifest, lambda _: data, cache=tmp_path / "cache")
-        == root
-    )
-    root.chmod(0o700)
-    assert (
-        project_files.materialize("a" * 64, manifest, lambda _: data, cache=tmp_path / "cache")
-        == root
-    )
-    with pytest.raises(PermissionError):
-        (root / "marker").write_text("an existing writable cache is sealed on reuse")
 
 
 def test_malformed_config_diagnostics_never_echo_uploaded_secrets(tmp_path):

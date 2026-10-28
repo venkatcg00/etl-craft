@@ -293,7 +293,7 @@ segments are delivered with the S7.A web UI.
 A bundled run uses the admitted Python files and metadata for every attempt. Editing the
 working tree does not change it. Install imported dependencies in the agent image and check
 with `etl-craft doctor --agent --api URL`. See [project bundles](../deploying/project-bundles.md).
-Every run uses the version that last passed `etl-craft pipelines refresh`, so a script runs with
-that version's read-only copy as its working directory. Writing a file there fails with
-`PermissionError` at that write. Write scratch files with `tempfile`, and outputs to an absolute
-path of your own; bytecode is not written into the cache.
+Every run uses the version that last passed `etl-craft pipelines refresh`. A script runs from
+that version's verified copy, with the project directory as its working directory, so relative
+paths it writes land in the project directory and the copy stays unchanged. Read the version's
+own files through `task.config.project_dir`; bytecode is not written into the cache.

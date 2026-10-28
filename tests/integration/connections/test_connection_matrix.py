@@ -69,6 +69,7 @@ def write(tmp_path: Path, **sections) -> Path:
     }
     if "Warehouse" in raw:
         raw["Warehouse"] = {**settings, **raw["Warehouse"]}
+    raw["Artifacts"] = {"Store": (tmp_path / "artifacts").as_uri()}
     path = tmp_path / "craft-connector.yml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return path

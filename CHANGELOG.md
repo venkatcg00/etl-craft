@@ -39,10 +39,6 @@ All notable changes are recorded here. The format follows
 
 ### Upgrade notes
 
-- Python scripts now run in a read-only copy of the version that last passed refresh. A script
-  that writes a relative path fails at that write with `PermissionError`; write scratch files
-  with `tempfile` and outputs to an absolute path.
-
 - Managed SQL task SELECTs must now parse with sqlglot in the project's warehouse dialect.
   Validate and refresh fail with the file, line, column, dialect and parser message. Fix the
   SQL or move unsupported vendor syntax to SQL_SCRIPT. Upgrade refresh lists failures and

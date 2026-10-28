@@ -139,8 +139,10 @@ def _run_bound(
             _record_failure(engine, args.task_run_id, error, config)
             return error.exit_code
         if context.bundle_id is not None:
+            # The bundle cache stays unwritten: tasks and warehouse drivers that write relative
+            # paths do so in the host project directory, as without a bundle.
             sys.dont_write_bytecode = True
-            os.chdir(context.config.project_dir)
+            os.chdir(context.config.host_dir)
         with log.log_context(
             pipeline=context.pipeline_code,
             task=context.task_code,

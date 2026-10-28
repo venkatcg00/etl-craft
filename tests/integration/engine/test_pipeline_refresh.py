@@ -16,7 +16,7 @@ from etl_craft.engine.refreshes import admitted
 from etl_craft.services.operations.context import OperationContext
 from fixtures.actions import act
 from fixtures.engine_db import profile_block
-from fixtures.metadata import add_pipeline, add_task
+from fixtures.metadata import add_dependency, add_pipeline, add_task
 
 
 def project_files(engine_db, tmp_path):
@@ -107,6 +107,29 @@ def test_new_run_uses_the_last_good_bundle_after_files_change_and_a_restart(refr
         assert row.version == first.metadata_version
         pinned = Bundle.load(conn, row.bundle_id)
     assert pinned.read(ctx.config, "python_scripts/work.py") == before
+
+
+def test_pinned_tasks_write_relative_files_in_the_project_directory_not_the_bundle(
+    refresh_project,
+):
+    ctx, pipeline, script = refresh_project
+    script.write_text(
+        "from pathlib import Path\nfrom etl_craft.scripting import ScriptResult\n"
+        "def run():\n    Path('scratch.txt').write_text('first')\n"
+        "    return ScriptResult(row_count=1)\n"
+    )
+    with ctx.engine.begin() as conn:
+        first = conn.execute(text("SELECT TASK_ID FROM CFG_TASKS")).scalar_one()
+        second = add_task(conn, pipeline, "T2", "PYTHON", SCRIPT_FILE="python_scripts/work.py")
+        add_dependency(conn, pipeline, second, first)
+    bundle = act(ctx, ActionName.PIPELINE_REFRESH).refreshes[0].bundle_id
+    ctx.engine.update_execution_options(refresh_required=True)
+    outcome = act(ctx, ActionName.RUN, pipeline_code="P")
+    assert outcome.status == RunStatus.SUCCESS, outcome
+    assert (ctx.config.project_dir / "scratch.txt").read_text() == "first"
+    with ctx.engine.connect() as conn:
+        root = Bundle.load(conn, bundle).materialize(ctx.config)
+    assert not (root / "scratch.txt").exists()
 
 
 def test_never_passed_and_blocked_refreshes_refuse_with_findings_and_remedy(refresh_project):
