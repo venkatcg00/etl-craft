@@ -76,8 +76,21 @@ def pytest_runtest_makereport(item, call):
     project = temporary / "support-insights"
     if not (project / "craft-connector.yml").is_file():
         return
+    try:
+        failure_artifacts(project, target)
+    except Exception as error:
+        # Diagnostic boundary: evidence failure must not replace the test's original failure.
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "capture-error.txt").write_text(f"{type(error).__name__}: {error}")
+        logger.exception("could not capture demo failure evidence")
+
+
+def failure_artifacts(project: Path, target: Path) -> None:
+    """Preserve logs first, then record the installed runtime and catalog metadata."""
     target.mkdir(parents=True, exist_ok=True)
-    for python in temporary.parent.glob("venvs*/venv-*/bin/python"):
+    if (project / "logs").is_dir():
+        shutil.copytree(project / "logs", target / "logs", dirs_exist_ok=True)
+    for python in project.parent.parent.glob("venvs*/venv-*/bin/python"):
         versions = subprocess.run(
             [
                 str(python),
@@ -92,14 +105,7 @@ def pytest_runtest_makereport(item, call):
             check=False,
         )
         (target / "installed-versions.txt").write_text(versions.stdout + versions.stderr)
-    if (project / "logs").is_dir():
-        shutil.copytree(project / "logs", target / "logs", dirs_exist_ok=True)
-    try:
-        catalog(project, target)
-    except Exception as error:
-        # Diagnostic boundary: evidence failure must not replace the test's original failure.
-        (target / "catalog-error.txt").write_text(f"{type(error).__name__}: {error}")
-        logger.exception("could not capture demo catalog evidence")
+    catalog(project, target)
 
 
 def capture_stacks(target: Path, stop: threading.Event) -> None:

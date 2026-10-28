@@ -32,7 +32,14 @@ jobs:
       - name: Start services
         run: docker compose up -d --wait postgres mailpit iceberg-rest
       - name: Run exact failed demo
-        run: uv run pytest -q -p no:cacheprovider 'tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-duckdb_iceberg]'
+        run: uv run pytest -q -p no:cacheprovider --basetemp "$RUNNER_TEMP/demo" 'tests/e2e/test_demo.py::test_the_demo_runs_locally[pip-sqlite-duckdb_iceberg]'
+      - name: Installed runtime versions
+        if: always()
+        run: |
+          python="$RUNNER_TEMP/demo/venvs0/venv-pip/bin/python"
+          if [ -x "$python" ]; then
+            "$python" -c 'from importlib.metadata import version; print({name: version(name) for name in ("etl-craft", "duckdb", "duckdb-engine")})'
+          fi
       - name: Service logs
         if: failure()
         run: docker compose logs --no-color > dist/service-failures.log

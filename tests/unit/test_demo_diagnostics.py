@@ -48,3 +48,18 @@ def test_demo_catalog_capture_includes_only_generated_project_namespaces(monkeyp
     assert all("/ec_0123abcd_" in url for url in calls)
     assert demo_diagnostics.namespaces("another_project") == ()
     assert demo_diagnostics.namespaces("../../etc/passwd") == ()
+
+
+def test_failure_capture_saves_attempt_logs_before_catalog_failure(monkeypatch, tmp_path):
+    project = tmp_path / "support-insights"
+    (project / "logs").mkdir(parents=True)
+    (project / "logs" / "attempt.log").write_text("warehouse statement failed\n")
+    target = tmp_path / "evidence"
+
+    def unavailable(project, target):
+        raise OSError("catalog unavailable")
+
+    monkeypatch.setattr(demo_diagnostics, "catalog", unavailable)
+    with pytest.raises(OSError, match="catalog unavailable"):
+        demo_diagnostics.failure_artifacts(project, target)
+    assert (target / "logs" / "attempt.log").read_text() == "warehouse statement failed\n"
