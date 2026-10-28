@@ -88,7 +88,7 @@ def run(profile: str, index: int, count: int, output: Path) -> int:
         "--strict-markers",
         "--strict-config",
         "-n",
-        "auto",
+        "logical",
         "--dist",
         "worksteal",
     ]

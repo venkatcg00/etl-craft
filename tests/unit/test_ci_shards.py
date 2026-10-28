@@ -370,7 +370,7 @@ def test_only_one_linux_python_combination_measures_project_coverage(tmp_path, m
     measured = [row for row, command in zip(profiles, commands, strict=True) if "--cov" in command]
     assert len(measured) == 1 and measured[0]["os"] == "ubuntu-latest"
     assert all(
-        "-n" in command and "auto" in command and "worksteal" in command for command in commands
+        "-n" in command and "logical" in command and "worksteal" in command for command in commands
     )
 
 
