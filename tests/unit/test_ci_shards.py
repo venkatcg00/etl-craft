@@ -510,8 +510,8 @@ def test_platform_jobs_run_units_and_sqlite_transitions_without_complete_engine_
         lambda command, **_: commands.append(command) or SimpleNamespace(returncode=0, stdout=""),
     )
     ci.run("coverage-3.13-macos-latest", 0, 1, tmp_path)
-    assert "tests/unit" in commands[0]
-    assert "tests/integration/engine/test_transitions.py" in commands[0]
+    assert "tests/unit" not in commands[0]
+    assert commands[0][commands[0].index("-m", 3) + 1] == "unit or engine_sqlite"
     assert ci.selection("engine") == "engine_postgres and not warehouse_postgres"
 
 
@@ -522,10 +522,11 @@ def test_every_collected_marker_has_a_complete_pr_or_existing_cloud_owner():
         assert ci.assigned_profile("test_case", [marker]) != "unassigned", marker
 
 
-def test_unfiltered_catalog_survives_marker_selection_and_xdist(pytester, monkeypatch):
+@pytest.mark.parametrize("profile", ["coverage-3.11-ubuntu-latest", "coverage-3.13-macos-latest"])
+def test_unfiltered_catalog_survives_marker_selection_and_xdist(pytester, monkeypatch, profile):
     from pathlib import Path
 
-    monkeypatch.setenv("ETL_CRAFT_CI_PROFILE", ci.PRIMARY)
+    monkeypatch.setenv("ETL_CRAFT_CI_PROFILE", profile)
     tests = Path(__file__).parents[1]
     pytester.makeconftest(
         f"import sys\nsys.path.insert(0, {str(tests)!r})\n"

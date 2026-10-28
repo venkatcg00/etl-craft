@@ -75,6 +75,15 @@ class Shard:
             item.nodeid: sorted({mark.name for mark in item.iter_markers()}) for item in items
         }
         yield
+        if self.profile.startswith("coverage-") and self.profile != "coverage-3.11-ubuntu-latest":
+            extras = [
+                item
+                for item in items
+                if item.get_closest_marker("unit") is None
+                and not item.nodeid.startswith("tests/integration/engine/test_transitions.py::")
+            ]
+            items[:] = [item for item in items if item not in extras]
+            config.hook.pytest_deselected(items=extras)
         if self.profile.startswith("e2e-") and self.profile != "e2e-duckdb":
             extras = [
                 item for item in items if not item.nodeid.startswith("tests/e2e/test_demo.py::")

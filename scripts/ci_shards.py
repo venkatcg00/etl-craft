@@ -175,8 +175,6 @@ def run(profile: str, index: int, count: int, output: Path) -> int:
         "worksteal",
     ]
     command += ["-m", selection(profile)]
-    if profile.startswith("coverage-") and profile != PRIMARY:
-        command += ["tests/unit", "tests/integration/engine/test_transitions.py"]
     if profile in {PRIMARY, "warehouse-local"}:
         command += ["--cov", "--cov-report=", "--cov-fail-under=0"]
     elif profile == MEASURED_SERVICE:
