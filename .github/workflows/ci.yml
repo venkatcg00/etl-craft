@@ -228,6 +228,13 @@ jobs:
       - name: Build and verify the package
         run: make verify-package
 
+      - name: Install macOS compatibility dependencies
+        if: matrix.os == 'macos-latest'
+        run: uv sync --locked --all-groups --python "$UV_PYTHON"
+      - name: Check macOS units and SQLite transitions on the package runner
+        if: matrix.os == 'macos-latest'
+        run: uv run python scripts/ci_shards.py run "coverage-$UV_PYTHON-macos-latest" 0 1 "$RUNNER_TEMP/result/compatibility"
+
       - name: Record package validation
         run: python scripts/ci_shards.py record package-${{ matrix.os }} "$RUNNER_TEMP/result"
       - uses: actions/upload-artifact@v7

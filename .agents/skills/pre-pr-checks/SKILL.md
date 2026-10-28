@@ -6,8 +6,8 @@ description: Run etl-craft's validation before a pull request - make static docs
 # Pre-PR checks
 
 Open the pull request only after every step that applies has finished green (`AGENTS.md`,
-"Validation"). CI then runs the complete suite, every matrix combination and the installed-wheel
-demos in under ten minutes, and is their authority: do not repeat that locally. Keep logs in a
+"Validation"). CI then runs the complete suite once, explicit Python/platform compatibility subsets and the
+installed-wheel demos in under ten minutes, and is their authority: do not repeat that locally. Keep logs in a
 scratch directory outside the repository:
 
 ```bash
@@ -240,8 +240,9 @@ Recognize these before blaming the change:
 ## Report
 
 CI's **every test and matrix accounted for** check is required alongside the individual jobs.
-It verifies complete collection/outcome artifacts and combines coverage for each Python/platform
-pair at the unchanged 90% threshold. A passing partition alone is not a complete suite result.
+It verifies complete collection/outcome artifacts and ownership against the unfiltered catalog.
+It combines measured Linux, native warehouse and PostgreSQL supervision coverage at the unchanged
+90% threshold. A passing partition alone is not a complete suite result.
 Use the `ci-*` artifacts for shard failures; do not bypass the final check when an artifact or
 matrix job is missing.
 

@@ -14,6 +14,11 @@ The owner sets direction; you are responsible for:
 - **Operability.** Failures someone can debug at 3 a.m. from the message and the audit tables.
 - **Docs, examples and the changelog**, which match the code in the same pull request.
 - **Test reliability and CI cost.** A slow or flaky gate costs every later change.
+- **Scope.** etl-craft is built for ETL/ELT data movement, not as a general-purpose
+  orchestrator. Scheduling and run control serve data movement. Python tasks may call external
+  tools (for example, start an Informatica job), but moving data is why a pipeline exists.
+  Refuse orchestrator features such as passing values between tasks (XCom), generic operators
+  or arbitrary workflows, unless the S8 demo shows that data movement needs them.
 
 Judge every instruction, roadmap item and review comment against those. Following an instruction
 that damages the package is not helpful; saying so, with a better option, is.
@@ -272,10 +277,10 @@ make docs                 # strict documentation build
 make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpit (Docker)
 ```
 
-- **Tests:** locally, run the tests for the code the change touches. CI runs the complete suite,
-  Linux on all supported Python versions, macOS on the newest supported Python, and the
-  installed-wheel demos on every pull request, in under ten
-  minutes, and is the authority for them. `make test` and `make check` run in parallel;
+- **Tests:** locally, run the tests for the code the change touches. CI runs the complete
+  suite once on Linux 3.11, plus unit tests and SQLite transitions on every other supported
+  Python/Linux combination and the newest Python on macOS, and the installed-wheel demos
+  on every pull request, in under ten minutes, and is the authority for them. `make test` and `make check` run in parallel;
   service suites default to four workers.
   The release gate retains every Python × OS combination. Use `make test-changed` locally
   before a PR; CI always runs the complete suite and is the authority.

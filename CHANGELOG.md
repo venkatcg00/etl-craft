@@ -17,6 +17,9 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Pull-request CI separates complete-suite execution from Python/platform compatibility checks,
+  verifies ownership against the unfiltered test collection, and retains the full release matrix.
+
 - Standing task pauses optionally supply SUCCESS, FAILED or SKIPPED without running the task.
   Explicit replacement and optional offset-aware expiry preserve version history. Earlier
   admissions never inherit a later outcome; task resume releases holds without creating runs.

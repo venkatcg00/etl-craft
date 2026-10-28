@@ -36,9 +36,9 @@ and is its authority. Fix failures before asking for a merge.
 CI partitions complete collections across jobs and isolated agent processes. Demo agents in
 one job share their warehouse service; each owns its databases, Iceberg namespaces and email
 addresses. The final **every test and matrix accounted for** check requires each shard, its test
-outcomes and the package
-matrix results. It combines coverage separately for each Python/platform pair before enforcing
-the same 90% threshold. Individual shard coverage is not an acceptance result.
+outcomes, ownership against the unfiltered collection, and package matrix results. Coverage
+from the measured Linux run, native warehouse suite and PostgreSQL supervision modules is
+combined before enforcing the same 90% threshold. Individual shard coverage is not an acceptance result.
 
 Download the `ci-*` artifacts to inspect collected IDs, outcomes, durations, runner resources
 and cache hits. `scripts/ci-durations.json` holds measured case estimates grouped by suite and,
@@ -189,6 +189,8 @@ workstation. These targets keep `TMPDIR` under `~/.cache/etl-craft/tests/tmp` on
 do not use a RAM-backed `/tmp` for service suites. Races still use explicit synchronization
 and their twenty-round local validation.
 
-Pull requests test Linux on every supported Python version and macOS on the newest one.
-Coverage is measured on one Linux combination, with PostgreSQL supervision coverage combined
-from the Engine DB shards. The release gate retains the complete Python × OS matrix.
+The complete PR suite runs once across Linux 3.11 jobs. Other supported Linux Python versions
+and the newest Python on macOS run all unit tests and SQLite transitions. Native warehouse
+coverage and PostgreSQL supervision coverage join the measured Linux run. The release gate
+retains the complete Python × OS matrix; no ordinary suite moves there. Existing cloud suites
+stay release-only and are not represented as skipped PR executions.
