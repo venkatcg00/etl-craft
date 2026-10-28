@@ -167,7 +167,7 @@ item's text, or work done early under another item.
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Done | #261, #263, #264 | Project isolation complete; owner moved catalog sign-in to S7.A.7. |
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
-| S7.Z Environments, governance and admin-managed projects | Planned | | Environment type and STRICT/RELAXED governance per project; extend S7.Y project/pool commands; direct `CFG_` SQL edits in RELAXED projects |
+| S7.Z Environments, governance and admin-managed projects | Done | #266 | Admin environment/governance fields, shared intervention policy, PostgreSQL direct-edit history and complete guard checks; product-audit skill. |
 | S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
 | S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
@@ -388,6 +388,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.Z validates admin/role boundaries, strict and relaxed interventions, direct-edit attribution,
+missing guards and real-row upgrades on SQLite and PostgreSQL, plus real SCD edit/unlock checks
+on DuckDB and PostgreSQL warehouses. Environment-change races pass twenty rounds per Engine DB.
+Static checks, strict docs and skill validation pass. No warehouse SQL changed; cloud acceptance
+is not required. Console tests remain S7.A's work; the product-audit release workflow is added,
+not executed against a release candidate here.
 
 S7.AI validates pool/attempt credentials, lease expiry and renewal, credential-free child
 processes (including pinned config secret names), SSO age, concurrent sign-in, OIDC TLS/cache,
@@ -866,6 +873,23 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.Z owner decisions, 2026-10-27: direct SQL edits are PostgreSQL only. SQLite attribution
+  and DML/history guards stay unchanged; ordinary SQLite clients fail with "no such function".
+  SQLite file access is the trust boundary: file writers can bypass Engine DB protections.
+  Initialized etl-craft connections refuse unattributed DDL on package objects; PostgreSQL
+  retains the owner/writer privilege split. Startup and doctor share missing-guard detection;
+  setup repairs guards, and SQLite RELAXED projects report INFO about PostgreSQL direct edits.
+- S7.Z environment/governance fields are deployment-admin actions with a mandatory reason,
+  including in RELAXED projects; project CAN_MANAGE, files, YAML and direct SQL cannot set them.
+  S7.Y A already removed admin CSVs and added project/pool commands; S7.Y B scoped access.
+  S7.AF supersedes file-drift reporting: the Engine DB is truth, and absent rows stay unchanged.
+  No typed confirmations currently exist to relax; no confirmation flag is introduced. Console
+  tests remain S7.A's work; this item tests CLI and API. The owner includes the exact
+  product-audit skill and its Claude link in this implementation PR.
+  S7.AG can reuse dialect guard table sets and PostgreSQL `etl_craft_config_project` row
+  ownership resolution; this PR does not confine project migrations. Existing CSV/YAML unknown
+  fields already prevent configuration from setting governance; that contract is retained.
 
 - S7.Y B owner addition, 2026-10-27: no pipeline folders; tags remain the only pipeline
   grouping. Config plan/apply report each existing grant that starts or stops matching after
@@ -8442,8 +8466,9 @@ and the endurance run on the example passed. A partial coverage matrix cannot pa
       and the release gate rejects incomplete evidence.
 
 - [ ] S7.I endurance, the S6.G load benchmark and cloud evidence pass on the 0.9.0 candidate.
-- [ ] The owner and agents audit the candidate end to end as new users: install, setup, sign-in,
-      running/failing/recovery, CLI, UI, catalog and docs; every finding is fixed.
+- [ ] The owner and agents use the `product-audit` skill to audit the candidate end to end as new
+      users: install, setup, sign-in, running/failing/recovery, CLI, UI, catalog and docs; every
+      finding is fixed.
 - [ ] Context-free agents, given only published docs and package, install and set up controller,
       UI copy and agent, run the demo and recover a failure; every sticking point is fixed.
 

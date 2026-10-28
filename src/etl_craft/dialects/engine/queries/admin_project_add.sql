@@ -1,1 +1,1 @@
-INSERT INTO CFG_PROJECTS (PROJECT_CODE,PROJECT_NAME,TIMEZONE,DEFAULT_POOL,MAX_RUNNING_TASKS) VALUES (:code,:name,:timezone,:default_pool,:max_running_tasks)
+INSERT INTO CFG_PROJECTS (PROJECT_CODE,PROJECT_NAME,TIMEZONE,DEFAULT_POOL,MAX_RUNNING_TASKS,ENVIRONMENT_TYPE,ENVIRONMENT_NAME,GOVERNANCE) VALUES (:code,:name,:timezone,:default_pool,:max_running_tasks,:environment_type,:environment_name,:governance)

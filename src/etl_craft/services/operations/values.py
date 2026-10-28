@@ -11,6 +11,7 @@ from typing import ClassVar
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.enums import ActionName, ActorKind, Handler, ProtectionEvent
 from etl_craft.core.errors import PermissionDeniedError, SqlGuardError, UsageError
+from etl_craft.core.governance import check_reason
 from etl_craft.core.time import as_utc
 from etl_craft.engine import locks
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
@@ -47,7 +48,7 @@ class ValueEdit(ValueKey):
     """Explicit values for one key; omitted existing values are retained."""
 
     values: dict[str, object]
-    reason: str
+    reason: str = ""
     row_lock: bool = False
 
 
@@ -55,7 +56,7 @@ class ValueEdit(ValueKey):
 class ValueUnlock(ValueKey):
     """An explicit release; no columns means all active locks on the selected key."""
 
-    reason: str
+    reason: str = ""
     columns: tuple[str, ...] = ()
 
 
@@ -302,11 +303,7 @@ def write_values(ctx: OperationContext, edit: ValueEdit) -> ValueResult:
 
 def _check_reason(reason: str) -> None:
     """Keep every successful edit/unlock explainable without accepting unbounded evidence."""
-    if not reason.strip() or len(reason) > 4096:
-        raise UsageError(
-            f"data edit/unlock reason length={len(reason)}; expected 1-4096 nonblank characters; "
-            "supply a concise explanation"
-        )
+    check_reason(reason)
 
 
 def _set_row_lock(guard: Protection, key_hash: str, request: ProtectionRequest) -> None:

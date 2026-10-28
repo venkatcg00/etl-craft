@@ -28,6 +28,7 @@ from etl_craft.core.errors import (
     RunStateError,
     UsageError,
 )
+from etl_craft.core.governance import check_reason
 from etl_craft.engine import attempt_cancellation, controls, locks, run_scopes, runlog, transitions
 from etl_craft.engine.controls import ControlView
 from etl_craft.engine.queries import statement
@@ -56,6 +57,7 @@ from etl_craft.services.operations.requests import BulkControlRequest, ControlId
 
 def control(ctx: OperationContext, request: ControlRequest) -> ControlView | OperationResult:
     """Pause or resume a definition, or request a scoped control of one run or task."""
+    check_reason(request.reason)
     if request.action in DEFINITION_CONTROLS:
         from etl_craft.services.operations.pipelines import set_pause
 
@@ -70,6 +72,7 @@ def control(ctx: OperationContext, request: ControlRequest) -> ControlView | Ope
 
 def request_control(ctx: OperationContext, request: ControlRequest) -> ControlView:
     """Commit the dispatch fence first; return acceptance separately from agent completion."""
+    check_reason(request.reason)
     if request.action == ControlAction.RUN_PAUSED and request.selector == runlog.ACTIVE_RUN:
         return _new_paused(ctx, request)
     with control_scope(ctx, request) as run_id, ctx.engine.begin() as conn:

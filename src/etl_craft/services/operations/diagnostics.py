@@ -39,6 +39,21 @@ class DoctorView:
 def check_configuration(ctx: OperationContext, request: NoInput) -> DoctorView:
     """Report unreachable services rather than requiring an Engine DB connection first."""
     checks = tuple(doctor.run_checks(ctx.config))
+    if ctx.role == ApiRole.ADMIN and not any(c.status == doctor.Status.FAIL for c in checks):
+        from etl_craft.services.project_warehouses import shared_warehouses
+
+        comparison = shared_warehouses(ctx.engine, ctx.config)
+        shared = comparison.shared
+        checks += tuple(doctor.warn("Shared warehouse", note) for note in comparison.unavailable)
+        if shared:
+            checks += (
+                doctor.Check(
+                    "Shared warehouse",
+                    doctor.Status.INFO,
+                    f"projects {', '.join(sorted(shared))} share a warehouse database "
+                    "and schema; allowed",
+                ),
+            )
     failed = any(c.status == doctor.Status.FAIL for c in checks)
     agents = (
         list_agents(ctx, NoInput())

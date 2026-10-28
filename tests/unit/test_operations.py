@@ -425,7 +425,7 @@ def test_json_numbers_must_be_finite():
 def test_missing_override_reason_is_refused_before_a_task_runs(ctx):
     seed(ctx, active=True, task=True)
     before = to_json(history(ctx, task_code="load"))
-    with pytest.raises(UsageError, match="needs a `reason`"):
+    with pytest.raises(UsageError, match=r"default.*CUSTOM.*STRICT.*--reason"):
         run(ctx, task_code="load", ignore_dependencies=True)
     assert to_json(history(ctx, task_code="load")) == before
     assert action_count(ctx) == 1

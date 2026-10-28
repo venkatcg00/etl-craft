@@ -108,3 +108,37 @@ administrator command `project disable --project CODE --reason REASON`.
 
 Projects in an instance share a code trust boundary. Use separate instances for separate
 security domains; project permissions control application access, not arbitrary task code.
+
+
+## Environments and governance
+
+An admin labels each project with an environment (`DEV`, `SIT`, `UAT`, `PROD`, `SANDBOX` or
+`CUSTOM`), an optional environment name, and `STRICT` or `RELAXED` governance:
+
+```sh
+etl-craft project set --project sales --environment-type DEV --environment-name perf --governance RELAXED --reason "Development testing"
+etl-craft project list --reason "Review environments"
+```
+
+These fields are administration data, never `craft-connector.yml` or CSV configuration.
+Existing projects remain `CUSTOM`/`STRICT`; production requires `STRICT`. Omitted fields on
+`project set` keep their stored values. Only deployment admins change them, always with a reason.
+
+`STRICT` interventions require a reason. `RELAXED` permits empty reasons for marks, pauses,
+holds/releases, stops/aborts, recover/restart, one-run pause permission, dependency overrides,
+reruns/backfills, offset/watermark resets, item controls and data edits/unlocks. Authorization,
+auditing and safety checks are unchanged; administrative reasons remain mandatory.
+
+Direct SQL edits need PostgreSQL and a `RELAXED` project. They retain row identities, attribution,
+constraints and history. The Engine DB is the source of truth; no file-drift report is needed.
+On SQLite use files or commands: an ordinary client reports `no such function: etl_craft_actor`
+(or another `etl_craft_...` function). Doctor reports this limitation as INFO for RELAXED SQLite
+projects. SQLite file writers can bypass protection; use file permissions and PostgreSQL for
+shared database access.
+
+Projects may share a warehouse database and schema. Admin project reads and doctor show an
+informational note when the current approved connection definitions match; nothing is blocked.
+Projects without a published connection cannot be compared until their connections are known.
+
+If an approved bundle or its connection settings cannot be read, project results report the
+comparison as unavailable with a remedy. That diagnostic does not block an admin change.

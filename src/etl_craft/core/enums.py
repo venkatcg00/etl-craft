@@ -754,3 +754,21 @@ class Permission(StrEnum):
     CAN_VIEW = "CAN_VIEW"
     CAN_RUN = "CAN_RUN"
     CAN_MANAGE = "CAN_MANAGE"
+
+
+class EnvironmentType(StrEnum):
+    """Administrator-selected purpose of a project."""
+
+    DEV = "DEV"
+    SIT = "SIT"
+    UAT = "UAT"
+    PROD = "PROD"
+    SANDBOX = "SANDBOX"
+    CUSTOM = "CUSTOM"
+
+
+class Governance(StrEnum):
+    """Project intervention policy; authorization is independent."""
+
+    STRICT = "STRICT"
+    RELAXED = "RELAXED"

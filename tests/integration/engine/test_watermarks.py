@@ -215,6 +215,28 @@ def test_cli_watermark_reset_does_not_change_run_status(metadata_project, capsys
         main([*args, "--status", "FAILED"])
     assert error.value.code == 2
 
+    import os
+
+    from fastapi.testclient import TestClient
+
+    from etl_craft.api.app import create_app
+    from etl_craft.core.errors import ExitCode
+
+    ctx = OperationContext(p.engine, p.config, current_actor(), role=ApiRole.ADMIN)
+    headers = {"Authorization": "Bearer " + os.environ["ETL_CRAFT_TOKEN"]}
+    client = TestClient(create_app(ctx))
+    payload = {"pipeline_code": "P", "task_code": "T", "run_id": run, "watermark": "1"}
+    for policy in ("STRICT", "RELAXED"):
+        act(ctx, ActionName.PROJECT_SET, project="default", governance=policy, reason="policy")
+        code = main(args[:-2])
+        output = capsys.readouterr()
+        response = client.post("/api/v1/projects/default/marks", json=payload, headers=headers)
+        if policy == "RELAXED":
+            assert code == 0 and response.status_code == 200, (output.err, response.text)
+        else:
+            assert code == ExitCode.USAGE and "STRICT" in output.err and "--reason" in output.err
+            assert response.status_code == 400 and "STRICT" in response.text
+
 
 def test_real_task_processes_commit_each_sql_watermark(metadata_project):
     from etl_craft.execution.pipeline import run_pipeline

@@ -222,7 +222,7 @@ def test_role_legacy_and_reason_refusals_are_explicit(ctx):
     _, run, _, _ = seed(ctx)
     with pytest.raises(PermissionDeniedError):
         ask(replace(ctx, role=ApiRole.VIEWER), run, ControlAction.HOLD)
-    with pytest.raises(UsageError, match="`reason` is required"):
+    with pytest.raises(UsageError, match=r"default.*CUSTOM.*STRICT.*--reason"):
         invoke(
             ctx,
             ActionName.CONTROL,

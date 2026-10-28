@@ -4,7 +4,7 @@ import argparse
 
 from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, EnvironmentType, Governance
 from etl_craft.core.errors import UsageError
 from etl_craft.services.operations import admin_metadata as operations
 
@@ -34,6 +34,11 @@ def configure_project(parser: argparse.ArgumentParser) -> None:
             sub.add_argument("--timezone")
             sub.add_argument("--default-pool")
             sub.add_argument("--max-running-tasks", type=int)
+            sub.add_argument(
+                "--environment-type", type=EnvironmentType, choices=tuple(EnvironmentType)
+            )
+            sub.add_argument("--environment-name")
+            sub.add_argument("--governance", type=Governance, choices=tuple(Governance))
         configure_output(sub)
 
 
@@ -64,10 +69,24 @@ def run_project(args: argparse.Namespace, out: Output) -> int:
         done,
         args.output_format,
         text=lambda: out.rows(
-            (p.project, p.name, p.timezone, p.default_pool, p.max_running_tasks, p.active_flag)
+            (
+                p.project,
+                p.name,
+                p.timezone,
+                p.default_pool,
+                p.max_running_tasks,
+                p.active_flag,
+                p.environment_type,
+                p.environment_name,
+                p.governance,
+                "shared warehouse" if p.shared_warehouse else "",
+            )
             for p in done.projects
         ),
     )
+    if args.output_format != "json":
+        for note in done.warehouse_notes:
+            out.line(note)
     return 0
 
 

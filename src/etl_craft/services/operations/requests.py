@@ -18,6 +18,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import UsageError
+from etl_craft.core.governance import reason_text
 from etl_craft.core.tags import TAG_RULE, valid_tag
 from etl_craft.engine.runlog import RunSelector
 
@@ -341,7 +342,6 @@ class RunRequest(RunSelection):
         """Refuse incompatible requests before any resources are opened."""
         super().__post_init__()
         optional_text("task_code", self.task_code)
-        optional_text("reason", self.reason)
         if self.reason is not None and len(self.reason) > MAX_REASON:
             raise UsageError(f"`reason` has {len(self.reason)} characters; give at most 4096")
         if self.standalone and (not self.task_code or self.force or self.rerun):
@@ -387,7 +387,7 @@ class RunRequest(RunSelection):
 class MarkRequest(RunSelection):
     """A run, task or new stand-in run's status, or a task's watermark or offset reset."""
 
-    reason: str
+    reason: str = ""
     task_code: str | None = None
     status: RunStatus | None = None
     watermark: str | None = None
@@ -399,7 +399,7 @@ class MarkRequest(RunSelection):
     def __post_init__(self) -> None:
         """Refuse a mark that names two outcomes or none."""
         super().__post_init__()
-        require_text("reason", self.reason, limit=MAX_REASON)
+        object.__setattr__(self, "reason", reason_text(self.reason))
         optional_text("task_code", self.task_code)
         if sum(value is not None for value in (self.status, self.watermark, self.offset)) != 1:
             raise UsageError("mark needs exactly one of `status`, `watermark` or `offset`")
@@ -442,14 +442,14 @@ class ControlRequest(RunSelection):
     """One exact run or task scope, or a definition pause; repeated keys keep their identity."""
 
     action: ControlAction
-    reason: str
+    reason: str = ""
     task_code: str | None = None
     request_key: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the action boundary before changing any admission or attempt state."""
         super().__post_init__()
-        require_text("reason", self.reason, limit=MAX_REASON)
+        object.__setattr__(self, "reason", reason_text(self.reason))
         optional_text("task_code", self.task_code)
         if self.request_key is not None:
             require_text("request_key", self.request_key, limit=128)

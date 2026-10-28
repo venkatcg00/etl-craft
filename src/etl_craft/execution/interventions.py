@@ -41,6 +41,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import HandlerError, RunRefusedError, RunStateError, UsageError
+from etl_craft.core.governance import check_reason
 from etl_craft.engine import controls, locks, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import intervention_rows as record
@@ -412,9 +413,7 @@ def check_override(config: ConnectorConfig, option: str, reason: str | None) -> 
 
     Raises ``UsageError`` without a reason.
     """
-    if reason is None or not reason.strip():
-        raise UsageError(f"{option} needs a `reason`: it is recorded with the run")
-    return reason
+    return check_reason(reason)
 
 
 def record_gate_bypass(
@@ -444,8 +443,7 @@ def record_gate_bypass(
 def _check(
     config: ConnectorConfig, command: str, reason: str, status: str | None, rows: int | None
 ) -> RunStatus:
-    if not reason.strip():
-        raise UsageError(f"{command} needs a `reason`: it is recorded with the change")
+    check_reason(reason)
     if rows is not None and rows < 0:
         raise UsageError(f"`rows` is a row count, so it cannot be negative (got {rows})")
     if status is None:
