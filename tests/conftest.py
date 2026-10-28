@@ -5,6 +5,7 @@ pytest_plugins = [
     "plugins.evidence",
     "plugins.ci_shards",
     "plugins.suites",
+    "plugins.demo_diagnostics",
     "fixtures.engine_db",
     "fixtures.retention",
     "fixtures.cli_project",

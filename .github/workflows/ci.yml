@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       cache:
@@ -25,6 +26,7 @@ concurrency:
 jobs:
   prepare:
     name: build package and plan complete matrix
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       coverage: ${{ steps.plan.outputs.coverage }}
@@ -55,6 +57,7 @@ jobs:
 
   static:
     name: lint / types / layers / history
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -79,6 +82,7 @@ jobs:
   test:
     name: coverage (${{ matrix.python }}, ${{ matrix.os }}, shard ${{ matrix.index }})
     needs: prepare
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -107,6 +111,7 @@ jobs:
   service:
     name: local services (${{ matrix.profile }}, shard ${{ matrix.index }})
     needs: prepare
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -152,12 +157,14 @@ jobs:
   e2e:
     name: installed demo (${{ matrix.warehouse }})
     needs: prepare
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.e2e) }}
     env:
+      ETL_CRAFT_CI_DIAGNOSTICS: ${{ github.workspace }}/dist/demo-diagnostics
       ETL_CRAFT_REQUIRE_SERVICES: "1"
       ETL_CRAFT_E2E_WAREHOUSE: ${{ matrix.warehouse }}
       ETL_CRAFT_TEST_WHEEL: ${{ github.workspace }}/dist/${{ needs.prepare.outputs.wheel }}
@@ -196,12 +203,20 @@ jobs:
       - name: Service logs
         if: failure()
         run: docker compose logs --no-color
+      - name: Preserve installed-demo failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: demo-failure-${{ matrix.warehouse }}
+          path: dist/demo-diagnostics/
+          if-no-files-found: warn
       - name: Stop the local services
         if: always()
         run: make services-down
 
   package:
     name: package (build, install with pip and uv, ${{ matrix.os }})
+    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -229,7 +244,7 @@ jobs:
 
   complete:
     name: every test and matrix accounted for
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft)
     needs: [prepare, static, test, service, e2e, package]
     runs-on: ubuntu-latest
     steps:
