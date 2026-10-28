@@ -21,6 +21,7 @@ LAYERS = (
 DOTTED_NAME = re.compile(rf"^(?:etl_craft\.)?(?:{LAYERS})(?:\.[A-Za-z_]\w*)+$")
 FENCE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
 INLINE = re.compile(r"`([^`\n]+)`")
+CONTAINER_IMAGES = frozenset({"prom/prometheus", "zaproxy/zap-stable", "aquasec/trivy"})
 MAKE = re.compile(r"\bmake((?: [a-z][a-z-]*)+)")
 
 
@@ -39,6 +40,8 @@ def _code(path: Path) -> list[str]:
 
 def _looks_like_path(span: str) -> bool:
     """A repository path names a directory; bare names such as ``schema.sql`` recur per dialect."""
+    if span in CONTAINER_IMAGES:
+        return False
     if any(char in span for char in " <>*$(){}=|,'\""):
         return False
     if span.startswith("/") and "/" not in span[1:]:

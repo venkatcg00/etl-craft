@@ -221,6 +221,7 @@ def test_empty_catalog_does_not_claim_a_warehouse_check(api):
 @pytest.mark.parametrize("role", ROLES)
 def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, monkeypatch):
     ctx, client, creds, run, _attempt = api
+    original_control = ACTIONS[ActionName.CONTROL]
     calls = []
 
     def done(caller, request):
@@ -286,12 +287,13 @@ def test_every_write_route_enforces_role_and_passes_actor_to_service(api, role, 
             assert request.run_id == body.get("run_id")
     if role == "viewer":
         assert calls == []
+    monkeypatch.setitem(ACTIONS, ActionName.CONTROL, original_control)
     response = client.post(
         "/api/v1/projects/default/controls",
         json={"pipeline_code": "P", "action": "PAUSE", "reason": " "},
         headers=headers(creds["operator"]),
     )
-    assert response.status_code == 400 and "`reason`" in response.json()["message"]
+    assert response.status_code == 400 and "--reason" in response.json()["message"]
 
 
 @pytest.mark.parametrize("role", ROLES)
