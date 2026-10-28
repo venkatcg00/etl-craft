@@ -45,7 +45,8 @@ Audit JSON and logs redact nested secret fields and connection URL credentials; 
 configuration still names secret variables rather than storing their values.
 
 `prepare.py metadata` creates numbered seed migrations under `migrations/` and runs
-`etl-craft migrate`. Repeating it leaves applied files unchanged. To edit loaded metadata,
+`etl-craft migrate`, then `etl-craft pipelines refresh` to establish the checked version
+that admission uses. Repeating it leaves applied files unchanged and records an unchanged refresh. To edit loaded metadata,
 add a new project migration instead of editing an applied seed. The optional remote-mode
 seed is added after the main seed.
 

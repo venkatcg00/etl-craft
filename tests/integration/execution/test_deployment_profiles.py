@@ -6,13 +6,15 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.cli import main
+from etl_craft.config import load_config
 from etl_craft.config.sizing import start_role
-from etl_craft.core.enums import DeploymentProfile
+from etl_craft.core.enums import ActionName, ApiRole, DeploymentProfile
 from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.resources import GIB, Host
 from etl_craft.engine.connection import engine_db
 from etl_craft.execution.pools.local import LocalPool
 from etl_craft.services.doctor import run_checks
+from fixtures.actions import act
 from fixtures.auth import service_token
 from fixtures.metadata import add_pipeline, add_task
 from fixtures.scoped_controls import ctx as ctx
@@ -22,10 +24,19 @@ MACHINE = Host({"/proc/self/cgroup": "0::/\n"}.get, lambda: 8, 8, 16 * GIB)
 
 def test_the_cluster_profile_refuses_sqlite_and_init_only_starts_nothing(ctx, capsys, monkeypatch):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(ctx.engine, "ops"))
+    scripts = ctx.config.project_dir / "python_scripts"
+    scripts.mkdir()
+    (scripts / "work.py").write_text("def run(task):\n    pass\n")
     with ctx.engine.begin() as conn:
-        add_task(conn, add_pipeline(conn, "P"), "T")
+        add_task(conn, add_pipeline(conn, "P"), "T", "PYTHON", SCRIPT_FILE="python_scripts/work.py")
     path = ctx.config.config_path
     raw = yaml.safe_load(path.read_text())
+    raw["Artifacts"] = {"Store": (ctx.config.project_dir / "artifacts").as_uri()}
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    result = act(
+        replace(ctx, config=load_config(path), role=ApiRole.ADMIN), ActionName.PIPELINE_REFRESH
+    )
+    assert not result.failed, result
     path.write_text(
         yaml.safe_dump(
             {
@@ -33,6 +44,7 @@ def test_the_cluster_profile_refuses_sqlite_and_init_only_starts_nothing(ctx, ca
                 "Orchestration": raw["Orchestration"],
                 "Deployment": {"Profile": "CONTROLLER_AGENTS"},
                 "Engine": raw["Engine"],
+                "Artifacts": raw["Artifacts"],
             },
             sort_keys=False,
         )

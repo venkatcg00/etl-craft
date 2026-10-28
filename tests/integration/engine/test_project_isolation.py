@@ -163,7 +163,12 @@ def test_project_manager_delegates_inside_its_project_only(isolation):
 
 
 def test_project_edit_and_dependency_permissions(isolation, tmp_path):
+    from etl_craft.config.object_models import Artifacts
+
     admin, _ = isolation
+    admin = replace(
+        admin, config=replace(admin.config, artifacts=Artifacts((tmp_path / "artifacts").as_uri()))
+    )
     folder = tmp_path / "changes"
     folder.mkdir()
     (folder / "pipeline_dependencies.csv").write_text(

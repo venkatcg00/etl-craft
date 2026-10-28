@@ -32,7 +32,8 @@ from etl_craft.core.placement import ResourceRequest, resource_request
 from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.dialects.business_rules import expand_scope, output_key
 from etl_craft.dialects.engine import for_engine
-from etl_craft.dialects.query_analysis import output_columns, read_query
+from etl_craft.dialects.query_analysis import managed_select_problem, output_columns, read_query
+from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import project_statement
 from etl_craft.engine.repository.business_rules import fetch_business_rules_for_task
 from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
@@ -140,9 +141,16 @@ class _Metadata:
 
 def validate(engine: Engine, config: ConnectorConfig, pipeline_code: str | None = None) -> Report:
     """Check every active pipeline, or only ``pipeline_code``; return every finding."""
-    with engine.connect() as conn:
-        report = validate_on(conn, config, pipeline_code)
-        definitions = fetch_source_columns(conn)
+    with read_snapshot(engine) as conn:
+        return validate_snapshot(conn, engine, config, pipeline_code)
+
+
+def validate_snapshot(
+    conn: Connection, engine: Engine, config: ConnectorConfig, pipeline_code: str | None = None
+) -> Report:
+    """Check metadata and source definitions from the caller's stable Engine DB view."""
+    report = validate_on(conn, config, pipeline_code)
+    definitions = fetch_source_columns(conn)
     dialect, catalog = dialect_and_catalog(config)
     grouped: dict[str, list[SourceColumn]] = {}
     for column in definitions:
@@ -423,14 +431,7 @@ def _unread_sql(conn: Connection, context: TaskContext) -> list[str]:
         return []
     dialect, _ = dialect_and_catalog(context.config)
     found: list[tuple[str, str]] = []
-    if context.handler == Handler.SQL:
-        try:
-            spec = read_sql_task(context)
-        except EtlCraftError:
-            return []
-        if spec.select_sql is not None:
-            found.append((spec.source, spec.select_sql))
-    elif context.handler == Handler.BUSINESS_RULES:
+    if context.handler == Handler.BUSINESS_RULES:
         found = [
             (f"business rule {rule.business_rule_name!r}", rule.business_rule_sql)
             for rule in fetch_business_rules_for_task(conn, context.task_id)
@@ -508,6 +509,10 @@ def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     ) or dialect.task_storage_problem(context.task_params)
     if problem is not None:
         return [problem]
+    if spec.select_sql is not None:
+        sqlglot_dialect, _ = dialect_and_catalog(context.config)
+        if problem := managed_select_problem(spec.select_sql, sqlglot_dialect, spec.source):
+            return [problem]
     if spec.action == SqlAction.SETUP_TABLE:
         others = fetch_target_tasks(conn, context.pipeline_id, context.task_id)
         writer_action(spec.setup_for, others, spec.target_object)

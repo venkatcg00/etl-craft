@@ -15,6 +15,7 @@ from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.engine.retention_tables import TABLES
 from etl_craft.services.archives import ArchiveSession
+from etl_craft.services.retention_bundles import cleanup_bundles
 from etl_craft.services.retention_files import cleanup_files, expire_logs
 
 
@@ -38,11 +39,13 @@ def purge_history(
 ) -> dict[str, int]:
     """Use the same category policy with verified snapshots when archiving is requested."""
     with retaining():
-        return (
+        counts = (
             plain_history(engine, config, now, dry_run=dry_run)
             if archive is None
             else archive.run(now)
         )
+        counts["AUD_PROJECT_BUNDLES"] = cleanup_bundles(engine, config, now, dry_run=dry_run)
+        return counts
 
 
 def plain_history(

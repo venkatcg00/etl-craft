@@ -30,7 +30,7 @@ from etl_craft.engine.repository.pipelines import (
     resolve_pipeline_id,
 )
 from etl_craft.engine.repository.tasks import fetch_task_codes
-from etl_craft.engine.run_definitions import for_run
+from etl_craft.engine.run_definitions import for_admission, for_run
 from etl_craft.execution.attempt_records import run_cancelled
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -68,7 +68,7 @@ def init_pipeline_run(
     paused = open_pause(engine, pipeline_code, selector=selector)
     if paused is not None:
         return paused_outcome(pipeline_code, paused)
-    pipeline_id, _ = prepare(engine, config, pipeline_code, selector=selector)
+    pipeline_id, _, config = prepare(engine, config, pipeline_code, selector=selector)
     selected_clock = clock or Clock()
     pipeline_run_id, skip_reason = drive(
         start_steps(
@@ -141,7 +141,7 @@ def prepare(
     pipeline_code: str,
     *,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
-) -> tuple[int, PipelineDetail]:
+) -> tuple[int, PipelineDetail, ConnectorConfig]:
     """Resolve the pipeline and test the connections its run uses."""
     with engine.connect() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
@@ -155,16 +155,25 @@ def prepare(
         run_id = (
             runlog.select_run(conn, pipeline_id, selector).pipeline_run_id if existing else None
         )
-        with for_run(conn, run_id):
+        definition_scope = (
+            for_run(conn, run_id) if run_id is not None else for_admission(conn, pipeline_id)
+        )
+        with definition_scope as definition:
             detail = fetch_pipeline_detail(conn, pipeline_id)
             handlers = fetch_pipeline_handlers(conn, pipeline_id)
+        if run_id is None and definition is not None and definition.bundle_id is not None:
+            from etl_craft.config.project import project_config
+            from etl_craft.engine.bundles import Bundle
+
+            bundle = Bundle.load(conn, definition.bundle_id)
+            config = project_config(config, bundle.materialize(config) / "craft-connector.yml")
     if run_id is not None:
         from etl_craft.execution.bundle_files import run_config
 
         config = run_config(engine, config, run_id)
     sends_sla_email = config.limits.enforce_sla and detail.sla_in_hours is not None
     check_run_connections(engine, config, pipeline_code, handlers, sends_sla_email=sends_sla_email)
-    return pipeline_id, detail
+    return pipeline_id, detail, config
 
 
 @dataclass(frozen=True)
@@ -326,6 +335,19 @@ def _wait_gate(
     engine: Engine, config: ConnectorConfig, pipeline_id: int, queued: int, clock: Clock
 ) -> Generator[float, None, PipelineGateResult | None]:
     """Yield gate deadlines without an agent, stopping if the queued run is cancelled."""
+    from etl_craft.execution.bundle_files import run_config
+
+    config = run_config(engine, config, queued)
+    with engine.connect() as conn, for_run(conn, queued):
+        handlers = fetch_pipeline_handlers(conn, pipeline_id)
+        detail = fetch_pipeline_detail(conn, pipeline_id)
+    check_run_connections(
+        engine,
+        config,
+        detail.pipeline_code,
+        handlers,
+        sends_sla_email=config.limits.enforce_sla and detail.sla_in_hours is not None,
+    )
     while True:
         if run_cancelled(engine, queued):
             return None

@@ -14,6 +14,7 @@ import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -89,3 +90,9 @@ def require(name: str) -> Service:
             pytest.fail(message, pytrace=False)
         pytest.skip(message)
     return found
+
+
+def namespace(prefix: str) -> str:
+    """Give each worker and test an independent service namespace."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"{prefix}_{worker}_{uuid4().hex[:12]}"

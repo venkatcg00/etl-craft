@@ -28,6 +28,7 @@ from sqlalchemy.engine.interfaces import DBAPIConnection
 from etl_craft.config.auth import EngineSpec
 from etl_craft.core.actor import Actor
 from etl_craft.core.definitions import Definition
+from etl_craft.core.errors import ConfigurationError
 from etl_craft.core.text import split_statements
 from etl_craft.dialects.engine.metadata import CREDENTIAL_COLUMNS
 from etl_craft.dialects.engine.tables import team_config
@@ -46,6 +47,16 @@ class EngineDialect(ABC):
 
     spec: EngineSpec
     directory: Path
+
+    def artifact_location(self, config: ConnectorConfig) -> str:
+        """Server Engine DBs require an explicitly configured durable bundle store."""
+        if config.artifacts.store is None:
+            raise ConfigurationError(
+                f"{config.config_path}: Artifacts.Store is unset for the PostgreSQL Engine DB; "
+                "expected a durable file:// or profiled s3:// store; configure Artifacts.Store "
+                "and include it in Engine DB backups"
+            )
+        return config.artifacts.store
 
     @property
     def name(self) -> str:

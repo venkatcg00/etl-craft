@@ -107,6 +107,7 @@ def test_cache_refuses_unrecorded_special_files(tmp_path):
     files = {"craft-connector.yml": b"Secrets: {}"}
     manifest = {name: sha256_hex(data) for name, data in files.items()}
     root = materialize("c" * 64, manifest, files.__getitem__, cache=tmp_path / "cache")
+    root.chmod(0o700)
     os.mkfifo(root / "unrecorded")
     with pytest.raises(ConfigurationError, match="special file"):
         materialize("c" * 64, manifest, files.__getitem__, cache=tmp_path / "cache")

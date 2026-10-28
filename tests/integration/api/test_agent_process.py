@@ -1,5 +1,6 @@
 """Real agents execute project files through HTTP without Engine DB credentials."""
 
+import json
 import signal
 import threading
 import time
@@ -121,7 +122,7 @@ def test_a_lost_agent_stops_its_writer_before_a_second_holder(cluster, monkeypat
         agent.signal(signal.SIGKILL)
         agent.wait()
     else:
-        ui = p.processes[1]
+        ui = next(command for command in p.processes if "ui" in command.process.args)
         ui.signal(signal.SIGKILL)
         ui.wait()
     deadline = time.monotonic() + (5 if failure == "agent-killed" else 55)
@@ -221,11 +222,12 @@ def test_api_publication_needs_only_project_files_and_a_person_token(cluster, mo
     project, url, _, _ = cluster
     with monkeypatch.context() as isolated:
         isolated.delenv(SECRET_VAR)
-        code, output = project.run("bundle", "publish", "--api", url)
+        code, output = project.run("bundle", "publish", "--api", url, "--format", "json")
     assert code == 0, output
     with project.engine.connect() as conn:
         bundle = conn.execute(
-            text("SELECT BUNDLE_ID AS bundle_id FROM AUD_PROJECT_BUNDLES")
+            text("SELECT BUNDLE_ID AS bundle_id FROM AUD_PROJECT_BUNDLES WHERE BUNDLE_ID=:id"),
+            {"id": json.loads(output)["bundle_id"]},
         ).scalar_one()
     assert bundle in output
 

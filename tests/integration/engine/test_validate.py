@@ -532,7 +532,7 @@ def test_validate_rejects_invalid_retry_parameters(project, parameters):
     assert any("CFG_TASK_PARAMETERS." in check.message for check in report.findings)
 
 
-def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project):
+def test_managed_sql_parse_failure_is_an_error_naming_the_line_column_and_remedy(project):
     engine, config, root = project
     (root / "sql_scripts" / "orders.sql").write_text(
         "SELECT id,\n       amount FROM raw.orders WHERE", "utf-8"
@@ -552,13 +552,14 @@ def test_sql_sqlglot_cannot_read_is_a_warning_naming_the_line_and_column(project
         for finding in report.findings
     )
     warnings = {where: message for where, status, message in found(report) if status is Status.WARN}
-    assert warnings["SALES.setup"].startswith(
-        "SCRIPT_FILE='sql_scripts/orders.sql': sqlglot cannot read it as duckdb SQL "
-        "(line 2, column "
+    errors = {where: message for where, status, message in found(report) if status is Status.FAIL}
+    assert errors["SALES.setup"].startswith(
+        "SCRIPT_FILE='sql_scripts/orders.sql': managed SELECT must parse as duckdb SQL; "
+        "sqlglot: line 2, column "
     )
-    assert warnings["SALES.setup"].endswith(
-        "); the warehouse decides when the task runs, and column lineage cannot trace it"
-    )
+    assert "fix the SQL" in errors["SALES.setup"]
+    assert "SQL_SCRIPT" in errors["SALES.setup"]
+    assert "SALES.setup" not in warnings
     assert warnings["SALES.rules"].startswith(
         "business rule 'unfinished': sqlglot cannot read it as duckdb SQL (line 1, column "
     )

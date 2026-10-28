@@ -300,7 +300,7 @@ class S3Objects:
         except Exception as error:
             # Retention retains its durable cleanup row until provider deletion succeeds.
             raise ConfigurationError(
-                f"Object_stores.{self.name}, s3://{bucket}/{key}: log removal failed "
+                f"Object_stores.{self.name}, s3://{bucket}/{key}: object removal failed "
                 f"({type(error).__name__}); expected delete access; "
                 "restore store permissions and rerun purge"
             ) from None

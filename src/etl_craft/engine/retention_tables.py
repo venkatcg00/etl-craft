@@ -13,6 +13,9 @@ class HistoryTable:
 
 
 TABLES = (
+    HistoryTable(
+        "AUD_PIPELINE_REFRESHES", "retention_aud_pipeline_refreshes", "config_history_days"
+    ),
     HistoryTable("AUD_GATE_WAITS", "retention_aud_gate_waits", "run_history_days"),
     HistoryTable(
         "AUD_DEPENDENCY_CONSUMPTION", "retention_aud_dependency_consumption", "consumption_days"

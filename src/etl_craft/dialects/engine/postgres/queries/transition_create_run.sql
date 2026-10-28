@@ -6,7 +6,8 @@ END_DATE, ENDED_BY, ENDED_BY_KIND, SSO_GROUP_IDS, BUNDLE_ID, METADATA_VERSION, M
 SELECT CAST(:pipeline_id AS bigint) AS pipeline_id,CAST(:status AS varchar) AS status,:run_date AS run_date,:backfill AS backfill,
 :run_key AS run_key,:trigger_kind AS trigger_kind,:actor AS actor,:actor_kind AS actor_kind,
 :end_date AS end_date,:ended_by AS ended_by,:ended_by_kind AS ended_by_kind,:sso_group_ids AS sso_group_ids,
-CASE WHEN :use_bundles THEN (SELECT bundle_id FROM bundle) ELSE NULL END AS bundle_id,
-encode(sha256(convert_to(CAST(snapshot AS text),'UTF8')),'hex') AS metadata_version,CAST(snapshot AS text) AS metadata_snapshot
-FROM image WHERE NOT :use_bundles OR EXISTS (SELECT 1 AS found FROM bundle) OR CAST(:status AS varchar)='SKIPPED'
+CASE WHEN :use_refresh THEN CAST(:refresh_bundle AS varchar) WHEN :use_bundles THEN (SELECT bundle_id FROM bundle) ELSE NULL END AS bundle_id,
+CASE WHEN :use_refresh THEN CAST(:refresh_version AS varchar) ELSE encode(sha256(convert_to(CAST(snapshot AS text),'UTF8')),'hex') END AS metadata_version,
+CASE WHEN :use_refresh THEN CAST(:refresh_snapshot AS text) ELSE CAST(snapshot AS text) END AS metadata_snapshot
+FROM image WHERE :use_refresh OR NOT :use_bundles OR EXISTS (SELECT 1 AS found FROM bundle) OR CAST(:status AS varchar)='SKIPPED'
 RETURNING PIPELINE_RUN_ID AS pipeline_run_id

@@ -65,6 +65,20 @@ def setup(config: ConnectorConfig) -> SetupResult:
         with engine.begin() as conn:
             for_engine(engine).refresh_metadata_triggers(conn)
             restore_guards(conn)
+        from etl_craft.services.refresh_upgrade import initialize
+
+        refreshed = initialize(engine, config)
+        checks.extend(
+            Check(
+                f"Pipeline refresh {result.pipeline_code}",
+                Status.INFO,
+                "no version has passed yet; "
+                + "; ".join(finding.message for finding in result.findings)
+                + "; correct the findings and run `etl-craft pipelines refresh`",
+            )
+            for result in refreshed.refreshes
+            if any(f.failed for f in result.findings)
+        )
     finally:
         engine.dispose()
     return SetupResult(checks, created_tables=created, applied_migrations=applied)

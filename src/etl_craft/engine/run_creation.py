@@ -14,6 +14,7 @@ from etl_craft.core.errors import ConfigurationError, RunStateError, StaleTransi
 from etl_craft.engine import runlog
 from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
+from etl_craft.engine.refreshes import admitted
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,12 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
             f"pipeline_id={pipeline_id}: invalid trigger_kind={trigger_kind!r}; "
             "use SCHEDULE, MANUAL, BACKFILL, ORCHESTRATOR or STAND_IN"
         )
+    refresh = (
+        admitted(conn, pipeline_id)
+        if conn.engine.get_execution_options().get("refresh_required")
+        and status != RunStatus.SKIPPED
+        else None
+    )
     key = run_key or f"{trigger_kind.lower().replace('_', '-')}:{uuid4()}"
     try:
         with conn.begin_nested():
@@ -56,6 +63,10 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
                 {
                     **actor_parameters(actor),
                     "pipeline_id": pipeline_id,
+                    "use_refresh": refresh is not None,
+                    "refresh_snapshot": None if refresh is None else refresh[0],
+                    "refresh_version": None if refresh is None else refresh[1],
+                    "refresh_bundle": None if refresh is None else refresh[2],
                     "use_bundles": bool(
                         conn.engine.get_execution_options().get("bundles_enabled", False)
                     ),

@@ -136,7 +136,11 @@ def test_wait_handoff_and_each_child_ending(trigger_scene, ending):
 
 def test_real_attempt_frees_its_slot_after_handoff(trigger_scene):
     trigger_scene = trigger_scene()
-    project, _, _, task, run = trigger_scene
+    project, ctx, _, task, run = trigger_scene
+    from etl_craft.services.operations.pipeline_refresh import RefreshInput
+
+    refresh = invoke(ctx, ActionName.PIPELINE_REFRESH, RefreshInput(pipeline_code="CHILD"))
+    assert not refresh.failed, refresh
     spec = admit_attempt(
         project.engine,
         project.config,
@@ -809,6 +813,10 @@ def test_explicit_rerun_of_ended_parent_keeps_controller_wait_open(trigger_scene
 
     scene = trigger_scene()
     project, ctx, _, _, run = scene
+    from etl_craft.services.operations.pipeline_refresh import RefreshInput
+
+    checked = invoke(ctx, ActionName.PIPELINE_REFRESH, RefreshInput(pipeline_code="CHILD"))
+    assert not checked.failed, checked
     first = invoke(ctx, ActionName.TRIGGER_PIPELINE, owned(scene))
     with project.engine.begin() as conn:
         transitions.admit_run(conn, first.pipeline_run_id, ctx.actor)

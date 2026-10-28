@@ -21,6 +21,7 @@ from fixtures.services import (
     POSTGRES_PASSWORD,
     POSTGRES_USER,
     Service,
+    namespace,
     require,
 )
 
@@ -133,20 +134,23 @@ def test_trino_writes_an_iceberg_table_to_minio_and_reads_it_back():
     # The table's data and metadata land in the warehouse bucket, so this also proves the
     # bucket exists and the catalog can write to it.
     trino = require("trino")
-    table = f"iceberg.harness.t_{uuid.uuid4().hex[:12]}"
-    trino_query(trino, "CREATE SCHEMA IF NOT EXISTS iceberg.harness")
+    schema = f"iceberg.{namespace('harness')}"
+    table = f"{schema}.t"
+    trino_query(trino, f"CREATE SCHEMA {schema}")
     try:
         trino_query(trino, f"CREATE TABLE {table} AS SELECT 1 AS x")
         assert trino_query(trino, f"SELECT x FROM {table}") == [[1]]
     finally:
         trino_query(trino, f"DROP TABLE IF EXISTS {table}")
+        trino_query(trino, f"DROP SCHEMA {schema}")
 
 
 # -- Mailpit ------------------------------------------------------------------------------
 
 
-def delivered_subjects(api: Service) -> list[str]:
-    listing = http_json(f"{api.http_url}/api/v1/messages?limit=200")
+def delivered_subjects(api: Service, subject: str) -> list[str]:
+    query = urllib.parse.urlencode({"query": f'subject:"{subject}"'})
+    listing = http_json(f"{api.http_url}/api/v1/search?{query}")
     return [message["Subject"] for message in listing["messages"]]
 
 
@@ -166,6 +170,6 @@ def test_mailpit_delivers_mail_sent_with_and_without_a_login(login):
         server.send_message(message)
 
     deadline = time.monotonic() + 10
-    while subject not in delivered_subjects(api):
+    while subject not in delivered_subjects(api, subject):
         assert time.monotonic() < deadline, f"{subject!r} never reached mailpit"
         time.sleep(0.2)

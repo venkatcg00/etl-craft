@@ -1,9 +1,11 @@
-.PHONY: help sync lint format typecheck imports history test coverage check static build verify-package clean regressions \
+.PHONY: help sync lint format typecheck imports history test test-changed coverage check static build verify-package clean regressions \
 	quality quality-baseline \
 	certs services-up services-down services-reset test-harness suite release-gate \
 	docs docs-serve docs-site
 
 UV ?= uv
+PYTEST_WORKERS ?= auto
+SERVICE_WORKERS = $(if $(filter auto,$(PYTEST_WORKERS)),4,$(PYTEST_WORKERS))
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -28,11 +30,21 @@ imports: ## Check the layer contracts
 history: ## Reject change-history commentary in tracked files
 	$(UV) run python scripts/check_no_history.py
 
-test: ## Run the test suite
-	$(UV) run pytest -q
+test coverage test-changed: export TMPDIR = $(HOME)/.cache/etl-craft/tests/tmp
+
+test: ## Run the test suite in parallel, capping service workers
+	mkdir -p "$(TMPDIR)"
+	$(UV) run pytest -q -m unit -n $(PYTEST_WORKERS) --dist worksteal
+	$(UV) run pytest -q -m "not unit" -n $(SERVICE_WORKERS) --dist worksteal
+
+test-changed: ## Run affected tests locally, including full suites for changed data files
+	mkdir -p "$(TMPDIR)"
+	$(UV) run python scripts/test_changed.py --workers $(PYTEST_WORKERS)
 
 coverage: ## Run the test suite with the coverage gate
-	$(UV) run pytest -q --cov --cov-report=term-missing
+	mkdir -p "$(TMPDIR)"
+	$(UV) run pytest -q -m unit --cov --cov-report= --cov-fail-under=0 -n $(PYTEST_WORKERS) --dist worksteal
+	$(UV) run pytest -q -m "not unit" --cov --cov-append --cov-report=term-missing -n $(SERVICE_WORKERS) --dist worksteal
 
 regressions: ## Check named regression coverage for stabilization defects
 	$(UV) run python scripts/check_regressions.py

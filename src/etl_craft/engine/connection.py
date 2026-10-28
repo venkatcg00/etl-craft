@@ -30,6 +30,7 @@ def engine_db(config: ConnectorConfig, **engine_kwargs: Any) -> Engine:
     engine = build_engine(config, **engine_kwargs)
     try:
         register_engine(engine)
+        engine.update_execution_options(refresh_required=True)
     except SQLAlchemyError as error:
         engine.dispose()
         raise ConfigurationError(f"could not connect to the Engine DB: {error}") from error

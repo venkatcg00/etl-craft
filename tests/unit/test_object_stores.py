@@ -159,3 +159,40 @@ def test_bad_log_settings_fail_before_any_store_access(tmp_path, values):
     with pytest.raises(ConfigurationError) as caught:
         parse_config(raw, tmp_path / "craft-connector.yml")
     assert "Logs." in str(caught.value)
+
+
+def test_sqlite_bundle_store_defaults_to_the_host_project_and_keeps_explicit_store(tmp_path):
+    from dataclasses import replace
+
+    from etl_craft.config.object_models import Artifacts
+    from etl_craft.dialects.engine import for_jdbc_url
+
+    raw = deepcopy(RAW)
+    raw.pop("Artifacts")
+    config = parse_config(raw, tmp_path / "craft-connector.yml")
+    dialect = for_jdbc_url(config.engine.jdbc_url)
+    expected = (tmp_path / ".etl-craft" / "artifacts").as_uri()
+    assert dialect.artifact_location(config) == expected
+    pinned = replace(
+        config,
+        config_path=tmp_path / "cache" / "craft-connector.yml",
+        _host_config_path=config.config_path,
+    )
+    assert dialect.artifact_location(pinned) == expected
+    configured = replace(config, artifacts=Artifacts("s3://durable/bundles", "artifacts"))
+    assert dialect.artifact_location(configured) == "s3://durable/bundles"
+
+
+def test_postgres_bundle_store_requires_an_explicit_location(tmp_path):
+    from etl_craft.dialects.engine import for_jdbc_url
+
+    raw = deepcopy(RAW)
+    raw.pop("Artifacts")
+    config = parse_config(raw, tmp_path / "craft-connector.yml")
+    dialect = for_jdbc_url("jdbc:postgresql://localhost/engine")
+    with pytest.raises(
+        ConfigurationError, match=r"Artifacts\.Store is unset for the PostgreSQL"
+    ) as refused:
+        dialect.artifact_location(config)
+    assert str(config.config_path) in str(refused.value)
+    assert "configure Artifacts.Store" in str(refused.value)

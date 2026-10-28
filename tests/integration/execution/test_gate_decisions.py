@@ -41,6 +41,8 @@ def upstream(project, *, task_edge=False, pipeline_edge=True, repairs="Y"):
                 ),
                 {"repairs": repairs, "edge": edge},
             )
+    code, output = project.run("pipelines", "refresh", "--pipeline", "P")
+    assert code == 0, output
     return run, rows[task]
 
 
@@ -89,9 +91,13 @@ def test_task_consumes_its_claim_snapshot_after_upstream_repairs(cli_project):
     run, task_run = upstream(project, task_edge=True, pipeline_edge=False)
     (project.config.python_scripts_dir / "load.py").write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
-        "def run(task):\n    while not Path('release').exists():\n        time.sleep(0.05)\n"
+        "def run(task):\n"
+        f"    while not Path({str(project.config.project_dir / 'release')!r}).exists():\n"
+        "        time.sleep(0.05)\n"
         "    return ScriptResult(1)\n"
     )
+    code, output = project.run("pipelines", "refresh", "--pipeline", "P")
+    assert code == 0, output
     parent = project.start("run", "--pipeline-code", "P")
     project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING")
     repair(project, run)
@@ -245,6 +251,8 @@ def test_bypassed_pipeline_decisions_never_consume_an_upstream(cli_project, poli
     raw = yaml.safe_load(path.read_text())
     raw["Orchestration"]["Dependency_gates"] = policy
     path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    code, output = project.run("pipelines", "refresh", "--pipeline", "P")
+    assert code == 0, output
     code, output = project.run("run", "--pipeline-code", "P")
     assert code == 0, output
     with project.engine.connect() as conn:
@@ -324,6 +332,8 @@ def test_run_ending_and_consumption_roll_back_together(cli_project, point, crash
             text("UPDATE CFG_PIPELINES SET SLA_IN_HOURS=1 WHERE PIPELINE_ID=:id"),
             {"id": project.pipeline_id},
         )
+    code, output = project.run("pipelines", "refresh", "--pipeline", "P")
+    assert code == 0, output
     code, output = project.run(
         "run", "--pipeline-code", "P", fault=point + (":kill" if crash else "")
     )
@@ -380,13 +390,15 @@ def test_attempt_success_offset_and_consumption_roll_back_together(cli_project, 
 
     project = cli_project
     upstream(project, task_edge=True, pipeline_edge=False)
-    code, output = project.run("run", "--pipeline-code", "P", "--init-only")
-    assert code == 0, output
     (project.config.python_scripts_dir / "load.py").write_text(
         "from etl_craft.scripting import ScriptResult, Offset\n"
         "def run(task):\n    assert task.offset == Offset.number(3)\n"
         "    return ScriptResult(1, Offset.number(9))\n"
     )
+    code, output = project.run("pipelines", "refresh", "--pipeline", "P")
+    assert code == 0, output
+    code, output = project.run("run", "--pipeline-code", "P", "--init-only")
+    assert code == 0, output
     with project.engine.begin() as conn:
         save_task_offset(conn, project.task_id, StoredOffset("NUMBER", "3"))
     code, output = project.run(
@@ -425,12 +437,14 @@ def test_a_child_crashing_after_commit_keeps_the_complete_success(cli_project):
 
     project = cli_project
     upstream(project, task_edge=True, pipeline_edge=False)
-    code, output = project.run("run", "--pipeline-code", "P", "--init-only")
-    assert code == 0, output
     (project.config.python_scripts_dir / "load.py").write_text(
         "from etl_craft.scripting import ScriptResult, Offset\n"
         "def run(task):\n    return ScriptResult(1, Offset.number(9))\n"
     )
+    code, output = project.run("pipelines", "refresh", "--pipeline", "P")
+    assert code == 0, output
+    code, output = project.run("run", "--pipeline-code", "P", "--init-only")
+    assert code == 0, output
     code, output = project.run(
         "run", "--pipeline-code", "P", "--task-code", "load", fault="child.after_outcome:kill"
     )

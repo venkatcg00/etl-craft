@@ -45,6 +45,13 @@ VALUES = {
     "connections": "a" * 64,
     "approved": "Y",
     "use_bundles": False,
+    "use_refresh": False,
+    "refresh_required": False,
+    "missing_only": False,
+    "passed": True,
+    "snapshot": "{}",
+    "digests": '["' + "a" * 64 + '"]',
+    "refresh_snapshot": "{}",
     "event_wait": False,
     "manifest": "{}",
     "mirror_id": "plan-mirror",
@@ -279,6 +286,22 @@ def full_scans(plan, partial_indexes=frozenset(), limited=False):
 
 REGISTRY = "Reads the agent registry: one row per agent token, bounded by the tokens issued."
 FULL_READS = {
+    (
+        "refresh_direct_projects",
+        "cfg_pipelines",
+    ): "Relates committed direct edits to every configured pipeline's owning project.",
+    (
+        "refresh_doctor",
+        "cfg_pipelines",
+    ): "Lists refresh readiness for every pipeline in the selected project.",
+    (
+        "retention_aud_pipeline_refreshes_count",
+        "aud_pipeline_refreshes",
+    ): "Counts the complete eligible refresh category for an explicit retention snapshot.",
+    (
+        "retention_bundle_candidates_count",
+        "aud_project_bundles",
+    ): "Counts obsolete bundles for explicit retention; references use point reads.",
     ("metrics_runs", "cfg_pipelines"): "Groups current runs across all configured projects.",
     ("metrics_gates", "cfg_pipelines"): "Groups current waits across all configured projects.",
     (

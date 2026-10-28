@@ -98,6 +98,26 @@ class ArtifactStore:
             finally:
                 os.close(directory)
 
+    def remove(self, digest: str) -> None:
+        """Idempotently remove an unreferenced engine-built content address."""
+        key = self._key(digest)
+        address = urlsplit(self.location)
+        if address.scheme == "s3":
+            self._client().remove(address.netloc, (address.path.strip("/") + "/" + key).lstrip("/"))
+            return
+        with self._prefix() as root:
+            try:
+                directory = os.open(
+                    "objects", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root
+                )
+            except FileNotFoundError:
+                return
+            try:
+                with suppress(FileNotFoundError):
+                    os.unlink(digest, dir_fd=directory)
+            finally:
+                os.close(directory)
+
     def probe(self) -> None:
         """Check configured prefixes without touching a published object's bytes."""
         address = urlsplit(self.location)

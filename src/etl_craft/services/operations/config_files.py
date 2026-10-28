@@ -46,7 +46,17 @@ def plan_config(ctx: OperationContext, request: ConfigDirectory) -> config_files
 
 def apply_config(ctx: OperationContext, request: ConfigDirectory) -> config_files.ConfigSync:
     """Merge submitted ``CFG_`` changes, unless ``validate`` fails the result."""
-    return _sync(ctx, request, apply=True)
+    result = _sync(ctx, request, apply=True)
+    if result.failed:
+        return result
+    from etl_craft.core.enums import ActionName
+    from etl_craft.services.operations.actions import invoke
+    from etl_craft.services.operations.pipeline_refresh import RefreshInput
+    from etl_craft.services.refresh_models import RefreshResults
+
+    checked = invoke(ctx, ActionName.PIPELINE_REFRESH, RefreshInput())
+    assert isinstance(checked, RefreshResults)
+    return replace(result, refreshes=checked.refreshes)
 
 
 def _sync(

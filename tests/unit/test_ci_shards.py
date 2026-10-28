@@ -119,14 +119,15 @@ def test_missing_matrix_artifacts_fail(tmp_path):
     assert any("package matrix" in problem for problem in problems)
 
 
-def test_every_original_python_platform_and_warehouse_combination_is_planned():
+def test_approved_pull_request_python_platform_and_warehouse_matrix_is_planned():
     groups = ci.combinations()
     versions = {row["python"] for row in groups["coverage"]}
     assert {"3.11", "3.12", "3.13"} <= versions
     for version in versions:
-        assert {"ubuntu-latest", "macos-latest"} <= {
-            row["os"] for row in groups["coverage"] if row["python"] == version
-        }
+        assert any(
+            row["python"] == version and row["os"] == "ubuntu-latest" for row in groups["coverage"]
+        )
+    assert {row["python"] for row in groups["coverage"] if row["os"] == "macos-latest"} == {"3.13"}
     assert {"duckdb", "postgres", "duckdb_iceberg", "trino_iceberg"} <= {
         row["warehouse"] for row in groups["e2e"]
     }
@@ -167,7 +168,7 @@ def test_parallel_workers_all_finish_and_any_failure_or_signal_fails_the_job(
 def test_each_demo_warehouse_uses_one_job_with_all_logical_workers():
     rows = ci.matrix()["e2e"]
     assert len(rows) == len(ci.combinations()["e2e"])
-    assert all(row["index"] == 0 and row["count"] == 4 for row in rows)
+    assert all(row["index"] == 0 and row["count"] == ci.SHARDS["e2e"] for row in rows)
 
 
 def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_path, monkeypatch):
@@ -230,7 +231,7 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
     installed.write_text(json.dumps(wrong))
     assert any("wrong installed-wheel hash" in problem for problem in ci.verify(tmp_path, wheel))
     installed.write_text(original)
-    paths[0].unlink()
+    next(path for path in paths if path.parent.name.startswith("engine-")).unlink()
     assert any("expected exactly shards" in problem for problem in ci.verify(tmp_path, wheel))
 
 
@@ -322,7 +323,7 @@ def test_each_supervision_module_must_reach_ninety_percent(tmp_path, monkeypatch
     }
 
 
-@pytest.mark.parametrize("profile,measured", [("engine", True), ("connections", False)])
+@pytest.mark.parametrize("profile,measured", [("engine", True), ("warehouse-local", False)])
 def test_the_engine_shards_measure_only_the_supervision_modules(
     tmp_path, monkeypatch, profile, measured
 ):
@@ -345,3 +346,90 @@ def test_environment_selection_cannot_omit_tests_from_ci(monkeypatch, tmp_path, 
     assert ci.run("engine", 0, 2, tmp_path / "unused") == 2
     assert "unset PYTEST_ADDOPTS" in capsys.readouterr().err
     assert not (tmp_path / "unused").exists()
+
+
+def test_worker_missing_outcome_cannot_pass_verification():
+    data = reports()
+    data[1]["tests"] = []
+    data[1]["counts"] = {"passed": 0}
+    problems = ci.check_profile("engine", data, 2)
+    assert any("outcomes do not cover exactly" in problem for problem in problems)
+
+
+def test_only_one_linux_python_combination_measures_project_coverage(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    monkeypatch.setattr(
+        ci.subprocess,
+        "run",
+        lambda command, **_: commands.append(command) or SimpleNamespace(returncode=0, stdout=""),
+    )
+    profiles = ci.combinations()["coverage"]
+    for row in profiles:
+        assert ci.run(row["profile"], 0, 1, tmp_path / row["profile"]) == 0
+    measured = [row for row, command in zip(profiles, commands, strict=True) if "--cov" in command]
+    assert len(measured) == 1 and measured[0]["os"] == "ubuntu-latest"
+    assert all(
+        "-n" in command and "auto" in command and "worksteal" in command for command in commands
+    )
+
+
+def test_pull_request_matrix_fits_runner_concurrency_limits():
+    plan = ci.matrix()
+    # Package jobs wait for static, so static and package cannot overlap.
+    peak = sum(len(rows) for rows in plan.values()) + max(len(ci.VALIDATIONS), 1)
+    assert peak <= 20
+    mac = sum(row.get("os") == "macos-latest" for rows in plan.values() for row in rows)
+    assert mac + 1 <= 5
+
+
+def test_verify_rejects_a_result_lost_from_an_xdist_worker(pytester, monkeypatch):
+    from pathlib import Path
+
+    tests = Path(__file__).parents[1]
+    monkeypatch.setenv("ETL_CRAFT_CI_PROFILE", "engine")
+    monkeypatch.setenv("ETL_CRAFT_REQUIRE_SERVICES", "1")
+    pytester.makeconftest(f"""
+import sys
+sys.path.insert(0, {str(tests)!r})
+pytest_plugins = ["plugins.evidence", "plugins.ci_shards"]
+from plugins.evidence import EvidenceRecorder
+original = EvidenceRecorder.pytest_runtest_logreport
+
+def omit_one(self, report):
+    if not report.nodeid.endswith("test_lost"):
+        original(self, report)
+
+EvidenceRecorder.pytest_runtest_logreport = omit_one
+""")
+    pytester.makeini("[pytest]\nmarkers = engine_sqlite: local test\n")
+    pytester.makepyfile("""
+import pytest
+pytestmark = pytest.mark.engine_sqlite
+
+def test_kept():
+    assert True
+
+def test_lost():
+    assert True
+""")
+    evidence = pytester.path / "results.json"
+    result = pytester.runpytest_subprocess(
+        "-q",
+        "-n",
+        "2",
+        "--dist",
+        "worksteal",
+        "--ci-shard=0/1",
+        "--evidence=" + str(evidence),
+        "-m",
+        ci.SERVICE_MARKERS["engine"],
+    )
+    result.assert_outcomes(passed=2)
+    report = json.loads(evidence.read_text())
+    assert len(report["collected"]) == 2
+    assert len(report["tests"]) == 1
+    assert any(
+        "outcomes do not cover exactly" in problem
+        for problem in ci.check_profile("engine", [report], 1)
+    )

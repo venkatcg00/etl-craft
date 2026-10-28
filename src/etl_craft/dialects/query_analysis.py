@@ -2,8 +2,8 @@
 
 The parse tree tells a column named ``copy`` from a ``COPY`` statement, and finds a write
 inside a ``WITH``. When sqlglot cannot parse the SQL, the word-level check in ``core.text``
-decides instead, since the warehouse may accept syntax sqlglot does not know; ``validate``
-reports the parse error as a warning, with its line and column.
+decides the read-only property instead. Managed SELECT validation separately requires a parse;
+unmanaged SQL_SCRIPT tasks can use vendor syntax sqlglot does not understand.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def read_query(sql: str, dialect: str | None) -> Reading:
         statements = [statement for statement in parse(sql, read=dialect) if statement]
     except ParseError as error:
         first = error.errors[0] if error.errors else {}
-        where = f"line {first['line']}, column {first['col']}: " if first.get("line") else ""
+        where = f"line {first.get('line', 'unknown')}, column {first.get('col', 'unknown')}: "
         return Reading(unparsed=f"{where}{first.get('description') or error}")
     except SqlglotError as error:
         return Reading(unparsed=str(error))
@@ -84,6 +84,18 @@ def read_query(sql: str, dialect: str | None) -> Reading:
     if writes:
         return Reading(problem=f"contains {', '.join(writes)}, which a read-only query cannot")
     return Reading(root=root)
+
+
+def managed_select_problem(sql: str, dialect: str | None, source: str) -> str | None:
+    """Require managed SELECTs to parse independently of the lexical read-only fallback."""
+    reading = read_query(sql, dialect)
+    if reading.unparsed is None:
+        return None
+    return (
+        f"{source}: managed SELECT must parse as {dialect or 'standard'} SQL; "
+        f"sqlglot: {reading.unparsed}; remedy: fix the SQL, or move vendor syntax "
+        "sqlglot can't parse into a SQL_SCRIPT task"
+    )
 
 
 def event_query_problem(sql: str, dialect: str | None, key_column: str | None) -> str | None:

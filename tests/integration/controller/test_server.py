@@ -127,12 +127,14 @@ def blocking_script(project):
     raw["Orchestration"]["Shutdown_grace_seconds"] = 0
     project.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     (project.config.python_scripts_dir / "load.py").write_text(
-        "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
-        "def run(task):\n    marker=Path('server-first-attempt')\n"
+        f"from pathlib import Path\nROOT = {str(project.config.project_dir)!r}\n"
+        "import time\nfrom etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n    marker=Path(ROOT, 'server-first-attempt')\n"
         "    if not marker.exists():\n        marker.write_text('started')\n"
         "        time.sleep(120)\n"
         "    return ScriptResult(1)\n"
     )
+    assert project.run("pipelines", "refresh")[0] == 0
 
 
 def wait_for_script(project):
@@ -233,6 +235,7 @@ def test_shutdown_interrupts_gate_wait_without_starting_a_task(cli_project):
         upstream_run = start_run(conn, upstream)
         task_run(conn, task, upstream_run, status="IN-PROGRESS")
         add_dependency(conn, p.pipeline_id, p.task_id, task, upstream_pipeline=upstream)
+    assert p.run("pipelines", "refresh", "--pipeline", "P")[0] == 0
     assert p.run("pause", "--pipeline-code", "UPSTREAM", "--reason", "maintenance")[0] == 0
     assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "gate")[0] == 0
     server = p.start("controller")
@@ -294,11 +297,13 @@ def wait_for_output(command, text_, timeout=15):
 
 def released_script(project):
     (project.config.python_scripts_dir / "load.py").write_text(
-        "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
-        "def run(task):\n    Path('started').write_text('started')\n"
-        "    while not Path('release').exists():\n        time.sleep(0.05)\n"
+        f"from pathlib import Path\nROOT = {str(project.config.project_dir)!r}\n"
+        "import time\nfrom etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n    Path(ROOT, 'started').write_text('started')\n"
+        "    while not Path(ROOT, 'release').exists():\n        time.sleep(0.05)\n"
         "    return ScriptResult(1)\n"
     )
+    assert project.run("pipelines", "refresh")[0] == 0
 
 
 @POSTGRES_ONLY

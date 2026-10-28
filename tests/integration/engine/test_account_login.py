@@ -38,6 +38,7 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
                 "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {"Project": "default"},
                 "Engine": {"dev": block},
+                "Artifacts": {"Store": (tmp_path / "artifacts").as_uri()},
             },
             sort_keys=False,
         )

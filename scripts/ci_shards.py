@@ -18,29 +18,27 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCAL_WAREHOUSES = ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
 SERVICE_MARKERS = {
     "engine": "engine_sqlite or engine_postgres",
-    "warehouse-duckdb": "warehouse_duckdb",
-    "warehouse-postgres": "warehouse_postgres",
+    "warehouse-local": "warehouse_duckdb or warehouse_postgres or harness or connections",
     "warehouse-iceberg": "warehouse_duckdb_iceberg or warehouse_trino_iceberg",
-    "connections": "harness or connections",
 }
 SHARDS = {
-    "coverage": 4,
+    "coverage": 1,
+    "measured-coverage": 2,
     "engine": 6,
-    "warehouse-duckdb": 1,
-    "warehouse-postgres": 1,
-    "warehouse-iceberg": 3,
-    "connections": 1,
-    "e2e": 4,
+    "warehouse-local": 1,
+    "warehouse-iceberg": 2,
+    "e2e": 1,
 }
 VALIDATIONS = {"package-ubuntu-latest", "package-macos-latest"}
 
 
 def combinations() -> dict[str, list[dict[str, str]]]:
-    """Keep the existing Python/platform, service and installed-demo combinations."""
+    """Plan the approved pull-request platform, service and installed-demo combinations."""
     coverage = [
         {"profile": f"coverage-{version}-{runner}", "python": version, "os": runner}
         for version in ("3.11", "3.12", "3.13")
         for runner in ("ubuntu-latest", "macos-latest")
+        if runner == "ubuntu-latest" or version == "3.13"
     ]
     service = [{"profile": profile} for profile in SERVICE_MARKERS]
     e2e = [
@@ -56,7 +54,15 @@ def matrix(serial: bool = False) -> dict[str, list[dict[str, str | int]]]:
             row | {"index": index, "count": count}
             for row in rows
             for count in [
-                1 if serial else SHARDS[family if family != "service" else row["profile"]]
+                1
+                if serial
+                else SHARDS[
+                    "measured-coverage"
+                    if row["profile"] == "coverage-3.11-ubuntu-latest"
+                    else family
+                    if family != "service"
+                    else row["profile"]
+                ]
             ]
             for index in range(1 if family == "e2e" else count)
         ]
@@ -81,10 +87,14 @@ def run(profile: str, index: int, count: int, output: Path) -> int:
         "addopts=",
         "--strict-markers",
         "--strict-config",
+        "-n",
+        "auto",
+        "--dist",
+        "worksteal",
     ]
-    if profile.startswith("coverage-"):
+    if profile == "coverage-3.11-ubuntu-latest":
         command += ["--cov", "--cov-report=", "--cov-fail-under=0"]
-    else:
+    elif not profile.startswith("coverage-"):
         marker = "e2e_pip or e2e_uv" if profile.startswith("e2e-") else SERVICE_MARKERS[profile]
         command += ["-m", marker]
         if profile == MEASURED_SERVICE:
@@ -216,7 +226,7 @@ def verify(directory: Path, wheel: Path, serial: bool = False) -> list[str]:
         problems.append("package matrix results are missing or unexpected")
     if not problems:
         for profile in expected:
-            if profile.startswith("coverage-"):
+            if profile == "coverage-3.11-ubuntu-latest":
                 measured = paths[profile] + paths.get(MEASURED_SERVICE, [])
                 problems.extend(coverage_report(profile, measured, directory))
     return problems

@@ -183,6 +183,7 @@ def materialize(
     target = parent / bundle_id
     if target.exists() or target.is_symlink():
         verify(target, manifest)
+        seal(target)
         return target
     with tempfile.TemporaryDirectory(prefix=f".{bundle_id}-", dir=parent) as scratch:
         stage = Path(scratch) / "project"
@@ -206,7 +207,15 @@ def materialize(
             if not target.is_dir():
                 raise
             verify(target, manifest)
+    seal(target)
     return target
+
+
+def seal(folder: Path) -> None:
+    """Make a cached bundle read-only, so a task writing into it fails at that write."""
+    for path in [folder, *folder.rglob("*")]:
+        if path.is_dir():
+            path.chmod(0o500)
 
 
 def script_imports(folder: Path) -> tuple[str, ...]:

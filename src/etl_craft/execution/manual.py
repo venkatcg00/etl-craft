@@ -20,7 +20,7 @@ from etl_craft.engine.repository.dependencies import (
 from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
-from etl_craft.engine.run_definitions import for_run
+from etl_craft.engine.run_definitions import for_admission, for_run
 from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.execution.interventions import check_override, open_pause
 from etl_craft.execution.pipeline import run_pipeline
@@ -58,7 +58,11 @@ def run_manual(
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         selected = _select_run(conn, pipeline_id, selector, options.get("run_date"))
-        with for_run(conn, None if selected is None else selected.pipeline_run_id):
+        with (
+            for_admission(conn, pipeline_id)
+            if selected is None
+            else for_run(conn, selected.pipeline_run_id)
+        ):
             scope = select_tasks(
                 conn,
                 pipeline_id,

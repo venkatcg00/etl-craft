@@ -163,6 +163,7 @@ B65 = [
 # S7.P's obvious-failure catalog (docs/development/road-to-1.0.0.md). Each row names the tests
 # that prove its 1.0.0 behaviour, or "open: <item>" for the unfinished item that owns it.
 [obvious_failures]
+unsupported-duckdb-2 = ["tests/unit/test_dependency_bounds.py::test_dependency_bounds_install_matrix"]
 engine-db-restart = [
     "tests/integration/controller/test_server.py::test_server_and_its_attempt_ride_out_an_engine_db_outage",
     "tests/integration/controller/test_server.py::test_an_outage_longer_than_its_budget_stops_the_server_naming_the_setting",

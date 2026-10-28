@@ -3,7 +3,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       cache:
@@ -26,7 +25,6 @@ concurrency:
 jobs:
   prepare:
     name: build package and plan complete matrix
-    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     outputs:
       coverage: ${{ steps.plan.outputs.coverage }}
@@ -57,7 +55,6 @@ jobs:
 
   static:
     name: lint / types / layers / history
-    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -82,7 +79,6 @@ jobs:
   test:
     name: coverage (${{ matrix.python }}, ${{ matrix.os }}, shard ${{ matrix.index }})
     needs: prepare
-    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -111,7 +107,6 @@ jobs:
   service:
     name: local services (${{ matrix.profile }}, shard ${{ matrix.index }})
     needs: prepare
-    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -131,9 +126,8 @@ jobs:
         run: |
           case "$PROFILE" in
             engine) docker compose up -d --wait postgres mailpit ;;
-            warehouse-duckdb|warehouse-postgres) docker compose up -d --wait postgres ;;
+            warehouse-local) make services-up ;;
             warehouse-iceberg) docker compose up -d --wait postgres trino ;;
-            connections) make services-up ;;
             *) echo "Unknown service profile: $PROFILE" >&2; exit 1 ;;
           esac
       - name: Execute assigned service tests
@@ -157,7 +151,6 @@ jobs:
   e2e:
     name: installed demo (${{ matrix.warehouse }})
     needs: prepare
-    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -215,8 +208,10 @@ jobs:
         run: make services-down
 
   package:
+    needs: static
+    env:
+      UV_PYTHON: ${{ matrix.os == 'macos-latest' && '3.13' || '3.11' }}
     name: package (build, install with pip and uv, ${{ matrix.os }})
-    if: github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -229,7 +224,7 @@ jobs:
           enable-cache: ${{ inputs.cache != 'cold' }}
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: ${{ env.UV_PYTHON }}
       - name: Build and verify the package
         run: make verify-package
 
@@ -244,7 +239,7 @@ jobs:
 
   complete:
     name: every test and matrix accounted for
-    if: always() && (github.event_name != 'pull_request' || github.head_ref != 'feat/engine-pipeline-refresh' || !github.event.pull_request.draft)
+    if: always()
     needs: [prepare, static, test, service, e2e, package]
     runs-on: ubuntu-latest
     steps:

@@ -124,7 +124,9 @@ class Demo:
         shutil.copytree(
             DEMO,
             self.root,
-            ignore=shutil.ignore_patterns("*.db", "*.duckdb", ".flaky-*", "migrations"),
+            ignore=shutil.ignore_patterns(
+                "*.db", "*.duckdb", ".flaky-*", "migrations", ".etl-craft"
+            ),
         )
         if self.cloud or self.warehouse_kind in ("duckdb_iceberg", "trino_iceberg"):
             self.prefix = f"ec_{self.tag}_"
@@ -151,6 +153,7 @@ class Demo:
             "Cloning": {
                 "dev": {"Enabled": self.warehouse_kind != "snowflake_iceberg", "Scope": "ALL"}
             },
+            "Artifacts": {"Store": (self.root / ".etl-craft" / "artifacts").as_uri()},
         }
         path = self.root / "craft-connector.yml"
         if self.cloud:
@@ -327,6 +330,7 @@ class Demo:
                 run_script(conn, for_engine(engine).split_statements(sql))
         finally:
             engine.dispose()
+        self.ok("pipelines", "refresh")
 
     def close(self) -> None:
         for step in reversed(self.cleanup):

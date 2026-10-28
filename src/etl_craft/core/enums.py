@@ -257,6 +257,8 @@ class ActionName(StrEnum):
     WHOAMI = "whoami"
     HEALTH = "health"
     PIPELINES = "pipelines"
+    PIPELINE_REFRESH = "pipelines refresh"
+    PIPELINE_REFRESH_HISTORY = "pipeline refresh history"
     PIPELINE = "pipeline"
     GRAPH = "graph"
     STEPS = "steps"

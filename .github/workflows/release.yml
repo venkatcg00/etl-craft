@@ -98,3 +98,26 @@ jobs:
       - name: Stop local services
         if: always()
         run: make services-down
+
+  python-platform:
+    name: complete Python / OS compatibility (${{ matrix.python }}, ${{ matrix.os }})
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-groups --python '${{ matrix.python }}'
+      - name: Run every test applicable without local services
+        run: uv run pytest -q -n auto --dist worksteal --junitxml=python-platform.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: python-platform-${{ matrix.python }}-${{ matrix.os }}
+          path: python-platform.xml

@@ -50,6 +50,17 @@ class SqliteEngineDialect(EngineDialect):
     spec = engine_for_jdbc_url(JDBC_PREFIX)
     directory = Path(__file__).parent
 
+    def artifact_location(self, config: ConnectorConfig) -> str:
+        """Keep implicit SQLite bundles beside the host project's configuration."""
+        if config.artifacts.store is not None:
+            return config.artifacts.store
+        root = (
+            config._host_config_path.absolute().parent
+            if config._host_config_path is not None
+            else config.project_dir
+        )
+        return (root / ".etl-craft" / "artifacts").as_uri()
+
     def controller_lock_path(self, engine: Engine) -> str:
         """SQLite leadership needs one file shared by every local task process."""
         database = engine.url.database

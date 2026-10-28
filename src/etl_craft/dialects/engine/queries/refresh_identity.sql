@@ -1,0 +1,2 @@
+SELECT PIPELINE_CODE AS pipeline_code,BLOCK_ON_REFRESH_ERROR AS block_on_refresh_error
+FROM CFG_PIPELINES WHERE PIPELINE_ID=:pipeline_id

@@ -92,6 +92,10 @@ def test_cli_omitted_recovery_reason_obeys_governance(
     with project.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
         task = add_task(conn, pipeline, "T", "PYTHON", SCRIPT_FILE="python_scripts/test.py")
+    (project.root / "python_scripts" / "test.py").write_text("def run(task):\n    return None\n")
+    checked = act(ctx, ActionName.PIPELINE_REFRESH)
+    assert not checked.failed, checked
+    with project.engine.begin() as conn:
         run = start_run(conn, pipeline)
         task_run(conn, task, run, RunStatus.FAILED)
         if option != "--allow-paused":
@@ -278,6 +282,8 @@ def test_run_override_reasons_share_governance(
         if run is not None:
             task_run(conn, task, run, RunStatus.SUCCESS)
             finish_run(conn, run, RunStatus.SUCCESS)
+    checked = act(ctx, ActionName.PIPELINE_REFRESH)
+    assert not checked.failed, checked
     if kind == "rerun":
         options = ["--task-code", "T", "--run-id", str(run), "--rerun"]
         payload = {"task_code": "T", "run_id": run, "rerun": True}

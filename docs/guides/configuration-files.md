@@ -100,7 +100,10 @@ development, test and production.
 
 Administrators manage pools with `etl-craft pool add|set|list|disable`, each with `--reason`.
 Tasks without `POOL` use their project's `DEFAULT_POOL`. Pipelines also have
-`MAX_PARALLEL_TASKS` (default 8) and `PRIORITY` (default 0).
+`MAX_PARALLEL_TASKS` (default 8), `PRIORITY` (default 0), and
+`BLOCK_ON_REFRESH_ERROR` (default `N`). Apply ends with a
+[pipeline refresh](validating.md#refresh-and-the-version-that-runs); changes remain committed
+if refresh fails, while admission keeps the last passing version.
 [Placement](../deploying/agents.md#pools-limits-and-resource-placement) explains the limits.
 
 For each row of a file, `apply`:
