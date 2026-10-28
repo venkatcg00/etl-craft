@@ -376,6 +376,8 @@ def coverage_report(profile: str, reports: list[Path], directory: Path) -> list[
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    timing_parser = commands.add_parser("timing")
+    timing_parser.add_argument("run_id")
     plan = commands.add_parser("matrix")
     plan.add_argument("--serial", action="store_true")
     plan.add_argument("--output", type=Path, required=True)
@@ -397,6 +399,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("name", choices=sorted(VALIDATIONS))
     record.add_argument("output", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "timing":
+        from ci_timing import timing
+
+        return timing(args.run_id)
     if args.command == "matrix":
         with args.output.open("a", encoding="utf-8") as handle:
             for family, rows in matrix(args.serial).items():

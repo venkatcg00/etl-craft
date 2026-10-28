@@ -286,7 +286,8 @@ make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpi
   before a PR; CI always runs the complete suite and is the authority.
 - **Concurrency:** a change to run creation, leases, locks, ROW_ID allocation or gates runs its
   tests 20 times locally, because CI runs each test once.
-- **CI time:** required pull-request CI stays under ten minutes. A change that would take it
+- **CI time:** required pull-request CI stays under ten minutes of execution time (the longest
+  chain of job run times through `needs`). Report runner queue time and wall time separately. A change that would take it
   over is a stop-and-ask.
 - **Cloud suites:** CI never runs the Databricks and Snowflake suites. A change to their dialects
   or to SQL every warehouse runs needs them (see the skill). Try each affected cloud once. When

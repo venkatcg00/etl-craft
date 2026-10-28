@@ -7,7 +7,9 @@ description: Run etl-craft's validation before a pull request - make static docs
 
 Open the pull request only after every step that applies has finished green (`AGENTS.md`,
 "Validation"). CI then runs the complete suite once, explicit Python/platform compatibility subsets and the
-installed-wheel demos in under ten minutes, and is their authority: do not repeat that locally. Keep logs in a
+installed-wheel demos in under ten minutes, of execution time (longest `needs` chain), and is their authority: do not repeat that locally.
+Use `uv run python scripts/ci_shards.py timing <run-id>` to report execution, summed job queues,
+longest queue and wall time separately. Runner queue time is outside the gate. Keep logs in a
 scratch directory outside the repository:
 
 ```bash

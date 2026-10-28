@@ -170,7 +170,7 @@ item's text, or work done early under another item.
 | S7.Z Environments, governance and admin-managed projects | Done | #266 | Admin environment/governance fields, shared intervention policy, PostgreSQL direct-edit history and complete guard checks; product-audit skill. |
 | S7.AA Pipeline refresh | Done | #267 | Refresh records findings; runs use the last passing version unless blocked; parallel CI and local affected-test selection |
 | S7.AB Standing task controls | Done | #268 | Versioned task pauses, admitted outcomes and explicit scheduled resume choices |
-| S7.AJ Required CI under ten minutes | In progress | #269 | Remove duplicated complete-suite runs; retain fail-closed accounting and measure wall time including queues |
+| S7.AJ Required CI under ten minutes | In progress | #269 | Remove duplicated complete-suite runs; retain fail-closed accounting and measure execution separately from runner queues |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
 | S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
@@ -880,6 +880,9 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 **Choices that differ from the item text.**
 
 - S7.AJ owner decisions, 2026-10-28: plan text and CI implementation ship in one PR.
+  The ten-minute gate measures the longest chain of job execution durations through workflow
+  dependencies; runner queue time is excluded and reported separately with wall time.
+  Re-measure with `uv run python scripts/ci_shards.py timing <run-id>`.
   etl-craft is built for ETL/ELT data movement, not as a general-purpose orchestrator.
   Scheduling and run control serve data movement. Python tasks may call external tools
   (for example, start an Informatica job), but moving data is why a pipeline exists.

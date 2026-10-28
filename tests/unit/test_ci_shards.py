@@ -552,3 +552,98 @@ def test_unfiltered_catalog_disagreement_between_shards_fails():
     data[0]["ci"]["catalog"] = {"test_one": ["engine_postgres"]}
     data[1]["ci"]["catalog"] = {"test_two": ["engine_postgres"]}
     assert any("unfiltered collections disagree" in p for p in ci.check_profile("engine", data, 2))
+
+
+def test_timing_uses_needs_chain_not_wall_or_slowest_job():
+    timing = load("ci_timing")
+    workflow = {
+        "jobs": {
+            "prepare": {"name": "prepare"},
+            "test": {"name": "test (${{ matrix.index }})", "needs": "prepare"},
+            "static": {"name": "static"},
+            "package": {"name": "package", "needs": "static"},
+            "verify": {"name": "verify", "needs": ["test", "package"]},
+        }
+    }
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 10, 28, tzinfo=UTC)
+
+    def job(name, created, began, ended):
+        return {
+            "name": name,
+            "status": "completed",
+            "created_at": (start + timedelta(seconds=created)).isoformat(),
+            "started_at": (start + timedelta(seconds=began)).isoformat(),
+            "completed_at": (start + timedelta(seconds=ended)).isoformat(),
+        }
+
+    jobs = [
+        job("prepare", 0, 2, 12),
+        job("test (0)", 12, 15, 115),
+        job("test (1)", 12, 15, 95),
+        job("static", 0, 2, 62),
+        job("package", 62, 662, 722),
+        job("verify", 722, 724, 744),
+    ]
+    result = timing.measure(
+        {"id": 1, "conclusion": "success", "created_at": start.isoformat()}, jobs, workflow
+    )
+    assert result["execution_seconds"] == 140
+    assert result["wall_seconds"] == 744
+    assert result["queue_seconds"] == 612
+    assert result["longest_job_queue_seconds"] == 600
+    assert result["slowest_jobs"][0]["name"] == "test (0)"
+    jobs[-1]["status"] = "queued"
+    with pytest.raises(ValueError, match="has not completed"):
+        timing.measure({}, jobs, workflow)
+
+
+def test_timing_fetches_every_job_page_and_workflow_at_run_revision(monkeypatch, capsys):
+    import base64
+
+    timing = load("ci_timing")
+    calls = []
+
+    def api(path):
+        calls.append(path)
+        if "/contents/" in path:
+            return {"content": base64.b64encode(b"jobs:\n  verify:\n    name: verify\n").decode()}
+        if "/jobs?" in path:
+            job = {
+                "name": "verify",
+                "status": "completed",
+                "created_at": "2026-10-28T00:00:00Z",
+                "started_at": "2026-10-28T00:00:02Z",
+                "completed_at": "2026-10-28T00:00:12Z",
+            }
+            return {"total_count": 2, "jobs": [job]}
+        return {
+            "id": 42,
+            "run_attempt": 2,
+            "head_sha": "exact-commit",
+            "path": ".github/workflows/ci.yml",
+            "conclusion": "success",
+            "created_at": "2026-10-28T00:00:00Z",
+        }
+
+    monkeypatch.setattr(timing, "api", api)
+    assert ci.main(["timing", "42"]) == 0
+    assert json.loads(capsys.readouterr().out)["execution_seconds"] == 10
+    assert any("page=2" in path for path in calls)
+    assert calls[-1].endswith("?ref=exact-commit")
+
+
+def test_timing_refuses_missing_or_ambiguous_jobs():
+    timing = load("ci_timing")
+    job = {
+        "name": "same",
+        "status": "completed",
+        "created_at": "2026-10-28T00:00:00Z",
+        "started_at": "2026-10-28T00:00:00Z",
+        "completed_at": "2026-10-28T00:00:01Z",
+    }
+    with pytest.raises(ValueError, match="unambiguous"):
+        timing.measure({}, [job], {"jobs": {"one": {"name": "same"}, "two": {"name": "same"}}})
+    with pytest.raises(ValueError, match="missing"):
+        timing.measure({}, [job], {"jobs": {"one": {"name": "same"}, "two": {"name": "other"}}})
