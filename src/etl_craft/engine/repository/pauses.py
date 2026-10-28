@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import BigInteger, DateTime, bindparam
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import current_actor
+from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 
 
@@ -55,16 +57,56 @@ def record_pause(conn: Connection, pipeline_id: int, paused_by: str, reason: str
     )
 
 
-def close_pause(conn: Connection, pipeline_id: int, resumed_by: str, reason: str) -> bool:
+def close_pause(
+    conn: Connection,
+    pipeline_id: int,
+    resumed_by: str,
+    reason: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
     """Close the open pause of ``pipeline_id``; return whether it had one."""
     result = conn.execute(
         statement(conn, "resume_pipeline_pause"),
         {
             "pipeline_id": pipeline_id,
-            "now": datetime.now(UTC),
+            "now": now or datetime.now(UTC),
             "actor_kind": current_actor().kind.value,
             "resumed_by": resumed_by,
             "reason": reason,
         },
     )
     return bool(result.rowcount)
+
+
+@dataclass(frozen=True)
+class Resume:
+    """A retained resume decision, including its choice and exact created run identities."""
+
+    pause_id: int
+    pipeline_id: int
+    pipeline_code: str
+    task_code: str | None
+    resumed_at: datetime
+    actor: str | None
+    reason: str | None
+
+    def __post_init__(self) -> None:
+        """Keep resume history timestamps identical across both Engine DBs."""
+        object.__setattr__(self, "resumed_at", as_utc(self.resumed_at))
+
+
+def resumes(
+    conn: Connection, pipeline_id: int | None = None, since: datetime | None = None
+) -> tuple[Resume, ...]:
+    """Read project-scoped resume history for audit and selected-pipeline explanations."""
+    return tuple(
+        Resume(**row._mapping)
+        for row in conn.execute(
+            statement(conn, "pause_resume_history").bindparams(
+                bindparam("since", type_=DateTime(timezone=True)),
+                bindparam("pipeline_id", type_=BigInteger),
+            ),
+            {"pipeline_id": pipeline_id, "since": since},
+        )
+    )

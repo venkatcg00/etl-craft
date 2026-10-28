@@ -151,6 +151,7 @@ nav:
       - SQL source watermark: examples/sql-watermark.md
       - Unmanaged SQL task: examples/sql-script.md
       - Scoped operator controls: examples/operator-controls.md
+      - Standing task controls: examples/standing-task-controls.md
   - Reference:
       - reference/index.md
       - Command line: reference/cli.md

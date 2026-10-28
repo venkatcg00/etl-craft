@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.engine import Connection
@@ -72,7 +72,24 @@ def _sync(
         changes.extend(tag_access_changes(conn, ctx, completed))
 
     done = config_files.sync_config(ctx.engine, ctx.config, files, apply=apply, authorize=authorize)
-    return replace(done, tag_access_changes=tuple(changes))
+    from etl_craft.engine.standing_pauses import current
+
+    with ctx.engine.connect() as conn:
+        pipelines = conn.execute(
+            statement(conn, "refresh_pipelines"),
+            {
+                "project_id": ctx.project_id,
+                "pipeline_code": None,
+                "missing_only": False,
+            },
+        ).all()
+        pauses = tuple(
+            pause
+            for pipeline in pipelines
+            for pause in current(conn, pipeline.pipeline_id)
+            if pause.active(datetime.now(UTC))
+        )
+    return replace(done, tag_access_changes=tuple(changes), task_pauses=pauses)
 
 
 def export_config(ctx: OperationContext, request: ConfigExportInput) -> config_files.ConfigExport:

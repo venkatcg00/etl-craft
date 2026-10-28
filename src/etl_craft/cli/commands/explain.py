@@ -32,6 +32,12 @@ def _run(args: argparse.Namespace, out: Output) -> int:
 
 def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
     def render() -> None:
+        for resume in done.pipeline.resumes:
+            out.line(f"resumed by {resume.actor} at {resume.resumed_at}: {resume.reason}")
+        if done.standing_pause is not None:
+            out.line(done.standing_pause.describe())
+        elif done.task is not None and done.task.standing_pause is not None:
+            out.line(done.task.standing_pause.describe())
         out.line(f"{done.pipeline.pipeline_code}.{done.task_code}: {done.state}")
         out.line(
             f"pipeline_run_id={done.run.pipeline_run_id} status={done.run.status} "

@@ -23,6 +23,7 @@ class TaskStatus:
     status: str
     error_message: str | None
     attempt_count: int
+    standing_pause_id: int | None = None
 
 
 def fetch_task_statuses_for_run(

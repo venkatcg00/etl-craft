@@ -62,3 +62,29 @@ def test_recipients():
         parse_recipients(" | ", "EMAIL_TO")
     with pytest.raises(HandlerError, match=r"EMAIL_TO has address.* not valid: team"):
         parse_recipients("a@x.io|team", "EMAIL_TO")
+
+
+def test_failed_standing_pause_sends_no_failure_alert(monkeypatch):
+    from types import SimpleNamespace
+
+    from etl_craft.core.enums import Handler, RunStatus
+    from etl_craft.handlers import email_alert
+
+    failed = TaskStatus(
+        1,
+        "load",
+        Handler.PYTHON,
+        RunStatus.FAILED,
+        "failed by standing pause 7",
+        0,
+        standing_pause_id=7,
+    )
+    report = SimpleNamespace(statuses=[failed], sla=None, watched=[])
+    monkeypatch.setattr(
+        email_alert, "task_store", lambda *_: SimpleNamespace(alert=lambda _: report)
+    )
+    monkeypatch.setattr(email_alert, "send_email", lambda *_: pytest.fail("failure alert was sent"))
+    context = SimpleNamespace(task_id=9, task_params={"EMAIL_TO": "ops@example.com"})
+    result = email_alert.run(context, None)
+    assert result.variables["EMAIL_SENT"] == "false"
+    assert "standing pause" in result.variables["REASON"]

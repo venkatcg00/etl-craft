@@ -24,6 +24,7 @@ from etl_craft.core.enums import (
     ControlStatus,
     Permission,
     ProcessRole,
+    RunStatus,
 )
 from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
@@ -287,6 +288,8 @@ def seeded_tables(db):
                         value = datetime.now(UTC)
                     else:
                         value = 1 if "INT" in type_name or "NUMERIC" in type_name else "sample"
+                if table.upper() == "AUD_PIPELINE_PAUSES" and lower == "outcome":
+                    value = RunStatus.SUCCESS
                 if table.upper() == "AUD_CONNECTION_RESERVATIONS" and lower == "role":
                     value = ProcessRole.UI
                 if table.upper() == "AUD_CONTROL_REQUESTS":

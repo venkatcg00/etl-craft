@@ -169,7 +169,8 @@ item's text, or work done early under another item.
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
 | S7.Z Environments, governance and admin-managed projects | Done | #266 | Admin environment/governance fields, shared intervention policy, PostgreSQL direct-edit history and complete guard checks; product-audit skill. |
 | S7.AA Pipeline refresh | Done | #267 | Refresh records findings; runs use the last passing version unless blocked; parallel CI and local affected-test selection |
-| S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
+| S7.AB Standing task controls | Done | #268 | Versioned task pauses, admitted outcomes and explicit scheduled resume choices |
+| S7.AJ Required CI under ten minutes | Planned | | Measure the platform-job bottleneck after S7.AB; preserve complete-suite evidence |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
 | S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
@@ -226,7 +227,7 @@ requests this plan text together with S7.AF's code; only S7.AF is implemented in
 Owner clarification for S7.AF: disabling a parent preserves unchanged existing children.
 New or changed active children require active parents. Columns must still retire before their table.
 
-Run order is S7.AF, S7.Y B, S7.AI, S7.Z, S7.AA, S7.AB. S7.Y stays In progress until B merges.
+Run order is S7.AF, S7.Y B, S7.AI, S7.Z, S7.AA, S7.AB, S7.AJ. S7.Y stays In progress until B merges.
 
 - S7.Z: Engine DB truth replaces file drift reporting; direct edits need no drift report.
   Reuse S7.AG's project/admin/team-table guards for direct edits; its bullets remain unchanged.
@@ -389,6 +390,11 @@ does not move worker work ahead of the metadata, account or operator-control cor
 
 **Acceptance availability.**
 
+S7.AB (#268) exercised standing outcomes, holds, expiry, replacement, schedule resume,
+permission refusals and released-schema upgrades on SQLite and PostgreSQL. Admission and
+replacement visibility races passed twenty local rounds. Warehouse SQL and cloud dialects
+are unchanged; cloud acceptance was not needed. Complete matrix and wheel demos remain CI gates.
+
 S7.Z validates admin/role boundaries, strict and relaxed interventions, direct-edit attribution,
 missing guards and real-row upgrades on SQLite and PostgreSQL, plus real SCD edit/unlock checks
 on DuckDB and PostgreSQL warehouses. Environment-change races pass twenty rounds per Engine DB.
@@ -403,7 +409,6 @@ from every released schema. Grant/claim/sign-in/ending races run twenty rounds; 
 Semgrep dispositions are in #264. Browser catalog sign-in is explicitly S7.A.7; one-project
 IP-restricted publishing is the interim contract. Warehouse SQL is unchanged, so cloud SQL
 acceptance is not required. Complete coverage and installed-wheel demos remain CI gates.
-
 
 S7.Y B validates project boundaries, permission precedence, explicit selection, full exports,
 per-project catalog artifacts and log paths on both Engine DBs. Real grants and history upgrade
@@ -873,6 +878,22 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AB owner decisions, 2026-10-28: one task pause with an optional SUCCESS, FAILED or
+  SKIPPED outcome replaces the item's separate controls. No outcome holds. Task resume removes
+  both and creates no runs; it refuses `--then` because tasks have no schedule ticks. Scheduled
+  pipeline resume requires run-now, catch-up or wait; unscheduled resume refuses that choice.
+  Extend AUD_PIPELINE_PAUSES with TASK_ID, OUTCOME and EXPIRES_AT, retaining version history.
+  Runs admitted before a pause or replacement hold and never inherit its new outcome. Later
+  admissions retain their exact pause version. Expiry is an unpause without a write. FAILED
+  produces no retry or alert; SUCCESS produces no data or fresh output. An already-paused task
+  refuses another pause unless `--replace` atomically closes and opens its version. Expiry
+  timestamps require an offset and must be in the future. The owner includes S7.AJ plan text
+  in this PR; it follows S7.AB. Required CI at about twelve minutes is accepted until S7.AJ.
+  Pause versions are captured when the run record is created, including queued runs, alongside
+  its pinned metadata; promotion to IN-PROGRESS does not recapture. Existing intervention rows
+  record admission and application. Existing pause retention protects referenced pause
+  versions. Console pages remain S7.A work; shared metadata, graph and run reads expose controls.
 
 - S7.AA owner decision, 2026-10-28: S5.F pins metadata and a bundle per run, but does not
   retain a pre-admission last-good version. Add one additive `AUD_PIPELINE_REFRESHES` table,
@@ -6613,6 +6634,21 @@ is [Standing task controls](metadata-and-ui.md#standing-task-controls).
 
 *Done when:* an operator can pause a task or fix its outcome for future runs without a config
 change, and every view shows the override.
+
+### S7.AJ Required CI under ten minutes
+
+Owner decision, 2026-10-28. After S7.AB. Plan only in the S7.AB PR.
+
+- S7.AA cut required CI from 28 to about 12 minutes (run 40683655513: 11 min 42 s).
+- Single-shard Python/OS jobs set the wall time: macOS 3.13 at 10.7 minutes and Linux 3.13
+  at 10.5 minutes. `test_pull_request_matrix_fits_runner_concurrency_limits` caps the matrix
+  at 20 jobs.
+- Measure these options: non-measured Python/OS jobs run unit tests plus a SQLite engine subset
+  per PR, with the complete suite in the release gate; more than 20 jobs with queueing; or
+  removing duplicated SQLite-engine runs between platform jobs and engine service shards.
+
+*Done when:* three consecutive clean runs finish under ten minutes and `ci_shards verify`
+still proves every test ran exactly once in the complete suite.
 
 ### S7.A Web UI
 

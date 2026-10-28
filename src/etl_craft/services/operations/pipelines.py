@@ -14,12 +14,18 @@ from etl_craft.services.operations.snapshots import pipeline_view
 
 def set_pause(ctx: OperationContext, request: ControlRequest) -> OperationResult:
     """Pause or resume using the existing run and process ownership guards."""
-    change = (
-        interventions.pause_pipeline
-        if request.action == ControlAction.PAUSE
-        else interventions.resume_pipeline
-    )
-    message = change(ctx.engine, ctx.config, request.pipeline_code, request.reason)
+    if request.action == ControlAction.PAUSE:
+        if request.then is not None:
+            from etl_craft.core.errors import UsageError
+
+            raise UsageError("--then applies only to scheduled pipeline resume; omit it for pause")
+        message = interventions.pause_pipeline(
+            ctx.engine, ctx.config, request.pipeline_code, request.reason
+        )
+    else:
+        from etl_craft.services.operations.pipeline_resume import resume
+
+        message = resume(ctx, request)
     with read_snapshot(ctx.engine) as conn:
         pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
         view = pipeline_view(conn, pipeline_id)

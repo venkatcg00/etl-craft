@@ -162,6 +162,11 @@ def judge(
     """
     if run is None:
         return None, "has no finished run"
+    if run.revision == 0:
+        return (
+            None,
+            f"run {run.run_id} has no fresh output: SUCCESS was supplied by a standing pause",
+        )
     last = (
         trackers.ConsumedRun(last_consumed, 1) if isinstance(last_consumed, int) else last_consumed
     )

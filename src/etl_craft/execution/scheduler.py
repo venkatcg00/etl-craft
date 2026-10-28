@@ -24,7 +24,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import DependencyGraph, TaskRunState
 from etl_craft.core.outage import OutageBudget
-from etl_craft.engine import controls, runlog
+from etl_craft.engine import controls, runlog, standing_pauses
 from etl_craft.engine.repository import trackers
 from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
 from etl_craft.engine.retry import TRANSIENT_ERRORS
@@ -163,8 +163,8 @@ class Scheduler:
             and (self.force or state.get(t, TaskRunState()).status not in SETTLED_STATUSES)
         ]
         ready = self._ready(state, pending, retries)
-        waiting = self._waiting(retries)
         ready = [task_id for task_id in ready if task_id not in fences]
+        ready, waiting = self._standing(ready, self._waiting(retries))
         for task_id in ready:
             if task_id in retries and retries[task_id] > self.clock.now():
                 continue
@@ -244,6 +244,31 @@ class Scheduler:
             return False
         self.never_ready = pending
         return True
+
+    def _standing(
+        self, ready: list[int], waiting: list[datetime]
+    ) -> tuple[list[int], list[datetime]]:
+        """Apply pinned outcomes and retain holds without occupying a worker slot."""
+        if not ready:
+            return ready, waiting
+        dispatch = []
+        with self.engine.begin() as conn:
+            standing_pauses.lock(conn, self.pipeline_id)
+            effects = standing_pauses.effects(
+                conn, self.pipeline_id, self.pipeline_run_id, self.clock.now()
+            )
+            for task_id in ready:
+                pause, holds = effects.get(task_id, (None, False))
+                if pause is not None and not holds:
+                    standing_pauses.apply(conn, pause, self.pipeline_run_id)
+                    self.attempted.add(task_id)
+                    self.completed.add(task_id)
+                elif pause is not None and holds:
+                    standing_pauses.hold(conn, pause, self.pipeline_run_id)
+                    waiting.append(self.clock.now() + timedelta(seconds=ENGINE_POLL_SECONDS))
+                else:
+                    dispatch.append(task_id)
+        return dispatch, waiting
 
     def _waiting(self, retries: dict[int, datetime]) -> list[datetime]:
         """Collect retry deadlines and durable child waits without occupying the pool."""

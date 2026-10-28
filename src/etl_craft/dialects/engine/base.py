@@ -93,6 +93,10 @@ class EngineDialect(ABC):
         otherwise it raises ``LockTimeoutError`` once that time has passed.
         """
 
+    def standing_pause_lock(self, conn: Connection, key: int) -> None:
+        """Serialize pause changes and admission until the transaction ends."""
+        conn.execute(text(self.query("standing_pause_lock")), {"lock_key": key})
+
     @abstractmethod
     def refresh_metadata_triggers(self, conn: Connection) -> None:
         """Install metadata capture and write guards for the current table definitions."""

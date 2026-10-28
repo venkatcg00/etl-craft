@@ -61,11 +61,15 @@ def control(ctx: OperationContext, request: ControlRequest) -> ControlView | Ope
     if request.action in DEFINITION_CONTROLS:
         from etl_craft.services.operations.pipelines import set_pause
 
-        if request.run_id is not None or request.run_key is not None or request.task_code:
+        if request.run_id is not None or request.run_key is not None:
             raise UsageError(
-                f"{request.action} applies to the pipeline definition; omit `run_id`, `run_key` "
-                "and `task_code`"
+                f"{request.action} applies across runs; omit `run_id` and `run_key`; "
+                "optionally name `task_code` for a standing task pause"
             )
+        if request.task_code is not None:
+            from etl_craft.services.operations.task_pauses import change
+
+            return change(ctx, request)
         return set_pause(ctx, request)
     return request_control(ctx, request)
 

@@ -10,4 +10,5 @@ SELECT p.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code,
                AND a.EXCLUSIVE_RUN='Y' AND a.STATUS IN ('QUEUED','IN-PROGRESS')) AS pending
 FROM CFG_PIPELINES p JOIN CFG_PROJECTS project ON project.PROJECT_ID=p.PROJECT_ID
 WHERE p.ACTIVE_FLAG='Y' AND project.ACTIVE_FLAG='Y'
+AND (CAST(:pipeline_id AS bigint) IS NULL OR p.PIPELINE_ID=:pipeline_id)
 ORDER BY p.PIPELINE_ID

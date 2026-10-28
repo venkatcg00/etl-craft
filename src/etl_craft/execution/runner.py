@@ -131,7 +131,7 @@ def run_task(
         check_override(config, option, override.reason)
         if force:
             raise UsageError(f"{option} and `force` are different overrides: choose one")
-    paused = open_pause(engine, pipeline_code, selector=selector)
+    paused = open_pause(engine, pipeline_code, selector=selector, pipeline_id=pipeline_id)
     if paused is not None:
         return _skipped(
             f"{task_code}: {pipeline_code} is {paused.describe()}; nothing started or "
@@ -181,6 +181,11 @@ def _run_local(
                 reason=f"force: {task_code} runs again under the ended run",
                 selector=options.selector,
             )
+            control = _standing_outcome(
+                conn, pipeline_id, pipeline_run_id, task_id, gate.clock.now()
+            )
+            if control is not None:
+                return control
         decisions: tuple[trackers.GateDecision, ...] = ()
         if not options.force:
             blocked, cross = preflight(
@@ -296,6 +301,9 @@ def _run_overridden(
             pipeline_run_id = runlog.select_run(conn, pipeline_id, selector).pipeline_run_id
         else:
             pipeline_run_id, _ = transitions.resolve_run(conn, pipeline_id, selector=selector)
+        control = _standing_outcome(conn, pipeline_id, pipeline_run_id, task_id, datetime.now(UTC))
+        if control is not None:
+            return control
         status = runlog.fetch_task_run_status(conn, task_id, pipeline_run_id)
         if override.rerun and status != RunStatus.IN_PROGRESS:
             pipeline_run_id, _ = transitions.resolve_run(
@@ -738,3 +746,20 @@ def spec_task_id(engine: Engine, spec: AttemptSpec) -> int:
             statement(conn, "control_task_context"), {"task_run_id": spec.task_run_id}
         ).one()
         return int(row.task_id)
+
+
+def _standing_outcome(
+    conn: Connection, pipeline_id: int, run_id: int, task_id: int, now: datetime
+) -> TaskOutcome | None:
+    """Keep dependency overrides from implicitly removing a standing task pause."""
+    from etl_craft.engine import standing_pauses
+
+    pause, holds = standing_pauses.at_task(conn, pipeline_id, run_id, task_id, now)
+    if pause is None:
+        return None
+    if holds:
+        standing_pauses.hold(conn, pause, run_id)
+        return _skipped(pause.describe(), waiting=True)
+    standing_pauses.apply(conn, pause, run_id)
+    assert pause.outcome is not None
+    return TaskOutcome(pause.outcome, pause.describe())
