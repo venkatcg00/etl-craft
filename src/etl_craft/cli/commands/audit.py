@@ -34,6 +34,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     assert isinstance(done, AuditView)
 
     def render_text() -> None:
+        for resume in done.resumes:
+            out.line(
+                f"{resume.pipeline_code}: resumed by {resume.actor} at {resume.resumed_at}: "
+                f"{resume.reason}"
+            )
         out.rows([("AT", "ACTOR", "KIND", "COMMAND", "OUTCOME", "ARGUMENTS")])
         out.rows(
             (row.at, row.actor, row.kind, row.command, row.outcome, json.dumps(row.arguments))

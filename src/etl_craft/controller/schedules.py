@@ -4,21 +4,19 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from datetime import UTC, datetime, time, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy.engine import Engine, RowMapping
+from sqlalchemy.engine import Engine
 
 from etl_craft.controller.catalog import CatalogSchedule
 from etl_craft.core.actor import acting_as, current_actor
-from etl_craft.core.cron import next_after, timezone
+from etl_craft.core.cron import next_after
 from etl_craft.core.enums import InterventionAction, RunStatus, TriggerKind, YesNo
-from etl_craft.core.errors import MetadataError
-from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.run_creation import RunCreation, create
-from etl_craft.engine.runlog import as_date
+from etl_craft.engine.schedule_ticks import cursor as schedule_cursor
 from etl_craft.services.operations import OperationContext
 
 
@@ -41,17 +39,20 @@ class Schedules:
             rows = conn.execute(
                 statement(conn, "controller_schedules"),
                 {
+                    "pipeline_id": None,
                     "refresh_required": bool(
                         ctx.engine.get_execution_options().get("refresh_required")
-                    )
+                    ),
                 },
             ).all()
         active = {r.pipeline_id for r in rows if r.run_schedule is not None}
         self.deadlines = {p: v for p, v in self.deadlines.items() if p in active}
+        with ctx.engine.connect() as conn:
+            paused = set(conn.execute(statement(conn, "schedule_paused_ids")).scalars())
         for row in rows:
             if stop is not None and stop.is_set():
                 return
-            if row.run_schedule is None:
+            if row.run_schedule is None or row.pipeline_id in paused:
                 continue
             signature = (
                 row.run_schedule,
@@ -59,11 +60,12 @@ class Schedules:
                 row.project_timezone,
                 row.schedule_start_date,
                 row.last_run_key,
+                row.resumed_at,
             )
             cached = self.deadlines.get(row.pipeline_id)
             if cached is not None and cached[0] == signature and cached[1] > now:
                 continue
-            zone, cursor = _cursor(row._mapping, row.project_timezone, now)
+            zone, cursor = schedule_cursor(row._mapping, row.project_timezone, now)
             tick = next_after(row.run_schedule, cursor, zone)
             retained: deque[datetime] = deque()
             count = row.max_catchup_runs if row.catchup == YesNo.YES else 1
@@ -94,40 +96,6 @@ class Schedules:
                         else None,
                     )
             self.deadlines[row.pipeline_id] = (signature, tick)
-
-
-def _cursor(row: RowMapping, default_zone: str, now: datetime) -> tuple[ZoneInfo, datetime]:
-    """Validate the persisted schedule boundary before finding its next tick."""
-    try:
-        zone = timezone(
-            row["schedule_timezone"] if row["schedule_timezone"] is not None else default_zone
-        )
-        if row["schedule_start_date"] is not None:
-            start = as_date(row["schedule_start_date"])
-            cursor = datetime.combine(start, time(), zone).astimezone(UTC) - timedelta(
-                microseconds=1
-            )
-        else:
-            cursor = as_utc(row["create_date"]) if row["create_date"] is not None else now
-    except ValueError as error:
-        raise MetadataError(
-            f"{row['pipeline_code']}: SCHEDULE_START_DATE={row['schedule_start_date']!r}; "
-            "expected YYYY-MM-DD; correct the schedule"
-        ) from error
-    key = row["last_run_key"]
-    if key is not None:
-        problem = (
-            f"{row['pipeline_code']}: scheduled RUN_KEY={key!r}; "
-            "expected schedule:<UTC ISO instant>; repair the historical key"
-        )
-        try:
-            previous = datetime.fromisoformat(key.removeprefix("schedule:"))
-        except ValueError as error:
-            raise MetadataError(problem) from error
-        if previous.utcoffset() != timedelta(0) or not key.startswith("schedule:"):
-            raise MetadataError(problem)
-        cursor = max(cursor, previous)
-    return zone, cursor
 
 
 def _create_tick(

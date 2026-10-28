@@ -31,7 +31,6 @@ from etl_craft.execution.interventions import (
     mark_task,
     pause_pipeline,
     record_stand_in_run,
-    resume_pipeline,
     skip_run,
 )
 from etl_craft.execution.pipeline import backfill, run_pipeline
@@ -707,6 +706,14 @@ def run_count(engine):
         return conn.execute(text("SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG")).scalar_one()
 
 
+def resume_operation(engine, config, reason):
+    return invoke(
+        OperationContext(engine, config, Actor(WHO, ActorKind.USER), role=ApiRole.ADMIN),
+        ActionName.CONTROL,
+        ControlRequest(pipeline_code="P", action=ControlAction.RESUME, reason=reason),
+    ).message
+
+
 def test_a_paused_pipeline_starts_nothing_until_resumed(config, pipeline):
     engine, _ = pipeline
     message = pause_pipeline(engine, config, "P", "source is down", requested_by=WHO)
@@ -724,11 +731,9 @@ def test_a_paused_pipeline_starts_nothing_until_resumed(config, pipeline):
     assert "nothing started or recorded" in rerun.message
     assert run_count(engine) == 0
 
-    assert resume_pipeline(engine, config, "P", "source is back", requested_by=WHO) == (
-        "P: resumed"
-    )
-    with pytest.raises(RunStateError, match="P is not paused"):
-        resume_pipeline(engine, config, "P", "again", requested_by=WHO)
+    assert resume_operation(engine, config, "source is back") == ("P: resumed")
+    with pytest.raises(RunStateError, match="P: not paused"):
+        resume_operation(engine, config, "again")
     assert run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id is not None
     with engine.connect() as conn:
         row = conn.execute(
@@ -783,7 +788,7 @@ def test_a_run_paused_while_it_runs_stops_starting_tasks_and_goes_on_once_resume
     assert statuses(engine, held.pipeline_run_id) == {"extract": ("SUCCESS", 1)}
     assert run_status(engine, held.pipeline_run_id) == "IN-PROGRESS"
 
-    assert "goes on with" in resume_pipeline(engine, config, "P", "go", requested_by=WHO)
+    assert "goes on with" in resume_operation(engine, config, "go")
     done = run_pipeline(engine, config, "P", child=CHILD)
     assert (done.status, done.pipeline_run_id) == (RunStatus.SUCCESS, held.pipeline_run_id)
     assert statuses(engine, held.pipeline_run_id)["transform"] == ("SUCCESS", 9)

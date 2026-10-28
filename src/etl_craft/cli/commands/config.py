@@ -76,6 +76,8 @@ def _render(out: Output, done: ConfigSync, verb: str) -> None:
             out.line(f"    {grant.principal} tag={grant.tag!r} {grant.permission}: {match}")
         if access.policy_change is not None:
             out.line(f"    {access.policy_change}")
+    for pause in done.task_pauses:
+        out.line(pause.describe())
     for finding in done.findings:
         out.line(f"[{finding.status.value:<4}] {finding.where}: {finding.message}")
     for checked in done.refreshes:

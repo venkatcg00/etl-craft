@@ -331,41 +331,17 @@ def pause_pipeline(
     return message
 
 
-def resume_pipeline(
-    engine: Engine,
-    config: ConnectorConfig,
-    pipeline_code: str,
-    reason: str,
-    *,
-    requested_by: str | None = None,
-) -> str:
-    """Resume a paused ``pipeline_code``; return what was done, in one line.
-
-    Raises ``RunStateError`` when it is not paused.
-    """
-    _check(config, "resume", reason, None, None)
-    who = requested_by or current_actor().name
-    with engine.begin() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        if not pauses.close_pause(conn, pipeline_id, who, reason):
-            raise RunStateError(f"{pipeline_code} is not paused")
-        active = runlog.fetch_active_pipeline_run_id(conn, pipeline_id)
-    message = f"{pipeline_code}: resumed"
-    if active is not None:
-        message += (
-            f"; `etl-craft run --pipeline-code {pipeline_code}` goes on with "
-            f"pipeline_run_id={active}"
-        )
-    logger.warning("%s (by %s: %s)", message, who, reason)
-    return message
-
-
 def open_pause(
-    engine: Engine, pipeline_code: str, *, selector: runlog.RunSelector | None = None
+    engine: Engine,
+    pipeline_code: str,
+    *,
+    selector: runlog.RunSelector | None = None,
+    pipeline_id: int | None = None,
 ) -> pauses.Pause | None:
     """Return the open pause of ``pipeline_code``, or ``None`` when it is not paused."""
     with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        if pipeline_id is None:
+            pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         pause = pauses.fetch_open_pause(conn, pipeline_id)
         if (
             pause is not None

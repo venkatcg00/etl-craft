@@ -9,7 +9,8 @@ from typing import Any, ClassVar
 
 from etl_craft.core.enums import AttemptStatus, FailureClass, RunStatus, SlaStatus, TriggerKind
 from etl_craft.engine.repository.intervention_rows import Intervention
-from etl_craft.engine.repository.pauses import Pause
+from etl_craft.engine.repository.pauses import Pause, Resume
+from etl_craft.engine.standing_pauses import TaskPause
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,8 @@ class TaskRunView:
     child_run_ids: tuple[int, ...] = ()
     item_progress: str | None = None
 
+    standing_pause: TaskPause | None = None
+
 
 @dataclass(frozen=True)
 class PipelineView:
@@ -132,6 +135,8 @@ class PipelineView:
     sla_in_hours: float | None
     paused: Pause | None
     tags: tuple[str, ...] = ()
+    task_pauses: tuple[TaskPause, ...] = ()
+    resumes: tuple[Resume, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,8 @@ class GraphView:
     conditional: tuple[str, ...]
     depends_on: Mapping[str, tuple[tuple[str, str], ...]]
     pipeline_dependencies: tuple[tuple[str, str], ...]
+
+    task_pauses: tuple[TaskPause, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -280,6 +287,7 @@ class AuditView:
     SCHEMA: ClassVar[str] = "etl-craft/audit/1"
     actions: tuple[ActionView, ...]
     changes: tuple[MetadataChangeView, ...]
+    resumes: tuple[Resume, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -328,3 +328,9 @@ projects remain `CUSTOM`/`STRICT`. For optional development testing, an admin ca
 `etl-craft project set --project default --environment-type DEV --governance RELAXED --reason "Development testing"`
 with the actual configured project code. RELAXED permits empty intervention reasons; direct SQL
 config edits require PostgreSQL. SQLite users keep using config files or commands.
+
+Standing task controls are operational state, outside config and refresh. Use `pause` with a
+pipeline and task code to hold it, optionally `--outcome SUCCESS|FAILED|SKIPPED` and an
+`--expires-at` timestamp with an offset. Replacement requires `--replace`; task `resume`
+removes both the pause and outcome and creates no runs. A scheduled pipeline `resume` requires
+`--then run-now|catch-up|wait`. See the run-control guide for admission and expiry semantics.

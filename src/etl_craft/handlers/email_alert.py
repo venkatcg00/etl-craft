@@ -93,6 +93,17 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     state = task_store(context, engine_db).alert(params.get("EMAIL_PIPELINES"))
     statuses, sla, watched = state.statuses, state.sla, state.watched
     outcome = run_outcome(statuses, exclude_task_id=context.task_id, sla_missed=sla is not None)
+    failures = [
+        s for s in statuses if s.handler != Handler.EMAIL_ALERT and s.status == RunStatus.FAILED
+    ]
+    if failures and all(s.standing_pause_id is not None for s in failures):
+        return HandlerResult(
+            variables={
+                "RUN_STATUS": outcome,
+                "EMAIL_SENT": "false",
+                "REASON": "failed by standing pause; no failure alert",
+            }
+        )
     if wanted is not None and outcome not in wanted:
         return HandlerResult(
             variables={

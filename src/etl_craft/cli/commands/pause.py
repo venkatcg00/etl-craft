@@ -1,8 +1,11 @@
-"""Pause and resume a pipeline definition: its schedule and new runs."""
+"""Pause and resume pipeline definitions or standing task controls."""
 
 from __future__ import annotations
 
 import argparse
+import sys
+from dataclasses import replace
+from datetime import datetime
 from functools import partial
 
 from etl_craft.cli.commands.common import (
@@ -14,15 +17,22 @@ from etl_craft.cli.commands.common import (
 )
 from etl_craft.cli.commands.control_requests import render_bulk
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import ActionName, ControlAction
+from etl_craft.core.enums import (
+    MARKABLE_STATUSES,
+    ActionName,
+    ControlAction,
+    ResumeChoice,
+    enum_value,
+)
 from etl_craft.core.errors import ExitCode, UsageError
+from etl_craft.engine.controls import ControlView
 from etl_craft.services.operations.controls import BulkControlView, BulkOutcome
-from etl_craft.services.operations.models import PipelineListView
+from etl_craft.services.operations.models import OperationResult, PipelineListView
 from etl_craft.services.operations.requests import BulkControlRequest, ControlRequest, TagFilter
 
 HELP = {
-    ControlAction.PAUSE: "Pause a pipeline definition: no scheduled or new runs until resumed.",
-    ControlAction.RESUME: "Resume a paused pipeline definition.",
+    ControlAction.PAUSE: "Pause a pipeline or task across runs; optionally set a task outcome.",
+    ControlAction.RESUME: "Resume a pipeline or task; scheduled pipelines need --then.",
 }
 
 
@@ -30,6 +40,27 @@ def _configure(parser: argparse.ArgumentParser, *, action: ControlAction) -> Non
     configure_output(parser)
     verb = action.lower()
     parser.add_argument("--pipeline-code", help=f"The pipeline to {verb}.")
+    parser.add_argument("--task-code", help="Standing pause of this task across runs.")
+    parser.add_argument(
+        "--then", choices=tuple(ResumeChoice), help="Scheduled pipeline resume choice."
+    )
+    if action == ControlAction.PAUSE:
+        parser.add_argument(
+            "--outcome",
+            choices=MARKABLE_STATUSES,
+            help="Supply this outcome instead of running the task; omit to hold.",
+        )
+        parser.add_argument(
+            "--expires-at",
+            type=datetime.fromisoformat,
+            metavar="TIMESTAMP",
+            help="Future ISO-8601 timestamp with an offset; omit for no expiry.",
+        )
+        parser.add_argument(
+            "--replace",
+            action="store_true",
+            help="Atomically replace an existing task pause; no unpaused window.",
+        )
     configure_tags(parser)
     parser.add_argument(
         "--yes", action="store_true", help="Confirm the printed pipeline selection."
@@ -52,7 +83,7 @@ def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int
                 "review the printed pipelines and repeat with --yes"
             )
         requests = tuple(
-            ControlRequest(pipeline_code=code, action=action, reason=args.reason) for code in codes
+            request_from(args, ControlRequest, pipeline_code=code, action=action) for code in codes
         )
         outcomes: list[BulkOutcome] = []
         for start in range(0, len(requests), 100):
@@ -62,7 +93,15 @@ def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int
                 BulkControlRequest(requests=requests[start : start + 100]),
             )
             assert isinstance(batch, BulkControlView)
-            outcomes.extend(batch.outcomes)
+            for request, outcome in zip(requests[start : start + 100], batch.outcomes, strict=True):
+                if (
+                    outcome.error
+                    and "scheduled resume requires" in outcome.error
+                    and request.then is None
+                    and sys.stdin.isatty()
+                ):
+                    outcome = replace(outcome, control=_single(args, out, request), error=None)
+                outcomes.append(outcome)
         failures = sum(outcome.error is not None for outcome in outcomes)
         batch_result = BulkControlView(
             tuple(outcomes), f"{len(outcomes) - failures} accepted; {failures} refused"
@@ -71,9 +110,46 @@ def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int
         return ExitCode.FAILURE if any(o.error for o in batch_result.outcomes) else ExitCode.SUCCESS
     if args.pipeline_code is None:
         raise UsageError("give --pipeline-code or --tag to choose pipelines")
-    done = call(args, ActionName.CONTROL, request_from(args, ControlRequest, action=action))
+    done = _single(args, out, request_from(args, ControlRequest, action=action))
     out.result(done, args.output_format)
     return ExitCode.SUCCESS
+
+
+def _single(
+    args: argparse.Namespace, out: Output, request: ControlRequest
+) -> ControlView | OperationResult:
+    """Ask only after the shared operation has refused and supplied the missed-tick plan."""
+    try:
+        done = call(args, ActionName.CONTROL, request)
+    except UsageError as error:
+        if not (
+            request.action == ControlAction.RESUME
+            and request.then is None
+            and request.task_code is None
+            and sys.stdin.isatty()
+            and "scheduled resume requires" in str(error)
+        ):
+            raise
+        preview = Output(stdout=out.stderr) if args.output_format == "json" else out
+        preview.line(str(error))
+        preview.line("Resume then (run-now/catch-up/wait):")
+        answer = input().strip()
+        done = call(
+            args,
+            ActionName.CONTROL,
+            replace(
+                request,
+                then=enum_value(
+                    ResumeChoice,
+                    answer,
+                    UsageError(
+                        f"--then={answer!r}; expected run-now, catch-up or wait; choose one"
+                    ),
+                ),
+            ),
+        )
+    assert isinstance(done, (ControlView, OperationResult))
+    return done
 
 
 def command(action: ControlAction) -> Command:

@@ -17,6 +17,12 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Standing task pauses optionally supply SUCCESS, FAILED or SKIPPED without running the task.
+  Explicit replacement and optional offset-aware expiry preserve version history. Earlier
+  admissions never inherit a later outcome; task resume releases holds without creating runs.
+- **Breaking / upgrade:** scheduled pipeline resume now requires `--then run-now|catch-up|wait`
+  in scripts and API calls. Interactive CLI users are prompted. Unscheduled pipelines and task
+  resumes refuse `--then`. Update scheduled resume automation before upgrading.
 - Pipeline refresh records validation findings and immutable metadata/bundles. New runs use the
   last passing version; pipelines with no passing version cannot start. Config apply refreshes
   committed changes, and PostgreSQL direct edits trigger controller refreshes. Unchanged refreshes
@@ -39,6 +45,8 @@ All notable changes are recorded here. The format follows
 
 ### Upgrade notes
 
+- Scheduled resume automation must pass `--then run-now|catch-up|wait`. Task resume creates
+  no runs and refuses this flag.
 - Managed SQL task SELECTs must now parse with sqlglot in the project's warehouse dialect.
   Validate and refresh fail with the file, line, column, dialect and parser message. Fix the
   SQL or move unsupported vendor syntax to SQL_SCRIPT. Upgrade refresh lists failures and

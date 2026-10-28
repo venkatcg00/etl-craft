@@ -119,7 +119,15 @@ class ControlAction(StrEnum):
 
 
 DEFINITION_CONTROLS = frozenset({ControlAction.PAUSE, ControlAction.RESUME})
-"""Controls of a pipeline definition rather than of one run; they are never stored as requests."""
+"""Controls across runs rather than of one run; they are never stored as run requests."""
+
+
+class ResumeChoice(StrEnum):
+    """What new work a scheduled pipeline resume creates."""
+
+    RUN_NOW = "run-now"
+    CATCH_UP = "catch-up"
+    WAIT = "wait"
 
 
 class ControlStatus(StrEnum):
@@ -370,6 +378,8 @@ class InterventionAction(StrEnum):
     RESET = "RESET"
     GATE_BYPASS = "GATE_BYPASS"
     IGNORE_DEPENDENCIES = "IGNORE_DEPENDENCIES"
+    PAUSE_ADMISSION = "PAUSE_ADMISSION"
+    PAUSE_APPLIED = "PAUSE_APPLIED"
     RERUN = "RERUN"
 
 

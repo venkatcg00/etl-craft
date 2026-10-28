@@ -225,7 +225,7 @@ same services and preserve the authenticated actor.
 
 ```bash
 etl-craft pause --pipeline-code SALES_DAILY --reason "the CRM is being migrated this week"
-etl-craft resume --pipeline-code SALES_DAILY --reason "the migration is done"
+etl-craft resume --pipeline-code SALES_DAILY --then wait --reason "the migration is done"
 ```
 
 While a pipeline is paused, `etl-craft run` starts nothing of it (whole runs, single tasks and
@@ -455,3 +455,49 @@ The API first reads `/api/v1/pipelines?tag=team:sales&tag=tier:gold`, then posts
 `/api/v1/controls/bulk`. Definition controls need no run id or request key. Run and task controls
 still need their explicit run identity and unique request key. The audit records a `control`
 request for each code; editing tags later cannot change that selection.
+
+## Standing task pauses
+
+A task pause applies across runs without changing config or requiring a refresh. Other branches
+continue. With no outcome the task waits; an optional `SUCCESS`, `FAILED` or `SKIPPED` replaces
+execution. Reasons are required in STRICT projects and optional in RELAXED projects.
+
+```bash
+etl-craft pause --pipeline-code SALES_DAILY --task-code load --reason "source maintenance"
+etl-craft pause --pipeline-code SALES_DAILY --task-code load --replace --outcome SKIPPED \
+  --expires-at 2026-12-01T12:00:00+00:00 --reason "skip during maintenance"
+etl-craft resume --pipeline-code SALES_DAILY --task-code load --reason "source restored"
+```
+
+Expiry must be a future ISO-8601 timestamp with an offset; durations and timestamps without
+an offset are refused. Expiry acts as unpause when a task is reached, without modifying history.
+A repeated pause is refused unless `--replace` is given. Replacement closes the old version
+and opens the new one in one transaction, with no unpaused window. Resume removes both the
+pause and its outcome and creates no runs. Tasks have no schedule ticks, so task resume refuses
+`--then`.
+
+A run admitted before a pause or before a replacement never inherits the later outcome: it
+waits at that task until unpaused, then executes normally. Runs admitted while a pause is in
+force record its version and use that version's outcome. An outcome of FAILED creates no
+attempt, retry or failure alert. A supplied SUCCESS writes no rows, satisfies no HAS_DATA gate
+and publishes no fresh output revision to consumers. History records the applied pause id.
+Status, explain, the metadata and graph reads, and config plan/apply show the control's actor,
+reason, outcome and expiry. For example:
+
+```text
+load: standing pause 12: actor=operator, outcome=SKIPPED, expiry=until resume, reason='maintenance'
+```
+
+## Choosing work after pipeline resume
+
+Scheduled pipeline resume requires `--then run-now|catch-up|wait`:
+
+- `run-now` queues one immediate run.
+- `catch-up` queues missed ticks retained by CATCHUP and MAX_CATCHUP_RUNS.
+- `wait` creates nothing until the next scheduled tick.
+
+An interactive CLI shows the retained ticks and asks for a choice. The API and non-interactive
+CLI refuse an omitted choice. Unscheduled pipeline resume needs no choice and refuses `--then`.
+Already-running work and independent run/task holds are preserved. The resume history records
+the actor, reason, choice and created run ids; a controller restart preserves the next-tick
+boundary. Bulk resume uses the same operation for each selected pipeline.

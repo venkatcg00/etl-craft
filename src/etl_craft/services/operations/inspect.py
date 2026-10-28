@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator, Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean
 
@@ -77,8 +78,11 @@ from etl_craft.services.operations.snapshots import (
 
 def list_pipelines(ctx: OperationContext, request: TagFilter) -> PipelineListView:
     """List the active definitions."""
+    from etl_craft.engine.standing_pauses import current
+
     with read_snapshot(ctx.engine) as conn:
         pauses = fetch_open_pauses(conn)
+        task_pauses = tuple(p for p in current(conn, None) if p.active(datetime.now(UTC)))
         access = pipeline_access(conn, ctx)
         views = []
         for row in conn.execute(statement(conn, "active_pipelines")):
@@ -98,6 +102,7 @@ def list_pipelines(ctx: OperationContext, request: TagFilter) -> PipelineListVie
                     None if row.sla_in_hours is None else float(row.sla_in_hours),
                     pause,
                     tags,
+                    tuple(p for p in task_pauses if p.pipeline_id == row.pipeline_id),
                 )
             )
         return PipelineListView(tuple(views))
@@ -137,6 +142,7 @@ def pipeline_graph(ctx: OperationContext, request: PipelineInput) -> GraphView:
                 (edge.depends_on_pipeline_code, edge.dependency_type)
                 for edge in fetch_pipeline_dependency_edges(conn, pipeline_id)
             ),
+            pipeline_view(conn, pipeline_id).task_pauses,
         )
 
 
@@ -261,6 +267,8 @@ def _pipeline_history(ctx: OperationContext, request: HistoryInput) -> HistoryVi
 
 def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
     """Read completed requests and immutable metadata captures without making an action."""
+    from etl_craft.engine.repository.pauses import resumes
+
     pipeline_code = request.pipeline_code
     since = None if request.since is None else as_utc(request.since)
     with read_snapshot(ctx.engine) as conn:
@@ -284,6 +292,9 @@ def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
         return AuditView(
             tuple(ActionView(**row) for row in actions),
             tuple(MetadataChangeView(**row) for row in changes),
+            tuple(
+                r for r in resumes(conn, pipeline_id, since) if ids is None or r.pipeline_id in ids
+            ),
         )
 
 

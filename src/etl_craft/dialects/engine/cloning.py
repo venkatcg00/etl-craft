@@ -88,16 +88,17 @@ def _sqlite_stamp(conn: Connection, table: str, keys: list[str], columns: list[s
     ).all()
     for guard in guards:
         header, separator, body = guard.sql.partition("BEGIN")
-        if (
-            "BEFORE UPDATE" not in header.upper()
-            or "NEW.UPDATED_AT IS NOT OLD.UPDATED_AT" in header
-        ):
+        if "BEFORE UPDATE" not in header.upper():
             continue
-        prefix, when, condition = header.partition("WHEN")
-        header = prefix + " WHEN "
-        if when:
-            header += f"({condition.strip()}) AND "
-        header += f"NOT ({stamp}) "
+        stamp_start = header.find("NOT (etl_craft_actor() IS NOT NULL AND NEW.UPDATED_AT")
+        if stamp_start >= 0:
+            header = header[:stamp_start] + f"NOT ({stamp}) "
+        else:
+            prefix, when, condition = header.partition("WHEN")
+            header = prefix + " WHEN "
+            if when:
+                header += f"({condition.strip()}) AND "
+            header += f"NOT ({stamp}) "
         conn.exec_driver_sql(f"DROP TRIGGER {quote(guard.name)}")
         conn.exec_driver_sql(header + separator + body)
     where = " AND ".join(f"{quote(k)} IS NEW.{quote(k)}" for k in keys)

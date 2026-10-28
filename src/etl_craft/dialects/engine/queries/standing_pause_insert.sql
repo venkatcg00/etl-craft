@@ -1,0 +1,4 @@
+INSERT INTO AUD_PIPELINE_PAUSES
+(PIPELINE_ID,TASK_ID,OUTCOME,EXPIRES_AT,PAUSED_AT,PAUSED_BY,PAUSED_BY_KIND,REASON)
+VALUES (:pipeline_id,:task_id,:outcome,:expires_at,:now,:actor,:actor_kind,:reason)
+RETURNING PIPELINE_PAUSE_ID AS pause_id

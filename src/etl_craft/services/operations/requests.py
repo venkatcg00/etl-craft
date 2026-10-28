@@ -15,6 +15,7 @@ from etl_craft.core.enums import (
     MARKABLE_STATUSES,
     ControlAction,
     LineageDirection,
+    ResumeChoice,
     RunStatus,
 )
 from etl_craft.core.errors import UsageError
@@ -446,11 +447,35 @@ class ControlRequest(RunSelection):
     task_code: str | None = None
     request_key: str | None = None
 
+    outcome: RunStatus | None = None
+    expires_at: datetime | None = None
+    replace: bool = False
+    then: ResumeChoice | None = None
+
     def __post_init__(self) -> None:
         """Validate the action boundary before changing any admission or attempt state."""
         super().__post_init__()
         object.__setattr__(self, "reason", reason_text(self.reason))
         optional_text("task_code", self.task_code)
+        if self.then is not None and self.then not in tuple(ResumeChoice):
+            raise UsageError(
+                f"`then`={self.then!r}; expected run-now, catch-up or wait; choose one"
+            )
+        if self.outcome is not None and self.outcome not in MARKABLE_STATUSES:
+            raise UsageError(f"`outcome`={self.outcome!r}; expected SUCCESS, FAILED or SKIPPED")
+        if self.expires_at is not None and self.expires_at.utcoffset() is None:
+            raise UsageError(
+                f"`expires_at`={self.expires_at.isoformat()!r}; expected ISO-8601 with a timezone "
+                "offset, for example 2026-12-01T12:00:00+00:00; supply an offset"
+            )
+        if self.action != ControlAction.PAUSE and (
+            self.outcome is not None or self.expires_at is not None or self.replace
+        ):
+            raise UsageError("outcome, expires_at and replace apply only to pause; omit them")
+        if self.task_code is None and (
+            self.outcome is not None or self.expires_at is not None or self.replace
+        ):
+            raise UsageError("outcome, expires_at and replace need task_code; name the task")
         if self.request_key is not None:
             require_text("request_key", self.request_key, limit=128)
 
@@ -469,14 +494,9 @@ class BulkControlRequest(Request):
             )
         for request in self.requests:
             if request.action in DEFINITION_CONTROLS:
-                if (
-                    request.run_id is not None
-                    or request.run_key is not None
-                    or request.task_code is not None
-                ):
+                if request.run_id is not None or request.run_key is not None:
                     raise UsageError(
-                        "definition controls name only `pipeline_code`; "
-                        "omit run and task identities"
+                        "definition controls name a pipeline or task; omit run identities"
                     )
                 continue
             if request.request_key is None or (request.run_id is None and request.run_key is None):

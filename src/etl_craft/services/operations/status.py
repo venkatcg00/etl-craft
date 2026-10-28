@@ -20,7 +20,7 @@ from etl_craft.core.enums import (
 )
 from etl_craft.core.graph import DependencyGraph, RunState, TaskRunState, build_graph
 from etl_craft.core.time import as_utc, elapsed_seconds
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, standing_pauses
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
@@ -31,6 +31,7 @@ from etl_craft.engine.repository.dependencies import (
 )
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id, tagged_pipelines
 from etl_craft.engine.repository.tasks import resolve_task_id
+from etl_craft.engine.standing_pauses import TaskPause
 from etl_craft.execution.gates import judge, satisfies
 from etl_craft.execution.readiness import BACKFILL_ASSUMED
 from etl_craft.services.operations.agents import AgentsView, list_agents
@@ -92,6 +93,7 @@ class TaskSnapshot:
     unsatisfiable: bool
     now: datetime
     blocked_by_failure: bool = False
+    standing_pause: TaskPause | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,7 @@ class Explanation:
     state: str
     next_action: str
     dependents: tuple[str, ...] = ()
+    standing_pause: TaskPause | None = None
 
 
 def explain(snapshot: TaskSnapshot) -> Explanation:
@@ -124,8 +127,13 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
     met = len(snapshot.dependencies) - len(unmet)
     if task is not None and task.status in {RunStatus.SUCCESS, RunStatus.SKIPPED}:
         state, action = task.status.lower(), "No work is needed; this task is already settled."
-    elif snapshot.pipeline.paused is not None:
-        state, action = "paused", "Resume the pipeline before starting this task."
+    elif snapshot.pipeline.paused is not None or snapshot.standing_pause is not None:
+        state = "paused"
+        action = (
+            "Resume the pipeline before starting this task."
+            if snapshot.pipeline.paused
+            else "Resume the task pause before starting this task; inspect its admitted version."
+        )
     elif retry_at is not None:
         state = "retry scheduled"
         action = f"The supervisor can claim the retry at {retry_at.isoformat()}."
@@ -178,6 +186,7 @@ def explain(snapshot: TaskSnapshot) -> Explanation:
         retry_at,
         state,
         action,
+        standing_pause=snapshot.standing_pause,
     )
 
 
@@ -292,6 +301,7 @@ def _admitted_snapshots(
     now = datetime.now(UTC)
     pipeline_dependencies = _pipeline_dependencies(conn, pipeline_id, run, policy, decisions, now)
     snapshots = []
+    effects = standing_pauses.effects(conn, pipeline_id, run_id, now)
     for definition in definitions:
         if task_code is not None and definition.task_code != task_code:
             continue
@@ -301,6 +311,7 @@ def _admitted_snapshots(
         dependencies = _dependencies(
             conn, graph, state, codes, definition.task_id, task, decisions, policy, run.backfill
         )
+        control, held = effects.get(definition.task_id, (None, False))
         snapshots.append(
             TaskSnapshot(
                 pipeline,
@@ -316,6 +327,7 @@ def _admitted_snapshots(
                 definition.task_id in impossible,
                 now,
                 definition.task_id in failed_blocks,
+                replace(control, outcome=None) if control is not None and held else control,
             )
         )
     return snapshots

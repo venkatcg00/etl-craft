@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from etl_craft.core.actor import Actor, sso_groups
 from etl_craft.core.enums import RunStatus, TriggerKind, YesNo
 from etl_craft.core.errors import ConfigurationError, RunStateError, StaleTransitionError
-from etl_craft.engine import runlog
+from etl_craft.engine import runlog, standing_pauses
 from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
 from etl_craft.engine.refreshes import admitted
@@ -37,24 +37,14 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
         options.run_key,
         options.status,
     )
-    if status not in {RunStatus.IN_PROGRESS, RunStatus.QUEUED, RunStatus.SKIPPED} or (
-        status == RunStatus.SKIPPED and trigger_kind != TriggerKind.SCHEDULE
-    ):
-        raise RunStateError(
-            f"pipeline_id={pipeline_id}: initial status={status!r}; "
-            "only schedules may start SKIPPED"
-        )
-    if trigger_kind not in set(TriggerKind):
-        raise RunStateError(
-            f"pipeline_id={pipeline_id}: invalid trigger_kind={trigger_kind!r}; "
-            "use SCHEDULE, MANUAL, BACKFILL, ORCHESTRATOR or STAND_IN"
-        )
+    _validate(pipeline_id, status, trigger_kind)
     refresh = (
         admitted(conn, pipeline_id)
         if conn.engine.get_execution_options().get("refresh_required")
         and status != RunStatus.SKIPPED
         else None
     )
+    standing_pauses.lock(conn, pipeline_id)
     key = run_key or f"{trigger_kind.lower().replace('_', '-')}:{uuid4()}"
     try:
         with conn.begin_nested():
@@ -88,6 +78,8 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
                     f"bundle is published; "
                     "expected an admitted project bundle; run `etl-craft bundle publish` first"
                 )
+            if status != RunStatus.SKIPPED:
+                standing_pauses.pin(conn, pipeline_id, int(run_id), actor)
             if status == RunStatus.SKIPPED:
                 lifecycle(conn, "run", int(run_id), status)
             elif status == RunStatus.IN_PROGRESS:
@@ -106,3 +98,19 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
             f"pipeline_id={pipeline_id}, run_key={key!r}: expected no active run and a new key, "
             f"owner=None; found {state}. Check run history before retrying."
         ) from error
+
+
+def _validate(pipeline_id: int, status: str, trigger_kind: str) -> None:
+    """Refuse invalid initial identities before taking admission locks."""
+    if status not in {RunStatus.IN_PROGRESS, RunStatus.QUEUED, RunStatus.SKIPPED} or (
+        status == RunStatus.SKIPPED and trigger_kind != TriggerKind.SCHEDULE
+    ):
+        raise RunStateError(
+            f"pipeline_id={pipeline_id}: initial status={status!r}; "
+            "only schedules may start SKIPPED"
+        )
+    if trigger_kind not in set(TriggerKind):
+        raise RunStateError(
+            f"pipeline_id={pipeline_id}: invalid trigger_kind={trigger_kind!r}; "
+            "use SCHEDULE, MANUAL, BACKFILL, ORCHESTRATOR or STAND_IN"
+        )

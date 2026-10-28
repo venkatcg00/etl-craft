@@ -38,6 +38,7 @@ INTEGER_NAMES = frozenset(
 )
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
+    "lock_key": 8241012,
     "batch_id": "batch",
     "body": "{}",
     "destination": "destination",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean
 from sqlalchemy.engine import Connection, RowMapping
@@ -35,6 +35,9 @@ def timestamp(value: object) -> datetime | None:
 
 def pipeline_view(conn: Connection, pipeline_id: int) -> PipelineView:
     """Read one definition and its pause within the caller's snapshot."""
+    from etl_craft.engine.repository.pauses import resumes
+    from etl_craft.engine.standing_pauses import current
+
     detail = fetch_pipeline_detail(conn, pipeline_id)
     pause = fetch_open_pause(conn, pipeline_id)
     if pause is not None:
@@ -50,6 +53,8 @@ def pipeline_view(conn: Connection, pipeline_id: int) -> PipelineView:
         detail.sla_in_hours,
         pause,
         tuple(detail.tags or ()),
+        tuple(p for p in current(conn, pipeline_id) if p.active(datetime.now(UTC))),
+        resumes(conn, pipeline_id)[:1],
     )
 
 
@@ -127,6 +132,8 @@ def task_run_view(
 
 def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
     """Convert a task summary and its attempts into one public document."""
+    from etl_craft.engine.standing_pauses import applied
+
     values = dict(row)
     has_items = values.pop("has_items", False)
     item_progress = None
@@ -151,6 +158,7 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
     ]
     return TaskRunView(
         **values,
+        standing_pause=applied(conn, row.pipeline_run_id, row.task_id),
         attempts=tuple(attempts),
         item_progress=item_progress,
         child_run_ids=tuple(

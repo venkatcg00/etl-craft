@@ -91,6 +91,7 @@ EXPECTED = {
     enums.HttpMethod: {"GET", "POST"},
     enums.HttpScheme: {"http", "https"},
     enums.LineageDirection: {"BOTH", "UPSTREAM", "DOWNSTREAM"},
+    enums.ResumeChoice: {"run-now", "catch-up", "wait"},
     enums.ControlStatus: {"REQUESTED", "ACKNOWLEDGED", "COMPLETED"},
     enums.ControlAcknowledgement: {"PROCESS", "QUERIES"},
     enums.TriggerKind: {
@@ -151,6 +152,8 @@ EXPECTED = {
         "GATE_BYPASS",
         "IGNORE_DEPENDENCIES",
         "RERUN",
+        "PAUSE_ADMISSION",
+        "PAUSE_APPLIED",
     },
     enums.GatePolicy: {"ENFORCE", "WARN", "OFF"},
     enums.AgentStatus: {"ACTIVE", "DRAINING", "GONE"},

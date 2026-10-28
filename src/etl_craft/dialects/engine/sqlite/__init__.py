@@ -56,6 +56,9 @@ class SqliteEngineDialect(EngineDialect):
             return config.artifacts.store
         return (config.host_dir / ".etl-craft" / "artifacts").as_uri()
 
+    def standing_pause_lock(self, conn: Connection, key: int) -> None:
+        """BEGIN IMMEDIATE already serializes pause changes and admission."""
+
     def controller_lock_path(self, engine: Engine) -> str:
         """SQLite leadership needs one file shared by every local task process."""
         database = engine.url.database
