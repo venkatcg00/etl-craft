@@ -117,7 +117,10 @@ that damages the package is not helpful; saying so, with a better option, is.
   variable names, never values. Its directory is the project directory, holding `sql_scripts/`,
   `python_scripts/`, `config/`, `migrations/` and `logs/`; relative paths start there.
 - Every write to etl-craft's Engine DB tables goes through etl-craft and names its actor; the
-  Engine DB refuses any other. Extra team-owned `CFG_` tables are outside this rule: teams
+  Engine DB refuses any other, except direct SQL changes to project config rows in a
+  `RELAXED` PostgreSQL project, stamped `sql:<database user>` and recorded in typed history.
+  SQLite direct SQL edits are unsupported; database-file access is its trust boundary.
+  Admin tables, audit/history rows and hard deletes retain their guards. Extra team-owned `CFG_` tables are outside this rule: teams
   maintain them with their own scripts, without package guards, history or field requirements.
   `AUD_` stays reserved for etl-craft. Metadata edits use the project's config files
   (one CSV file per package-owned config table,

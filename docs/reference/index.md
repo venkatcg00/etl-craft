@@ -22,3 +22,11 @@ See [Project layout](../deploying/project-layout.md#several-projects-in-one-repo
 Audit hardening adds `token create --pool P` (required only for agent tokens), a default
 `--expires 365d`, and pool/last-used metadata in `token list`. Setup accepts
 `--admin-name N --password-stdin` only for first-admin provisioning; stdin must be a pipe.
+
+
+Project administration also supports `--environment-type DEV|SIT|UAT|PROD|SANDBOX|CUSTOM`,
+`--environment-name LABEL` and `--governance STRICT|RELAXED` on `project add|set`.
+`project list` includes these fields and an informational shared-warehouse indicator.
+Only deployment admins set them, with a non-empty `--reason`; `PROD` requires `STRICT`.
+Intervention `--reason` is checked by the selected project's governance policy, equally through
+CLI and API. See [environments and governance](../deploying/project-layout.md#environments-and-governance).

@@ -604,7 +604,14 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     claims = sso_groups.set(ctx.sso_group_ids)
     try:
         with using(None), selected_project(ctx.project_id), admitted(ctx, name, request):
-            result = call(project_settings(ctx, name, request), request)
+            from etl_craft.core.governance import using_policy
+            from etl_craft.services.operations.governance import project_policy
+
+            if name == ActionName.MIGRATE:
+                result = call(project_settings(ctx, name, request), request)
+            else:
+                with using_policy(project_policy(ctx, request)):
+                    result = call(project_settings(ctx, name, request), request)
             return (
                 visible_result(ctx, result)
                 if ACTIONS[name].scope == ActionScope.PIPELINE

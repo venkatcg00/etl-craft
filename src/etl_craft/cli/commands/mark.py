@@ -32,7 +32,7 @@ def _configure(parser: argparse.ArgumentParser) -> None:
         help="Reset a Python task's offset: a PARTITIONS JSON object (null removes a "
         "partition), or a value of the stored type.",
     )
-    parser.add_argument("--reason", required=True, help="Why; recorded with the change.")
+    parser.add_argument("--reason", default="", help="Why; recorded with the change.")
     parser.add_argument(
         "--rows",
         type=int,

@@ -430,9 +430,20 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
             **task,
             "key": {"id": 1},
             "values": {"name": "O'Connor"},
-            "reason": "verified spelling",
+            "reason": "",
         }
         assert client.post(path, json=body).status_code == 401
+        refused = client.post(path, json=body, headers=headers)
+        assert (
+            refused.status_code == 400 and "STRICT" in refused.text and "--reason" in refused.text
+        )
+        act(
+            ctx,
+            ActionName.PROJECT_SET,
+            project="default",
+            governance="RELAXED",
+            reason="development",
+        )
         response = client.post(path, json=body, headers=headers)
         assert response.status_code == 200, response.text
         assert response.json()["schema"] == "etl-craft/scd-values/1"
@@ -460,6 +471,7 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
         assert current(w)[0]["name"] == "O'Connor"
         assert current(w)[0].get("UPDATED_BY", current(w)[0].get("updated_by")) == "alice"
         assert client.post(path, json={**body, "unknown": True}, headers=headers).status_code == 400
+        act(ctx, ActionName.PROJECT_SET, project="default", governance="STRICT", reason="restore")
         act(ctx, ActionName.ACCOUNT_SET_ROLE, name="alice", role=ApiRole.OPERATOR)
         assert client.post(path, json=body, headers=headers).status_code == 403
         denied = client.post(
@@ -473,8 +485,21 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
             == 200
         )
         act(ctx, ActionName.ACCOUNT_SET_ROLE, name="alice", role=ApiRole.ADMIN)
+        refused = client.post(
+            path + "/unlock", json={**task, "key": {"id": 1}, "reason": ""}, headers=headers
+        )
+        assert (
+            refused.status_code == 400 and "STRICT" in refused.text and "--reason" in refused.text
+        )
+        act(
+            ctx,
+            ActionName.PROJECT_SET,
+            project="default",
+            governance="RELAXED",
+            reason="development",
+        )
         response = client.post(
-            path + "/unlock", json={**task, "key": {"id": 1}, "reason": "release"}, headers=headers
+            path + "/unlock", json={**task, "key": {"id": 1}, "reason": ""}, headers=headers
         )
         assert response.status_code == 200, response.text
         w.run("load", **params)

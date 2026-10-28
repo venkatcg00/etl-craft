@@ -45,7 +45,7 @@ def _configure(parser: argparse.ArgumentParser, *, action: ControlAction) -> Non
     )
     parser.add_argument("--task-code", help="Only this task under the selected run.")
     parser.add_argument("--request-key", help="Idempotency key for this exact action and scope.")
-    parser.add_argument("--reason", required=True, help="Why; recorded with the control.")
+    parser.add_argument("--reason", default="", help="Why; recorded with the control.")
 
 
 def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int:

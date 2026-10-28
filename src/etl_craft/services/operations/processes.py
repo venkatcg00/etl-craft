@@ -13,6 +13,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import ActionName, ApiRole, ConnectionUse, ProcessRole
 from etl_craft.core.errors import ConfigurationError, MigrationError
 from etl_craft.dialects.engine import for_engine
+from etl_craft.dialects.engine.guards import require_guards
 from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.notifications import check_notifications
 from etl_craft.engine.process_reservations import (
@@ -66,6 +67,12 @@ def check_package_schema(ctx: OperationContext, connection: Connection | None = 
             f"Engine DB is missing migrations {engine}; expected etl-craft package version "
             f"{__version__}; run `etl-craft migrate` before starting controller or ui"
         )
+
+    if connection is not None:
+        require_guards(connection)
+    else:
+        with ctx.engine.connect() as conn:
+            require_guards(conn)
 
 
 def probe(ctx: OperationContext) -> Health:

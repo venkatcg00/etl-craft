@@ -1,0 +1,1 @@
+SELECT ENVIRONMENT_TYPE AS environment_type, ENVIRONMENT_NAME AS environment_name, GOVERNANCE AS governance FROM CFG_PROJECTS WHERE PROJECT_ID=:project_id

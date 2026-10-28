@@ -69,10 +69,8 @@ def execute(args: argparse.Namespace, out: Output) -> int:
         )
     if args.controls_file is not None:
         return _bulk(args, out)
-    if args.pipeline_code is None or not args.reason:
-        raise UsageError(
-            "recovery/restart/one-run permission needs `pipeline_code` and a nonblank `reason`"
-        )
+    if args.pipeline_code is None:
+        raise UsageError("recovery/restart/one-run permission needs `pipeline_code`")
     if args.run_id is None and args.run_key is None and not args.allow_paused:
         raise UsageError(
             "recovery/restart/one-run permission needs an explicit `run_id` or `run_key`"
@@ -116,14 +114,13 @@ def read_selection(path: Path) -> tuple[ControlRequest, ...]:
 
 def _bulk(args: argparse.Namespace, out: Output) -> int:
     """Submit a fully parsed selection through the ordinary bulk operation."""
-    if any(
+    if args.reason or any(
         v is not None
         for v in (
             args.pipeline_code,
             args.task_code,
             args.run_id,
             args.run_key,
-            args.reason,
             args.request_key,
         )
     ):

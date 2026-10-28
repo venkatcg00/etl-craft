@@ -18,7 +18,7 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import parse_qsl
 
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from etl_craft.config import ConnectorConfig, profile_needs_secret, resolve_secret
@@ -32,6 +32,7 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     EmailTransport,
     GatePolicy,
+    Governance,
     IcebergMaintenance,
     ProcessRole,
 )
@@ -46,6 +47,7 @@ from etl_craft.core.resources import (
 )
 from etl_craft.core.text import quote_identifier
 from etl_craft.dialects.engine import for_engine
+from etl_craft.dialects.engine.guards import missing_guards
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.connection_budget import footprint, reservations
 from etl_craft.engine.migrations import pending_migrations
@@ -69,6 +71,7 @@ from etl_craft.warehouse.fencing import cluster_problem
 class Status(StrEnum):
     """What a check found."""
 
+    INFO = "INFO"
     OK = "OK"
     WARN = "WARN"
     FAIL = "FAIL"
@@ -466,6 +469,7 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
     dialect = for_engine(engine)
     with engine.connect() as conn:
         grants = dialect.extra_write_grants(conn)
+        checks.extend(_guard_checks(conn, config))
     for table, role, privilege in grants:
         quoted_role = quote_identifier(role) if role != "PUBLIC" else role
         schema = config.engine.schema or "public"
@@ -682,4 +686,43 @@ def _artifacts(config: ConnectorConfig) -> list[Check]:
                     "list/write/read succeeded",
                 )
             )
+    return checks
+
+
+def _guard_checks(conn: Connection, config: ConnectorConfig) -> list[Check]:
+    """Report missing guards and the selected project's direct-edit capability."""
+    checks: list[Check] = []
+    dialect = for_engine(conn)
+    for trigger in missing_guards(conn):
+        checks.append(
+            fail(
+                "Engine DB guard",
+                f"missing trigger {trigger}; expected every package guard; "
+                "re-run `etl-craft setup` or restore",
+            )
+        )
+    project = conn.execute(
+        statement(conn, "project_by_code"), {"code": config.project}
+    ).one_or_none()
+    policy = (
+        None
+        if project is None
+        else conn.execute(
+            statement(conn, "project_governance"), {"project_id": project.project_id}
+        ).one()
+    )
+    if (
+        policy is not None
+        and policy.governance == Governance.RELAXED
+        and not dialect.supports_api_replicas
+    ):
+        checks.append(
+            Check(
+                "Direct config edits",
+                Status.INFO,
+                "RELAXED project: direct SQL edits need a PostgreSQL Engine DB; "
+                "use config files or commands on SQLite",
+            )
+        )
+
     return checks

@@ -3,10 +3,10 @@
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Row
 
 from etl_craft.core.cron import timezone
-from etl_craft.core.enums import ApiRole, YesNo
+from etl_craft.core.enums import ApiRole, EnvironmentType, Governance, YesNo
 from etl_craft.core.errors import MetadataError, UsageError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.engine import locks
@@ -32,6 +32,20 @@ class ProjectFields(ProjectIdentity):
     timezone: str | None = None
     default_pool: str | None = None
     max_running_tasks: int | None = None
+    environment_type: EnvironmentType | None = None
+    environment_name: str | None = None
+    governance: Governance | None = None
+
+    def __post_init__(self) -> None:
+        """Validate supplied enums even for direct Python callers."""
+        for flag, value, allowed in (
+            ("--environment-type", self.environment_type, tuple(EnvironmentType)),
+            ("--governance", self.governance, tuple(Governance)),
+        ):
+            if value is not None and value not in allowed:
+                raise UsageError(
+                    f"{flag}={value!r}; expected {', '.join(allowed)}; supply a documented value"
+                )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -59,6 +73,10 @@ class Project:
     default_pool: str
     max_running_tasks: int
     active_flag: str
+    environment_type: str
+    environment_name: str | None
+    governance: str
+    shared_warehouse: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,6 +94,7 @@ class Projects:
 
     SCHEMA: ClassVar[str] = "etl-craft/projects/1"
     projects: tuple[Project, ...]
+    warehouse_notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,6 +132,10 @@ def pool_name(value: str | None) -> None:
 def list_projects(ctx: OperationContext, request: ProjectIdentity) -> Projects:
     """List deployment project identities, optionally selecting one code."""
     reason(request.reason)
+    from etl_craft.services.project_warehouses import shared_warehouses
+
+    comparison = shared_warehouses(ctx.engine, ctx.config) if ctx.role == ApiRole.ADMIN else None
+    shared = comparison.shared if comparison is not None else frozenset()
     with ctx.engine.connect() as conn:
         rows = conn.execute(statement(conn, "admin_projects"))
         return Projects(
@@ -124,6 +147,10 @@ def list_projects(ctx: OperationContext, request: ProjectIdentity) -> Projects:
                     r.default_pool,
                     r.max_running_tasks,
                     r.active_flag,
+                    r.environment_type,
+                    r.environment_name,
+                    r.governance,
+                    r.project_code in shared,
                 )
                 for r in rows
                 if (request.project is None or r.project_code == request.project)
@@ -134,7 +161,8 @@ def list_projects(ctx: OperationContext, request: ProjectIdentity) -> Projects:
                     )
                     is not None
                 )
-            )
+            ),
+            comparison.unavailable if comparison is not None else (),
         )
 
 
@@ -184,11 +212,20 @@ def change_project(ctx: OperationContext, request: ProjectFields, *, adding: boo
     """Serialize project changes with config publication and apply only given fields."""
     reason(request.reason)
     code("--project", request.project)
-    fields = (request.name, request.timezone, request.default_pool, request.max_running_tasks)
+    fields = (
+        request.name,
+        request.timezone,
+        request.default_pool,
+        request.max_running_tasks,
+        request.environment_type,
+        request.environment_name,
+        request.governance,
+    )
     if not adding and all(value is None for value in fields):
         raise UsageError(
             "project set: no field given; supply --name, --timezone, "
-            "--default-pool or --max-running-tasks"
+            "--default-pool, --max-running-tasks, --environment-type, "
+            "--environment-name or --governance"
         )
     with locks.MIGRATE.hold(ctx.engine, wait_seconds=30), ctx.engine.begin() as conn:
         old = conn.execute(
@@ -220,6 +257,7 @@ def change_project(ctx: OperationContext, request: ProjectFields, *, adding: boo
             if adding
             else None,
         )
+        effective = environment_values(conn, effective, request, old)
         project_values(conn, effective)
         values = {
             "code": request.project,
@@ -227,6 +265,9 @@ def change_project(ctx: OperationContext, request: ProjectFields, *, adding: boo
             "timezone": effective.timezone,
             "default_pool": effective.default_pool,
             "max_running_tasks": effective.max_running_tasks,
+            "environment_type": effective.environment_type,
+            "environment_name": effective.environment_name,
+            "governance": effective.governance,
         }
         conn.execute(
             statement(conn, "admin_project_add" if adding else "admin_project_set"), values
@@ -311,3 +352,36 @@ def disable_pool(ctx: OperationContext, request: PoolIdentity) -> Pools:
             )
         conn.execute(statement(conn, "admin_pool_disable"), {"name": request.name})
     return list_pools(ctx, request)
+
+
+def environment_values(
+    conn: Connection,
+    effective: ProjectFields,
+    request: ProjectFields,
+    old: Row[tuple[object, ...]] | None,
+) -> ProjectFields:
+    """Merge environment fields without changing omitted values."""
+    environment = (
+        None
+        if old is None
+        else conn.execute(
+            statement(conn, "project_governance"), {"project_id": old.project_id}
+        ).one()
+    )
+    effective = replace(
+        effective,
+        environment_type=request.environment_type
+        or (EnvironmentType.CUSTOM if environment is None else environment.environment_type),
+        environment_name=request.environment_name,
+        governance=request.governance
+        or (Governance.STRICT if environment is None else environment.governance),
+    )
+    if (
+        effective.environment_type == EnvironmentType.PROD
+        and effective.governance == Governance.RELAXED
+    ):
+        raise UsageError(
+            f"project {request.project!r}: --environment-type=PROD, --governance=RELAXED; "
+            "PROD requires STRICT; set --governance STRICT"
+        )
+    return effective

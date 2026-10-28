@@ -464,8 +464,10 @@ def test_item_http_actions_preserve_quoted_keys_and_report_the_operator(scene):
     from fastapi.testclient import TestClient
 
     from etl_craft.api.app import create_app
+    from etl_craft.core.enums import ActionName, ApiRole
     from etl_craft.services.operations.items import ItemView
     from etl_craft.services.operations.serialization import from_json
+    from fixtures.actions import act
     from fixtures.auth import service_token
 
     key = "' OR 1=1 --"
@@ -474,12 +476,27 @@ def test_item_http_actions_preserve_quoted_keys_and_report_the_operator(scene):
     headers = {"Authorization": f"Bearer {token}"}
     path = f"/api/v1/projects/default/pipelines/P/runs/{scene.run}/tasks/T/items"
     with TestClient(create_app(context(scene))) as client:
+        refused = client.post(
+            path + "/controls",
+            headers=headers,
+            json={"action": "MARK", "item_key": key, "status": "SUCCESS", "rows": 3},
+        )
+        assert (
+            refused.status_code == 400 and "STRICT" in refused.text and "--reason" in refused.text
+        )
+        act(
+            replace(context(scene), role=ApiRole.ADMIN),
+            ActionName.PROJECT_SET,
+            project="default",
+            governance="RELAXED",
+            reason="development",
+        )
         changed = client.post(
             path + "/controls",
             headers=headers,
             json={
                 "action": "MARK",
-                "reason": "verified",
+                "reason": "",
                 "item_key": key,
                 "status": "SUCCESS",
                 "rows": 3,
@@ -523,3 +540,70 @@ def test_two_prepare_batches_record_each_key_and_retained_skip_once(scene):
         ("one", "SKIPPED"),
         ("new", "QUEUED"),
     ]
+
+
+@pytest.mark.parametrize("policy", ("STRICT", "RELAXED"))
+def test_cli_item_reason_obeys_governance(
+    scene, monkeypatch, capsys, cli_logging, tmp_path, policy
+):
+    import yaml
+
+    from etl_craft.cli import main
+    from etl_craft.core.enums import ActionName, ApiRole
+    from etl_craft.core.errors import ExitCode
+    from fixtures.actions import act
+    from fixtures.auth import service_token
+    from fixtures.engine_db import profile_block
+
+    scene.store.prepare_items(("one",))
+    act(
+        replace(context(scene), role=ApiRole.ADMIN),
+        ActionName.PROJECT_SET,
+        project="default",
+        governance=policy,
+        reason="policy",
+    )
+    token = service_token(scene.db)
+    path = tmp_path / "craft-connector.yml"
+    block = profile_block(scene.config.engine, scene.config.engine.schema or "public")
+    if scene.db.url.get_backend_name() == "sqlite":
+        block.update(Jdbc_url=f"jdbc:sqlite:{scene.db.url.database}", Schema="main")
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "Secrets": {"Source_type": "ENVIRONMENT"},
+                "Orchestration": {"Project": "default"},
+                "Engine": {"test": block},
+            },
+            sort_keys=False,
+        )
+    )
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", token)
+    result = main(
+        [
+            "--config",
+            str(path),
+            "items",
+            "mark",
+            "--pipeline-code",
+            "P",
+            "--task-code",
+            "T",
+            "--run-id",
+            str(scene.run),
+            "--item-key",
+            "one",
+            "--status",
+            "SUCCESS",
+        ]
+    )
+    error = capsys.readouterr().err
+    if policy == "RELAXED":
+        assert result == ExitCode.SUCCESS, error
+    else:
+        assert result == ExitCode.USAGE and "STRICT" in error and "--reason" in error
+    with scene.db.connect() as conn:
+        reasons = (
+            conn.execute(text("SELECT REASON AS reason FROM AUD_RUN_INTERVENTIONS")).scalars().all()
+        )
+        assert reasons == ([""] if policy == "RELAXED" else [])

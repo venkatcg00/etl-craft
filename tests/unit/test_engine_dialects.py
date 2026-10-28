@@ -167,8 +167,12 @@ def test_the_schemas_split_into_whole_statements():
         for s in POSTGRES.split_statements(POSTGRES.schema_path().read_text("utf-8"))
     ]
     functions = [s for s in postgres if s.startswith("CREATE OR REPLACE FUNCTION")]
-    assert len(functions) == 6
-    assert all(s.endswith("LANGUAGE plpgsql") for s in functions)
+    assert functions
+    assert any("etl_craft_config_project(" in s for s in functions)
+    for function in functions:
+        delimiter = re.search(r"AS (\$[\w]*\$)", function).group(1)
+        assert function.count(delimiter) == 2
+        assert function.endswith((delimiter, "LANGUAGE plpgsql"))
     sqlite = [
         without_comments(s)
         for s in SQLITE.split_statements(SQLITE.schema_path().read_text("utf-8"))

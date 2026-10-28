@@ -17,3 +17,5 @@ The project's instructions for every coding agent are in `AGENTS.md`; they apply
   wait for the completion notice rather than polling.
 - For changes to `api/`, tokens, secrets, SQL generation or file paths, the self-review includes
   the built-in `security-review` skill; for large diffs, also `code-review`.
+
+- `/product-audit` audits the release candidate as a product and reports before fixing.

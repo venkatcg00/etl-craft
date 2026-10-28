@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection, Row
 from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import Handler, InterventionAction, ItemAction, ItemStatus, RunStatus
 from etl_craft.core.errors import ResourceNotFoundError, RunRefusedError, UsageError
+from etl_craft.core.governance import check_reason, reason_text
 from etl_craft.core.items import ItemProgress, ItemRecord, progress, valid_item_key
 from etl_craft.engine import controls, items
 from etl_craft.engine.queries import statement
@@ -41,7 +42,7 @@ class ItemControl(ItemInput):
     """Control one named item, or the failed items, with a recorded reason."""
 
     action: ItemAction
-    reason: str
+    reason: str = ""
     item_key: str | None = None
     all_failed: bool = False
     status: ItemStatus | None = None
@@ -60,7 +61,7 @@ class ItemControl(ItemInput):
                 f"item action={self.action!r}, status={self.status!r}; expected an item action "
                 "and terminal mark status; choose the documented action/status values"
             ) from error
-        require_text("reason", self.reason)
+        object.__setattr__(self, "reason", reason_text(self.reason))
         if self.all_failed == (self.item_key is not None):
             raise UsageError(
                 "item selection: expected exactly one of item_key and all_failed; select "
@@ -114,6 +115,7 @@ def inspect(ctx: OperationContext, request: ItemInput) -> ItemView:
 
 def control(ctx: OperationContext, request: ItemControl) -> ItemView:
     """Commit a mark or a truthful pending cancellation; reruns retain other successes."""
+    check_reason(request.reason)
     with ctx.engine.begin() as conn:
         controls.lock_run(conn, request.run_id)
         task = conn.execute(statement(conn, "item_task"), vars(request)).one_or_none()

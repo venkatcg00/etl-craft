@@ -23,7 +23,7 @@ def configure(parser: argparse.ArgumentParser) -> None:
         selector = sub.add_mutually_exclusive_group(required=True)
         selector.add_argument("--item-key")
         selector.add_argument("--all-failed", action="store_true")
-        sub.add_argument("--reason", required=True)
+        sub.add_argument("--reason", default="")
         if name == "mark":
             sub.add_argument(
                 "--status",

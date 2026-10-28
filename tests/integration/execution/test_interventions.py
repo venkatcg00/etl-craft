@@ -431,7 +431,7 @@ def test_what_mark_and_cancel_refuse(config, pipeline):
     with pytest.raises(RunStateError, match="matched 0 runs"):
         mark_run(engine, config, "P", "SUCCESS", "why", requested_by=WHO)
     run_id = run_pipeline(engine, config, "P", child=CHILD).pipeline_run_id
-    with pytest.raises(UsageError, match="needs a `reason`"):
+    with pytest.raises(UsageError, match=r"STRICT.*--reason"):
         mark_run(
             engine,
             config,
@@ -540,10 +540,11 @@ def test_the_commands(config, pipeline, capsys, monkeypatch, engine_db):
 
     assert cli_main(["abort", "--pipeline-code", "P", "--reason", "x"]) == ExitCode.RUN_STATE
     assert "matched 0 runs" in capsys.readouterr().err
-    # A reason is required.
-    with pytest.raises(SystemExit) as usage:
+    assert (
         cli_main(["mark", "--pipeline-code", "P", "--status", "SUCCESS", "--new-run"])
-    assert usage.value.code == ExitCode.USAGE
+        == ExitCode.USAGE
+    )
+    assert "STRICT" in capsys.readouterr().err
 
 
 def attempts(engine, pipeline_run_id):
@@ -626,7 +627,7 @@ def test_a_task_runs_without_its_dependencies_when_told_to(config, pipeline):
     assert again.message.endswith(
         f"already SUCCESS under pipeline_run_id={run_id}; give `rerun` to run it again"
     )
-    with pytest.raises(UsageError, match="`ignore_dependencies` needs a `reason`"):
+    with pytest.raises(UsageError, match=r"STRICT.*--reason"):
         run_task(engine, config, "P", "transform", child=CHILD, override=Override(""))
     with pytest.raises(UsageError, match="different overrides"):
         run_task(engine, config, "P", "transform", force=True, override=Override("x"))
@@ -690,7 +691,7 @@ def test_the_run_options(config, pipeline, capsys, monkeypatch, engine_db):
             ["--task-code", "extract", "--with-downstream"],
             "`--with-downstream` goes with `--rerun`",
         ),
-        (["--task-code", "extract", "--rerun"], "`--rerun` needs a `--reason`"),
+        (["--task-code", "extract", "--rerun"], "--reason"),
         (
             ["--task-code", "extract", "--rerun", "--force", "--reason", "x"],
             "choose one",
@@ -970,7 +971,7 @@ def test_what_a_backfill_refuses(config, pipeline):
         backfill(engine, config, "P", date(2026, 9, 5), date(2026, 9, 1), "x")
     with pytest.raises(UsageError, match="is 367 dates; one backfill runs at most 366"):
         backfill(engine, config, "P", date(2025, 1, 1), date(2026, 1, 2), "x")
-    with pytest.raises(UsageError, match="a backfill needs a `reason`"):
+    with pytest.raises(UsageError, match=r"STRICT.*--reason"):
         backfill(engine, config, "P", date(2026, 9, 1), date(2026, 9, 1), "")
     with engine.begin() as conn:
         run_id = start_run(conn, ids["P"], run_date=date(2026, 9, 9))

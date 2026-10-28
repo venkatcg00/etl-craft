@@ -59,6 +59,12 @@ def setup(config: ConnectorConfig) -> SetupResult:
             catalog=catalog,
             warehouse_dialect=dialect,
         )
+        from etl_craft.dialects.engine import for_engine
+        from etl_craft.dialects.engine.guards import restore_guards
+
+        with engine.begin() as conn:
+            for_engine(engine).refresh_metadata_triggers(conn)
+            restore_guards(conn)
     finally:
         engine.dispose()
     return SetupResult(checks, created_tables=created, applied_migrations=applied)

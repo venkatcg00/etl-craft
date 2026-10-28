@@ -17,6 +17,12 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Projects now have admin-managed environment type/name and STRICT/RELAXED governance. Existing
+  projects upgrade as CUSTOM/STRICT; PROD requires STRICT. RELAXED permits empty intervention
+  reasons and PostgreSQL direct config changes with SQL attribution and typed history. SQLite
+  direct edits remain unsupported. Startup/doctor check missing guards; setup restores them.
+- Admin project reads and doctor note shared warehouse connections without blocking them.
+
 - Unattended setup requires explicit first-admin input through --admin-name and --password-stdin;
   interactive setup retries invalid password lengths up to three times.
 - Catalog success rates count first endings, list repaired runs separately and hide stale errors

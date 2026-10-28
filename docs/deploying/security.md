@@ -336,3 +336,30 @@ Ngrok publishing requires Docs_site.Allowed_ips; local and organization External
 remain available. S7.A.7 will serve catalogs through the API with the UI's shared browser
 session and project checks. Organization-hosted static catalogs remain one site per project;
 the host controls access.
+
+
+## Environments and governance
+
+Only deployment admins change `ENVIRONMENT_TYPE`, `ENVIRONMENT_NAME` or `GOVERNANCE` with
+`project add` or `project set`, always with `--reason`. Project `CAN_MANAGE` does not grant
+these deployment-admin actions. These fields are not YAML settings or config CSV columns.
+Projects upgrade as `CUSTOM` and `STRICT`; `PROD` cannot use `RELAXED`.
+
+`RELAXED` accepts empty intervention reasons. It never relaxes roles, project grants, auditing,
+constraints, leases, fencing, target locks, recorded consumption, human data protection, secrets
+or retention. Administrative project, pool and access reasons remain mandatory.
+
+Direct SQL edits require a PostgreSQL Engine DB and a `RELAXED` project. Package config inserts,
+updates and `ACTIVE_FLAG='N'` retirements are stamped `sql:<database user>` and recorded in typed
+history. Primary-key changes, project moves, hard deletes, admin tables and audit/history edits
+are refused. SQL uses
+database credentials, which bypass etl-craft roles; protect those credentials. Keep the separate
+owner and writer roles: ordinary writers do not own package tables and cannot alter or drop them.
+
+On SQLite, users change config through files or commands. An ordinary SQL client encounters
+`no such function: etl_craft_actor` (or another `etl_craft_...` function); this means the client
+has no etl-craft attribution functions, not that the project needs a different governance value.
+Whoever can write the SQLite database file can bypass every Engine DB protection. Protect the
+file with permissions, and use PostgreSQL wherever people other than the operator have database
+access. Startup and doctor refuse missing package guard triggers; re-run `etl-craft setup` or
+restore the database before starting work.

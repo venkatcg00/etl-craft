@@ -321,3 +321,9 @@ for the selected BR task and an exact run identity. The engine adds no periodic 
 teams configure ordinary pipelines and schedules themselves. Returned, newly flagged, cleared
 and dropped counts appear per rule in the task's reported values and log. Upgrading converts
 stored fragment rules to complete SELECTs with EXISTS; export config again after upgrading.
+
+Project environments and governance are admin settings, not demo CSV/YAML fields. Existing demo
+projects remain `CUSTOM`/`STRICT`. For optional development testing, an admin can use
+`etl-craft project set --project default --environment-type DEV --governance RELAXED --reason "Development testing"`
+with the actual configured project code. RELAXED permits empty intervention reasons; direct SQL
+config edits require PostgreSQL. SQLite users keep using config files or commands.

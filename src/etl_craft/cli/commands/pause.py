@@ -34,7 +34,7 @@ def _configure(parser: argparse.ArgumentParser, *, action: ControlAction) -> Non
     parser.add_argument(
         "--yes", action="store_true", help="Confirm the printed pipeline selection."
     )
-    parser.add_argument("--reason", required=True, help=f"Why; recorded with the {verb}.")
+    parser.add_argument("--reason", default="", help=f"Why; recorded with the {verb}.")
 
 
 def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int:

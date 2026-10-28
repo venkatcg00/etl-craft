@@ -44,6 +44,10 @@ def mark_connections(engine: Engine) -> None:
             driver.create_function("etl_craft_purpose", 0, purpose.get, deterministic=True)
             driver.create_function("etl_craft_migration", 0, migration.get, deterministic=True)
 
+            from etl_craft.dialects.engine.guards import sqlite_authorizer
+
+            driver.set_authorizer(sqlite_authorizer)
+
         def reset_inserts(
             conn: Connection,
             cursor: Any,
@@ -53,6 +57,15 @@ def mark_connections(engine: Engine) -> None:
             executemany: bool,
         ) -> None:
             conn.info["etl_craft_inserting"].clear()
+            trusted = scoped_actor() is not None
+            if conn.info.get("etl_craft_ddl_actor") != trusted:
+                from etl_craft.dialects.engine.guards import sqlite_authorizer
+
+                # Changing the authorizer invalidates SQLite's cached authorization decisions.
+                driver = conn.connection.driver_connection
+                assert driver is not None
+                driver.set_authorizer(sqlite_authorizer)
+                conn.info["etl_craft_ddl_actor"] = trusted
 
         event.listen(engine, "connect", connected)
         event.listen(engine, "before_cursor_execute", reset_inserts)
