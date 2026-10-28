@@ -134,8 +134,8 @@ def pipeline_steps(
     if paused is not None:
         return paused_outcome(pipeline_code, paused)
     clock = clock or Clock()
+    pipeline_id, detail, config = prepare(engine, config, pipeline_code, selector=selector)
     hooks = hooks or default_hooks(config, engine)
-    pipeline_id, detail = prepare(engine, config, pipeline_code, selector=selector)
     pipeline_run_id, skip_reason = yield from start_steps(
         engine,
         config,
@@ -150,6 +150,9 @@ def pipeline_steps(
             before_admission=hooks.before_admission,
         ),
     )
+    from etl_craft.execution.bundle_files import run_config
+
+    config = run_config(engine, config, pipeline_run_id)
     if run_cancelled(engine, pipeline_run_id):
         with engine.connect() as conn:
             task_codes = fetch_task_codes(conn, pipeline_id)

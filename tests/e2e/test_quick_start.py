@@ -66,7 +66,7 @@ def test_the_quick_start_runs_as_written(tmp_path):
         DEMO,
         project,
         ignore=shutil.ignore_patterns(
-            "engine.db*", "warehouse.duckdb*", "logs", "catalog", ".flaky-has-failed", "migrations"
+            "engine.db*", "warehouse.duckdb*", "logs", "catalog", "migrations", ".etl-craft"
         ),
     )
     environment = {**os.environ, "XDG_CONFIG_HOME": str(tmp_path / "person")}

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from etl_craft.controller.cloning import clone_due
+from etl_craft.controller.refresh import refresh_due
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import ActionName
 from etl_craft.engine.queries import statement
@@ -58,6 +59,7 @@ def maintain(
     ctx: OperationContext, now: datetime, stop: threading.Event, deadlines: dict[int, datetime]
 ) -> None:
     """Share the maintenance worker; coalesce elapsed clone ticks rather than queueing them."""
+    refresh_due(ctx, stop)
     try:
         purge_due(ctx, now, stop)
     finally:

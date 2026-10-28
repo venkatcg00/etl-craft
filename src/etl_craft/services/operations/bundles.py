@@ -15,6 +15,7 @@ from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import ApiRole, YesNo
 from etl_craft.core.errors import ConfigurationError, PermissionDeniedError
 from etl_craft.core.text import sha256_hex
+from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.artifacts import ArtifactStore
 from etl_craft.engine.bundles import Bundle
@@ -78,17 +79,10 @@ def required_role(ctx: OperationContext, request: object) -> ApiRole:
 
 def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
     """Validate before publishing; only a committed row makes a bundle admissible."""
-    location = ctx.config.artifacts.store
-    if location is None:
-        raise ConfigurationError(
-            "Artifacts.Store is unset; expected file:///shared/path or a "
-            "profiled s3:// location; configure it on the API/controller host before publishing"
-        )
+    location = for_engine(ctx.engine).artifact_location(ctx.config)
     manifest, content, connections = _uploaded(ctx, request)
     bundle_id = sha256_hex(uuid4().bytes)
     store = ArtifactStore(ctx.config, location, ctx.config.artifacts.profile)
-    for name, digest in manifest.items():
-        store.write(digest, content[name])
     recorded = json.dumps(
         {
             "schema": "etl-craft/bundle-manifest/1",
@@ -99,30 +93,33 @@ def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
         sort_keys=True,
     )
     warehouse_limit = project_config_from_content(ctx, content).max_warehouse_queries
-    with locks.BUNDLES.hold(ctx.engine), ctx.engine.begin() as conn:
-        approved = conn.execute(
-            statement(conn, "bundle_approved_connection"),
-            {"project_id": ctx.project_id or current_project_id()},
-        ).scalar_one_or_none()
-        if ctx.role != ApiRole.ADMIN and approved != connections:
-            raise PermissionDeniedError(
-                f"project {ctx.project!r}: connection contract changed since admission; "
-                "expected the latest admin-approved definitions; ask an admin to publish "
-                "this connection contract before retrying"
+    with locks.BUNDLES.hold(ctx.engine):
+        for name, digest in manifest.items():
+            store.write(digest, content[name])
+        with ctx.engine.begin() as conn:
+            approved = conn.execute(
+                statement(conn, "bundle_approved_connection"),
+                {"project_id": ctx.project_id or current_project_id()},
+            ).scalar_one_or_none()
+            if ctx.role != ApiRole.ADMIN and approved != connections:
+                raise PermissionDeniedError(
+                    f"project {ctx.project!r}: connection contract changed since admission; "
+                    "expected the latest admin-approved definitions; ask an admin to publish "
+                    "this connection contract before retrying"
+                )
+            conn.execute(
+                statement(conn, "bundle_insert"),
+                {
+                    "bundle_id": bundle_id,
+                    "project_id": ctx.project_id or current_project_id(),
+                    "manifest": recorded,
+                    "connections": connections,
+                    "approved": YesNo.YES,
+                    "warehouse_limit": warehouse_limit,
+                    "actor": current_actor().name,
+                    "now": datetime.now(UTC),
+                },
             )
-        conn.execute(
-            statement(conn, "bundle_insert"),
-            {
-                "bundle_id": bundle_id,
-                "project_id": ctx.project_id or current_project_id(),
-                "manifest": recorded,
-                "connections": connections,
-                "approved": YesNo.YES,
-                "warehouse_limit": warehouse_limit,
-                "actor": current_actor().name,
-                "now": datetime.now(UTC),
-            },
-        )
     ctx.engine.update_execution_options(bundles_enabled=True)
     return BundleView(bundle_id, manifest)
 

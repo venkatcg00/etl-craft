@@ -35,6 +35,8 @@ def test_standalone_cli_runs_only_selected_sql_and_preserves_exact_key(
             SCRIPT_FILE="sql_scripts/one.sql",
         )
         add_dependency(conn, project.pipeline_id, downstream, selected_id)
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
     args = (
         "run",
         "--pipeline-code",

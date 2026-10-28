@@ -28,11 +28,12 @@ lookups and aggregations inside it, with CTEs or subqueries, not as statements o
 
 The engine reads the SQL, from a file or inline, with sqlglot in the warehouse's dialect, and
 refuses it when it is not a query or anything in it writes, such as an `INSERT`, or a `DELETE`
-inside a `WITH`; a column named `copy` or `grant_date` is fine. When sqlglot cannot parse the
-SQL, the engine checks it word by word instead (it must start with `SELECT`, `WITH`, `TABLE` or
-`VALUES` and hold no word such as `DELETE` or `DROP` outside comments and string literals), and
-the warehouse decides whether the SQL is valid. [`validate`](validating.md) warns about such SQL,
-with the line and column where sqlglot stopped.
+inside a `WITH`; a column named `copy` or `grant_date` is fine. The lexical fallback remains
+only a read-only check. Managed SELECTs must also parse in
+sqlglot's warehouse dialect before `validate` or pipeline refresh passes them. A parse failure
+names the file, line, column, dialect and parser message. Fix the SQL, or move vendor syntax
+sqlglot cannot parse into an unmanaged `SQL_SCRIPT` task. Execution of an already admitted,
+pinned run is unchanged.
 
 The columns the SELECT returns are checked before the target is touched, and the task fails,
 naming them, when:

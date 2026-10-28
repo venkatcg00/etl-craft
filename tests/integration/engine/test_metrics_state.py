@@ -255,7 +255,7 @@ def test_enabling_metrics_inside_an_existing_savepoint_preserves_its_outcome(eng
 
 @pytest.mark.parametrize("failed", [False, True])
 def test_controller_tick_histogram_excludes_the_wait_and_uses_explicit_duration(
-    engine_db, monkeypatch, failed
+    engine_db, monkeypatch, failed, tmp_path
 ):
     import threading
     import time
@@ -266,7 +266,13 @@ def test_controller_tick_histogram_excludes_the_wait_and_uses_explicit_duration(
     ctx, registry = context(engine_db)
     from dataclasses import replace
 
-    ctx = replace(ctx, actor=Actor("controller", ActorKind.SERVICE))
+    from etl_craft.config.object_models import Artifacts
+
+    ctx = replace(
+        ctx,
+        actor=Actor("controller", ActorKind.SERVICE),
+        config=replace(ctx.config, artifacts=Artifacts((tmp_path / "artifacts").as_uri())),
+    )
     stop = threading.Event()
     ticks = iter((10.0, 10.25))
     monkeypatch.setattr(

@@ -38,6 +38,7 @@ def project(empty_engine_db, tmp_path, monkeypatch, cli_logging):
                 "Secrets": {"Source_type": "ENVIRONMENT"},
                 "Orchestration": {"Project": "default"},
                 "Engine": {"dev": block},
+                "Artifacts": {"Store": (tmp_path / "artifacts").as_uri()},
             },
             sort_keys=False,
         )
@@ -265,6 +266,7 @@ def test_cli_sso_against_the_local_tls_issuer(project, issuer, monkeypatch, caps
     path = resolve_config_path()
     raw = yaml.safe_load(path.read_text())
     raw["Auth"] = {"Oidc_issuer": auth.oidc_issuer, "Oidc_client_id": auth.oidc_client_id}
+    raw["Artifacts"] = raw.pop("Artifacts")
     path.write_text(yaml.safe_dump(raw, sort_keys=False))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "y")

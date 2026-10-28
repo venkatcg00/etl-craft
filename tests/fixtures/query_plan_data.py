@@ -63,6 +63,16 @@ SEEDS = [
         "generate_series(1,:pipelines) p",
     ),
     (
+        "AUD_PIPELINE_REFRESHES",
+        "REFRESH_ID,PROJECT_ID,PIPELINE_ID,REFRESHED_AT,ACTOR,ACTOR_KIND,STATUS,"
+        "METADATA_VERSION,METADATA_SNAPSHOT,BUNDLE_ID,FINDINGS",
+        f"{RUN_ID},1,p,{DAY},'plan','SYSTEM','SUCCESS',repeat('a',64),"
+        "jsonb_build_object('CFG_PIPELINES',jsonb_build_object('rows',"
+        "jsonb_build_array(jsonb_build_object('pipeline_id',p,'run_schedule','0 0 * * *'))))::text,"
+        "lpad(p::text,64,'0'),'[]'",
+        RUNS,
+    ),
+    (
         "CFG_TABLES",
         "TABLE_ID,SCHEMA_NAME,TABLE_NAME",
         "p,'plan','table_'||p",

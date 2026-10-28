@@ -43,3 +43,17 @@ def _read(conn: Connection, run_id: int) -> tuple[Definition, int]:
             "start a new run instead of reopening a pre-bundle completed run"
         )
     return Definition.read(row.snapshot, run_id, row.bundle_id), int(row.project_id)
+
+
+@contextmanager
+def for_admission(conn: Connection, pipeline_id: int) -> Iterator[Definition | None]:
+    """Read the last passing definition before a new run's connection preflight."""
+    if not conn.engine.get_execution_options().get("refresh_required"):
+        yield None
+        return
+    from etl_craft.engine.refreshes import admitted
+
+    snapshot, _, bundle_id = admitted(conn, pipeline_id)
+    definition = Definition.read(snapshot, bundle_id=bundle_id)
+    with using(definition):
+        yield definition

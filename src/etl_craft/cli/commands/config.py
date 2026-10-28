@@ -7,7 +7,7 @@ from pathlib import Path
 
 from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, RunStatus
 from etl_craft.core.errors import ExitCode
 from etl_craft.services.config_files import ConfigExport, ConfigSync
 from etl_craft.services.operations.config_files import ConfigDirectory, ConfigExportInput
@@ -78,6 +78,12 @@ def _render(out: Output, done: ConfigSync, verb: str) -> None:
             out.line(f"    {access.policy_change}")
     for finding in done.findings:
         out.line(f"[{finding.status.value:<4}] {finding.where}: {finding.message}")
+    for checked in done.refreshes:
+        out.line(f"{checked.pipeline_code}: refresh {checked.status}")
+        for refresh_finding in checked.findings:
+            out.line(
+                f"  {refresh_finding.file}: {refresh_finding.message}; {refresh_finding.remedy}"
+            )
     if done.failed:
         out.line("validate failed the result, so nothing was changed")
     elif verb == "plan":
@@ -101,7 +107,11 @@ def _run(args: argparse.Namespace, out: Output) -> int:
     done = call(args, name, request_from(args, ConfigDirectory))
     assert isinstance(done, ConfigSync)
     out.result(done, args.output_format, text=lambda: _render(out, done, args.config_verb))
-    return ExitCode.FAILURE if done.failed else ExitCode.SUCCESS
+    return (
+        ExitCode.FAILURE
+        if done.failed or any(r.status == RunStatus.FAILED for r in done.refreshes)
+        else ExitCode.SUCCESS
+    )
 
 
 COMMAND = Command(

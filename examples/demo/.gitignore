@@ -4,5 +4,6 @@ warehouse.duckdb*
 logs/
 catalog/
 .catalog.*
-python_scripts/.flaky-has-failed
 __pycache__/
+
+.etl-craft/

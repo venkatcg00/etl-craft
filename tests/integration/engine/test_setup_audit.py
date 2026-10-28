@@ -28,6 +28,7 @@ def setup_project(empty_engine_db, tmp_path, monkeypatch):
                         engine_db.config.engine, engine_db.config.engine.schema or "main"
                     )
                 },
+                "Artifacts": {"Store": (tmp_path / "artifacts").as_uri()},
             },
             sort_keys=False,
         )

@@ -320,6 +320,13 @@ class ConnectorConfig:
         return self.config_path.absolute().parent
 
     @property
+    def host_dir(self) -> Path:
+        """The host's project directory, where data paths resolve even when code is pinned."""
+        if self._host_config_path is None:
+            return self.project_dir
+        return self._host_config_path.absolute().parent
+
+    @property
     def sql_scripts_dir(self) -> Path:
         """Where ``SCRIPT_FILE`` names are found: ``sql_scripts/`` in the project."""
         return self.project_dir / SQL_SCRIPTS_DIRNAME

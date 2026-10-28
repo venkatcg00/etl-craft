@@ -196,6 +196,7 @@ def cli_project(empty_engine_db, tmp_path, monkeypatch):
             "dev": {"Jdbc_url": "jdbc:duckdb:warehouse.duckdb", "Schema": "main"},
         },
     }
+    raw["Artifacts"] = {"Store": (tmp_path / "artifacts").as_uri()}
     path = tmp_path / "craft-connector.yml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False))
     config = load_config(path)
@@ -212,6 +213,8 @@ def cli_project(empty_engine_db, tmp_path, monkeypatch):
         project.task_id = add_task(
             conn, project.pipeline_id, "load", "PYTHON", SCRIPT_FILE="python_scripts/load.py"
         )
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
     try:
         yield project
     finally:

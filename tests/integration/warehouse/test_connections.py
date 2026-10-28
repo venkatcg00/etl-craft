@@ -26,6 +26,7 @@ from fixtures.services import (
     POSTGRES_DB,
     POSTGRES_PASSWORD,
     POSTGRES_USER,
+    namespace,
     require,
     service,
 )
@@ -147,22 +148,26 @@ def test_a_postgres_warehouse_with_a_password(monkeypatch):
 @pytest.fixture
 def trino_config():
     trino = require("trino")
-    return warehouse_config(f"jdbc:trino://{trino.address}/iceberg/etl_craft_test", user="etl")
+    return warehouse_config(
+        f"jdbc:trino://{trino.address}/iceberg/{namespace('connections')}", user="etl"
+    )
 
 
 @pytest.mark.warehouse_trino_iceberg
 def test_trino_writes_and_reads_an_iceberg_table(trino_config):
     assert warehouse_dialect(trino_config).spec.key == "trino_iceberg"
-    table = f"iceberg.etl_craft_test.t_{uuid.uuid4().hex[:8]}"
+    schema = trino_config.warehouse.jdbc_url.rsplit("/", 1)[1]
+    table = f"iceberg.{schema}.t"
     engine = build_warehouse_engine(trino_config)
     try:
         with engine.connect() as conn:
-            conn.execute(text("CREATE SCHEMA IF NOT EXISTS iceberg.etl_craft_test"))
+            conn.execute(text(f"CREATE SCHEMA iceberg.{schema}"))
             conn.execute(text(f"CREATE TABLE {table} AS SELECT 7 AS id"))
             try:
                 assert conn.execute(text(f"SELECT id FROM {table}")).scalar_one() == 7
             finally:
                 conn.execute(text(f"DROP TABLE {table}"))
+                conn.execute(text(f"DROP SCHEMA iceberg.{schema}"))
         assert verify_iceberg_catalog(trino_config, engine) is None
     finally:
         engine.dispose()

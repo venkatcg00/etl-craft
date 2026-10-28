@@ -162,7 +162,7 @@ def probe(
                 return {"keys": list(selected), "rows": list(selected.values())}, {}
             return ({"row": rows[0]} if rows else None), {}
     assert event.file is not None
-    pattern = event.file if Path(event.file).is_absolute() else str(config.project_dir / event.file)
+    pattern = event.file if Path(event.file).is_absolute() else str(config.host_dir / event.file)
     current: dict[str, Any] = {}
     settled = []
     for written in sorted(glob.glob(pattern, recursive=True)):

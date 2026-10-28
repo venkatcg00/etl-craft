@@ -32,6 +32,7 @@ def managed_project(config, directory, monkeypatch, *, timeout=30):
         "Secrets": {"Source_type": str(config.source.type)},
         "Orchestration": {"Project": "default", "Local_python_slots": 1, "Log_dir": "logs"},
         "Engine": {"dev": fields},
+        "Artifacts": {"Store": (directory / "artifacts").as_uri()},
     }
     if config.source.path:
         raw["Secrets"]["Path"] = config.source.path
@@ -58,6 +59,8 @@ def managed_project(config, directory, monkeypatch, *, timeout=30):
             project.task_id = add_task(
                 conn, project.pipeline_id, "load", "PYTHON", SCRIPT_FILE="python_scripts/load.py"
             )
+        code, output = project.run("pipelines", "refresh", timeout=timeout)
+        assert code == 0, output
         yield project
     finally:
         for command in reversed(project.processes):

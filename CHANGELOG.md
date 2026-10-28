@@ -17,6 +17,15 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- Pipeline refresh records validation findings and immutable metadata/bundles. New runs use the
+  last passing version; pipelines with no passing version cannot start. Config apply refreshes
+  committed changes, and PostgreSQL direct edits trigger controller refreshes. Unchanged refreshes
+  report their preceding result; changed refreshes name tables, tasks and files.
+- `BLOCK_ON_REFRESH_ERROR` in pipelines.csv defaults to N; Y blocks new runs after a failed refresh.
+  SQLite defaults unset Artifacts.Store to `.etl-craft/artifacts` in the project directory.
+- DuckDB is explicitly bounded to `>=1.5.5,<2`; duckdb-engine's cap does not bound DuckDB itself.
+  No new library ships. Local tests support parallel workers and affected-test selection.
+
 - Projects now have admin-managed environment type/name and STRICT/RELAXED governance. Existing
   projects upgrade as CUSTOM/STRICT; PROD requires STRICT. RELAXED permits empty intervention
   reasons and PostgreSQL direct config changes with SQL attribution and typed history. SQLite
@@ -29,6 +38,16 @@ All notable changes are recorded here. The format follows
   beside successful statuses. Core/extra dependencies have upper compatibility bounds.
 
 ### Upgrade notes
+
+- Managed SQL task SELECTs must now parse with sqlglot in the project's warehouse dialect.
+  Validate and refresh fail with the file, line, column, dialect and parser message. Fix the
+  SQL or move unsupported vendor syntax to SQL_SCRIPT. Upgrade refresh lists failures and
+  completes; last-good admitted execution is unchanged.
+
+- PostgreSQL deployments without Artifacts.Store must configure a durable shared store before
+  setup. Migration 0067 seeds refresh baselines from successful runs with snapshots and bundles;
+  setup/controller refresh remaining pipelines automatically. Doctor lists failures without a
+  baseline. SQLite backups must include `.etl-craft/artifacts` beside the database file.
 
 - Migration 0065 binds existing agent tokens to their last recorded registration's pool and
   revokes agent tokens that never registered. Issue replacements with --role agent --pool P.

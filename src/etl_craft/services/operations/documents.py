@@ -74,7 +74,7 @@ class DocsVersions:
 
 def docs_folder(config: ConnectorConfig, output: Path | None = None) -> Path:
     """Choose the site folder: the request's, else ``Docs_site.Output``, else ``catalog/``."""
-    return output or config.docs_site.output or config.project_dir / DEFAULT_FOLDER
+    return output or config.docs_site.output or config.host_dir / DEFAULT_FOLDER
 
 
 def generate_docs(ctx: OperationContext, request: DocsInput) -> DocsBuild:

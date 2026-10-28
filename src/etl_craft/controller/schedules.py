@@ -38,7 +38,14 @@ class Schedules:
         if not ctx.config.allow_schedule:
             return
         with ctx.engine.connect() as conn:
-            rows = conn.execute(statement(conn, "controller_schedules")).all()
+            rows = conn.execute(
+                statement(conn, "controller_schedules"),
+                {
+                    "refresh_required": bool(
+                        ctx.engine.get_execution_options().get("refresh_required")
+                    )
+                },
+            ).all()
         active = {r.pipeline_id for r in rows if r.run_schedule is not None}
         self.deadlines = {p: v for p, v in self.deadlines.items() if p in active}
         for row in rows:

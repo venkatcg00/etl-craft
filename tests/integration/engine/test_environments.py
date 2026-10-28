@@ -492,10 +492,14 @@ def test_malformed_manifest_cannot_block_admin_changes(engine_db, tmp_path, monk
     )
 
 
-def test_setup_restores_missing_static_guards(engine_db):
+def test_setup_restores_missing_static_guards(engine_db, tmp_path):
+    from etl_craft.config.object_models import Artifacts
     from etl_craft.services.setup import setup
 
-    db = engine_db
+    db = replace(
+        engine_db,
+        config=replace(engine_db.config, artifacts=Artifacts((tmp_path / "artifacts").as_uri())),
+    )
     table = "AUD_ATTEMPT_ACKNOWLEDGEMENTS"
     trigger = (
         "trg_attempt_ack_immutable"

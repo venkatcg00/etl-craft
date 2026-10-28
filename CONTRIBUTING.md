@@ -175,3 +175,20 @@ failure and fails the job; every completed iteration has an uploaded JUnit repor
 outage affects only the test's temporary database, prevents new connections for five seconds,
 and restores access in cleanup.
 Tests advance abandoned leases explicitly rather than waiting for their normal expiry.
+
+## Parallel and affected tests
+
+Run `make test-changed` before a pull request. It uses pytest-testmon locally; CI always runs
+the complete suite. Changes to Engine DB SQL, schemas, migrations, marker and release TOML,
+examples or templates first run the full Engine DB and warehouse suites, because testmon
+cannot track data files Python reads. The testmon database stays outside git.
+
+`make test` runs unit tests with `-n auto` and service suites with four workers;
+`make check` includes parallel coverage. Set `PYTEST_WORKERS=2` to cap both on a smaller
+workstation. These targets keep `TMPDIR` under `~/.cache/etl-craft/tests/tmp` on disk;
+do not use a RAM-backed `/tmp` for service suites. Races still use explicit synchronization
+and their twenty-round local validation.
+
+Pull requests test Linux on every supported Python version and macOS on the newest one.
+Coverage is measured on one Linux combination, with PostgreSQL supervision coverage combined
+from the Engine DB shards. The release gate retains the complete Python × OS matrix.

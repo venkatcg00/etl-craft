@@ -82,6 +82,7 @@ def config(engine_db, tmp_path):
             "Local_warehouse_slots": 2,
         },
         "Engine": {"dev": block},
+        "Artifacts": {"Store": (tmp_path / "artifacts").as_uri()},
     }
     path = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent / (
         "craft-connector.yml"
@@ -405,9 +406,24 @@ def test_a_relay_outage_does_not_prevent_data_tasks_from_running(config, engine_
 def test_the_command_line(config, pipeline, capsys, monkeypatch, engine_db):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.config_path.parent)
+    scripts = config.project_dir / "python_scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "fail.py").write_text(
+        "def run(task):\n    raise RuntimeError('expected task failure')\n"
+    )
+    with engine_db.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_TASKS SET HANDLER='PYTHON'"))
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
+                "SELECT TASK_ID,'SCRIPT_FILE','python_scripts/fail.py' FROM CFG_TASKS"
+            )
+        )
+    assert cli_main(["pipelines", "refresh"]) == ExitCode.SUCCESS
+    capsys.readouterr()
     assert cli_main(["run", "--pipeline-code", "P", "--init-only"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.endswith("IN-PROGRESS\n")
-    # The real task process has no handlers installed, so every task that runs fails.
+    # Real task processes execute the checked script, so every runnable task fails.
     assert cli_main(["run", "--pipeline-code", "P"]) == ExitCode.FAILURE
     # alert runs because extract failed; transform and after_broken never can.
     out = capsys.readouterr().out

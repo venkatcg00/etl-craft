@@ -296,7 +296,7 @@ class Scheduler:
                 params = fetch_task_parameters(conn, task_id)
             self.sql_events[task_id] = bool(params.get("EVENT_SQL"))
             if params.get("EVENT_FILE") and "\x00" not in params["EVENT_FILE"]:
-                self.file_events.watch(task_id, params["EVENT_FILE"], self.config.project_dir)
+                self.file_events.watch(task_id, params["EVENT_FILE"], self.config.host_dir)
         changed = self.file_events.changed(task_id)
         previous = self.event_due.get(task_id)
         if (

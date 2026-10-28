@@ -38,6 +38,9 @@ def install_writer(project, *, hold=False):
         "    return ScriptResult(1)\n"
     )
 
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
+
 
 def assert_complete(project):
     """Require one successful execution and matching warehouse provenance."""

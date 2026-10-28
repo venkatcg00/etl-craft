@@ -80,6 +80,7 @@ def metadata_project(empty_engine_db, tmp_path, monkeypatch) -> MetadataProject:
         },
         "Engine": {"dev": block},
         "Warehouse": {"dev": {"Jdbc_url": "jdbc:duckdb:analytics.duckdb", "Schema": "main"}},
+        "Artifacts": {"Store": (root / "artifacts").as_uri()},
     }
     (root / "craft-connector.yml").write_text(yaml.safe_dump(raw, sort_keys=False), "utf-8")
     sql = root / "sql_scripts" / "sales"

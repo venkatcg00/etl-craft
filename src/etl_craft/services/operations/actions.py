@@ -64,6 +64,7 @@ from etl_craft.services.operations import (
     items,
     maintenance,
     models,
+    pipeline_refresh,
     processes,
     retention,
     runs,
@@ -222,6 +223,12 @@ _ROWS = (
            f"{API}/whoami"),
     Action(ActionName.HEALTH, lambda ctx, request: models.Health(), NoInput, models.Health, VIEWER,
            GET, f"{API}/health"),
+    Action(ActionName.PIPELINE_REFRESH, pipeline_refresh.refresh, pipeline_refresh.RefreshInput,
+           pipeline_refresh.RefreshResults, DEVELOPER, POST, f"{API}/pipelines/refresh",
+           audit=REQUEST, scope=ActionScope.PIPELINE),
+    Action(ActionName.PIPELINE_REFRESH_HISTORY, pipeline_refresh.history,
+           pipeline_refresh.RefreshInput, pipeline_refresh.RefreshResults, VIEWER, GET,
+           f"{API}/pipeline-refreshes", scope=ActionScope.PIPELINE),
     Action(ActionName.PIPELINES, inspect.list_pipelines, TagFilter, models.PipelineListView, VIEWER,
            GET, f"{API}/pipelines",
            scope=ActionScope.PIPELINE),
@@ -417,6 +424,7 @@ _ROWS = (
 PROJECT_MANAGE_ACTIONS = frozenset(
     {
         ActionName.CONFIG_PLAN,
+        ActionName.PIPELINE_REFRESH,
         ActionName.CONFIG_APPLY,
         ActionName.MIGRATE,
         ActionName.BUNDLE_PUBLISH,
@@ -623,7 +631,9 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
 
 def project_settings(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
     """Use approved project connections for operations that inspect warehouse resources."""
-    if ctx.transport == Transport.LOCAL and not ctx.config.artifacts.store:
+    if ctx.transport == Transport.LOCAL and (
+        not ctx.config.artifacts.store or name == ActionName.PIPELINE_REFRESH
+    ):
         return ctx
     if (
         name == ActionName.PURGE
@@ -637,6 +647,7 @@ def project_settings(ctx: OperationContext, name: ActionName, request: object) -
         ActionName.PURGE,
         ActionName.RUN,
         ActionName.VALIDATE,
+        ActionName.PIPELINE_REFRESH,
         ActionName.LINEAGE,
         ActionName.LINEAGE_REFRESH,
         ActionName.CATALOG_GAPS,

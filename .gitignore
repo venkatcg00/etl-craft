@@ -35,3 +35,7 @@ htmlcov/
 # Editors
 .idea/
 .vscode/
+
+.etl-craft/
+
+.testmondata*

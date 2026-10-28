@@ -442,7 +442,7 @@ def test_delayed_developer_publication_cannot_restore_a_superseded_contract(
 
     from etl_craft.config.object_models import Artifacts
     from etl_craft.core.errors import PermissionDeniedError
-    from etl_craft.engine.artifacts import ArtifactStore
+    from etl_craft.engine import locks
     from etl_craft.services.operations.bundles import PublishBundle
 
     config = replace(engine_db.config, artifacts=Artifacts((tmp_path / "store").as_uri()))
@@ -457,13 +457,8 @@ def test_delayed_developer_publication_cannot_restore_a_superseded_contract(
 
     original, replacement = upload("first.db"), upload("replacement.db")
     invoke(admin, ActionName.BUNDLE_PUBLISH, original)
-    write = ArtifactStore.write
+    hold = type(locks.BUNDLES).hold
     replaced = []
-
-    def admin_replaces_during_upload(store, digest, data):
-        if not replaced:
-            replaced.append(invoke(admin, ActionName.BUNDLE_PUBLISH, replacement).bundle_id)
-        return write(store, digest, data)
 
     with monkeypatch.context() as patch:
         with engine_db.engine.begin() as conn:
@@ -475,11 +470,13 @@ def test_delayed_developer_publication_cannot_restore_a_superseded_contract(
             )
 
         # This interleaving occurs after role admission and before the developer's insert.
-        def interleave(store, digest, data):
-            patch.setattr(ArtifactStore, "write", write)
-            return admin_replaces_during_upload(store, digest, data)
+        def interleave(lock, *args, **kwargs):
+            if lock is locks.BUNDLES:
+                patch.setattr(type(locks.BUNDLES), "hold", hold)
+                replaced.append(invoke(admin, ActionName.BUNDLE_PUBLISH, replacement).bundle_id)
+            return hold(lock, *args, **kwargs)
 
-        patch.setattr(ArtifactStore, "write", interleave)
+        patch.setattr(type(locks.BUNDLES), "hold", interleave)
         with pytest.raises(PermissionDeniedError, match="changed since admission"):
             invoke(replace(admin, role=ApiRole.DEVELOPER), ActionName.BUNDLE_PUBLISH, original)
     with engine_db.engine.connect() as conn:

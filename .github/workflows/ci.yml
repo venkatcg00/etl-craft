@@ -126,9 +126,8 @@ jobs:
         run: |
           case "$PROFILE" in
             engine) docker compose up -d --wait postgres mailpit ;;
-            warehouse-duckdb|warehouse-postgres) docker compose up -d --wait postgres ;;
+            warehouse-local) make services-up ;;
             warehouse-iceberg) docker compose up -d --wait postgres trino ;;
-            connections) make services-up ;;
             *) echo "Unknown service profile: $PROFILE" >&2; exit 1 ;;
           esac
       - name: Execute assigned service tests
@@ -158,6 +157,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.e2e) }}
     env:
+      ETL_CRAFT_CI_DIAGNOSTICS: ${{ github.workspace }}/dist/demo-diagnostics
       ETL_CRAFT_REQUIRE_SERVICES: "1"
       ETL_CRAFT_E2E_WAREHOUSE: ${{ matrix.warehouse }}
       ETL_CRAFT_TEST_WHEEL: ${{ github.workspace }}/dist/${{ needs.prepare.outputs.wheel }}
@@ -196,11 +196,21 @@ jobs:
       - name: Service logs
         if: failure()
         run: docker compose logs --no-color
+      - name: Preserve installed-demo failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: demo-failure-${{ matrix.warehouse }}
+          path: dist/demo-diagnostics/
+          if-no-files-found: warn
       - name: Stop the local services
         if: always()
         run: make services-down
 
   package:
+    needs: static
+    env:
+      UV_PYTHON: ${{ matrix.os == 'macos-latest' && '3.13' || '3.11' }}
     name: package (build, install with pip and uv, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -214,7 +224,7 @@ jobs:
           enable-cache: ${{ inputs.cache != 'cold' }}
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: ${{ env.UV_PYTHON }}
       - name: Build and verify the package
         run: make verify-package
 

@@ -31,23 +31,26 @@ def test_fast_branch_starts_its_downstream_before_the_slow_branch_finishes(
     p = cli_project
     scripts = p.config.python_scripts_dir
     (scripts / "slow.py").write_text(
-        "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
-        "def run(task):\n    Path('slow-start').touch()\n"
+        f"from pathlib import Path\nROOT = {str(p.config.project_dir)!r}\n"
+        "import time\nfrom etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n    Path(ROOT, 'slow-start').touch()\n"
         "    deadline=time.monotonic()+8\n"
         "    while time.monotonic()<deadline:\n"
-        "        if Path('fast-downstream').exists():\n            return ScriptResult(1)\n"
+        "        if Path(ROOT, 'fast-downstream').exists():\n            return ScriptResult(1)\n"
         "        time.sleep(.05)\n"
         "    raise RuntimeError('ready downstream was held behind the slow task')\n"
     )
     (scripts / "load.py").write_text(
-        "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
+        f"from pathlib import Path\nROOT = {str(p.config.project_dir)!r}\n"
+        "import time\nfrom etl_craft.scripting import ScriptResult\n"
         "def run(task):\n    deadline=time.monotonic()+5\n"
-        "    while not Path('slow-start').exists() and time.monotonic()<deadline:\n"
+        "    while not Path(ROOT, 'slow-start').exists() and time.monotonic()<deadline:\n"
         "        time.sleep(.05)\n    return ScriptResult(1)\n"
     )
     (scripts / "after.py").write_text(
-        "from pathlib import Path\nfrom etl_craft.scripting import ScriptResult\n"
-        "def run(task):\n    Path('fast-downstream').touch()\n    return ScriptResult(1)\n"
+        f"from pathlib import Path\nROOT = {str(p.config.project_dir)!r}\n"
+        "from etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n    Path(ROOT, 'fast-downstream').touch()\n    return ScriptResult(1)\n"
     )
     with p.engine.begin() as conn:
         add_task(conn, p.pipeline_id, "slow", "PYTHON", SCRIPT_FILE="python_scripts/slow.py")
@@ -55,6 +58,7 @@ def test_fast_branch_starts_its_downstream_before_the_slow_branch_finishes(
             conn, p.pipeline_id, "after_fast", "PYTHON", SCRIPT_FILE="python_scripts/after.py"
         )
         add_dependency(conn, p.pipeline_id, following, p.task_id)
+    assert p.run("pipelines", "refresh")[0] == 0
     if server_mode:
         assert p.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
         server = p.start("controller")
@@ -291,8 +295,9 @@ def test_shutdown_cancels_all_runs_before_joining_the_shared_pool(cli_project):
     raw["Orchestration"].update(Local_warehouse_slots=1, Shutdown_grace_seconds=0)
     p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
     (p.config.python_scripts_dir / "block.py").write_text(
-        "from pathlib import Path\nimport time\n"
-        "def run(task):\n    Path('other-run-started').touch()\n    time.sleep(120)\n"
+        f"from pathlib import Path\nROOT = {str(p.config.project_dir)!r}\n"
+        "import time\n"
+        "def run(task):\n    Path(ROOT, 'other-run-started').touch()\n    time.sleep(120)\n"
     )
     with p.engine.begin() as conn:
         later = add_task(
@@ -301,6 +306,7 @@ def test_shutdown_cancels_all_runs_before_joining_the_shared_pool(cli_project):
         add_dependency(conn, p.pipeline_id, later, p.task_id)
         other = add_pipeline(conn, "OTHER")
         add_task(conn, other, "block", "PYTHON", SCRIPT_FILE="python_scripts/block.py")
+    assert p.run("pipelines", "refresh")[0] == 0
     assert p.run("run", "--pipeline-code", "P", "--init-only")[0] == 0
     assert p.run("run", "--pipeline-code", "OTHER", "--init-only")[0] == 0
     server = p.start("controller")

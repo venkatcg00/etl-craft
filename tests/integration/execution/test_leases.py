@@ -216,10 +216,13 @@ def test_parent_sigkill_reconciles_and_retries_real_child(cli_project):
     script = project.config.python_scripts_dir / "load.py"
     script.write_text(
         "from pathlib import Path\nimport time\nfrom etl_craft.scripting import ScriptResult\n"
-        "def run(task):\n    first = not Path('ready').exists()\n    Path('ready').touch()\n"
+        f"def run(task):\n    ready = Path({str(project.config.project_dir / 'ready')!r})\n"
+        "    first = not ready.exists()\n    ready.touch()\n"
         "    while first:\n        time.sleep(0.05)\n"
         "    return ScriptResult(7)\n"
     )
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
     parent = project.start("run", "--pipeline-code", "P")
     project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING")
     with project.engine.connect() as conn:
@@ -284,6 +287,8 @@ def test_child_sigkill_is_failed_by_live_parent(cli_project):
     (project.config.python_scripts_dir / "load.py").write_text(
         "import time\ndef run(task):\n    time.sleep(60)\n"
     )
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
     parent = project.start("run", "--pipeline-code", "P")
     project.wait_for("SELECT STATUS FROM AUD_TASK_ATTEMPTS", expected="RUNNING")
     with project.engine.connect() as conn:

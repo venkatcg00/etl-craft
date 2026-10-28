@@ -16,7 +16,9 @@ def test_controller_killed_after_clone_commit_recovers_a_single_mirror(cli_proje
     p = cli_project
     raw = yaml.safe_load(p.config.config_path.read_text())
     raw["Cloning"] = {"Enabled": True, "Scope": "AUD", "Every_minutes": 1}
+    raw["Artifacts"] = raw.pop("Artifacts")
     p.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    assert p.run("pipelines", "refresh")[0] == 0
     controller = p.start("controller", fault="clone.after_mirror_commit:kill")
     assert controller.wait(timeout=40) == 137, controller.output
     # The first table committed; its baseline was never acknowledged.

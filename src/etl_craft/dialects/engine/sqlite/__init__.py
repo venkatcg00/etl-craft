@@ -50,6 +50,12 @@ class SqliteEngineDialect(EngineDialect):
     spec = engine_for_jdbc_url(JDBC_PREFIX)
     directory = Path(__file__).parent
 
+    def artifact_location(self, config: ConnectorConfig) -> str:
+        """Keep implicit SQLite bundles beside the host project's configuration."""
+        if config.artifacts.store is not None:
+            return config.artifacts.store
+        return (config.host_dir / ".etl-craft" / "artifacts").as_uri()
+
     def controller_lock_path(self, engine: Engine) -> str:
         """SQLite leadership needs one file shared by every local task process."""
         database = engine.url.database
@@ -119,7 +125,7 @@ class SqliteEngineDialect(EngineDialect):
                 f"profile {profile.name!r}: a SQLite Engine DB has nothing to authenticate, "
                 f"so auth_mode must be 'none', got {profile.auth_mode!r}"
             )
-        database = resolve_sqlite_path(profile.jdbc_url, config.config_path)
+        database = resolve_sqlite_path(profile.jdbc_url, config.host_dir / "craft-connector.yml")
         serial = SerialConnections() if supervised else None
         creator = sqlite_creator(database)
         engine = create_engine(

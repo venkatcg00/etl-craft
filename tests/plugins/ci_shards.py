@@ -60,6 +60,7 @@ class Shard:
         evidence = config.getoption("--evidence")
         if not evidence:
             raise pytest.UsageError("CI sharding requires --evidence=PATH for completeness checks")
+        self.config = config
         self.path = Path(evidence)
         self.expected: list[str] = []
 
@@ -72,7 +73,8 @@ class Shard:
         family = self.profile.split("-", 1)[0]
         if family == "coverage":
             family += "-macos" if self.profile.endswith("macos-latest") else "-linux"
-        model = json.loads(TIMINGS.read_text(encoding="utf-8"))[family]
+        models = json.loads(TIMINGS.read_text(encoding="utf-8"))
+        model = models["warehouse"] if family == "warehouse" else models[family]
         timings = {
             f"{module}::{node}": duration
             for module, cases in model.items()
@@ -84,9 +86,21 @@ class Shard:
         items[:] = kept
         config.hook.pytest_deselected(items=removed)
 
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node, error) -> None:
+        """Take the complete pre-partition collection from each worker."""
+        expected = node.workeroutput.get("ci_expected")
+        if not error and isinstance(expected, list):
+            if self.expected and self.expected != expected:
+                raise pytest.UsageError("CI workers disagree on the complete test collection")
+            self.expected = expected
+
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self) -> None:
         """Extend the existing recorder after it has persisted the shard outcomes."""
+        if hasattr(self.config, "workerinput"):
+            self.config.workeroutput["ci_expected"] = self.expected
+            return
         evidence = json.loads(self.path.read_text(encoding="utf-8"))
         evidence["ci"] = {
             "profile": self.profile,

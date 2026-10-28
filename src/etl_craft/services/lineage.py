@@ -31,7 +31,7 @@ from datetime import datetime
 from importlib.metadata import version
 
 import sqlglot
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.lineage import lineage as sqlglot_lineage
@@ -246,11 +246,13 @@ def lineage_key(
 
 
 def _ordered_tasks(
-    engine: Engine, config: ConnectorConfig, tasks: list[tuple[SqlTaskRef, dict[str, str]]]
+    engine: Engine | Connection,
+    config: ConnectorConfig,
+    tasks: list[tuple[SqlTaskRef, dict[str, str]]],
 ) -> tuple[list[tuple[SqlTaskRef, dict[str, str]]], set[int], set[str]]:
     """Order SQL writers by metadata and references, retaining unresolved cycles."""
     dialect, catalog = dialect_and_catalog(config)
-    with engine.connect() as conn:
+    with engine.connect() if isinstance(engine, Engine) else nullcontext(engine) as conn:
         dependencies = fetch_task_dependency_edges(conn)
     writers: dict[str, set[int]] = {}
     reads: dict[int, tuple[str, ...]] = {}
@@ -309,7 +311,7 @@ def _ordered_tasks(
 
 
 def _collect(
-    engine: Engine,
+    engine: Engine | Connection,
     config: ConnectorConfig,
     keys: dict[int, str | None],
     *,
@@ -321,7 +323,7 @@ def _collect(
     ``refresh`` works everything out again. Without ``record`` nothing is stored.
     """
     dialect, catalog = dialect_and_catalog(config)
-    with engine.connect() as conn:
+    with engine.connect() if isinstance(engine, Engine) else nullcontext(engine) as conn:
         params_by_task = fetch_all_task_parameters(conn, Handler.SQL)
         tasks = [(ref, params_by_task.get(ref.task_id, {})) for ref in fetch_sql_tasks(conn)]
         defined = fetch_source_columns(conn)
@@ -402,7 +404,7 @@ def _collect(
             schemas[table_name(target.split("."), catalog)] = dict.fromkeys(
                 (e.target_column for e in edges), "UNKNOWN"
             )
-        if record and not stored:
+        if record and not stored and isinstance(engine, Engine):
             with engine.begin() as conn:
                 store_task_lineage(conn, ref.task_id, key, [cache_edge(e, catalog) for e in edges])
         keys[ref.task_id] = key
@@ -418,14 +420,25 @@ def dialect_and_catalog(config: ConnectorConfig) -> tuple[str | None, str | None
 
 
 def collect(
-    engine: Engine, config: ConnectorConfig, *, refresh: bool = False, record: bool = True
+    engine: Engine | Connection,
+    config: ConnectorConfig,
+    *,
+    refresh: bool = False,
+    record: bool = True,
 ) -> list[TaskLineage]:
     """Compute task lineage and publish table versions once under the recording lock."""
+    if record:
+        assert isinstance(engine, Engine)
     keys: dict[int, str | None] = {}
     try:
-        with LINEAGE.hold(engine, wait_seconds=30) if record else nullcontext():
+        with (
+            LINEAGE.hold(engine, wait_seconds=30)
+            if record and isinstance(engine, Engine)
+            else nullcontext()
+        ):
             results = _collect(engine, config, keys, refresh=refresh, record=record)
             if record:
+                assert isinstance(engine, Engine)
                 _, catalog = dialect_and_catalog(config)
                 with engine.begin() as conn:
                     record_lineage_versions(conn, catalog.lower() if catalog else None, keys)
@@ -672,8 +685,8 @@ def script_lineage(sql: str, name: str, config: ConnectorConfig) -> TaskLineage:
     )
 
 
-def _script_lineages(engine: Engine, config: ConnectorConfig) -> list[TaskLineage]:
-    with engine.connect() as conn:
+def _script_lineages(engine: Engine | Connection, config: ConnectorConfig) -> list[TaskLineage]:
+    with engine.connect() if isinstance(engine, Engine) else nullcontext(engine) as conn:
         tasks = fetch_active_tasks(conn)
         params = fetch_all_task_parameters(conn, Handler.SQL_SCRIPT)
     result = []

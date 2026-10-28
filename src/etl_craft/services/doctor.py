@@ -12,6 +12,7 @@ deployment profile's sizes and the Engine DB connection budget.
 from __future__ import annotations
 
 import importlib.util
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -35,6 +36,7 @@ from etl_craft.core.enums import (
     Governance,
     IcebergMaintenance,
     ProcessRole,
+    YesNo,
 )
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.resources import (
@@ -46,7 +48,7 @@ from etl_craft.core.resources import (
     size,
 )
 from etl_craft.core.text import quote_identifier
-from etl_craft.dialects.engine import for_engine
+from etl_craft.dialects.engine import for_engine, for_jdbc_url
 from etl_craft.dialects.engine.guards import missing_guards
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.connection_budget import footprint, reservations
@@ -665,15 +667,26 @@ def _project(config: ConnectorConfig) -> list[Check]:
 
 
 def _artifacts(config: ConnectorConfig) -> list[Check]:
-    """Prove configured artifact and log prefixes are reachable and writable."""
+    """Prove the durable bundle store and configured log prefix are writable."""
     from etl_craft.core.errors import EtlCraftError
     from etl_craft.engine.artifacts import ArtifactStore
 
     checks: list[Check] = []
-    for label, location in (("Artifact store", config.artifacts), ("Log store", config.logs)):
-        if location.store is None:
+    try:
+        artifacts = for_jdbc_url(config.engine.jdbc_url).artifact_location(config)
+    except EtlCraftError as error:
+        checks.append(fail("Artifact store", str(error)))
+        artifacts = None
+    else:
+        if config.artifacts.store is None:
+            checks.append(Check("Artifact store", Status.INFO, f"SQLite default: {artifacts}"))
+    for label, address, profile in (
+        ("Artifact store", artifacts, config.artifacts.profile),
+        ("Log store", config.logs.store, config.logs.profile),
+    ):
+        if address is None:
             continue
-        store = ArtifactStore(config, location.store, location.profile)
+        store = ArtifactStore(config, address, profile)
         try:
             store.probe()
         except (EtlCraftError, OSError) as error:
@@ -682,8 +695,7 @@ def _artifacts(config: ConnectorConfig) -> list[Check]:
             checks.append(
                 ok(
                     label,
-                    f"profile={location.profile}, prefix={location.store}: "
-                    "list/write/read succeeded",
+                    f"profile={profile}, prefix={address}: list/write/read succeeded",
                 )
             )
     return checks
@@ -725,4 +737,27 @@ def _guard_checks(conn: Connection, config: ConnectorConfig) -> list[Check]:
             )
         )
 
+    if project is not None and dialect.has_table(conn, "AUD_PIPELINE_REFRESHES"):
+        checks.extend(_refresh_checks(conn, int(project.project_id)))
+
+    return checks
+
+
+def _refresh_checks(conn: Connection, project_id: int) -> list[Check]:
+    """List invalid baselines without hiding pipelines that retain a runnable version."""
+    checks = []
+    for row in conn.execute(statement(conn, "refresh_doctor"), {"project_id": project_id}):
+        findings = [] if row.findings is None else json.loads(row.findings)
+        detail = "; ".join(str(f["message"]) for f in findings) or "no refresh recorded"
+        blocked = not row.has_baseline or row.block_on_refresh_error == YesNo.YES
+        state = (
+            "no version has passed yet" if not row.has_baseline else "last good version retained"
+        )
+        checks.append(
+            Check(
+                f"Pipeline refresh {row.pipeline_code}",
+                Status.FAIL if blocked else Status.WARN,
+                f"{state}; {detail}; correct the findings and run `etl-craft pipelines refresh`",
+            )
+        )
     return checks

@@ -168,7 +168,7 @@ item's text, or work done early under another item.
 | S7.Y Command-managed pipeline access | Done | #261, #263, #264 | Project isolation complete; owner moved catalog sign-in to S7.A.7. |
 | S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
 | S7.Z Environments, governance and admin-managed projects | Done | #266 | Admin environment/governance fields, shared intervention policy, PostgreSQL direct-edit history and complete guard checks; product-audit skill. |
-| S7.AA Pipeline refresh | Planned | | Refresh validates and records findings; a broken pipeline stays listed and the last good version runs unless blocked |
+| S7.AA Pipeline refresh | Done | #267 | Refresh records findings; runs use the last passing version unless blocked; parallel CI and local affected-test selection |
 | S7.AB Standing task controls | Planned | | Standing task pause and SKIPPED/SUCCESS/FAILED outcomes in the control store, shown on every view |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
 | S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
@@ -873,6 +873,56 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AA owner decision, 2026-10-28: S5.F pins metadata and a bundle per run, but does not
+  retain a pre-admission last-good version. Add one additive `AUD_PIPELINE_REFRESHES` table,
+  reusing that snapshot format. Store snapshot JSON only when its hash differs from the
+  pipeline's latest stored snapshot; other refresh records reference that row. A pipeline
+  with no passing refresh cannot admit, regardless of `BLOCK_ON_REFRESH_ERROR`; its refusal
+  names the findings and says no version has passed yet. Seed existing pipelines from their
+  latest successful run's snapshot and bundle; pipelines without one receive no seed.
+  Keep the latest result and latest successful snapshot and bundle while the pipeline exists;
+  apply `Retention.Config_history_days` to older records, protecting referenced snapshot rows
+  and every bundle referenced by a retained run or refresh. Both Engine DBs need upgrade and
+  retention tests. The additive table follows the 0.9.0 rollback rule. Refresh validates
+  Engine DB state, not S7.AF's partial helper files; direct-edit detection uses `sql:` config
+  history and applies only to PostgreSQL, following S7.Z.
+  For released schemas without historical artifacts, seed only a successful run that has
+  both a snapshot and a bundle. Setup or the first controller start automatically refreshes
+  every unseeded pipeline: passing refreshes establish its baseline; failing ones remain
+  listed by setup, doctor and the upgrade notes, and admission names their findings and
+  `etl-craft pipelines refresh`. Other pipelines and the upgrade itself remain unaffected.
+  Existing seeds are preserved. Test passing, failing and seeded cases from released 0.3.0
+  on both Engine DBs.
+  With a SQLite Engine DB and no `Artifacts.Store`, use the durable S5.F file store at
+  `<project_dir>/.etl-craft/artifacts`; add `.etl-craft/` to shipped ignore files and report
+  the resolved store in doctor's INFO output. Back it up with the SQLite file, and retain
+  its bundles according to refresh retention. PostgreSQL keeps an explicit `Artifacts.Store`
+  requirement: refresh, setup and doctor fail without it, naming the setting and remedy.
+  Upgrade notes identify that configuration as the one manual step for PostgreSQL deployments
+  without a store. Engine dialect determines this rule; agents, pools and hosts do not.
+  The owner includes parallel CI and local affected-test selection in the same PR. A draft
+  diagnostic stage may precede implementation: three branch-only pushes of ten isolated demo
+  copies plus twenty CPU-limited local runs bound the Iceberg investigation. If neither
+  reported defect reproduces, retain failure artifacts, record both as open S7.P risks and
+  finish refresh and CI work. Remove the temporary workflow before readiness; installed-demo
+  failures permanently retain attempt logs, catalog metadata and available native stacks.
+  Unchanged metadata and bundle contents still record a cheap refresh and retain findings;
+  text names the preceding refresh time/result and JSON returns `changed: false`. Changed
+  refreshes report tables, tasks and files. DuckDB is explicitly bounded to `>=1.5.5,<2`:
+  duckdb-engine's own version cap does not bound its DuckDB dependency. No new library ships;
+  the owner approved only that dependency-list addition in the quality baseline.
+  Owner, 2026-10-28: managed SELECTs must parse with sqlglot in the warehouse dialect. Refresh
+  and validate share the parse check and fail with file, line, column, dialect, parser message
+  and the remedy to fix SQL or use SQL_SCRIPT for unsupported vendor syntax. The lexical
+  fallback remains only a read-only check; pinned admitted execution is unchanged. SQL_SCRIPT
+  remains exempt. Unseeded upgrade parse failures are listed without aborting the upgrade.
+  Every run now executes a materialized bundle. Locally supervised tasks keep the host project
+  directory as their working directory, as runs without a bundle did, so relative writes by
+  scripts or warehouse drivers never change the shared bundle cache that later tasks verify.
+  Owner, 2026-10-28: S7.AA merges with required CI at about 12 minutes (from 28). The
+  single-shard Python/OS jobs and the 20-concurrent-job limit set the wall time; reaching
+  10 minutes is follow-up CI work.
 
 - S7.Z owner decisions, 2026-10-27: direct SQL edits are PostgreSQL only. SQLite attribution
   and DML/history guards stay unchanged; ordinary SQLite clients fail with "no such function".
@@ -7506,6 +7556,9 @@ release candidate.
      |---|---|---|
      | Engine DB restart or managed failover | Ridden out within `limits.engine_db_outage_seconds`; fails naming the outage after it | S5.U |
      | Warehouse connection drop or timeout mid-task | The attempt fails retryable and is retried; appends and replacements stay retry-safe | S3.G, S4.E |
+     | DuckDB 2.x not yet supported | Capped below 2; raising the cap needs the full warehouse suite and installed demos green on 2.x | after 0.9.0 |
+     | DuckDB Iceberg demo `drop_source_counts` hangs until its task timeout | Open: preserve attempt logs, catalog metadata and stalled stacks; exact demo did not reproduce the reported hang in fifty isolated GitHub attempts (including ten capped and ten forced-DuckDB-2.0 attempts) and twenty CPU-limited local attempts; regression remains `test_the_demo_runs_locally[pip-sqlite-duckdb_iceberg]` | S7.AA, S7.P |
+     | DuckDB Iceberg demo loses A02's preserved email and A04's row | Open: preserve full-log and catalog evidence; fifty isolated GitHub attempts (including ten capped and ten forced-DuckDB-2.0 attempts) and twenty CPU-limited local attempts did not reproduce these wrong rows; regression remains `test_the_demo_runs_locally[pip-sqlite-duckdb_iceberg]` | S7.AA, S7.P |
      | `kill -9` of a task, the controller or a agent, or a host reboot | Reconciled as `LOST` and retried with no lost or doubled rows | S3.D, S4.B, S5.C |
      | Two controllers started on one deployment | One leader; the other waits | S4.B |
      | The same run requested twice | One run, through run keys and one in-progress run per pipeline | S3.C |

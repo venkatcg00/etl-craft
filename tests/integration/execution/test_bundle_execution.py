@@ -32,6 +32,8 @@ def test_sql_run_uses_admitted_files_and_the_next_publication_uses_edits(cli_pro
         )
     code, output = project.run("bundle", "publish")
     assert code == 0, output
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
     code, output = project.run("run", "--pipeline-code", "P", "--init-only")
     assert code == 0, output
     script.unlink()
@@ -43,6 +45,8 @@ def test_sql_run_uses_admitted_files_and_the_next_publication_uses_edits(cli_pro
         ]
     script.write_text("SELECT 29 AS id")
     code, output = project.run("bundle", "publish")
+    assert code == 0, output
+    code, output = project.run("pipelines", "refresh")
     assert code == 0, output
     code, output = project.run("run", "--pipeline-code", "P")
     assert code == 0, output
@@ -100,11 +104,15 @@ def test_recovery_keeps_successes_and_admitted_files_after_definition_edits(cli_
         add_dependency(conn, project.pipeline_id, second, project.task_id)
     code, output = project.run("bundle", "publish")
     assert code == 0, output
+    code, output = project.run("pipelines", "refresh")
+    assert code == 0, output
     code, output = project.run("run", "--pipeline-code", "P")
     assert code != 0, output
     assert completed.read_text() == "once"
     completed.write_text("must not rerun")
-    retry.write_text("raise AssertionError('changed source must not execute')")
+    retry.write_text(
+        "def run(task):\n    raise AssertionError('changed source must not execute')\n"
+    )
     with project.engine.begin() as conn:
         run = conn.execute(
             text("SELECT PIPELINE_RUN_ID AS run_id FROM AUD_PIPELINES_RUN_LOG")
@@ -112,6 +120,8 @@ def test_recovery_keeps_successes_and_admitted_files_after_definition_edits(cli_
         conn.execute(text("UPDATE CFG_TASKS SET ACTIVE_FLAG='N'"))
         add_task(conn, project.pipeline_id, "new", "PYTHON", SCRIPT_FILE="python_scripts/retry.py")
     code, output = project.run("bundle", "publish")
+    assert code == 0, output
+    code, output = project.run("pipelines", "refresh")
     assert code == 0, output
     code, output = project.run(
         "run", "--pipeline-code", "P", "--run-id", str(run), "--recover", "--reason", "repair"

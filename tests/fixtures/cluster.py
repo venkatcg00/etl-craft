@@ -4,6 +4,7 @@ import base64
 import socket
 import threading
 import time
+from dataclasses import replace
 
 import httpx2 as httpx
 import pytest
@@ -65,7 +66,19 @@ def publish_project(project, agent_dir):
         yaml.safe_dump({key: raw[key] for key in SECTIONS if key in raw}, sort_keys=False).encode()
     ).decode()
     ctx = OperationContext(project.engine, project.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
-    invoke(ctx, ActionName.BUNDLE_PUBLISH, PublishBundle(files=uploaded))
+    from etl_craft.config.project import project_config
+    from etl_craft.engine.bundles import Bundle
+    from etl_craft.services.operations.pipeline_refresh import RefreshInput
+
+    publication = invoke(ctx, ActionName.BUNDLE_PUBLISH, PublishBundle(files=uploaded))
+    with project.engine.connect() as conn:
+        root = Bundle.load(conn, publication.bundle_id).materialize(project.config)
+    checked = invoke(
+        replace(ctx, config=project_config(project.config, root / "craft-connector.yml")),
+        ActionName.PIPELINE_REFRESH,
+        RefreshInput(),
+    )
+    assert not checked.failed, checked
 
 
 def start_ui(project, *, fault=None):

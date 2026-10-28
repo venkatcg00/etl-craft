@@ -9,6 +9,7 @@ import pytest
 from etl_craft.cli import main
 from etl_craft.config import ConnectionProfile, EmailProfile
 from etl_craft.config.model import SettingSource
+from etl_craft.config.object_models import Artifacts
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.services.doctor import Status, run_checks
@@ -40,6 +41,7 @@ def config(empty_engine_db, tmp_path, monkeypatch):
         config_path=tmp_path / "craft-connector.yml",
         warehouse=warehouse,
         email=email,
+        artifacts=Artifacts((tmp_path / "artifacts").as_uri()),
     )
 
 

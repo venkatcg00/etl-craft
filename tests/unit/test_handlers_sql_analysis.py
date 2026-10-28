@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from etl_craft.core import text
-from etl_craft.dialects.query_analysis import Reading, read_only_problem, read_query
+from etl_craft.dialects.query_analysis import (
+    Reading,
+    managed_select_problem,
+    read_only_problem,
+    read_query,
+)
+from etl_craft.dialects.warehouse import all_dialects
 
 DEMO = Path(__file__).parents[2] / "examples" / "demo"
 DEMO_SQL = sorted(
@@ -108,3 +114,31 @@ def test_the_demo_sql_reads_as_read_only_queries_in_every_warehouse_dialect(dial
             run_date_substitution=uses("run_date"),
         )
         assert read_query(sql, dialect) == Reading(), path.name
+
+
+@pytest.mark.parametrize("dialect", all_dialects(), ids=lambda item: item.spec.key)
+def test_managed_select_parses_in_every_supported_warehouse_dialect(dialect):
+    assert (
+        managed_select_problem(
+            "WITH chosen AS (SELECT 1 AS id) SELECT id FROM chosen WHERE id > 0",
+            dialect.sqlglot_dialect,
+            "SELECT_QUERY",
+        )
+        is None
+    )
+
+
+def test_managed_parse_requirement_does_not_replace_the_lexical_read_only_check():
+    sql = "SELECT * FROM"
+    assert read_only_problem(sql, "duckdb") is None
+    problem = managed_select_problem(sql, "duckdb", "SCRIPT_FILE='sql_scripts/bad.sql'")
+    for expected in (
+        "bad.sql",
+        "line 1",
+        "column",
+        "duckdb",
+        "sqlglot",
+        "fix the SQL",
+        "SQL_SCRIPT",
+    ):
+        assert expected in problem

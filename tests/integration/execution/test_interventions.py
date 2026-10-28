@@ -91,6 +91,7 @@ def config(engine_db, tmp_path):
             "Local_warehouse_slots": 2,
         },
         "Engine": {"dev": block},
+        "Artifacts": {"Store": (tmp_path / "artifacts").as_uri()},
     }
     path = (engine_db.config.config_path or tmp_path / "craft-connector.yml").parent / (
         "craft-connector.yml"
@@ -814,6 +815,19 @@ def test_a_run_skipped_on_purpose_is_recorded_and_seen_downstream(config, pipeli
 def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch, engine_db):
     monkeypatch.setenv("ETL_CRAFT_TOKEN", service_token(engine_db.engine))
     monkeypatch.chdir(config.project_dir)
+    scripts = config.project_dir / "python_scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "skip.py").write_text("def run(task):\n    return None\n")
+    with engine_db.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_TASKS SET HANDLER='PYTHON'"))
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
+                "SELECT TASK_ID,'SCRIPT_FILE','python_scripts/skip.py' FROM CFG_TASKS"
+            )
+        )
+    assert cli_main(["pipelines", "refresh"]) == ExitCode.SUCCESS
+    capsys.readouterr()
     assert cli_main(["pause", "--pipeline-code", "P", "--reason", "hold"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.startswith("P: paused;")
     assert cli_main(["run", "--pipeline-code", "P"]) == ExitCode.SUCCESS
@@ -995,6 +1009,8 @@ def test_the_run_date_and_backfill_options(config, engine_db, capsys, monkeypatc
         add_pipeline(conn, "P")
     monkeypatch.chdir(config.project_dir)
     both_days = ["--backfill", "2026-09-01:2026-09-02"]
+    assert cli_main(["pipelines", "refresh"]) == ExitCode.SUCCESS
+    capsys.readouterr()
     assert cli_main(["run", "--pipeline-code", "P", *both_days, "--reason", "r"]) == 0
     assert "backfill of 2 date(s)" in capsys.readouterr().out
     assert cli_main(["run", "--pipeline-code", "P", "--run-date", "2026-08-30"]) == 0

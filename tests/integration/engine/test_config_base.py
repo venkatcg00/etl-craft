@@ -88,6 +88,9 @@ def test_token_lifecycle_is_attributed_without_credentials(engine_db, monkeypatc
             used.set()
 
     monkeypatch.setattr(tokens, "_write_use", write_use)
+    # An earlier test's background write holds the process-wide usage slot until it ends.
+    assert tokens._USAGE_SLOT.acquire(timeout=30)
+    tokens._USAGE_SLOT.release()
     ctx = OperationContext(engine_db.engine, engine_db.config, ALICE, role=ApiRole.ADMIN)
     created = act(ctx, ActionName.TOKEN_CREATE, name="dashboard", role="viewer")
     assert tokens.authenticate(ctx, created.token)

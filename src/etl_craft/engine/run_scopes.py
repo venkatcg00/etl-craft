@@ -156,18 +156,23 @@ def create_manual_run(
 ) -> int:
     """Persist selection before admission, atomically with the exclusive-slot check."""
     from etl_craft.engine import transitions
+    from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
+    from etl_craft.engine.run_definitions import for_run
 
-    exclusive = scope.exclusive(conn)
-    run_id = transitions.create_run(
-        conn, pipeline_id, actor, run_key=run_key, run_date=run_date, status=RunStatus.QUEUED
-    )
-    conn.execute(
-        statement(conn, "manual_run_selection"),
-        {
-            "pipeline_run_id": run_id,
-            "selection": scope.serialize(),
-            "exclusive": YesNo.of(exclusive),
-        },
-    )
-    transitions.admit_run(conn, run_id, actor)
-    return run_id
+    with conn.begin_nested():
+        run_id = transitions.create_run(
+            conn, pipeline_id, actor, run_key=run_key, run_date=run_date, status=RunStatus.QUEUED
+        )
+        with for_run(conn, run_id):
+            selected_graph(fetch_pipeline_graph(conn, pipeline_id), scope)
+            exclusive = scope.exclusive(conn)
+        conn.execute(
+            statement(conn, "manual_run_selection"),
+            {
+                "pipeline_run_id": run_id,
+                "selection": scope.serialize(),
+                "exclusive": YesNo.of(exclusive),
+            },
+        )
+        transitions.admit_run(conn, run_id, actor)
+        return run_id

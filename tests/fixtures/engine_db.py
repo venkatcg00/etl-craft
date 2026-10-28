@@ -8,7 +8,6 @@ tests never share state.
 from __future__ import annotations
 
 import shutil
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -26,7 +25,7 @@ from etl_craft.config import (
 from etl_craft.config.loader_helpers import shown
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.dialects.engine import EngineDialect, build_engine, for_engine
-from fixtures.services import POSTGRES_PASSWORD, POSTGRES_USER, require
+from fixtures.services import POSTGRES_PASSWORD, POSTGRES_USER, namespace, require
 
 SECRET_VAR = "ETL_CRAFT_TEST_ENGINE_SECRET"
 ENGINE_CASES = [
@@ -117,7 +116,7 @@ def postgres_engine_db(
 ) -> Iterator[EngineDb]:
     """Create a database of its own on the local PostgreSQL service, and drop it afterwards."""
     service = require("postgres")
-    name = f"etl_craft_test_{uuid.uuid4().hex[:12]}"
+    name = namespace("etl_craft_test")
     with postgres_admin() as conn:
         sql = psycopg.sql.SQL("CREATE DATABASE {}").format(psycopg.sql.Identifier(name))
         if template is not None:

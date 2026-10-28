@@ -10,7 +10,6 @@ process would build for it.
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -35,6 +34,7 @@ from fixtures.services import (
     POSTGRES_DB,
     POSTGRES_PASSWORD,
     POSTGRES_USER,
+    namespace,
     require,
 )
 
@@ -214,7 +214,7 @@ def sql_world(
 ) -> Iterator[SqlWorld]:
     """A fresh schema on each warehouse in turn, with an Engine DB and pipeline P."""
     kind = request.param
-    schema = f"t_{uuid.uuid4().hex[:10]}"
+    schema = namespace("t")
     if kind == "duckdb":
         config = _config(tmp_path, _profile(f"jdbc:duckdb:{tmp_path / 'warehouse.duckdb'}"))
         catalog = "warehouse"

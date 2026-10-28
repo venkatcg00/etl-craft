@@ -13,6 +13,7 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft import __version__
+from etl_craft.config.loader import SECTIONS
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.services.operations import OperationContext
@@ -25,7 +26,9 @@ def start_listener(project, command, *args):
         port = listener.getsockname()[1]
     raw = yaml.safe_load(project.config.config_path.read_text())
     raw["Orchestration"]["Api_address"] = f"127.0.0.1:{port}"
-    project.config.config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    project.config.config_path.write_text(
+        yaml.safe_dump({key: raw[key] for key in SECTIONS if key in raw}, sort_keys=False)
+    )
     process = project.start(command, *args)
     url = f"http://127.0.0.1:{port}"
     deadline = time.monotonic() + 10

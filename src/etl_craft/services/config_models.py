@@ -9,6 +9,7 @@ from typing import ClassVar, Literal
 
 from etl_craft.core.enums import Permission, YesNo
 from etl_craft.engine.repository.config_rows import ACTIVE_FLAG, Key, Value
+from etl_craft.services.refresh_models import PipelineRefresh
 from etl_craft.services.validate import Finding
 
 
@@ -90,6 +91,7 @@ class ConfigSync:
     changes: tuple[Change, ...]
     findings: tuple[Finding, ...] = ()
     tag_access_changes: tuple[TagAccessChange, ...] = ()
+    refreshes: tuple[PipelineRefresh, ...] = ()
 
 
 @dataclass(frozen=True)

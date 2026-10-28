@@ -119,6 +119,8 @@ def test_server_creates_and_finishes_a_scheduled_run(cli_project):
             text("UPDATE CFG_PIPELINES SET RUN_SCHEDULE='@daily', SCHEDULE_START_DATE=:today"),
             {"today": today},
         )
+    code, output = p.run("pipelines", "refresh")
+    assert code == 0, output
     server = p.start("controller")
     p.wait_for(
         "SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG "

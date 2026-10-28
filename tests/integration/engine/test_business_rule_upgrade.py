@@ -16,7 +16,7 @@ from etl_craft.engine.repository.business_rules import (
     flag_rule_keys,
 )
 from etl_craft.services.config_files import export_config, read_config_files
-from fixtures.metadata import add_pipeline, add_table, add_task, insert, start_run
+from fixtures.metadata import add_pipeline, add_table, add_task, insert
 from fixtures.released_schema import install
 
 
@@ -48,7 +48,16 @@ def legacy_rules(empty_engine_db, monkeypatch, tmp_path):
             target=target,
             rule_sql="SELECT 1 WHERE t.amount < 0 -- keep this body",
         )
-        run = start_run(conn, pipeline)
+        # Today's run creation captures today's CFG_ columns, which this older schema lacks.
+        run = insert(
+            conn,
+            "INSERT INTO AUD_PIPELINES_RUN_LOG (PIPELINE_ID,STATUS,RUN_DATE,BACKFILL,"
+            "STARTED_BY,STARTED_BY_KIND) "
+            "VALUES (:pipeline,'IN-PROGRESS',:day,'N','system','SYSTEM')",
+            "PIPELINE_RUN_ID",
+            pipeline=pipeline,
+            day=datetime.now(UTC).date(),
+        )
         task_run = transitions.find_or_create_task_run(conn, task, run).task_run_id
         binding = begin_rule_run(conn, rule_id, task_run, datetime.now(UTC))
         rule = fetch_business_rules_for_task(conn, task)[0]

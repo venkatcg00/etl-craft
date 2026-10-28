@@ -205,6 +205,30 @@ def test_a_relative_sqlite_path_resolves_beside_the_config(tmp_path):
     assert resolve_sqlite_path("jdbc:sqlite:engine.db") == "engine.db"
 
 
+def test_a_pinned_bundle_opens_the_host_engine_db_and_resolves_data_beside_the_host(tmp_path):
+    from dataclasses import replace
+
+    host = parse_config(
+        {
+            "Secrets": {"Source_type": "ENVIRONMENT"},
+            "Engine": {"dev": {"Jdbc_url": "jdbc:sqlite:engine.db", "Schema": "main"}},
+        },
+        tmp_path / "host" / "craft-connector.yml",
+    )
+    pinned = replace(
+        host,
+        config_path=tmp_path / "bundle" / "craft-connector.yml",
+        _host_config_path=host.config_path,
+    )
+    assert pinned.project_dir == tmp_path / "bundle"
+    assert pinned.host_dir == tmp_path / "host"
+    engine = build_engine(pinned)
+    try:
+        assert engine.url.database == str(tmp_path / "host" / "engine.db")
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("jdbc_url", ["jdbc:sqlite:", "jdbc:sqlite::memory:"])
 def test_an_in_memory_sqlite_engine_db_is_refused(jdbc_url):
     with pytest.raises(ConfigurationError, match="in-memory"):

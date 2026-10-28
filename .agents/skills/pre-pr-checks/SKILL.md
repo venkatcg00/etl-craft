@@ -93,7 +93,12 @@ uv run pytest -q -p no:cacheprovider tests/unit/test_x.py tests/integration/y/ \
 Never set `ETL_CRAFT_REQUIRE_SERVICES=1` for a run that includes the cloud suites or the wheel
 demos: their skips by design would turn into failures.
 
-`make check` still runs the complete suite serially (about 25 minutes) when CI is unavailable.
+`make test-changed` is the local default before a PR. It uses pytest-testmon with xdist,
+first running full Engine DB and warehouse suites when SQL, migrations, schema, marker or
+release TOML, examples or templates changed. CI never uses selection: its complete suite is
+the authority. `make test` uses automatic unit workers and four service workers; override
+`PYTEST_WORKERS` to cap both. `make check` measures coverage in parallel. Keep TMPDIR on disk
+(the Make targets use `$HOME/.cache/etl-craft/tests/tmp`), because /tmp may be RAM-backed.
 
 ## 1b. Repeated races
 
@@ -107,7 +112,7 @@ for i in $(seq 20); do
 done
 ```
 
-CI runs Python 3.12 and 3.13 on Linux and macOS. Read a version- or macOS-only CI failure before
+CI runs every supported Python on Linux and the newest on macOS; release gates keep the full product. Read a version- or macOS-only CI failure before
 rerunning it.
 
 ## 2. Installed-wheel demos
@@ -124,8 +129,7 @@ ETL_CRAFT_REQUIRE_SERVICES=1 \
 
 This covers all four local warehouses on both Engine DBs, pip and uv, the sdist and the
 `ui` extra. Expect no skips. The demos copy `examples/demo/` from the source tree: a change
-there needs only a rerun; a change under `src/` needs a rebuild. Run demo sessions one at a
-time, because the local Iceberg demos share fixed namespaces.
+there needs only a rerun; a change under `src/` needs a rebuild. Demo copies have unique catalog namespaces; parallel workers must retain that isolation.
 
 ## 3. actionlint
 
@@ -224,8 +228,8 @@ Recognize these before blaming the change:
 - **A run that hits its timeout** is usually waiting on a broken service, not a slow test. Read
   the end of its log once and check `docker ps` before running it again.
 - **Cloud parallelism.** Cloud suites use `-n 6 --dist loadgroup`; keep workers at or below
-  warehouse query concurrency and inspect query history for queueing. Keep local suites serial
-  unless their parallel safety and memory use have been measured. Required PR CI keeps its shards.
+  warehouse query concurrency and inspect query history for queueing. Local service suites use
+  four workers on this workstation; keep TMPDIR on disk. Required PR CI keeps its shards.
 - **Shells that do not split words.** In zsh, `pytest $files` passes one argument. Write the
   list to a file and use `xargs -a <file> uv run pytest ...`.
 - **Stopping a background run.** `pkill -f <pattern>` also matches the shell that runs the

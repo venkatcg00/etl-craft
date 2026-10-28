@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "psutil>=6.0,<7",
     "duckdb-engine>=0.13,<1",
+    "duckdb>=1.5.5,<2",
     "psycopg[binary]>=3.3.6,<4",
     "pyyaml>=6.0.3,<7",
     "sqlalchemy>=2.0.54,<3",
@@ -38,7 +39,7 @@ Repository = "https://github.com/venkatcg00/etl-craft"
 Issues = "https://github.com/venkatcg00/etl-craft/issues"
 
 [project.optional-dependencies]
-ui = ["fastapi>=0.115,<1", "pydantic>=2.9.2,<3", "uvicorn>=0.35,<1", "jinja2>=3.1,<4"]
+ui = ["fastapi>=0.115,<1", "pydantic>=2.9.2,<3", "uvicorn>=0.35,<1", "jinja2>=3.1,<4", "starlette>=0.37.2,<2"]
 all = ["etl-craft[ui,aws,databricks,snowflake,trino]"]
 aws = [
     "boto3>=1.28,<2",
@@ -79,6 +80,7 @@ dev = [
     "psycopg[binary]>=3.2",
     "pytest>=8.3",
     "pytest-xdist==3.8.0",
+    "pytest-testmon==2.2.0",
     "pytest-cov>=6",
     "pytest-timeout>=2.3",
     "ruff>=0.16.8",

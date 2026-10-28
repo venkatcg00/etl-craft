@@ -247,6 +247,7 @@ def seeded_tables(db):
             "mirror_id": "actor-mirror",
             "table_name": "AUD_PIPELINE_PAUSES",
             "row_key": "[1]",
+            "metadata_snapshot": "{}",
         }
         inspector = inspect(conn)
         schema = None if engine.dialect.name == "sqlite" else inspector.default_schema_name
@@ -517,6 +518,7 @@ def test_cli_actor_requests_and_read_only_audit(
             }
         },
     }
+    metadata["Artifacts"] = {"Store": (tmp_path / "artifacts").as_uri()}
     config = tmp_path / "craft-connector.yml"
     config.write_text(yaml.safe_dump(metadata, sort_keys=False))
     with engine_db.engine.begin() as conn:
@@ -534,6 +536,7 @@ def test_cli_actor_requests_and_read_only_audit(
         result = main(["--config", str(config), *argv])
         assert result == 0, capsys.readouterr()
 
+    command("pipelines", "refresh", "--pipeline", "P")
     command("run", "--pipeline-code", "P", "--init-only")
     with engine_db.engine.connect() as conn:
         run_id = conn.execute(
@@ -569,7 +572,7 @@ def test_cli_actor_requests_and_read_only_audit(
         ).all()
         assert [tuple(row) for row in actions] == [
             (name, actor_name, "SERVICE")
-            for name in ("run", "control", "control", "control", "mark")
+            for name in ("pipelines refresh", "run", "control", "control", "control", "mark")
         ]
         row = conn.execute(
             text(
@@ -590,7 +593,7 @@ def test_cli_actor_requests_and_read_only_audit(
     assert main(["--config", str(config), "run", "--pipeline-code", "P", "--init-only"]) == 3
     assert "no signed-in account" in capsys.readouterr().err
     with engine_db.engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one() == 5
+        assert conn.execute(text("SELECT COUNT(*) FROM AUD_ACTIONS")).scalar_one() == 6
 
 
 def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):
@@ -608,6 +611,7 @@ def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):
         "AUD_DEPENDENCY_CONSUMPTION",
         "AUD_METADATA_CHANGES",
         "AUD_ACTIONS",
+        "AUD_PIPELINE_REFRESHES",
     }
     for table, column in tables:
         if table.upper() not in protected:

@@ -40,9 +40,10 @@ def test_dump_restore_recovers_exact_interrupted_run(cli_project, restored_datab
     p = cli_project
     prepare = p.config.python_scripts_dir / "prepare.py"
     prepare.write_text(
-        "from pathlib import Path\nfrom etl_craft.scripting import ScriptResult\n"
+        f"from pathlib import Path\nROOT = {str(p.config.project_dir)!r}\n"
+        "from etl_craft.scripting import ScriptResult\n"
         "def run(task):\n"
-        "    with Path('backup-prepared').open('a') as stream: stream.write('committed\\n')\n"
+        "    with Path(ROOT, 'backup-prepared').open('a') as stream: stream.write('committed\\n')\n"
         "    return ScriptResult(1)\n"
     )
     with p.engine.begin() as conn:
@@ -52,16 +53,18 @@ def test_dump_restore_recovers_exact_interrupted_run(cli_project, restored_datab
         add_dependency(conn, p.pipeline_id, p.task_id, task, "SUCCESS")
     script = p.config.python_scripts_dir / "load.py"
     script.write_text(
-        "from pathlib import Path\nfrom threading import Event\n"
+        f"from pathlib import Path\nROOT = {str(p.config.project_dir)!r}\n"
+        "from threading import Event\n"
         "from etl_craft.scripting import ScriptResult\n"
         "def run(task):\n"
-        "    marker=Path('backup-started')\n"
+        "    marker=Path(ROOT, 'backup-started')\n"
         "    if not marker.exists():\n"
         "        marker.write_text('started')\n"
         "        Event().wait(120)\n"
-        "    with Path('backup-output').open('a') as stream: stream.write('one row\\n')\n"
+        "    with Path(ROOT, 'backup-output').open('a') as stream: stream.write('one row\\n')\n"
         "    return ScriptResult(1)\n"
     )
+    assert p.run("pipelines", "refresh")[0] == 0
     assert p.run("run", "--pipeline-code", "P", "--init-only", "--run-key", "restore")[0] == 0
     controller = p.start("controller", "--no-ui")
     p.wait_for("SELECT COUNT(*) FROM AUD_TASK_ATTEMPTS WHERE STATUS='RUNNING'", expected=1)
