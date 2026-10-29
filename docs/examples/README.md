@@ -209,3 +209,8 @@ complete local files remain under `Log_dir`, and agent files follow `Logs.Store`
 Retention section to keep history forever.
 Review `etl-craft purge --dry-run --format json` as an administrator before enabling deletion.
 See the [retention guide](../deploying/engine-db.md#retaining-project-history).
+
+For a pipeline or task code change, use `etl-craft rename --project P --pipeline OLD --to NEW
+--reason "Clearer code"` (add `--task OLD` for a task). See
+[Renaming pipelines and tasks](../guides/configuration-files.md#renaming-pipelines-and-tasks).
+Update the example's CSV files and team SQL references after the command; do not replace its IDs.

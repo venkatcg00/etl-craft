@@ -1,9 +1,4 @@
-"""One row per action: what it calls, who may, whether it is audited, where it runs, its route.
-
-Every interface reaches an operation through ``invoke``, which checks the role, records the
-request once and calls the operation. The CLI, the HTTP routes, the reference page and the
-controller client read everything else about an action from this table.
-"""
+"""One action table for calls, authorization, audit, placement and generated routes."""
 
 from __future__ import annotations
 
@@ -66,6 +61,7 @@ from etl_craft.services.operations import (
     models,
     pipeline_refresh,
     processes,
+    renames,
     retention,
     runs,
     sessions,
@@ -204,7 +200,6 @@ _ROWS = (
            agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/report", BY_ACTION),
     Action(ActionName.AGENT_LOG, agent_logs.upload, agent_models.AgentLog,
            agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/log"),
-
     # Sign-in: no role; the sign-in actions record their own row once the account is proven.
     Action(ActionName.LOGIN_METHODS, sessions.sign_in_methods, NoInput, sessions.SignInMethods,
            None, GET, f"{API}/login/methods"),
@@ -218,11 +213,12 @@ _ROWS = (
            POST, f"{API}/login/refresh"),
     Action(ActionName.LOGOUT, sessions.sign_out, sessions.TokenInput, None, None, POST,
            f"{API}/login/revoke", BY_ACTION),
-    # Reads.
     Action(ActionName.WHOAMI, sessions.whoami, NoInput, sessions.Identity, VIEWER, GET,
            f"{API}/whoami"),
     Action(ActionName.HEALTH, lambda ctx, request: models.Health(), NoInput, models.Health, VIEWER,
            GET, f"{API}/health"),
+    Action(ActionName.RENAME, renames.rename, renames.RenameInput, renames.RenameResult,
+           DEVELOPER, POST, f"{API}/renames", REQUEST, scope=ActionScope.PROJECT),
     Action(ActionName.PIPELINE_REFRESH, pipeline_refresh.refresh, pipeline_refresh.RefreshInput,
            pipeline_refresh.RefreshResults, DEVELOPER, POST, f"{API}/pipelines/refresh",
            audit=REQUEST, scope=ActionScope.PIPELINE),
@@ -286,7 +282,6 @@ _ROWS = (
            scope=ActionScope.PIPELINE),
     Action(ActionName.REHASH_PLAN, maintenance.plan_rehash, maintenance.RehashInput,
            RehashResult, VIEWER, GET, f"{API}/rehash", scope=ActionScope.PROJECT),
-    # Runs and controls.
     Action(ActionName.TRIGGER_PIPELINE, triggers.initialize, triggers.TriggerRequest,
            triggers.TriggerView, OPERATOR, POST, f"{API}/triggers", REQUEST,
            scope=ActionScope.PIPELINE),
@@ -353,7 +348,6 @@ _ROWS = (
            ADMIN, POST, f"{API}/groups/members", REQUEST),
     Action(ActionName.GROUP_REMOVE_MEMBER, groups.remove_member, groups.GroupMember, groups.Groups,
            ADMIN, POST, f"{API}/groups/members/remove", REQUEST),
-    # Development and administration.
     Action(ActionName.LINEAGE_REFRESH, diagnostics.refresh_lineage, LineageRefreshInput,
            diagnostics.LineageView, DEVELOPER, POST, f"{API}/lineage/refresh", REQUEST,
            scope=ActionScope.PIPELINE),
@@ -423,6 +417,7 @@ _ROWS = (
 
 PROJECT_MANAGE_ACTIONS = frozenset(
     {
+        ActionName.RENAME,
         ActionName.CONFIG_PLAN,
         ActionName.PIPELINE_REFRESH,
         ActionName.CONFIG_APPLY,
@@ -632,7 +627,7 @@ def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
 def project_settings(ctx: OperationContext, name: ActionName, request: object) -> OperationContext:
     """Use approved project connections for operations that inspect warehouse resources."""
     if ctx.transport == Transport.LOCAL and (
-        not ctx.config.artifacts.store or name == ActionName.PIPELINE_REFRESH
+        not ctx.config.artifacts.store or name in (ActionName.PIPELINE_REFRESH, ActionName.RENAME)
     ):
         return ctx
     if (
@@ -648,6 +643,7 @@ def project_settings(ctx: OperationContext, name: ActionName, request: object) -
         ActionName.RUN,
         ActionName.VALIDATE,
         ActionName.PIPELINE_REFRESH,
+        ActionName.RENAME,
         ActionName.LINEAGE,
         ActionName.LINEAGE_REFRESH,
         ActionName.CATALOG_GAPS,

@@ -38,13 +38,13 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
         options.status,
     )
     _validate(pipeline_id, status, trigger_kind)
+    standing_pauses.lock(conn, pipeline_id)
     refresh = (
         admitted(conn, pipeline_id)
         if conn.engine.get_execution_options().get("refresh_required")
         and status != RunStatus.SKIPPED
         else None
     )
-    standing_pauses.lock(conn, pipeline_id)
     key = run_key or f"{trigger_kind.lower().replace('_', '-')}:{uuid4()}"
     try:
         with conn.begin_nested():

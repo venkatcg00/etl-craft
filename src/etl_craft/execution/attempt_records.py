@@ -6,6 +6,7 @@ import contextvars
 import logging
 import socket
 import threading
+from contextlib import suppress
 from pathlib import Path
 
 from sqlalchemy.engine import Connection, Engine
@@ -19,7 +20,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.errors import ResourceNotFoundError
-from etl_craft.core.text import byte_tail
+from etl_craft.core.text import byte_tail, is_metadata_code
 from etl_craft.engine import attempt_cancellation, attempt_starts, controls, runlog, transitions
 from etl_craft.engine.logs import LogAttempt
 from etl_craft.engine.metrics import lifecycle
@@ -55,25 +56,44 @@ def attempt_log_path(
 
 
 def local_attempt_log(config: ConnectorConfig, row: LogAttempt) -> Path:
-    """Accept recorded canonical project paths and the original canonical local layout."""
-    expected = attempt_log_path(
-        config,
-        row.pipeline_code,
-        row.pipeline_run_id,
-        row.task_code,
-        row.attempt_number,
-        project_id=row.project_id,
-    ).absolute()
-    root = config.log_dir.absolute()
-    legacy = root / expected.relative_to(root / f"project-{row.project_id}")
-    path = None if row.log_path is None else Path(row.log_path).absolute()
-    if path not in (expected, legacy):
+    """Validate recorded local identities independently of mutable pipeline/task codes."""
+    root = config.log_dir.resolve()
+    path = None if row.log_path is None else Path(row.log_path)
+    relative = None
+    if path is not None and ".." not in path.parts:
+        with suppress(ValueError):
+            relative = path.absolute().relative_to(config.log_dir.absolute())
+    parts = () if relative is None else relative.parts
+    scoped = len(parts) == 4 and parts[0] == f"project-{row.project_id}"
+    identity = parts[1:] if scoped else parts
+    suffix = f".attempt-{row.attempt_number}.log"
+    shape = (
+        len(identity) == 3
+        and is_metadata_code(identity[0])
+        and identity[1] == f"run-{row.pipeline_run_id}"
+        and identity[2].endswith(suffix)
+        and is_metadata_code(identity[2][: -len(suffix)])
+    )
+    boundary = root / f"project-{row.project_id}" if scoped else root
+    contained = False
+    if path is not None and shape:
+        with suppress(OSError, RuntimeError, ValueError):
+            resolved = path.resolve().relative_to(boundary).parts
+            contained = (
+                len(resolved) == 3
+                and is_metadata_code(resolved[0])
+                and resolved[1] == identity[1]
+                and resolved[2] == identity[2]
+            )
+    if path is None or not shape or not contained:
         raise ResourceNotFoundError(
-            f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected {str(expected)!r} "
-            f"or recorded legacy path {str(legacy)!r}; restore the canonical attempt path"
+            f"attempt_id={row.attempt_id}: LOG_PATH={row.log_path!r}; expected "
+            f"{root}/project-{row.project_id}/<pipeline>/run-{row.pipeline_run_id}/"
+            f"<task>{suffix} (or the recorded legacy layout without project directory), "
+            "with valid codes, no traversal and no symlink escaping its root; "
+            "restore the recorded canonical attempt path inside Orchestration.Log_dir"
         )
-    assert path is not None
-    return path
+    return path.absolute()
 
 
 class CancelWatch:

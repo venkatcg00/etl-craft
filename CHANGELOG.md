@@ -17,6 +17,19 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- `etl-craft rename --project P --pipeline OLD [--task OLD] --to NEW` and its API action retain
+  execution identity, offsets, consumed events and direct grants. Project CAN_MANAGE is required;
+  STRICT projects require a reason. Active runs and pending timestamp windows refuse renames;
+  reference updates and passing refreshes commit together. Stale config inserts using renamed-away
+  codes are refused using typed history. Matching retire/insert task plans name the rename command.
+- Recorded attempt logs remain readable and retainable after renames without moving files or
+  rewriting LOG_PATH. Paths are checked by project/run/attempt shape and resolved containment.
+  Metric series and catalog page paths use the new codes; rebuild docs and update team SQL,
+  team-owned tables, repository CSV files and monitoring references.
+- Engine DB migration 0072 defers the direct pipeline-grant code foreign key until transaction
+  commit, retaining grant identities and typed history during pipeline renames. Partial rename-history
+  indexes support stale-code checks and retention without scanning ordinary metadata history.
+
 - **Breaking / upgrade:** managed task writes stamp `UPDATE_DATE` with the attempt's recorded
   Engine DB start, shared by every row it writes. Existing rows keep their stamps. Managed
   writes into `UPDATE_DATE` columns coarser than microseconds now fail before writing: apply

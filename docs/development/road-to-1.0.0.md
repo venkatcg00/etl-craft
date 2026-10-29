@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Planned | | Guard project rows, admin/audit data and owned team-table DDL |
-| S7.AH Renames keep identity | Planned | | Rename command preserves IDs, offsets and consumed events |
+| S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
@@ -389,6 +389,15 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.AH exercises identity, offsets/events, dependency consumption, grants, reference updates,
+stale helper files, atomic refresh failures and recorded-log reads/retention on both Engine DBs.
+Admission and publication races passed twenty local rounds, including active code-reference
+consumers. Every added case fails with the source change stashed. Static checks, strict docs
+and the read-only security review passed; no actionable security findings were reported.
+The full local Engine DB/four-warehouse pass and affected-test gate passed; one selected
+Databricks retry-class case skipped because credentials were absent, before any cloud SQL.
+Cloud SQL is unchanged. Complete platform coverage and installed-wheel demos remain CI gates.
 
 S7.X exercises bounded windows, pending ownership, rollback, resets, abandonment, retention,
 standing SUCCESS/FAILED/SKIPPED and real-row upgrades on SQLite and PostgreSQL. Source/window
@@ -904,6 +913,28 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AH follows the owner's one-PR preference, including the shared notifier rule. Project
+  CAN_MANAGE and the intervention reason policy govern the generated rename action/route.
+  The owner's stale-config decision reserves renamed-away insert keys through typed metadata
+  history; retention keeps each rename transition and its preceding version, with no new mapping
+  table or column. Grant code constraints become deferred in both dialects, preserving grant IDs
+  and typed history while updating grants and trigger/watermark source parameters atomically.
+  Partial indexes over existing rename history serve reservation checks and retention; the
+  unchanged query-plan gate verifies indexed reads.
+- S7.AH owner decision, 2026-10-29: local logs validate recorded project/run/attempt path shape,
+  code characters and resolved containment independently of current codes. Files never move,
+  LOG_PATH never changes, and reads/retention never consult rename history. Old-code and legacy
+  paths remain readable; new attempts use new codes. Metrics and regenerated catalog paths
+  change. Rename and affected refresh/bundle records share one transaction; an unrefreshable
+  cross-project dependency refuses with its identity and remedy. Repository files and team SQL/
+  CFG_ references remain the team's responsibility. Busy identities refuse before resource waits
+  and are rechecked under admission fencing. Pipelines with trigger/watermark code references
+  must also be idle: their pinned snapshots retain old codes and cannot safely be rewritten.
+  The existing warehouse reservation precedes the
+  metadata writer, so SQL source checks do not open a nested SQLite writer. API calls use the
+  selected project's approved files; standalone refresh keeps its existing read snapshot.
+  Run S7.AG next, then S7.A page code.
 
 - S7.X owner decision, 2026-10-29: every managed UPDATE_DATE and bounded source watermark
   column must preserve at least microseconds; never round an attempt stamp to fit storage.
@@ -7707,7 +7738,7 @@ release candidate.
      | Unknown config CSV silently ignored | Refuse with filename/suggestion; test_unknown_csv_names_the_suggestion | S7.AF |
      | Project migration writes another project or admin/audit data | Guard rows/admin/DDL; planned test_project_migrations_are_scoped | S7.AG |
      | Team CFG_ table collision or cross-project write/DDL | Record ownership, refuse access and doctor collisions; planned test_team_table_project_ownership | S7.AG |
-     | Task/pipeline rename replays offsets or consumed events | Preserve IDs and refuse active runs; planned test_rename_preserves_offsets_and_events | S7.AH |
+     | Task/pipeline rename replays offsets or consumed events | Preserve IDs and refuse active runs; test_rename_preserves_offsets_and_events | S7.AH |
      | Pipeline manager reaches project editing or hidden upstreams | Project access gates all grants; restricted pipelines retain matching-grant rules, project CAN_MANAGE administers its project, upstream CAN_VIEW is required; test_project_edit_and_dependency_permissions | S7.Y B |
      | Local log names collide across projects | Project-ID log directory, readable legacy locations; test_project_log_paths | S7.Y B |
      | Arbitrary SQL/utility side effects retried after disconnect | Default RETRY_ON=NONE; test_unmanaged_default_retry_policy | S7.AD |

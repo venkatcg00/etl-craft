@@ -267,6 +267,20 @@ it. Never copy it, and never import another module's `_private` name.
 
 ## Validation
 
+- Every AI agent waits for a long run (a test suite, races, a demo, CI) with one call that
+  returns when the run ends:
+  - a background job the harness reports when it exits (a completion notice or trigger);
+  - or a single blocking command, for example a foreground run with a long timeout, or
+    `gh run watch <run-id> --exit-status`;
+  - or, for a condition no command reports, a bounded `timeout <s> sh -c 'until <check>; do
+    sleep 30; done'` inside one call.
+- Never check a log, a process or a CI run every few minutes across separate tool calls:
+  every check re-sends the whole session.
+- Write the run's output to a log file and read it once, after the run ends.
+- After `gh pr merge --auto`, end the session; don't wait for CI at all.
+- Where an item needs CI results (timing runs, a failure to read), use `gh run watch
+  --exit-status`, then read the job logs once.
+
 Follow `.agents/skills/pre-pr-checks/SKILL.md`. In short:
 
 ```bash

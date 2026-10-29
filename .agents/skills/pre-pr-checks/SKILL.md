@@ -16,10 +16,21 @@ scratch directory outside the repository:
 SCRATCH="$(mktemp -d)"
 ```
 
-Write each long step's output to `$SCRATCH/<step>.log` and check its exit status; `pytest | tail`
-hides a failure. Run it so that one tool call returns its result: in the foreground with a long
-timeout, or in the background only where your harness tells you when it ends. Never poll a log,
-a process or CI: every check re-sends the whole session. Run the steps one at a time.
+Check each run's exit status; `pytest | tail` hides a failure. Run the steps one at a time.
+
+- Every AI agent waits for a long run (a test suite, races, a demo, CI) with one call that
+  returns when the run ends:
+  - a background job the harness reports when it exits (a completion notice or trigger);
+  - or a single blocking command, for example a foreground run with a long timeout, or
+    `gh run watch <run-id> --exit-status`;
+  - or, for a condition no command reports, a bounded `timeout <s> sh -c 'until <check>; do
+    sleep 30; done'` inside one call.
+- Never check a log, a process or a CI run every few minutes across separate tool calls:
+  every check re-sends the whole session.
+- Write the run's output to a log file and read it once, after the run ends.
+- After `gh pr merge --auto`, end the session; don't wait for CI at all.
+- Where an item needs CI results (timing runs, a failure to read), use `gh run watch
+  --exit-status`, then read the job logs once.
 
 On a Linux workstation, start each long run in its own systemd scope so that an out-of-memory
 kill of the editor does not take the run with it, and keep the machine from suspending:
