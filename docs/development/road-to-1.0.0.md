@@ -175,7 +175,7 @@ item's text, or work done early under another item.
 | S7.AD Python script kinds | Done | #270 | Explicit ingestion/utility contracts, nullable utility counts and safe unmanaged retry defaults |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
-| S7.AG Project migrations stay in their project | Done | | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
+| S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
