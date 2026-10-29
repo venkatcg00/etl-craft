@@ -18,3 +18,16 @@ def install(db, release):
             for migration in migrations.migration_streams(db.engine)[0].files:
                 if migration.version < ("0007" if release == "0.2.0" else "0019"):
                     migrations._record(conn, migration)
+
+
+def seed_offset(conn, task_id, offset):
+    """Seed the released scalar/partition tracker without calling current-schema services."""
+    from sqlalchemy import text
+
+    conn.execute(
+        text(
+            "INSERT INTO AUD_TASK_OFFSET_TRACKER (TASK_ID,OFFSET_TYPE,OFFSET_VALUE) "
+            "VALUES (:task,:kind,:value)"
+        ),
+        {"task": task_id, "kind": offset.offset_type, "value": offset.offset_value},
+    )

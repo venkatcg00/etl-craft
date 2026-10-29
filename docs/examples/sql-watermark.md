@@ -35,3 +35,23 @@ Keep each column once in the merge lists. For example, `event_id|EVENT_ID` is a 
 and fails validation. If correcting repeated compare columns on an existing target, follow
 [the rehash procedure](../guides/sql-tasks.md#correcting-an-existing-repeated-compare-column)
 before resuming the pipeline.
+
+## Bounded ODS-to-mart example
+
+For an engine-managed ODS source, configure `WATERMARK_TYPE=TIMESTAMP`,
+`WATERMARK_COLUMN=ods_changed_at`, `WATERMARK_START=2000-01-01T00:00:00+00:00` and
+`WATERMARK_SOURCE_PIPELINES=["CLIENT_ALPHA","CLIENT_BETA","STEWARD_BUSINESS"]`:
+
+```sql
+SELECT customer_id, status, UPDATE_DATE AS ods_changed_at
+FROM ods.customers
+WHERE UPDATE_DATE >= $$watermark AND UPDATE_DATE < $$watermark_max
+```
+
+The admitted high is stable across retries; even an empty successful window advances to it.
+`UPDATE_DATE` means the Engine DB start of the attempt that wrote the row. Source and target
+columns must retain microseconds; existing coarse columns require a project migration.
+The alias avoids the target's reserved audit column. Compare only business columns in a
+merge, such as `MERGE_COMPARE_COLUMNS=status`. Source run IDs remain provenance, not a cursor.
+See [bounded timestamp windows](../guides/sql-tasks.md#bounded-timestamp-windows) for pending
+ownership, source fences, repairs, resets and the upgrade rule.

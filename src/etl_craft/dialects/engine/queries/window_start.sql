@@ -1,0 +1,5 @@
+SELECT a.STARTED_AT AS started_at FROM AUD_TASK_ATTEMPTS a
+WHERE a.ATTEMPT_ID=:attempt_id AND a.TASK_RUN_ID=:task_run_id
+UNION ALL
+SELECT t.START_DATE AS started_at FROM AUD_TASK_RUN_LOG t
+WHERE :attempt_id IS NULL AND t.TASK_RUN_ID=:task_run_id

@@ -370,7 +370,7 @@ def substitute_task_tokens(
     task_run_id: int = 0,
     pipeline_id_substitution: bool = False,
     task_run_id_substitution: bool = False,
-    watermark_literal: str | None = None,
+    watermark_literals: Mapping[str, str] | None = None,
     event_literals: Mapping[str, str | None] | None = None,
 ) -> str:
     """Replace execution-identity and run-date tokens, each only when its switch is on.
@@ -382,7 +382,7 @@ def substitute_task_tokens(
       refresh or when ``force_all`` asks for every row, when ``filter_enabled`` is on (the
       task's ``PIPELINE_RUN_ID_FILTER``).
     - ``$$event_files`` becomes escaped SQL file literals from successful event waits.
-    - ``$$watermark`` becomes the supplied typed SQL literal, when ``watermark_literal``
+    - ``$$watermark`` becomes the supplied typed SQL literal, when ``watermark_literals``
       is present; SQL task definitions supply it from the checked offset.
     - ``$$run_date`` becomes the date the run runs as of, as ``DATE 'YYYY-MM-DD'``, when
       ``run_date_substitution`` is on (the task's ``RUN_DATE_SUBSTITUTION``).
@@ -406,7 +406,8 @@ def substitute_task_tokens(
         TASK_RUN_ID_TOKEN[2:]: task_run_id_substitution,
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: filter_enabled,
         RUN_DATE_TOKEN[2:]: run_date_substitution,
-        "watermark": watermark_literal is not None,
+        "watermark": watermark_literals is not None,
+        "watermark_max": watermark_literals is not None and "watermark_max" in watermark_literals,
         "event_files": "event_files" in found,
         "event_keys": "event_keys" in found,
     }
@@ -417,26 +418,11 @@ def substitute_task_tokens(
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "PIPELINE_RUN_ID_FILTER",
         RUN_DATE_TOKEN[2:]: "RUN_DATE_SUBSTITUTION",
         "watermark": "WATERMARK_COLUMN, WATERMARK_TYPE and WATERMARK_START",
+        "watermark_max": "a TIMESTAMP watermark with $$watermark_max",
         "event_files": "a successful EVENT_WAIT in this run",
         "event_keys": "a successful keyed EVENT_WAIT in this run",
     }
-    unknown = sorted(found - known.keys())
-    if unknown:
-        raise HandlerError(
-            f"{source} uses unknown token(s) {', '.join('$$' + t for t in unknown)}; the known "
-            f"tokens are {', '.join('$$' + name for name in known)}"
-        )
-    for name, enabled in known.items():
-        if name in found and not enabled:
-            raise HandlerError(
-                f"{source} uses $${name}, but {switch[name]} is not true for this task; set "
-                f"{switch[name]}=true to have it replaced"
-            )
-        if enabled and name not in found:
-            raise HandlerError(
-                f"{switch[name]} is true, but {source} has no $${name} to replace; remove the "
-                "parameter or add the token"
-            )
+    check_task_tokens(found, known, switch, source)
     run_id = int(pipeline_run_id)
     full = force_all or refresh_type == RefreshType.FULL
     replacements = {
@@ -445,7 +431,7 @@ def substitute_task_tokens(
         TASK_RUN_ID_TOKEN[2:]: str(int(task_run_id)),
         PIPELINE_RUN_ID_FILTER_TOKEN[2:]: "1=1" if full else f"pipeline_run_id = {run_id}",
         RUN_DATE_TOKEN[2:]: f"DATE '{run_date.isoformat()}'",
-        "watermark": watermark_literal or "NULL",
+        **(watermark_literals or {}),
         **{name: literal or "NULL" for name, literal in events.items()},
     }
     return "".join(
@@ -624,3 +610,26 @@ def _event_literals(
 def byte_tail(value: str, maximum: int) -> str:
     """Keep whole UTF-8 characters within the requested trailing byte budget."""
     return value.encode()[-maximum:].decode("utf-8", errors="ignore") if maximum else ""
+
+
+def check_task_tokens(
+    found: set[str], known: Mapping[str, bool], switch: Mapping[str, str], source: str
+) -> None:
+    """Refuse unknown, disabled or unused substitutions before constructing SQL."""
+    unknown = sorted(found - known.keys())
+    if unknown:
+        raise HandlerError(
+            f"{source} uses unknown token(s) {', '.join('$$' + t for t in unknown)}; the known "
+            f"tokens are {', '.join('$$' + name for name in known)}"
+        )
+    for name, enabled in known.items():
+        if name in found and not enabled:
+            raise HandlerError(
+                f"{source} uses $${name}, but {switch[name]} is not true for this task; set "
+                f"{switch[name]}=true to have it replaced"
+            )
+        if enabled and name not in found:
+            raise HandlerError(
+                f"{switch[name]} is true, but {source} has no $${name} to replace; remove the "
+                "parameter or add the token"
+            )

@@ -146,6 +146,7 @@ VALUES = {
 def bindings(sql, name=""):
     overrides = {
         "access_list": {"project": "default"},
+        "window_reserve": {"high": MOMENT},
         "connection_reservation_insert": {
             "pool": 10,
             "sessions": 2,

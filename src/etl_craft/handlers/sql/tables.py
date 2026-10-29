@@ -242,6 +242,8 @@ def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
             "SCHEMA_EVOLUTION adds only the SELECT's own columns"
         )
     check_identity_types(session)
+    if "UPDATE_DATE" in audit:
+        check_update_precision(session)
     return target_columns
 
 
@@ -404,3 +406,12 @@ def check_identity_types(session: Session, columns: tuple[str, ...] = IDENTITY_C
                 f"{session.target}.{column} has type {kind}; expected BIGINT. "
                 "Migrate this column explicitly before writing or upgrading"
             )
+
+
+def check_update_precision(session: Session) -> None:
+    """Use the action's cached target definition before writing any UPDATE_DATE."""
+    kinds = {name.lower(): kind for name, kind in session.target_columns()}
+    if problem := session.dialect.timestamp_precision_problem(
+        session.target, "UPDATE_DATE", kinds["update_date"]
+    ):
+        raise SqlGuardError(problem)

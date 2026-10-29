@@ -456,3 +456,50 @@ def test_gate_wait_batch_counts_distinct_wait_kinds(scene, engine_db, monkeypatc
     assert max(batches) == 1
     assert sum(batches) == 2
     assert count(ctx, "AUD_GATE_WAITS") == 0
+
+
+def test_a_pending_timestamp_window_protects_its_run_range_and_attempt(scene):
+    ctx, pipeline, task, run, summary, _attempt = scene
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_OFFSET_TRACKER "
+                "(TASK_ID,OFFSET_TYPE,OFFSET_VALUE,PENDING_TASK_RUN_ID,PENDING_UPPER_BOUND) "
+                "VALUES (:task,'TIMESTAMP','1999-01-01T00:00:00+00:00',:summary,:high)"
+            ),
+            {"task": task, "summary": summary, "high": OLD},
+        )
+        action = conn.execute(
+            text(
+                "INSERT INTO AUD_ACTIONS (STARTED_AT,ENDED_AT,ACTOR,ACTOR_KIND,HOST,COMMAND,"
+                "ARGUMENTS,PROJECT_ID,PIPELINE_ID,PIPELINE_RUN_ID,TASK_ID,OUTCOME) "
+                "VALUES (:old,:old,'test','SYSTEM','host','run','{}',1,"
+                ":pipeline,:run,:task,'SUCCESS') "
+                "RETURNING ACTION_ID"
+            ),
+            {"old": OLD, "pipeline": pipeline, "run": run, "task": task},
+        ).scalar_one()
+    result = invoke(ctx, ActionName.PURGE, PurgeInput())
+    assert result.counts["AUD_TASK_ATTEMPTS"] == 0
+    assert result.counts["AUD_TASK_RUN_LOG"] == 0
+    assert count(ctx, "AUD_TASK_ATTEMPTS") == 1
+    assert count(ctx, "AUD_TASK_RUN_LOG") == 1
+    with ctx.engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT ACTION_ID AS id FROM AUD_ACTIONS WHERE ACTION_ID=:id"), {"id": action}
+            ).scalar_one()
+            == action
+        )
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE AUD_TASK_OFFSET_TRACKER SET PENDING_TASK_RUN_ID=NULL, "
+                "PENDING_UPPER_BOUND=NULL "
+                "WHERE TASK_ID=:task"
+            ),
+            {"task": task},
+        )
+    result = invoke(ctx, ActionName.PURGE, PurgeInput())
+    assert result.counts["AUD_TASK_ATTEMPTS"] == 1
+    assert result.counts["AUD_TASK_RUN_LOG"] == 1

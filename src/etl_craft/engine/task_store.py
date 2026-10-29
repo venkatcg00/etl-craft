@@ -19,6 +19,7 @@ from etl_craft.core.enums import BusinessRuleLevel, RunStatus, SqlAction, YesNo
 from etl_craft.core.errors import HandlerError, StaleTransitionError
 from etl_craft.core.items import ItemRecord, ItemState, ItemStore
 from etl_craft.core.ownership import ResourceLocker, attempt_holder
+from etl_craft.core.time import as_utc
 from etl_craft.engine import locks, resource_locks, transitions
 from etl_craft.engine.agent_state import fence
 from etl_craft.engine.alerts import AlertState, read_alert
@@ -44,6 +45,12 @@ from etl_craft.engine.repository.tasks import (
     TargetTask,
 )
 from etl_craft.engine.resource_locks import currently_holds, holder_tag
+from etl_craft.engine.timestamp_windows import (
+    TimestampWindow,
+    WindowDefinition,
+    admit_window,
+    recorded_start,
+)
 
 
 @dataclass(frozen=True)
@@ -131,6 +138,10 @@ class TaskStore(ResourceLocker, ItemStore, Protocol):
 
     def watermark(self, start: str, end: str) -> None:
         """Record a staged range without advancing its checkpoint."""
+        ...
+
+    def window(self, definition: WindowDefinition) -> TimestampWindow:
+        """Admit one retry-stable timestamp window before executing SQL."""
         ...
 
     def begin_rule(self, rule_id: int) -> RuleRunBinding:
@@ -238,7 +249,12 @@ class LocalTaskStore:
         if currently_holds(locks.target(target, row.catalog_name).key):
             self._contracts[target] = contract
         return TaskState(
-            StoredOffset(row.offset_type, row.offset_value)
+            StoredOffset(
+                row.offset_type,
+                row.offset_value,
+                row.pending_task_run_id,
+                None if row.pending_upper_bound is None else as_utc(row.pending_upper_bound),
+            )
             if row.offset_type is not None
             else None,
             (),
@@ -314,6 +330,28 @@ class LocalTaskStore:
                 attempt_id=identity.attempt_id,
                 owner=identity.owner,
             )
+
+    def window(self, definition: WindowDefinition) -> TimestampWindow:
+        """Serialize admission with source starts and publish range evidence before SQL."""
+        identity = self.identity
+        with self.engine.begin() as conn:
+            self._assert(conn)
+            window = admit_window(
+                conn,
+                identity.task_id,
+                identity.task_run_id,
+                recorded_start(conn, identity.task_run_id, identity.attempt_id),
+                definition,
+            )
+            transitions.record_watermark_range(
+                conn,
+                identity.task_run_id,
+                window.low.isoformat(),
+                window.high.isoformat(),
+                attempt_id=identity.attempt_id,
+                owner=identity.owner,
+            )
+            return window
 
     def items(self) -> ItemState:
         """Read durable items and this attempt's actual admitted memory."""

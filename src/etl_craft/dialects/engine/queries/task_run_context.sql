@@ -1,6 +1,6 @@
 -- The task's definition and admitted run, without resolving by recency.
 SELECT l.TASK_ID AS task_id, l.PIPELINE_RUN_ID AS pipeline_run_id,
-       l.ATTEMPT_COUNT AS attempt_count, l.STATUS AS status, r.WRITER AS writer,
+       l.ATTEMPT_COUNT AS attempt_count, l.START_DATE AS started_at, l.STATUS AS status, r.WRITER AS writer,
        t.HANDLER AS handler, t.TASK_CODE AS task_code, r.PIPELINE_ID AS pipeline_id,
        p.PIPELINE_CODE AS pipeline_code, p.REFRESH_TYPE AS refresh_type,
        r.RUN_DATE AS run_date, r.BACKFILL AS backfill,

@@ -163,3 +163,67 @@ def test_watermark_literals_keep_their_values(sql_world):
     from fixtures.sql_watermarks import check_watermark_literals
 
     check_watermark_literals(sql_world, "literal_watermark")
+
+
+def test_created_merge_columns_and_write_stamps_preserve_engine_time(sql_world, monkeypatch):
+    from datetime import UTC, datetime
+
+    from etl_craft.handlers import sql
+    from etl_craft.handlers.sql.session import Session
+    from fixtures.sql_watermarks import check_timestamp_stamps
+
+    class AgentTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2099, 1, 1, tzinfo=UTC)
+
+    original = Session.run
+
+    def warehouse_time(self, query, *args, **kwargs):
+        return original(
+            self,
+            query.replace("CURRENT_TIMESTAMP", "TIMESTAMP '1900-01-01 00:00:00'"),
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(sql, "datetime", AgentTime, raising=False)
+    monkeypatch.setattr(Session, "run", warehouse_time)
+    check_timestamp_stamps(sql_world, "microsecond_stamps")
+
+
+@warehouses("postgres")
+@pytest.mark.parametrize("action", ["SCD1_MERGE", "SCD2_MERGE", "OVERWRITE_TABLE", "DELETE_ROWS"])
+def test_a_coarse_update_date_is_refused_before_writing(sql_world, action):
+    w = sql_world
+    writer = "SCD2_MERGE" if action == "DELETE_ROWS" else action
+    w.setup("coarse_stamps", "SELECT CAST(1 AS BIGINT) AS id", writer)
+    w.execute(f"ALTER TABLE {w.name('coarse_stamps')} ALTER COLUMN UPDATE_DATE TYPE TIMESTAMPTZ(0)")
+    params = {
+        "SQL_ACTION": action,
+        "TARGET_OBJECT": "coarse_stamps",
+        "SELECT_QUERY": "SELECT CAST(1 AS BIGINT) AS id",
+    }
+    if action != "OVERWRITE_TABLE":
+        params["MERGE_KEY"] = "id"
+    if action in {"SCD1_MERGE", "SCD2_MERGE"}:
+        params["MERGE_COMPARE_COLUMNS"] = "id"
+    with pytest.raises(
+        SqlGuardError, match=r"coarse_stamps.UPDATE_DATE.*precision 0.*6.*migration"
+    ):
+        w.run("coarse_write", **params)
+    with w.warehouse.connect() as conn:
+        row = conn.execute(text(f"SELECT COUNT(*) AS count FROM {w.name('coarse_stamps')}"))
+        assert row.mappings().one()["count"] == 0
+
+
+def test_empty_bounded_windows_advance_to_the_admitted_high(sql_world):
+    from fixtures.sql_watermarks import check_empty_bounded_window
+
+    check_empty_bounded_window(sql_world, "bounded_empty")
+
+
+def test_bounded_timestamp_source_race_on_each_engine_and_warehouse(sql_world, engine_db):
+    from fixtures.sql_watermarks import check_bounded_race
+
+    check_bounded_race(sql_world, engine_db)

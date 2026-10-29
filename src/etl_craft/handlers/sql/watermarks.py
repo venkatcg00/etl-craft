@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,6 +28,7 @@ class Watermark:
 
     column: str
     start: Offset
+    upper: Offset | None = None
 
     def literal(self, config: ConnectorConfig) -> str:
         """Render a checked value as a literal in the warehouse's SQL dialect."""
@@ -38,6 +40,15 @@ class Watermark:
             return f"TIMESTAMP {exp.Literal.string(value.isoformat(sep=' ')).sql(dialect=dialect)}"
         # SQLAlchemy text() reads even a quoted :name as a bind without this escape.
         return exp.Literal.string(str(value)).sql(dialect=dialect).replace(":", "\\:")
+
+    def literals(self, config: ConnectorConfig, bounded: bool) -> dict[str, str]:
+        """Render low and optional admitted high with the same checked SQL escaping."""
+        values = {"watermark": self.literal(config)}
+        if bounded:
+            values["watermark_max"] = Watermark(self.column, self.upper or self.start).literal(
+                config
+            )
+        return values
 
 
 def read_watermark(
@@ -91,7 +102,10 @@ def read_watermark(
             f"{params['WATERMARK_START']!r}: {error}; set WATERMARK_TYPE to NUMBER, TEXT "
             "or TIMESTAMP and WATERMARK_START to a value of that type"
         ) from error
-    return Watermark(column, start)
+    upper = None
+    if stored is not None and stored.pending_upper_bound is not None:
+        upper = Offset(stored.pending_upper_bound, OffsetType.TIMESTAMP)
+    return Watermark(column, start, upper)
 
 
 def record_range(
@@ -112,6 +126,17 @@ def record_range(
             f"WATERMARK_COLUMN={column} contains NULL; return a non-NULL NUMBER, "
             "TEXT or TIMESTAMP so every row has a position"
         )
+    if watermark.upper is not None:
+        kind = session.column_types(stage)[column.lower()]
+        if problem := session.dialect.timestamp_precision_problem(stage, column, kind):
+            raise SqlGuardError(problem)
+        store.watermark(watermark.start.stored(), watermark.upper.stored())
+        session.watermark_to = (
+            None
+            if context.backfill
+            else StoredOffset(OffsetType.TIMESTAMP, watermark.upper.stored())
+        )
+        return
     value = session.run(
         f"SELECT MAX({column}) AS watermark_to FROM {stage}",
         step="watermark upper bound",
@@ -141,6 +166,29 @@ def record_range(
     store.watermark(watermark.start.stored(), end.stored())
     session.watermark_to = (
         StoredOffset(end.datatype, end.stored())
-        if value is not None and not context.backfill
+        if (value is not None or watermark.upper is not None) and not context.backfill
         else None
     )
+
+
+def source_pipelines(params: Mapping[str, str]) -> tuple[str, ...]:
+    """Parse the bounded reader's explicit source codes without guessing JSON shapes."""
+    raw = params.get("WATERMARK_SOURCE_PIPELINES")
+    if raw is None:
+        return ()
+    try:
+        codes = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise SqlGuardError(
+            f"WATERMARK_SOURCE_PIPELINES={raw!r}: invalid JSON; use an array of pipeline codes"
+        ) from error
+    if (
+        not isinstance(codes, list)
+        or any(not isinstance(code, str) or not code.strip() for code in codes)
+        or len(set(codes)) != len(codes)
+    ):
+        raise SqlGuardError(
+            f"WATERMARK_SOURCE_PIPELINES={raw!r}: expected a JSON array of unique, nonempty "
+            "pipeline codes; list each existing source pipeline once"
+        )
+    return tuple(codes)

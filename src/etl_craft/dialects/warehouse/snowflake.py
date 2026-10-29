@@ -74,6 +74,13 @@ class SnowflakeWarehouse(WarehouseDialect):
             return replace(failure, kind=FailureClass.PERMANENT)
         return failure
 
+    timestamp_default_precision = 9
+    hash_metadata_columns = (
+        "column_name, CASE WHEN data_type LIKE 'TIMESTAMP%' THEN "
+        "data_type || '(' || datetime_precision || ')' ELSE data_type END AS data_type, "
+        "numeric_precision, numeric_scale"
+    )
+
     spec = warehouse_by_key("snowflake")
     sqlalchemy_driver = "snowflake+etl_craft"
     catalog_columns = False

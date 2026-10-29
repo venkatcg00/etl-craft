@@ -108,7 +108,10 @@ and installed with uv, on SQLite and DuckDB
 The client feeds demonstrate Python offsets. A SQL source outside etl-craft can use the same
 typed offset store with `WATERMARK_COLUMN`, `WATERMARK_TYPE`, `WATERMARK_START` and
 `$$watermark`; [the SQL watermark example](../../docs/examples/sql-watermark.md) shows the
-parameters and a merge reload. The demo's existing SQL tasks keep their pipeline-run filters
+parameters and a merge reload. Bounded TIMESTAMP sources use both `$$watermark` and
+`$$watermark_max`, optionally with `WATERMARK_SOURCE_PIPELINES`; empty successful windows
+advance to the admitted high. Managed `UPDATE_DATE` stamps are the attempt's Engine DB start,
+so existing columns must preserve microseconds. The demo's existing SQL tasks keep their pipeline-run filters
 because their sources are already written by etl-craft.
 
 ## File deliveries

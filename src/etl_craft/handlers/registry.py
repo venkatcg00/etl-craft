@@ -54,6 +54,7 @@ class TaskContext:
     backfill: bool = False
     attempt_id: int | None = None
     owner: str | None = None
+    started_at: datetime | None = None
     event_files: tuple[str, ...] = ()
     event_keys: tuple[str, ...] = ()
     event_rows: tuple[Mapping[str, Any], ...] = ()

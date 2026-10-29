@@ -649,3 +649,113 @@ def test_validate_complete_business_rule_contract(project, sql, status, part):
     assert any(
         f.where == "BR.rules" and f.status is status and part in f.message for f in report.findings
     )
+
+
+@pytest.mark.parametrize("sources", ["not json", "{}", "[3]", '["SALES","SALES"]', '["UNKNOWN"]'])
+def test_bounded_source_findings_are_shared_by_validate_refresh_and_config_apply(project, sources):
+    import csv
+
+    from etl_craft.core.actor import current_actor
+    from etl_craft.core.enums import ActionName, ApiRole, RunStatus
+    from etl_craft.services.operations import OperationContext
+    from fixtures.actions import act
+
+    engine, config, root = project
+    from etl_craft.config.object_models import Artifacts
+
+    config = replace(config, artifacts=Artifacts((root / "artifacts").as_uri()))
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "SALES")
+        task = add_task(
+            conn,
+            pipeline,
+            "window",
+            "SQL",
+            SQL_ACTION="APPEND_TABLE",
+            TARGET_OBJECT="mart.events",
+            SELECT_QUERY="SELECT changed FROM raw.events WHERE changed >= $$watermark "
+            "AND changed < $$watermark_max",
+            WATERMARK_COLUMN="changed",
+            WATERMARK_TYPE="TIMESTAMP",
+            WATERMARK_START="2000-01-01T00:00:00+00:00",
+            WATERMARK_SOURCE_PIPELINES=sources,
+        )
+    report = validate(engine, config)
+    assert any(
+        f.status == Status.FAIL and "WATERMARK_SOURCE_PIPELINES" in f.message
+        for f in report.findings
+    )
+    ctx = OperationContext(engine, config, current_actor(), role=ApiRole.ADMIN)
+    refresh = act(ctx, ActionName.PIPELINE_REFRESH, pipeline_code="SALES").refreshes[0]
+    assert refresh.status == RunStatus.FAILED
+    assert any(f.failed and "WATERMARK_SOURCE_PIPELINES" in f.message for f in refresh.findings)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='[]' "
+                "WHERE TASK_ID=:id AND PARAMETER_NAME='WATERMARK_SOURCE_PIPELINES'"
+            ),
+            {"id": task},
+        )
+    directory = root / "config"
+    directory.mkdir(exist_ok=True)
+    with (directory / "task_parameters.csv").open("w", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(
+            ["PIPELINE_CODE", "TASK_CODE", "PARAMETER_NAME", "PARAMETER_VALUE", "ACTIVE_FLAG"]
+        )
+        writer.writerow(["SALES", "window", "WATERMARK_SOURCE_PIPELINES", sources, "Y"])
+    applied = act(ctx, ActionName.CONFIG_APPLY, config_dir=directory)
+    assert not applied.applied
+    assert any(
+        f.status == Status.FAIL and "WATERMARK_SOURCE_PIPELINES" in f.message
+        for f in applied.findings
+    )
+
+
+@pytest.mark.parametrize("column", ["UPDATE_DATE", "changed"])
+def test_known_coarse_timestamp_definitions_are_validation_findings(project, column):
+    from fixtures.metadata import add_source_column
+
+    engine, config, _ = project
+    with engine.begin() as conn:
+        pipeline = add_pipeline(conn, "MICROSECONDS")
+        target = "mart.events"
+        params = {
+            "SQL_ACTION": "SCD1_MERGE",
+            "TARGET_OBJECT": target,
+            "SELECT_QUERY": "SELECT id, changed FROM raw.events WHERE changed >= $$watermark "
+            "AND changed < $$watermark_max",
+            "MERGE_KEY": "id",
+            "MERGE_COMPARE_COLUMNS": "id",
+            "WATERMARK_TYPE": "TIMESTAMP",
+            "WATERMARK_COLUMN": "changed",
+            "WATERMARK_START": "2000-01-01T00:00:00+00:00",
+        }
+        add_task(conn, pipeline, "read", "SQL", **params)
+        add_source_column(
+            conn, target if column == "UPDATE_DATE" else "raw.events", column, "TIMESTAMP(0)", 1
+        )
+    report = validate(engine, config)
+    assert any(
+        "precision 0" in f.message and "migration" in f.message and column in f.message
+        for f in report.findings
+    )
+    if column == "changed":
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE CFG_COLUMNS SET DATA_TYPE='TIMESTAMP(6)' WHERE COLUMN_NAME='changed'")
+            )
+            add_source_column(conn, "raw.other", "changed", "TIMESTAMP(0)", 1)
+            conn.execute(
+                text(
+                    "UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE=:query "
+                    "WHERE PARAMETER_NAME='SELECT_QUERY'"
+                ),
+                {
+                    "query": "SELECT s.id, s.changed FROM raw.events s "
+                    "JOIN raw.other b ON s.id=b.id "
+                    "WHERE s.changed >= $$watermark AND s.changed < $$watermark_max"
+                },
+            )
+        assert all("precision 0" not in f.message for f in validate(engine, config).findings)

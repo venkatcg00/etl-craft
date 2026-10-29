@@ -33,6 +33,13 @@ class TrinoIcebergWarehouse(WarehouseDialect):
     """Trino, Iceberg catalog: no temporary tables, no alias on UPDATE or DELETE targets."""
 
     session_fencing = True
+    timestamp_default_precision = 3
+
+    def audit_column_type(self, column: str) -> str:
+        """Declare microsecond audit instants explicitly for Iceberg."""
+        if column in {"CREATE_DATE", "UPDATE_DATE"}:
+            return "TIMESTAMP(6) WITH TIME ZONE"
+        return super().audit_column_type(column)
 
     def retention_maintenance(
         self, table: str, action: IcebergMaintenance, days: int

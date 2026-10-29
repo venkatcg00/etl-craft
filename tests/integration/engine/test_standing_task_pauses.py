@@ -737,3 +737,90 @@ def test_several_atomic_replacements_keep_the_original_admitted_outcome(paused_t
     with ctx.engine.begin() as conn:
         pause, held = standing_pauses.at_task(conn, pipeline, run, task, datetime.now(UTC))
         assert not held and pause.outcome == RunStatus.SUCCESS
+
+
+@pytest.mark.parametrize("outcome", [RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.SKIPPED])
+def test_standing_watermark_outcomes_leave_the_whole_window_for_real_execution(
+    cli_project, outcome
+):
+    from etl_craft.engine.repository.offsets import (
+        StoredOffset,
+        fetch_task_offset,
+        save_task_offset,
+    )
+    from etl_craft.warehouse.connection import build_warehouse_engine
+    from fixtures.metadata import set_task_target
+
+    p = cli_project
+    params = {
+        "SQL_ACTION": "APPEND_TABLE",
+        "WATERMARK_COLUMN": "changed",
+        "WATERMARK_TYPE": "TIMESTAMP",
+        "WATERMARK_START": "2000-01-01T00:00:00+00:00",
+        "SELECT_QUERY": "SELECT changed FROM (SELECT TIMESTAMP '2000-01-02 00:00:00' AS changed) s "
+        "WHERE changed >= $$watermark AND changed < $$watermark_max",
+    }
+    with p.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE CFG_TASKS SET HANDLER='SQL' WHERE TASK_ID=:id"), {"id": p.task_id}
+        )
+        conn.execute(text("DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID=:id"), {"id": p.task_id})
+        set_task_target(conn, p.task_id, "main.dm")
+        for name, value in params.items():
+            conn.execute(
+                text(
+                    "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
+                    "VALUES (:id,:name,:value)"
+                ),
+                {"id": p.task_id, "name": name, "value": value},
+            )
+        initial = StoredOffset("TIMESTAMP", params["WATERMARK_START"])
+        save_task_offset(conn, p.task_id, initial)
+    warehouse = build_warehouse_engine(p.config)
+    try:
+        with warehouse.begin() as conn:
+            conn.execute(text("CREATE SEQUENCE dm_ids"))
+            conn.execute(
+                text(
+                    "CREATE TABLE dm (changed TIMESTAMP, PIPELINE_RUN_ID BIGINT, "
+                    "PIPELINE_ID BIGINT, TASK_RUN_ID BIGINT, CREATE_DATE TIMESTAMP, "
+                    "ROW_ID BIGINT DEFAULT nextval('dm_ids') PRIMARY KEY)"
+                )
+            )
+        warehouse.dispose()
+        code, output = p.run("pipelines", "refresh")
+        assert code == 0, output
+        code, output = p.run(
+            "pause",
+            "--pipeline-code",
+            "P",
+            "--task-code",
+            "load",
+            "--outcome",
+            outcome,
+            "--reason",
+            "maintenance",
+        )
+        assert code == 0, output
+        code, output = p.run("run", "--pipeline-code", "P")
+        assert code == (1 if outcome == RunStatus.FAILED else 0), output
+        with p.engine.connect() as conn:
+            assert fetch_task_offset(conn, p.task_id) == initial
+            assert (
+                conn.execute(text("SELECT COUNT(*) AS count FROM AUD_TASK_ATTEMPTS")).scalar_one()
+                == 0
+            )
+            summary = conn.execute(
+                text("SELECT WATERMARK_FROM AS low,WATERMARK_TO AS high FROM AUD_TASK_RUN_LOG")
+            ).one()
+            assert summary.low is None and summary.high is None
+        code, output = p.run(
+            "resume", "--pipeline-code", "P", "--task-code", "load", "--reason", "resume real SQL"
+        )
+        assert code == 0, output
+        code, output = p.run("run", "--pipeline-code", "P")
+        assert code == 0, output
+        with warehouse.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) AS count FROM dm")).scalar_one() == 1
+    finally:
+        warehouse.dispose()

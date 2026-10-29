@@ -35,11 +35,12 @@ from etl_craft.engine.attempts import (
 from etl_craft.engine.metrics import lifecycle
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import trackers
-from etl_craft.engine.repository.offsets import StoredOffset, save_task_offset
+from etl_craft.engine.repository.offsets import StoredOffset, commit_task_offset
 from etl_craft.engine.rule_runs import finish_rule_run as finish_rule_run
 from etl_craft.engine.rule_runs import restart_rule_run as restart_rule_run
 from etl_craft.engine.run_creation import RunCreation
 from etl_craft.engine.run_creation import create as create_new_run
+from etl_craft.engine.timestamp_windows import record_watermark_range as record_watermark_range
 from etl_craft.engine.transition_guards import stale as _stale
 
 
@@ -184,7 +185,7 @@ def finish_task_run(
                 .one()
                 .task_id
             )
-            save_task_offset(conn, task_id, offset)
+            commit_task_offset(conn, task_id, task_run_id, offset)
             fault_point("script.after_offset")
 
 
@@ -512,7 +513,10 @@ def start_attempt(
     process_start: str | None = None,
 ) -> None:
     """Start a claimed attempt, fenced by its owner."""
+    from etl_craft.engine.timestamp_windows import checked_clock
+
     with conn.begin_nested():
+        now = checked_clock(conn)
         _guard(
             conn,
             "start_attempt",
@@ -520,7 +524,13 @@ def start_attempt(
             attempt_id,
             "CLAIMED",
             owner,
-            {**actor_parameters(actor), "host": host, "pid": pid, "process_start": process_start},
+            {
+                **actor_parameters(actor),
+                "now": now,
+                "host": host,
+                "pid": pid,
+                "process_start": process_start,
+            },
         )
         sync_attempt_summary(conn, attempt_id)
 
@@ -606,7 +616,7 @@ def finish_attempt(
                 statement(conn, "task_run_for_attempt"), {"attempt_id": attempt_id}
             ).one()
             if offset is not None:
-                save_task_offset(conn, row.task_id, offset)
+                commit_task_offset(conn, row.task_id, row.task_run_id, offset)
                 fault_point("script.after_offset")
             fault_point("runner.before_consumption")
             trackers.consume_task_decisions(
@@ -770,37 +780,6 @@ def release_run_lease(conn: Connection, run_id: int, *, owner: str, expired: boo
         statement(conn, query), {"row_id": run_id, "owner": owner, "now": datetime.now(UTC)}
     )
     return result.rowcount == 1
-
-
-def record_watermark_range(
-    conn: Connection,
-    task_run_id: int,
-    watermark_from: str,
-    watermark_to: str,
-    *,
-    attempt_id: int | None = None,
-    owner: str | None = None,
-) -> None:
-    """Record a staged range only on the live owned attempt, preserving failed ranges."""
-    params = {
-        "row_id": attempt_id,
-        "task_run_id": task_run_id,
-        "owner": owner,
-        "now": datetime.now(UTC),
-        "watermark_from": watermark_from,
-        "watermark_to": watermark_to,
-    }
-    with conn.begin_nested():
-        query = (
-            "transition_record_watermark"
-            if attempt_id is not None
-            else "transition_record_task_watermark"
-        )
-        changed = conn.execute(statement(conn, query), params)
-        if changed.rowcount != 1:
-            raise _stale(conn, "task", task_run_id, "live owned attempt for watermark range", owner)
-        if attempt_id is not None:
-            sync_attempt_summary(conn, attempt_id)
 
 
 def update_control(conn: Connection, parameters: dict[str, object]) -> None:

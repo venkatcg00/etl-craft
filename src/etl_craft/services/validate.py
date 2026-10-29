@@ -20,6 +20,7 @@ from typing import ClassVar
 
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlglot import exp
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import python_script
@@ -55,6 +56,7 @@ from etl_craft.engine.repository.validation import (
     fetch_pipeline_parameters,
     fetch_task_dependency_edges,
 )
+from etl_craft.engine.timestamp_windows import source_pipeline_ids
 from etl_craft.execution.event_probe import probe_sql
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
@@ -65,8 +67,9 @@ from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.creation import writer_action
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
-from etl_craft.handlers.sql.spec import WRITERS, read_sql_task
+from etl_craft.handlers.sql.spec import WRITERS, SqlTask, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
+from etl_craft.handlers.sql.watermarks import source_pipelines
 from etl_craft.services.doctor import Status
 from etl_craft.services.lineage import (
     dialect_and_catalog,
@@ -506,6 +509,7 @@ def _target_formats(config: ConnectorConfig, data: _Metadata, report: Report) ->
 
 def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     spec = read_sql_task(context)
+    source_pipeline_ids(conn, source_pipelines(context.task_params))
     if context.config.warehouse is None:
         return ["a SQL task needs a Warehouse section in craft-connector.yml"]
     dialect = task_dialect(context)
@@ -518,6 +522,8 @@ def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
         sqlglot_dialect, _ = dialect_and_catalog(context.config)
         if problem := managed_select_problem(spec.select_sql, sqlglot_dialect, spec.source):
             return [problem]
+    if problems := _timestamp_definitions(conn, context, spec):
+        return problems
     if spec.action == SqlAction.SETUP_TABLE:
         others = fetch_target_tasks(conn, context.pipeline_id, context.task_id)
         writer_action(spec.setup_for, others, spec.target_object)
@@ -677,3 +683,47 @@ def _script_overlap(context: TaskContext, data: _Metadata, report: Report) -> No
                 f"unmanaged SQL_SCRIPT writes {target}, also targeted by managed task "
                 f"{task.label}; it bypasses managed hashes, ROW_ID and target locks",
             )
+
+
+def _timestamp_definitions(conn: Connection, context: TaskContext, spec: SqlTask) -> list[str]:
+    """Check known timestamp storage without requiring targets to exist before setup."""
+    dialect = task_dialect(context)
+    catalog = active_catalog(context.config)
+    wanted: set[tuple[str, str]] = set()
+    if spec.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE, SqlAction.OVERWRITE_TABLE} or (
+        spec.action == SqlAction.DELETE_ROWS and not spec.hard_delete
+    ):
+        wanted.add((qualify(spec.target_object, catalog).lower(), "update_date"))
+    if spec.bounded and spec.watermark is not None and spec.select_sql is not None:
+        reading = read_query(spec.select_sql, dialect.sqlglot_dialect)
+        if reading.root is not None:
+            for select in reading.root.find_all(exp.Select):
+                tables = {
+                    table.alias_or_name.lower(): qualify(
+                        ".".join(part.name for part in table.parts), catalog
+                    ).lower()
+                    for table in select.find_all(exp.Table)
+                }
+                for projection in select.expressions:
+                    column = projection.this if isinstance(projection, exp.Alias) else projection
+                    if (
+                        projection.alias_or_name.lower() == spec.watermark.column.lower()
+                        and isinstance(column, exp.Column)
+                    ):
+                        source = (
+                            tables.get(column.table.lower())
+                            if column.table
+                            else (next(iter(tables.values())) if len(tables) == 1 else None)
+                        )
+                        if source is not None:
+                            wanted.add((source, column.name.lower()))
+    return [
+        problem
+        for column in fetch_source_columns(conn)
+        if (qualify(column.table_name, catalog).lower(), column.column_name.lower()) in wanted
+        if (
+            problem := dialect.timestamp_precision_problem(
+                column.table_name, column.column_name, column.data_type
+            )
+        )
+    ]

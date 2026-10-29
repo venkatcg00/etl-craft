@@ -167,6 +167,7 @@ def reconcile_endings(
 
 
 def _cancel_event_tasks(conn: Connection, run_id: int, task_id: int | None) -> None:
+    conn.execute(statement(conn, "window_release_scope"), {"run_id": run_id, "task_id": task_id})
     for row in conn.execute(
         statement(conn, "control_event_tasks"), {"run_id": run_id, "task_id": task_id}
     ):

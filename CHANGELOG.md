@@ -17,6 +17,18 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- **Breaking / upgrade:** managed task writes stamp `UPDATE_DATE` with the attempt's recorded
+  Engine DB start, shared by every row it writes. Existing rows keep their stamps. Managed
+  writes into `UPDATE_DATE` columns coarser than microseconds now fail before writing: apply
+  a project migration to widen to `TIMESTAMP(6)` or the warehouse equivalent. etl-craft never
+  widens existing columns automatically. Agents receive the recorded start through START
+  and must run the controller's package version.
+- SQL TIMESTAMP watermarks can use `$$watermark_max` for frozen half-open windows, optionally
+  fenced by `WATERMARK_SOURCE_PIPELINES`. Empty windows advance to the admitted high; retries
+  retain the exact bounds. The existing offset tracker gains nullable pending run/high fields;
+  scalar and partition offsets keep their values. All resets share ownership, attribution and
+  audit checks; cancellation releases a pending window only after writers are confirmed ended.
+
 - **Breaking:** Python tasks require `SCRIPT_KIND=INGESTION` or `UTILITY`. Utility scripts
   receive no offset and may omit row counts; unmeasured counts remain NULL. Upgrade assigns
   `INGESTION` to existing tasks and preserves scalar and partitioned offsets. Existing pinned
