@@ -1,7 +1,7 @@
 -- Every active business rule of an active task, with its task.
 SELECT b.BUSINESS_RULE_ID AS business_rule_id, b.BUSINESS_RULE_NAME AS name,
        b.BUSINESS_RULE_TYPE AS rule_type, b.BUSINESS_RULE_SQL AS sql,
-       b.BUSINESS_RULE_KEY_COLUMN AS key_column, CASE WHEN o.CATALOG_NAME IS NULL THEN '' ELSE o.CATALOG_NAME || '.' END || o.SCHEMA_NAME || '.' || o.TABLE_NAME AS target_table,
+       b.BUSINESS_RULE_LEVEL AS business_rule_level, b.BUSINESS_RULE_KEY_COLUMN AS key_column, CASE WHEN o.CATALOG_NAME IS NULL THEN '' ELSE o.CATALOG_NAME || '.' END || o.SCHEMA_NAME || '.' || o.TABLE_NAME AS target_table,
        b.SEQUENCE_NUMBER AS sequence_number, p.PIPELINE_CODE AS pipeline_code,
        t.TASK_CODE AS task_code
 FROM CFG_BUSINESS_RULES b

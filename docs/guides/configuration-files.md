@@ -151,7 +151,7 @@ and require any remaining mandatory values.
 | `task_parameters.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`PARAMETER_NAME`**, `PARAMETER_VALUE`, `ACTIVE_FLAG` | |
 | `task_dependencies.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDS_ON_TASK_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
 | `pipeline_dependencies.csv` | **`PIPELINE_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
-| `business_rules.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`BUSINESS_RULE_NAME`**, **`SEQUENCE_NUMBER`**, **`BUSINESS_RULE_TYPE`**, **`BUSINESS_RULE_KEY_COLUMN`**, `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`BUSINESS_RULE_SQL`**, `ACTIVE_FLAG` | |
+| `business_rules.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`BUSINESS_RULE_NAME`**, **`SEQUENCE_NUMBER`**, **`BUSINESS_RULE_TYPE`**, `BUSINESS_RULE_LEVEL`, `BUSINESS_RULE_KEY_COLUMN`, `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`BUSINESS_RULE_SQL`**, `ACTIVE_FLAG` | |
 
 | `tables.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, `OBJECT_KIND`, `REJECT_RETENTION_DAYS`, `SNAPSHOT_RETENTION_DAYS`, `ORPHAN_RETENTION_DAYS`, `ACTIVE_FLAG` | Empty catalog means absent; empty kind means undeclared; empty retention cells keep their category forever |
 | `columns.csv` | `CATALOG_NAME`, **`SCHEMA_NAME`**, **`TABLE_NAME`**, **`COLUMN_NAME`**, **`DATA_TYPE`**, **`COLUMN_POSITION`**, `IS_NULLABLE`, `ACTIVE_FLAG` | Empty nullability means undeclared |
@@ -303,3 +303,11 @@ An ungranted tag edit reports no access change. This report neither changes gran
 a deploy. It reports grants rather than accounts, because SSO group membership cannot be
 completely enumerated at plan time. Per-project repository folders are deployment layout,
 not pipeline grouping.
+
+### Business-rule levels
+
+`business_rules.csv` accepts optional `BUSINESS_RULE_LEVEL`: new keys default to `ROW`;
+an omitted header leaves a stored level unchanged. `ROW` requires `BUSINESS_RULE_KEY_COLUMN`.
+`TABLE` requires it empty, refuses `INCOMPLETE`, and returns one `PASSED` result with optional
+`OBSERVED` and `DETAIL`. See [Business rules](business-rules.md#table-rules) for output types,
+limits and examples. Updating the level preserves the id; absence never retires a rule.

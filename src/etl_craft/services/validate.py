@@ -25,7 +25,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import python_script
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.cron import parse, timezone
-from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlAction
+from etl_craft.core.enums import BusinessRuleLevel, DependencyType, EmailFlavour, Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph, cycles
 from etl_craft.core.placement import ResourceRequest, resource_request
@@ -564,7 +564,11 @@ def _business_rules(conn: Connection, context: TaskContext, data: _Metadata) -> 
         try:
             dialect = dialect_and_catalog(config)[0]
             checked = check_rule(rule, catalog, dialect)
-            if output_key(rule.business_rule_sql, rule.business_rule_key_column, dialect) is None:
+            if (
+                rule.business_rule_level == BusinessRuleLevel.TABLE
+                or output_key(rule.business_rule_sql, rule.business_rule_key_column or "", dialect)
+                is None
+            ):
                 # Schema-only reads cannot reserve the Engine DB during config apply's transaction.
                 with open_warehouse(config) as warehouse:
                     check_output(checked, context, warehouse)
@@ -572,7 +576,7 @@ def _business_rules(conn: Connection, context: TaskContext, data: _Metadata) -> 
             problems.append(str(error))
             continue
         writer = rebuilt.get(table_name(rule.target_table.split("."), catalog))
-        if rule.business_rule_key_column.upper() == "ROW_ID" and writer is not None:
+        if (rule.business_rule_key_column or "").upper() == "ROW_ID" and writer is not None:
             problems.append(
                 f"business rule {rule.business_rule_name!r}: BUSINESS_RULE_KEY_COLUMN is "
                 f"ROW_ID, but {writer[0]} rebuilds {rule.target_table} with {writer[1]}, which "

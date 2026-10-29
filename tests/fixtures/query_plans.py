@@ -166,6 +166,7 @@ def bindings(sql, name=""):
         "target_contract_update_rule": {"table": 1},
         "lineage_cache_edges": {"confirmed_keys": [(1, "plan")]},
         "clear_rule_results": {"keys": ["key_1"]},
+        "table_rule_result": {"passed": "Y"},
         "control_event_probes": {"keys": [1, 2]},
         "agent_list": {"statuses": ["ACTIVE", "DRAINING"]},
         "insert_task_documentation": {"version": 1},

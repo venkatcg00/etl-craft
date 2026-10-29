@@ -198,6 +198,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Table-level business rules: optional `BUSINESS_RULE_LEVEL=TABLE` records one exact `Y`/`N`
+  result and optional `OBSERVED`/`DETAIL` text per run, without per-row flags. `REJECT` fails
+  the task; `REPORT` continues. Status, explain, run/history reads and catalog table pages
+  show the evidence. Text fields are limited to 4,096 characters and are never truncated.
+  Upgrade keeps existing rules as `ROW` and preserves their earlier run-log values. Partial
+  config files keep an omitted stored level; new rules default to `ROW`.
+
 - Managed Snowflake Postgres and Databricks Lakebase Engine DB profiles mint a fresh database
   token per connection through existing OAuth and PostgreSQL pooling. Set `Managed_provider`
   and the provider's `Account`/`Instance` or `Workspace_url`/`Endpoint` fields. Managed profiles

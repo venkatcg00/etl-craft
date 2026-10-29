@@ -13,6 +13,13 @@ from etl_craft.core.errors import EtlCraftError
 E = TypeVar("E", bound=StrEnum)
 
 
+class BusinessRuleLevel(StrEnum):
+    """Whether a check flags target rows or records one table result."""
+
+    ROW = "ROW"
+    TABLE = "TABLE"
+
+
 class ScriptKind(StrEnum):
     """Whether Python reports ingestion positions or performs utility work."""
 

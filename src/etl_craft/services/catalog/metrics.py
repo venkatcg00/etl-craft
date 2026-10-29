@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
-from etl_craft.core.enums import CatalogRunKind
+from etl_craft.core.enums import CatalogRunKind, RunStatus, SlaStatus
 from etl_craft.engine.repository.catalog import LastRun, RunSummary, TaskRunSummary
-from etl_craft.services.catalog.collect import RunKpis, run_kpis
 from etl_craft.services.catalog.html import escape as _e
 from etl_craft.services.catalog.html import render_table
 
@@ -147,3 +147,62 @@ def counts(run: LastRun | TaskRunSummary) -> str:
         ("rejected", run.reject_count),
     ]
     return ", ".join(f"{name} {value:,}" for name, value in counts if value is not None)
+
+
+@dataclass(frozen=True)
+class RunKpis:
+    """What a pipeline's or task's recent runs add up to."""
+
+    runs: int
+    finished: int
+    succeeded: int
+    failed: int
+    sla_breached: int
+    average_seconds: float | None
+    longest_seconds: float | None
+    average_rows: float | None = None
+    repaired: int = 0
+
+    @property
+    def success_rate(self) -> float | None:
+        """The share of finished runs that succeeded, or ``None`` before any finished."""
+        return None if not self.finished else self.succeeded / self.finished
+
+
+def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
+    """Return the KPIs of ``runs``: successes, failures, SLA misses, durations and rows.
+
+    A run counts as finished once it is ``SUCCESS``, ``FAILED`` or ``CANCELLED``; ``SKIPPED``
+    runs did no work and ``IN-PROGRESS`` ones have not ended, so neither counts either way.
+    """
+    finished = [
+        r
+        for r in runs
+        if (r.first_status or r.status)
+        in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED)
+    ]
+    seconds = [s for r in finished if (s := r.seconds) is not None]
+    rows = [
+        r.target_count
+        for r in runs
+        if isinstance(r, TaskRunSummary)
+        and r.status == RunStatus.SUCCESS
+        and r.target_count is not None
+    ]
+    return RunKpis(
+        runs=len(runs),
+        finished=len(finished),
+        succeeded=sum(1 for r in finished if (r.first_status or r.status) == RunStatus.SUCCESS),
+        failed=sum(1 for r in finished if (r.first_status or r.status) != RunStatus.SUCCESS),
+        sla_breached=sum(
+            1 for r in runs if isinstance(r, RunSummary) and r.sla_status == SlaStatus.BREACHED
+        ),
+        average_seconds=sum(seconds) / len(seconds) if seconds else None,
+        longest_seconds=max(seconds) if seconds else None,
+        average_rows=sum(rows) / len(rows) if rows else None,
+        repaired=sum(
+            r.first_status in (RunStatus.FAILED, RunStatus.CANCELLED)
+            and r.status == RunStatus.SUCCESS
+            for r in runs
+        ),
+    )

@@ -9,7 +9,8 @@ from datetime import datetime
 from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import RunStatus, YesNo
+from etl_craft.core.business_rules import RuleObservation
+from etl_craft.core.enums import BusinessRuleLevel, RunStatus, YesNo
 from etl_craft.core.text import split_object_ref
 from etl_craft.engine import transitions
 from etl_craft.engine.queries import statement
@@ -23,10 +24,11 @@ class BusinessRule:
     business_rule_name: str
     business_rule_sql: str
     business_rule_type: str
-    business_rule_key_column: str
+    business_rule_key_column: str | None
     target_table: str
     sequence_number: int
     target_active: bool = True
+    business_rule_level: str = BusinessRuleLevel.ROW
 
 
 def fetch_business_rules_for_task(conn: Connection, task_id: int) -> list[BusinessRule]:
@@ -126,3 +128,15 @@ def clear_rule_keys(
                 "now": now,
             },
         )
+
+
+def fetch_rule_observations(
+    conn: Connection, pipeline_id: int | None = None, run_id: int | None = None
+) -> tuple[RuleObservation, ...]:
+    """Read exact results or recent observations without a second service calculation."""
+    return tuple(
+        RuleObservation(**row._mapping)
+        for row in conn.execute(
+            statement(conn, "rule_observations"), {"pipeline_id": pipeline_id, "run_id": run_id}
+        )
+    )
