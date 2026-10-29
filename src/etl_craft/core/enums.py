@@ -240,9 +240,9 @@ class ActionScope(StrEnum):
 class ActionName(StrEnum):
     """Every action an interface can request; the value is its audit and role-policy name."""
 
+    RENAME = "rename"
     BUNDLE_PUBLISH = "bundle publish"
     AGENT_DOCTOR = "agent doctor"
-
     AGENT_REGISTER = "agent register"
     AGENT_DEREGISTER = "agent deregister"
     AGENT_CLAIM = "agent claim"

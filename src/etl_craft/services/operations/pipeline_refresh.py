@@ -2,6 +2,7 @@
 
 import json
 import re
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
@@ -82,76 +83,93 @@ def _refresh_locked(
     ctx: OperationContext, request: RefreshInput, *, missing_only: bool = False
 ) -> RefreshResults:
     assert ctx.project_id is not None
-    outcomes = []
     with read_snapshot(ctx.engine) as conn:
-        pipelines = conn.execute(
-            statement(conn, "refresh_pipelines"),
-            {
-                "project_id": ctx.project_id,
-                "pipeline_code": request.pipeline_code,
-                "missing_only": missing_only,
-            },
-        ).all()
-        if not pipelines:
-            if request.pipeline_code is not None:
-                raise ResourceNotFoundError(
-                    f"pipeline {request.pipeline_code!r}: no active pipeline in project "
-                    f"{ctx.project!r}; select an active pipeline shown by `etl-craft pipelines`"
-                )
-            return RefreshResults(())
-        config, bundle_id, bundle_problem = _project_bundle(ctx)
-        checked = _project_findings(conn, ctx, config)
-        for pipeline in pipelines:
-            snapshot = conn.execute(
-                statement(conn, "refresh_current"), {"pipeline_id": pipeline.pipeline_id}
-            ).scalar_one()
-            findings = tuple(
-                finding
-                for where, finding in checked
-                if where.partition(".")[0] == pipeline.pipeline_code or where.startswith("source ")
+        return refresh_on(conn, ctx, request, missing_only=missing_only, atomic=False)
+
+
+def refresh_on(
+    conn: Connection,
+    ctx: OperationContext,
+    request: RefreshInput,
+    *,
+    missing_only: bool = False,
+    pipeline_ids: frozenset[int] | None = None,
+    atomic: bool = True,
+) -> RefreshResults:
+    """Refresh a stable image; atomic callers hold MIGRATE/BUNDLES and own the writer."""
+    assert ctx.project_id is not None
+    outcomes = []
+    pipelines = conn.execute(
+        statement(conn, "refresh_pipelines"),
+        {
+            "project_id": ctx.project_id,
+            "pipeline_code": request.pipeline_code,
+            "missing_only": missing_only,
+        },
+    ).all()
+    if pipeline_ids is not None:
+        pipelines = [p for p in pipelines if p.pipeline_id in pipeline_ids]
+    if not pipelines:
+        if request.pipeline_code is not None:
+            raise ResourceNotFoundError(
+                f"pipeline {request.pipeline_code!r}: no active pipeline in project "
+                f"{ctx.project!r}; select an active pipeline shown by `etl-craft pipelines`"
             )
-            if bundle_problem is not None:
-                findings = (*findings, bundle_problem)
-            with ctx.engine.connect() as published:
-                changes, previous_time, previous_status = differences(
-                    published, int(pipeline.pipeline_id), snapshot, bundle_id
-                )
-            passed = not any(finding.failed for finding in findings)
-            now = datetime.now(UTC)
-            with ctx.engine.begin() as writer:
-                refresh_id = record(
-                    writer,
-                    RefreshWrite(
-                        ctx.project_id,
-                        int(pipeline.pipeline_id),
-                        snapshot,
-                        bundle_id,
-                        tuple(asdict(finding) for finding in findings),
-                        now,
-                        passed,
-                    ),
-                )
-            outcomes.append(
-                PipelineRefresh(
-                    refresh_id,
-                    pipeline.pipeline_code,
-                    now,
-                    ctx.actor.name,
-                    RunStatus.SUCCESS if passed else RunStatus.FAILED,
-                    sha256_hex(snapshot.encode()),
+        return RefreshResults(())
+    config, bundle_id, bundle_problem = _project_bundle(ctx, conn if atomic else None)
+    checked = _project_findings(conn, ctx, config)
+    for pipeline in pipelines:
+        snapshot = conn.execute(
+            statement(conn, "refresh_current"), {"pipeline_id": pipeline.pipeline_id}
+        ).scalar_one()
+        findings = tuple(
+            finding
+            for where, finding in checked
+            if where.partition(".")[0] == pipeline.pipeline_code or where.startswith("source ")
+        )
+        if bundle_problem is not None:
+            findings = (*findings, bundle_problem)
+        with nullcontext(conn) if atomic else ctx.engine.connect() as published:
+            changes, previous_time, previous_status = differences(
+                published, int(pipeline.pipeline_id), snapshot, bundle_id
+            )
+        passed = not any(finding.failed for finding in findings)
+        now = datetime.now(UTC)
+        with nullcontext(conn) if atomic else ctx.engine.begin() as writer:
+            refresh_id = record(
+                writer,
+                RefreshWrite(
+                    ctx.project_id,
+                    int(pipeline.pipeline_id),
+                    snapshot,
                     bundle_id,
-                    findings,
-                    bool(changes) or previous_time is None,
-                    changes,
-                    previous_time,
-                    previous_status,
-                )
+                    tuple(asdict(finding) for finding in findings),
+                    now,
+                    passed,
+                ),
             )
+        outcomes.append(
+            PipelineRefresh(
+                refresh_id,
+                pipeline.pipeline_code,
+                now,
+                ctx.actor.name,
+                RunStatus.SUCCESS if passed else RunStatus.FAILED,
+                sha256_hex(snapshot.encode()),
+                bundle_id,
+                findings,
+                bool(changes) or previous_time is None,
+                changes,
+                previous_time,
+                previous_status,
+            )
+        )
     return RefreshResults(tuple(outcomes))
 
 
 def _project_bundle(
     ctx: OperationContext,
+    connection: Connection | None,
 ) -> tuple[ConnectorConfig, str | None, RefreshFinding | None]:
     """Check the existing publication contract and freeze bytes once per project refresh."""
     bundle_id = None
@@ -160,7 +178,7 @@ def _project_bundle(
     try:
         files = collect(config.project_dir)
         manifest, _ = decode_files(files)
-        with ctx.engine.connect() as conn:
+        with ctx.engine.connect() if connection is None else nullcontext(connection) as conn:
             latest = conn.execute(
                 statement(conn, "bundle_latest"), {"project_id": ctx.project_id}
             ).scalar_one_or_none()
@@ -174,8 +192,8 @@ def _project_bundle(
         ):
             bundle_id = previous.bundle_id
         else:
-            bundle_id = publish(ctx, PublishBundle(files=files)).bundle_id
-        with ctx.engine.connect() as conn:
+            bundle_id = publish(ctx, PublishBundle(files=files), connection=connection).bundle_id
+        with ctx.engine.connect() if connection is None else nullcontext(connection) as conn:
             bundle = Bundle.load(conn, bundle_id)
         config = project_config(config, bundle.materialize(config) / "craft-connector.yml")
     except EtlCraftError as error:

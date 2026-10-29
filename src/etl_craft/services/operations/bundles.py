@@ -3,11 +3,14 @@
 import base64
 import json
 import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 from uuid import uuid4
+
+from sqlalchemy.engine import Connection
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import connection_sha256, project_config
@@ -77,8 +80,10 @@ def required_role(ctx: OperationContext, request: object) -> ApiRole:
     return ApiRole.DEVELOPER if approved == digest else ApiRole.ADMIN
 
 
-def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
-    """Validate before publishing; only a committed row makes a bundle admissible."""
+def publish(
+    ctx: OperationContext, request: PublishBundle, *, connection: Connection | None = None
+) -> BundleView:
+    """Publish checked bytes; a supplied transaction already holds the BUNDLES lock."""
     location = for_engine(ctx.engine).artifact_location(ctx.config)
     manifest, content, connections = _uploaded(ctx, request)
     bundle_id = sha256_hex(uuid4().bytes)
@@ -93,10 +98,10 @@ def publish(ctx: OperationContext, request: PublishBundle) -> BundleView:
         sort_keys=True,
     )
     warehouse_limit = project_config_from_content(ctx, content).max_warehouse_queries
-    with locks.BUNDLES.hold(ctx.engine):
+    with locks.BUNDLES.hold(ctx.engine) if connection is None else nullcontext():
         for name, digest in manifest.items():
             store.write(digest, content[name])
-        with ctx.engine.begin() as conn:
+        with ctx.engine.begin() if connection is None else nullcontext(connection) as conn:
             approved = conn.execute(
                 statement(conn, "bundle_approved_connection"),
                 {"project_id": ctx.project_id or current_project_id()},

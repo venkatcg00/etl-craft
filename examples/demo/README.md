@@ -349,3 +349,12 @@ The `quality` task also records `TABLE` results: `fact has rows` rejects an empt
 `missing teams` reports the NULL-team count against a five-percent threshold. Their
 `PASSED`, `OBSERVED` and `DETAIL` values appear in status/explain and catalog table pages;
 they create no per-row flags. Existing row rules retain their flag counts.
+
+## Renaming a demo pipeline or task
+
+For a deliberate code change on a completed demo, use `etl-craft rename --project default
+--pipeline CLIENT_ALPHA --to CLIENT_A --reason "Rename demonstration"`, rather than retiring
+and recreating the pipeline. The command preserves offsets, consumed events and IDs. Update
+config CSVs and team SQL references afterward; stale old-code inserts are refused. Existing
+logs keep their paths. Metric series and generated catalog links use the new codes. Restore the
+original demo configuration before using the unchanged expected-results checks.

@@ -311,3 +311,46 @@ an omitted header leaves a stored level unchanged. `ROW` requires `BUSINESS_RULE
 `TABLE` requires it empty, refuses `INCOMPLETE`, and returns one `PASSED` result with optional
 `OBSERVED` and `DETAIL`. See [Business rules](business-rules.md#table-rules) for output types,
 limits and examples. Updating the level preserves the id; absence never retires a rule.
+
+## Renaming pipelines and tasks
+
+Use the attributed rename action instead of retiring a row and inserting its replacement:
+
+```bash
+etl-craft rename --project sales --pipeline ORDERS --to SALES_ORDERS --reason "Clarify ownership"
+etl-craft rename --project sales --pipeline SALES_ORDERS --task load --to load_orders --reason "Clarify task"
+```
+
+The project requires CAN_MANAGE. A reason is required in STRICT projects and optional in
+RELAXED projects. The same action is available through the generated API rename route, using the selected
+project's approved published files. Publish its connection definitions as an admin first; see
+[actions](../reference/actions.md) and the [CLI reference](../reference/cli.md#rename).
+
+Pipeline and task IDs, offsets (including timestamp and partition cursors), consumed files and
+keys, standing pauses, dependencies and recorded consumption remain intact. Direct pipeline
+grants and code references in trigger and WATERMARK_SOURCE_PIPELINES parameters follow the
+pipeline, with typed history. The rename and passing refreshes commit together: failed refresh
+findings roll everything back. Pipelines with trigger/watermark code references must also be
+idle because admitted runs retain their pinned old-code definitions. A non-terminal run,
+including a queued/manual run, or pending timestamp window refuses the rename. Finish or cancel it and explicitly resolve any pending
+window first. Existing codes, including retired codes, and invalid codes are refused.
+
+A cross-project dependency that cannot be refreshed from this project's folder refuses the
+rename and names the reference. Coordinate removing that dependency and restoring it after
+the rename. Team-owned CFG_ tables and team SQL text belong to the team: update those references
+yourself. The result repeats this responsibility and lists project config CSV files still
+mentioning the old code.
+
+Old attempt logs keep their recorded paths and remain available through logs, the API and
+retention. New attempts use the new codes. Files are never moved and LOG_PATH is never rewritten.
+Metric labels use the new codes, so dashboards see new metric series. Catalog page paths also
+change; the next documentation build regenerates them. Update bookmarks and monitoring queries.
+
+Update the repository's CSV files to the new codes before applying them again, or export the
+current metadata to a reviewed destination and commit the updated files. Missing file rows do
+not retire anything. To prevent accidental duplicate identities, config plan and apply refuse
+inserting a code renamed away in the project, naming its old/new codes, actor, time and remedy:
+update the file or choose a different code. Typed metadata history supplies this reservation; retention preserves the rename transition and
+its preceding version so the reservation survives history cleanup.
+A retire-plus-insert plan with the same task definition warns about a likely rename and names
+the safe command; that warning does not block an intentional replacement.

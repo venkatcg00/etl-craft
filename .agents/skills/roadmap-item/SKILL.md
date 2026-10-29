@@ -113,8 +113,19 @@ after it is green.
 - Unless a required local suite could not run, turn on auto-merge and end the session:
   `gh pr merge <n> --squash --auto`. GitHub squash-merges once every required check passes and
   keeps the branch. Never pass `--delete-branch`.
-- Do not watch CI, poll checks or wait for logs: every check re-sends the whole session. The next
-  session finds the pull request in step 1 if CI failed.
+- Every AI agent waits for a long run (a test suite, races, a demo, CI) with one call that
+  returns when the run ends:
+  - a background job the harness reports when it exits (a completion notice or trigger);
+  - or a single blocking command, for example a foreground run with a long timeout, or
+    `gh run watch <run-id> --exit-status`;
+  - or, for a condition no command reports, a bounded `timeout <s> sh -c 'until <check>; do
+    sleep 30; done'` inside one call.
+- Never check a log, a process or a CI run every few minutes across separate tool calls:
+  every check re-sends the whole session.
+- Write the run's output to a log file and read it once, after the run ends.
+- After `gh pr merge --auto`, end the session; don't wait for CI at all.
+- Where an item needs CI results (timing runs, a failure to read), use `gh run watch
+  --exit-status`, then read the job logs once.
 - When a required local suite could not run (`AGENTS.md`, "Validation"), leave the pull
   request unmerged with the reason in it, and do not turn on auto-merge. A cloud suite that was
   unavailable on its one try does not hold the merge: record it and merge.

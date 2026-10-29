@@ -250,8 +250,9 @@ def sync_config(
                         "use `etl-craft project add --project CODE --reason REASON` first"
                     )
                 with selected_project(int(project.project_id)):
-                    changes.extend(merge_rows(conn, files, config, authorize))
-                    findings = tuple(validate_on(conn, config).findings)
+                    merged, warnings = merge_rows(conn, files, config, authorize)
+                    changes.extend(merged)
+                    findings = (*warnings, *validate_on(conn, config).findings)
                 if not apply or any(f.status is Status.FAIL for f in findings):
                     raise _RollBackError
                 applied = True

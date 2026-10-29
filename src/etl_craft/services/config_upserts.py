@@ -32,6 +32,7 @@ from etl_craft.engine.repository.config_rows import (
 from etl_craft.engine.repository.pipelines import current_project_id
 from etl_craft.services.config_models import Change, ColumnChange, ConfigFiles, FileRow, cell
 from etl_craft.services.config_validation import row_problem
+from etl_craft.services.validate import Finding
 
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
@@ -516,11 +517,15 @@ def merge_rows(
     files: ConfigFiles,
     config: ConnectorConfig,
     authorize: Callable[[Connection, ConfigFiles], None] | None = None,
-) -> list[Change]:
+) -> tuple[list[Change], tuple[Finding, ...]]:
     """Validate the final snapshot, then retire explicitly and upsert in one transaction."""
+    from etl_craft.services.config_renames import likely_renames, refuse_stale_codes
+
     current = snapshot(conn, files, config)
+    refuse_stale_codes(conn, files, current)
     files = resolved_files(complete_files(files, current), config)
     final = final_rows(files, current)
+    warnings = likely_renames(files, current, final)
     if authorize is not None:
         authorize(conn, files)
     check_references(files, final, current)
@@ -540,4 +545,4 @@ def merge_rows(
                 ),
                 identities,
             )
-    return changes
+    return changes, warnings
