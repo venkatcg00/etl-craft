@@ -424,6 +424,10 @@ FULL_READS.update(
             "cfg_business_rules",
         ): "Converts every stored legacy predicate once during the rule-query upgrade.",
         (
+            "team_tables",
+            "aud_team_tables",
+        ): "Lists every claimed team table once for doctor's unowned-table check.",
+        (
             "business_rule_duplicate_flags",
             "aud_business_rules_results",
         ): "Checks all active flags before upgrades; no legacy duplicate can be ignored.",

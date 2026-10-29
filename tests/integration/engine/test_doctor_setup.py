@@ -93,7 +93,7 @@ def test_a_project_migration_is_pending_until_setup_applies_it(config, tmp_path)
     setup(config)
     (tmp_path / "migrations").mkdir()
     (tmp_path / "migrations" / "0001_owner.sql").write_text(
-        "ALTER TABLE CFG_PIPELINES ADD COLUMN OWNER VARCHAR(100);", encoding="utf-8"
+        "CREATE TABLE CFG_OWNERS (OWNER VARCHAR(100));", encoding="utf-8"
     )
     assert found(run_checks(config))["Engine DB migrations"] == (
         Status.FAIL,
@@ -101,6 +101,29 @@ def test_a_project_migration_is_pending_until_setup_applies_it(config, tmp_path)
     )
     assert setup(config).applied_migrations == ["0001_owner.sql"]
     assert failed(run_checks(config)) == ["Active admin"]
+
+
+def test_doctor_names_out_of_project_statements_and_unowned_team_tables(
+    config, empty_engine_db, tmp_path
+):
+    from sqlalchemy import text
+
+    setup(config)
+    with empty_engine_db.engine.begin() as conn:
+        conn.execute(text("CREATE TABLE CFG_LEGACY (CODE VARCHAR(20))"))
+    assert found(run_checks(config))["Team table owner"] == (
+        Status.INFO,
+        "CFG_LEGACY has no owning project; the first project migration that changes it "
+        "claims it for its project",
+    )
+    (tmp_path / "migrations").mkdir()
+    (tmp_path / "migrations" / "0001_reach.sql").write_text(
+        "UPDATE CFG_ACCOUNTS SET ACTIVE_FLAG='N';", encoding="utf-8"
+    )
+    status, detail = found(run_checks(config))["Project migration scope"]
+    assert status is Status.FAIL
+    assert "project migration 0001_reach.sql statement 1" in detail
+    assert "CFG_ACCOUNTS is etl-craft's" in detail
 
 
 def test_setup_changes_nothing_when_a_check_fails(config, empty_engine_db):
@@ -211,7 +234,7 @@ def test_the_commands(tmp_path, monkeypatch, capsys):
 
     (tmp_path / "migrations").mkdir()
     (tmp_path / "migrations" / "0001_owner.sql").write_text(
-        "ALTER TABLE CFG_PIPELINES ADD COLUMN OWNER VARCHAR(100);", encoding="utf-8"
+        "CREATE TABLE CFG_OWNERS (OWNER VARCHAR(100));", encoding="utf-8"
     )
     assert main(["setup"]) == ExitCode.SUCCESS
     assert capsys.readouterr().out.splitlines()[-1] == "setup: applied 0001_owner.sql"

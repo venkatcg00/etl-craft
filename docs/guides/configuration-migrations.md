@@ -56,6 +56,19 @@ with a project migration (etl-craft migrate)`.
   and keep every applied file in `migrations/`.
 - **One file, one transaction.** A statement that fails rolls back the whole file and stops
   `migrate` before any later file, with the file's name and the database's message.
+- **Stay in your project.** An Engine DB can hold several projects, and the same pipeline code
+  can exist in each. `migrate` gives every file a temporary view, `ETL_CRAFT_PROJECT`, with one
+  column, `PROJECT_ID`: the project the file migrates. Filter every lookup on it, and give it as
+  `PROJECT_ID` to new pipelines and tables, as every example does:
+  `LEFT JOIN CFG_PIPELINES p ON p.PROJECT_ID = (SELECT PROJECT_ID FROM ETL_CRAFT_PROJECT) AND
+  p.PIPELINE_CODE = v.column1`. The Engine DB refuses a row that belongs to another project,
+  naming the table, both projects and the remedy, and the whole file rolls back.
+- **Only these statements.** Each statement is read before it runs: `SELECT`, `INSERT`,
+  `UPDATE`, `DELETE`, `MERGE`, and `CREATE`, `ALTER` or `DROP` of a table, view or index. A
+  statement that can't be read this way (`DO` blocks, functions, triggers, `SET`, `PRAGMA`,
+  transaction control) is refused, naming the file and the statement: split it into plain
+  statements. A migration never writes accounts, groups, grants, projects, pools, tokens,
+  `SCHEMA_MIGRATIONS` or `AUD_` tables, and never changes the definition of an etl-craft table.
 - **Rows refer to each other by code, never by id.** Ids differ between Engine DBs
   (development, test, production); codes do not. Look ids up by code among active rows
   (`ACTIVE_FLAG = 'Y'`), as every example does.
@@ -82,13 +95,21 @@ with a project migration (etl-craft migrate)`.
 
 Etl-craft's own config tables are listed with the schema in
 `dialects/engine/tables.py`. They keep their required base fields, actor attribution, history
-and supported config CSV interfaces. Adding columns to a package-owned table does not change
-that ownership or bypass its contract.
+and supported config CSV interfaces. A project migration writes their rows but never changes
+their definition: keep extra attributes in a team table keyed by the row's code or id.
 
-Any extra `CFG_` table belongs entirely to your team. It needs no etl-craft key, audit fields,
-active flag or actor. Your own scripts and plain database connections can create, change and
-use it; project migrations can also maintain its DDL and data. The package does not capture
-its changes, include it in config CSVs or catalog pages, or clone it into the warehouse.
+Any other table, such as an extra `CFG_` table, belongs entirely to your team. It needs no
+etl-craft key, audit fields, active flag or actor. Your own scripts and plain database
+connections can create, change and use it; project migrations can also maintain its DDL and
+data. The package does not capture its changes, include it in config CSVs or catalog pages, or
+clone it into the warehouse.
+
+A team table belongs to one project. The first project migration that creates, writes or
+changes it claims it for that project, recording the file and your actor in `AUD_TEAM_TABLES`.
+After that, another project's migrations may read it but not write or change it: they fail
+before running, naming the table, its project and the claiming file. A table created outside
+migrations has no project until a migration claims it; `etl-craft doctor` lists such tables,
+and fails on a pending migration that would change another project's table.
 For example:
 
 ```sql

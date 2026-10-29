@@ -79,6 +79,7 @@ AUDIT_TABLES = frozenset(
         "AUD_ATTEMPT_ACKNOWLEDGEMENTS",
         "AUD_CONTROL_REQUESTS",
         "AUD_METADATA_CHANGES",
+        "AUD_TEAM_TABLES",
     }
 )
 

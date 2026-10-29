@@ -37,6 +37,7 @@ _actor: ContextVar[Actor | None] = ContextVar("etl_craft_actor", default=None)
 sso_groups: ContextVar[tuple[int, ...]] = ContextVar("etl_craft_sso_groups", default=())
 purpose: ContextVar[str] = ContextVar("etl_craft_purpose", default="")
 migration: ContextVar[str] = ContextVar("etl_craft_migration", default="")
+migration_project: ContextVar[int | None] = ContextVar("etl_craft_migration_project", default=None)
 
 
 def current_actor() -> Actor:

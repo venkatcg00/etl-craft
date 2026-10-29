@@ -14,6 +14,19 @@ All notable changes are recorded here. The format follows
   account write lock. OIDC adds 120-second leeway and a ten-minute per-issuer discovery cache.
 - Ngrok catalog publishing requires Allowed_ips. Each publisher refuses another project's
   generated catalog; browser sign-in moves to S7.A.7.
+- Project migrations stay in their project. The Engine DB refuses a row of another project
+  and any write to admin, audit or migration-ledger tables; each statement is read with sqlglot
+  first, so DDL reaches only the project's own team tables and temporary tables. The first
+  migration that changes a team table claims it in the new `AUD_TEAM_TABLES`; other projects
+  may read it but not change it. `doctor` lists unowned team tables and fails on pending
+  statements that would leave the project. Each file sees its project in the temporary view
+  `ETL_CRAFT_PROJECT`.
+
+  Upgrade: `DO` blocks, functions, triggers, `SET`/`PRAGMA` and `ALTER TABLE` on etl-craft's
+  tables are now refused in new project migration files; applied files are untouched. Move
+  extra columns on package tables into a team table keyed by code or id. Inserts into
+  `CFG_PIPELINES` and `CFG_TABLES` must give `PROJECT_ID` (the old default was project 1), and
+  lookups by code should filter on `ETL_CRAFT_PROJECT`, as the updated examples do.
 
 ### Changed
 

@@ -52,8 +52,9 @@ from etl_craft.dialects.engine import for_engine, for_jdbc_url
 from etl_craft.dialects.engine.guards import missing_guards
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.engine.connection_budget import footprint, reservations
-from etl_craft.engine.migrations import pending_migrations
+from etl_craft.engine.migrations import PROJECT, MigrationFile, pending_files
 from etl_craft.engine.notifications import check_notifications
+from etl_craft.engine.project_migrations import ownership_problems, unowned_team_tables
 from etl_craft.engine.queries import statement
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
@@ -448,7 +449,9 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
                     "the Engine DB has no etl-craft tables yet: run `etl-craft setup`",
                 )
             ]
-        pending = pending_migrations(engine, project_default=config.migrations_dir)
+        files = pending_files(engine, project_default=config.migrations_dir)
+        pending = [f"{file.source.lower()}/{file.version}" for file in files]
+        scope = _scope_problems(config, engine, [f for f in files if f.source == PROJECT])
     except (EtlCraftError, SQLAlchemyError) as error:
         return [fail("Engine DB migrations", str(error))]
     if pending:
@@ -456,7 +459,8 @@ def _engine_state(config: ConnectorConfig, engine: Engine) -> list[Check]:
             fail(
                 "Engine DB migrations",
                 f"{len(pending)} pending: {', '.join(pending)}; run `etl-craft migrate`",
-            )
+            ),
+            *(fail("Project migration scope", problem) for problem in scope),
         ]
     checks = [ok("Engine DB migrations", "up to date"), *_warehouse_retention(config, engine)]
     checks.append(
@@ -737,10 +741,36 @@ def _guard_checks(conn: Connection, config: ConnectorConfig) -> list[Check]:
             )
         )
 
+    if dialect.has_table(conn, "AUD_TEAM_TABLES"):
+        checks.extend(
+            Check(
+                "Team table owner",
+                Status.INFO,
+                f"{table} has no owning project; the first project migration that changes it "
+                "claims it for its project",
+            )
+            for table in unowned_team_tables(conn)
+        )
     if project is not None and dialect.has_table(conn, "AUD_PIPELINE_REFRESHES"):
         checks.extend(_refresh_checks(conn, int(project.project_id)))
 
     return checks
+
+
+def _scope_problems(
+    config: ConnectorConfig, engine: Engine, files: list[MigrationFile]
+) -> list[str]:
+    """Name pending project statements that would change another project's tables."""
+    with engine.connect() as conn:
+        if not files or not for_engine(conn).has_table(conn, "AUD_TEAM_TABLES"):
+            return []
+        project = conn.execute(
+            statement(conn, "project_by_code"), {"code": config.project}
+        ).one_or_none()
+        if project is None:
+            return []
+        pending = [(file.version, file.sql) for file in files]
+        return ownership_problems(conn, int(project.project_id), pending)
 
 
 def _refresh_checks(conn: Connection, project_id: int) -> list[Check]:

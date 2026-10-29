@@ -323,6 +323,12 @@ SEEDS = [
         RUNS + " CROSS JOIN generate_series(1,1) t",
     ),
     (
+        "AUD_TEAM_TABLES",
+        "TABLE_NAME,PROJECT_ID,MIGRATION,CLAIMED_BY,CLAIMED_AT",
+        f"'TEAM_'||p,1,'0001_team.sql','plan',{STAMP}",
+        "generate_series(1,:pipelines) p",
+    ),
+    (
         "AUD_ATTEMPT_LOG_CHUNKS",
         "ATTEMPT_ID,SEQUENCE_NUMBER,CONTENT_SHA256,CONTENT,BYTE_OFFSET,BYTE_LENGTH,CREATED_AT",
         f"{TASK_RUN_ID},0,'plan','text',0,4,{DAY}",
