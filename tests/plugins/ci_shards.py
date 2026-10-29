@@ -6,6 +6,7 @@ import json
 import math
 import os
 import platform
+from collections.abc import Iterator
 from pathlib import Path
 
 import psutil
@@ -63,12 +64,32 @@ class Shard:
         self.config = config
         self.path = Path(evidence)
         self.expected: list[str] = []
+        self.catalog: dict[str, list[str]] = {}
 
-    @pytest.hookimpl(trylast=True)
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
     def pytest_collection_modifyitems(
         self, config: pytest.Config, items: list[pytest.Item]
-    ) -> None:
-        """Apply the partition after ordinary marker and expression selection."""
+    ) -> Iterator[None]:
+        """Retain the unfiltered catalog, then partition after ordinary marker selection."""
+        self.catalog = {
+            item.nodeid: sorted({mark.name for mark in item.iter_markers()}) for item in items
+        }
+        yield
+        if self.profile.startswith("coverage-") and self.profile != "coverage-3.11-ubuntu-latest":
+            extras = [
+                item
+                for item in items
+                if item.get_closest_marker("unit") is None
+                and not item.nodeid.startswith("tests/integration/engine/test_transitions.py::")
+            ]
+            items[:] = [item for item in items if item not in extras]
+            config.hook.pytest_deselected(items=extras)
+        if self.profile.startswith("e2e-") and self.profile != "e2e-duckdb":
+            extras = [
+                item for item in items if not item.nodeid.startswith("tests/e2e/test_demo.py::")
+            ]
+            items[:] = [item for item in items if item not in extras]
+            config.hook.pytest_deselected(items=extras)
         self.expected = sorted(item.nodeid for item in items)
         family = self.profile.split("-", 1)[0]
         if family == "coverage":
@@ -94,12 +115,17 @@ class Shard:
             if self.expected and self.expected != expected:
                 raise pytest.UsageError("CI workers disagree on the complete test collection")
             self.expected = expected
+            catalog = node.workeroutput.get("ci_catalog")
+            if not isinstance(catalog, dict) or (self.catalog and self.catalog != catalog):
+                raise pytest.UsageError("CI workers disagree on the unfiltered collection")
+            self.catalog = catalog
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self) -> None:
         """Extend the existing recorder after it has persisted the shard outcomes."""
         if hasattr(self.config, "workerinput"):
             self.config.workeroutput["ci_expected"] = self.expected
+            self.config.workeroutput["ci_catalog"] = self.catalog
             return
         evidence = json.loads(self.path.read_text(encoding="utf-8"))
         evidence["ci"] = {
@@ -107,6 +133,7 @@ class Shard:
             "index": self.index,
             "count": self.count,
             "expected": self.expected,
+            "catalog": self.catalog,
             "warehouse": os.environ.get("ETL_CRAFT_E2E_WAREHOUSE"),
             "cache_mode": os.environ.get("ETL_CRAFT_CI_CACHE_MODE"),
             "cache_hit": os.environ.get("ETL_CRAFT_CI_CACHE_HIT"),

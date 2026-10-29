@@ -17,14 +17,14 @@ from release_gate import check_outcomes, git, node_ids, sha256_of
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_WAREHOUSES = ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
 SERVICE_MARKERS = {
-    "engine": "engine_sqlite or engine_postgres",
+    "engine": "engine_postgres and not warehouse_postgres",
     "warehouse-local": "warehouse_duckdb or warehouse_postgres or harness or connections",
     "warehouse-iceberg": "warehouse_duckdb_iceberg or warehouse_trino_iceberg",
 }
 SHARDS = {
     "coverage": 1,
-    "measured-coverage": 2,
-    "engine": 6,
+    "measured-coverage": 3,
+    "engine": 5,
     "warehouse-local": 1,
     "warehouse-iceberg": 2,
     "e2e": 1,
@@ -37,14 +37,20 @@ def combinations() -> dict[str, list[dict[str, str]]]:
     coverage = [
         {"profile": f"coverage-{version}-{runner}", "python": version, "os": runner}
         for version in ("3.11", "3.12", "3.13")
-        for runner in ("ubuntu-latest", "macos-latest")
-        if runner == "ubuntu-latest" or version == "3.13"
+        for runner in ("ubuntu-latest",)
     ]
     service = [{"profile": profile} for profile in SERVICE_MARKERS]
     e2e = [
         {"profile": f"e2e-{warehouse}", "warehouse": warehouse} for warehouse in LOCAL_WAREHOUSES
     ]
-    return {"coverage": coverage, "service": service, "e2e": e2e}
+    return {
+        "coverage": coverage,
+        "macos": [
+            {"profile": "coverage-3.13-macos-latest", "python": "3.13", "os": "macos-latest"}
+        ],
+        "service": service,
+        "e2e": e2e,
+    }
 
 
 def matrix(serial: bool = False) -> dict[str, list[dict[str, str | int]]]:
@@ -59,6 +65,8 @@ def matrix(serial: bool = False) -> dict[str, list[dict[str, str | int]]]:
                 else SHARDS[
                     "measured-coverage"
                     if row["profile"] == "coverage-3.11-ubuntu-latest"
+                    else "coverage"
+                    if family == "macos"
                     else family
                     if family != "service"
                     else row["profile"]
@@ -68,6 +76,80 @@ def matrix(serial: bool = False) -> dict[str, list[dict[str, str | int]]]:
         ]
         for family, rows in combinations().items()
     }
+
+
+PRIMARY = "coverage-3.11-ubuntu-latest"
+
+
+def selection(profile: str) -> str:
+    """Select complete ordinary suites once, plus explicit platform compatibility checks."""
+    if profile == PRIMARY:
+        return "(unit or engine_sqlite or docs) and not warehouse_postgres"
+    if profile.startswith("coverage-"):
+        return "unit or engine_sqlite"
+    if profile == "e2e-duckdb":
+        return "e2e_pip or e2e_uv or package"
+    return "e2e_pip or e2e_uv" if profile.startswith("e2e-") else SERVICE_MARKERS[profile]
+
+
+def assigned_profile(node: str, markers: list[str]) -> str:
+    """Give each collected ordinary case one authoritative owner; cloud stays release-only."""
+    present = set(markers)
+    if present & {"cloud_databricks", "cloud_snowflake"}:
+        return "release"
+    if "package" in present:
+        return "e2e-duckdb"
+    if present & {"e2e_pip", "e2e_uv"}:
+        warehouse = next(
+            (name for name in LOCAL_WAREHOUSES if node.endswith(f"-{name}]")), "duckdb"
+        )
+        return f"e2e-{warehouse}"
+    if present & {"warehouse_duckdb_iceberg", "warehouse_trino_iceberg"}:
+        return "warehouse-iceberg"
+    if present & {"warehouse_duckdb", "warehouse_postgres", "connections", "harness"}:
+        return "warehouse-local"
+    if present & {"unit", "engine_sqlite", "docs"}:
+        return PRIMARY
+    return "engine" if "engine_postgres" in present else "unassigned"
+
+
+def check_collections(groups: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Compare authoritative selections with the unfiltered collection, including new tests."""
+    if PRIMARY not in groups:
+        return ["missing authoritative complete collection"]
+    catalog = groups[PRIMARY][0].get("ci", {}).get("catalog")
+    if not isinstance(catalog, dict) or not catalog:
+        return ["missing authoritative unfiltered collection"]
+    expected: dict[str, set[str]] = {}
+    for node, markers in catalog.items():
+        if not isinstance(node, str) or not isinstance(markers, list):
+            return ["invalid unfiltered collection"]
+        profile = assigned_profile(node, markers)
+        if profile != "release":
+            expected.setdefault(profile, set()).add(node)
+    problems = []
+    for profile, nodes in expected.items():
+        reports = groups.get(profile, [])
+        found = node_ids(reports[0].get("ci", {}).get("expected")) if reports else None
+        if found != nodes:
+            problems.append(
+                f"{profile}: complete suite has missing or duplicated ownership: "
+                f"{sorted(nodes ^ (found or set()))}"
+            )
+    for profile, reports in groups.items():
+        if profile.startswith("coverage-") and profile != PRIMARY:
+            wanted = {
+                node
+                for node, marks in catalog.items()
+                if "unit" in marks
+                or (
+                    "engine_sqlite" in marks
+                    and node.startswith("tests/integration/engine/test_transitions.py::")
+                )
+            }
+            if node_ids(reports[0].get("ci", {}).get("expected")) != wanted:
+                problems.append(f"{profile}: incomplete platform compatibility selection")
+    return problems
 
 
 def run(profile: str, index: int, count: int, output: Path) -> int:
@@ -92,15 +174,13 @@ def run(profile: str, index: int, count: int, output: Path) -> int:
         "--dist",
         "worksteal",
     ]
-    if profile == "coverage-3.11-ubuntu-latest":
+    command += ["-m", selection(profile)]
+    if profile in {PRIMARY, "warehouse-local"}:
         command += ["--cov", "--cov-report=", "--cov-fail-under=0"]
-    elif not profile.startswith("coverage-"):
-        marker = "e2e_pip or e2e_uv" if profile.startswith("e2e-") else SERVICE_MARKERS[profile]
-        command += ["-m", marker]
-        if profile == MEASURED_SERVICE:
-            # Only PostgreSQL reaches parts of the supervision modules: measure just those.
-            command += [f"--cov={_module(path)}" for path in SUPERVISION_MODULES]
-            command += ["--cov-report=", "--cov-fail-under=0"]
+    elif profile == MEASURED_SERVICE:
+        # Only PostgreSQL reaches parts of the supervision modules: measure just those.
+        command += [f"--cov={_module(path)}" for path in SUPERVISION_MODULES]
+        command += ["--cov-report=", "--cov-fail-under=0"]
     command += [f"--evidence={output / 'results.json'}"]
     command += [f"--ci-shard={index}/{count}"]
     if wheel := os.environ.get("ETL_CRAFT_TEST_WHEEL"):
@@ -140,13 +220,11 @@ def check_profile(profile: str, reports: list[dict[str, Any]], count: int) -> li
     commits = set()
     for report in reports:
         details = report.get("ci", {})
-        marker = (
-            None
-            if profile.startswith("coverage-")
-            else ("e2e_pip or e2e_uv" if profile.startswith("e2e-") else SERVICE_MARKERS[profile])
-        )
+        marker = selection(profile)
         if report.get("marker") != marker:
             problems.append(f"{profile}: unexpected test selection {report.get('marker')!r}")
+        if details.get("catalog") != reports[0].get("ci", {}).get("catalog"):
+            problems.append(f"{profile}: unfiltered collections disagree")
         if details.get("count") != count or node_ids(details.get("expected")) != expected:
             problems.append(f"{profile}: shard collection/count disagrees with its peers")
         if details.get("profile") != profile:
@@ -156,10 +234,9 @@ def check_profile(profile: str, reports: list[dict[str, Any]], count: int) -> li
         if not profile.startswith("coverage-") and details.get("services_required") is not True:
             problems.append(f"{profile}: service requirements were not enforced")
         selected = node_ids(report.get("collected"))
-        allow_skips = profile.startswith(("coverage-", "e2e-"))
         problems.extend(
             f"{profile}: {problem}"
-            for problem in check_outcomes(report, allow_skips=allow_skips, require_pass=False)
+            for problem in check_outcomes(report, allow_skips=False, require_pass=False)
         )
         if selected is None:
             continue
@@ -225,9 +302,15 @@ def verify(directory: Path, wheel: Path, serial: bool = False) -> list[str]:
     if set(validations) != VALIDATIONS:
         problems.append("package matrix results are missing or unexpected")
     if not problems:
+        problems.extend(check_collections(groups))
+    if not problems:
         for profile in expected:
             if profile == "coverage-3.11-ubuntu-latest":
-                measured = paths[profile] + paths.get(MEASURED_SERVICE, [])
+                measured = (
+                    paths[profile]
+                    + paths.get(MEASURED_SERVICE, [])
+                    + paths.get("warehouse-local", [])
+                )
                 problems.extend(coverage_report(profile, measured, directory))
     return problems
 
@@ -292,6 +375,8 @@ def coverage_report(profile: str, reports: list[Path], directory: Path) -> list[
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    timing_parser = commands.add_parser("timing")
+    timing_parser.add_argument("run_id")
     plan = commands.add_parser("matrix")
     plan.add_argument("--serial", action="store_true")
     plan.add_argument("--output", type=Path, required=True)
@@ -313,6 +398,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("name", choices=sorted(VALIDATIONS))
     record.add_argument("output", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "timing":
+        from ci_timing import timing
+
+        return timing(args.run_id)
     if args.command == "matrix":
         with args.output.open("a", encoding="utf-8") as handle:
             for family, rows in matrix(args.serial).items():

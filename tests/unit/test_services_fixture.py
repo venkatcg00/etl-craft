@@ -40,6 +40,7 @@ def test_reachable_tells_a_listening_port_from_a_closed_one():
 
 
 def test_require_skips_with_the_way_to_start_the_services(monkeypatch):
+    monkeypatch.delenv("ETL_CRAFT_REQUIRE_SERVICES", raising=False)
     monkeypatch.setitem(DEFAULT_PORTS, "postgres", free_port())
     with pytest.raises(pytest.skip.Exception, match="make services-up"):
         require("postgres")

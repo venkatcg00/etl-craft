@@ -170,7 +170,7 @@ item's text, or work done early under another item.
 | S7.Z Environments, governance and admin-managed projects | Done | #266 | Admin environment/governance fields, shared intervention policy, PostgreSQL direct-edit history and complete guard checks; product-audit skill. |
 | S7.AA Pipeline refresh | Done | #267 | Refresh records findings; runs use the last passing version unless blocked; parallel CI and local affected-test selection |
 | S7.AB Standing task controls | Done | #268 | Versioned task pauses, admitted outcomes and explicit scheduled resume choices |
-| S7.AJ Required CI under ten minutes | Planned | | Measure the platform-job bottleneck after S7.AB; preserve complete-suite evidence |
+| S7.AJ Required CI under ten minutes | Done | #269 | Complete PR suite once, explicit platform compatibility, fail-closed ownership and three clean execution-time runs |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
 | S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
@@ -389,6 +389,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.AJ (#269) passed three consecutive complete required-CI runs below ten minutes of
+execution time, including a cold-cache run. Ownership verification, zero-skip outcomes and
+the unchanged coverage thresholds passed on each. Unit, SQLite service and fixture-cleanup
+checks passed locally; the cleanup race passed twenty rounds. Static checks, strict docs and
+actionlint passed. No warehouse SQL changed, so new cloud acceptance was not needed.
 
 S7.AB (#268) exercised standing outcomes, holds, expiry, replacement, schedule resume,
 permission refusals and released-schema upgrades on SQLite and PostgreSQL. Admission and
@@ -878,6 +884,23 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AJ owner decisions, 2026-10-28: plan text and CI implementation ship in one PR.
+  The ten-minute gate measures the longest chain of job execution durations through workflow
+  dependencies; runner queue time is excluded and reported separately with wall time.
+  Re-measure with `uv run python scripts/ci_shards.py timing <run-id>`.
+  Three measured Linux 3.11 shards own unit/SQLite/docs cases; five engine shards own
+  PostgreSQL cases. Warehouse and installed-demo jobs own their cases once. Other Linux
+  versions run all unit tests and SQLite transitions; newest-Python macOS compatibility
+  shares the existing package job. The conservative twenty-job cap stays. The verifier
+  compares worker catalogs against the unfiltered collection and refuses missing, duplicate,
+  unassigned or skipped cases. No ordinary suite moved to release-only; the full Python/OS
+  product and existing cloud acceptance remain release gates.
+  etl-craft is built for ETL/ELT data movement, not as a general-purpose orchestrator.
+  Scheduling and run control serve data movement. Python tasks may call external tools
+  (for example, start an Informatica job), but moving data is why a pipeline exists.
+  Refuse orchestrator features such as passing values between tasks (XCom), generic operators
+  or arbitrary workflows, unless the S8 demo shows that data movement needs them.
 
 - S7.AB owner decisions, 2026-10-28: one task pause with an optional SUCCESS, FAILED or
   SKIPPED outcome replaces the item's separate controls. No outcome holds. Task resume removes
@@ -8473,6 +8496,7 @@ The source-error cases below are a minimum, not the full feature-coverage matrix
 | fails mid-transfer, or times out | retries, leases, `LOST` reconciliation | after a kill and a retry, no row is doubled or missing |
 | Alpha remains in progress while Beta finishes and DM starts | S7.X attempt-fenced timestamp window; no client run gate | Alpha is excluded from the first DM window and reaches the next exactly once; Gamma idle wait does not pin it |
 | one Beta partition fails | S5.AK fan-out and S5.AH partition offsets | successful item keys/rows stay; only failed partitions retry |
+| a task needed a value from an earlier task that wasn't data, an event or an offset | Owner watch item, 2026-10-28: only if Support Insights demonstrates the need, let later tasks in the same run read `ScriptResult.variables`, with a size cap; no XCom | record the demo case and prove the smallest data-movement fix; no implementation in S7.AJ |
 | Gamma receives no object before its deadline | S5.M FILE EVENT_WAIT with SKIP timeout | run and downstream work SKIPPED, no failure alert |
 | sends timestamps without zones, or across a DST change | typed `CAST` to the declared type; UTC audit times | run dates and event times match the generator's truth |
 | resends corrected history | backfills/reopened runs with fresh engine UPDATE_DATE and S7.X windows | next SI_DM window reflects the correction once, regardless of old source run ID |

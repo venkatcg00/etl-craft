@@ -8,6 +8,7 @@ tests never share state.
 from __future__ import annotations
 
 import shutil
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -110,6 +111,16 @@ def sqlite_engine_db(directory: Path) -> EngineDb:
     return EngineDb(for_engine(engine), engine, config)
 
 
+def finish_token_writes() -> None:
+    """Finish daemon telemetry before its database or secret environment disappears."""
+    for worker in threading.enumerate():
+        if worker.name == "token-usage":
+            worker.join(timeout=5)
+            assert not worker.is_alive(), (
+                "token usage writer did not finish before database cleanup"
+            )
+
+
 @contextmanager
 def postgres_engine_db(
     monkeypatch: pytest.MonkeyPatch, template: str | None = None
@@ -136,6 +147,7 @@ def postgres_engine_db(
     try:
         yield EngineDb(for_engine(engine), engine, config)
     finally:
+        finish_token_writes()
         engine.dispose()
         with postgres_admin() as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
@@ -216,6 +228,7 @@ def empty_engine_db(request: pytest.FixtureRequest, tmp_path: Path, engine_actor
     if request.param == "sqlite":
         db = sqlite_engine_db(tmp_path)
         request.addfinalizer(db.engine.dispose)
+        request.addfinalizer(finish_token_writes)
         return db
     postgres: EngineDb = request.getfixturevalue("postgres_database")
     return postgres

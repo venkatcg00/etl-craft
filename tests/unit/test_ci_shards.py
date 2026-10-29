@@ -127,7 +127,7 @@ def test_approved_pull_request_python_platform_and_warehouse_matrix_is_planned()
         assert any(
             row["python"] == version and row["os"] == "ubuntu-latest" for row in groups["coverage"]
         )
-    assert {row["python"] for row in groups["coverage"] if row["os"] == "macos-latest"} == {"3.13"}
+    assert {row["python"] for row in groups["macos"] if row["os"] == "macos-latest"} == {"3.13"}
     assert {"duckdb", "postgres", "duckdb_iceberg", "trino_iceberg"} <= {
         row["warehouse"] for row in groups["e2e"]
     }
@@ -190,24 +190,24 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
     for row in logical:
         profile = row["profile"]
         report = copy.deepcopy(reports()[0])
-        node = f"test_{row['index']}"
+        node = f"{profile}::test_{row['index']}"
         report.update(collected=[node], tests=[{"nodeid": node, "outcome": "passed"}])
         report["ci"].update(
             profile=profile,
             index=row["index"],
             count=row["count"],
-            expected=[f"test_{index}" for index in range(row["count"])],
+            expected=[f"{profile}::test_{index}" for index in range(row["count"])],
         )
         if profile.startswith("coverage-"):
             report.update(
                 python=profile.split("-", 2)[1] + ".1",
                 platform_key="darwin" if profile.endswith("macos-latest") else "linux",
-                marker=None,
+                marker=ci.selection(profile),
             )
         if profile.startswith("e2e-"):
             report["ci"]["warehouse"] = profile.removeprefix("e2e-")
             report["wheel_sha256"] = ci.sha256_of(wheel)
-            report["marker"] = "e2e_pip or e2e_uv"
+            report["marker"] = ci.selection(profile)
         elif not profile.startswith("coverage-"):
             report["marker"] = ci.SERVICE_MARKERS[profile]
         folder = tmp_path / f"{profile}-{row['index']}"
@@ -217,6 +217,44 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
         paths.append(path)
         if profile.startswith("e2e-"):
             installed = path
+    catalog = {}
+    primary_nodes = [
+        f"{ci.PRIMARY}::test_{index}" for index in range(ci.SHARDS["measured-coverage"])
+    ]
+    for path in paths:
+        report = json.loads(path.read_text())
+        profile = report["ci"]["profile"]
+        if profile.startswith("coverage-") and profile != ci.PRIMARY:
+            report.update(
+                collected=primary_nodes,
+                tests=[{"nodeid": node, "outcome": "passed"} for node in primary_nodes],
+                counts={"passed": len(primary_nodes)},
+            )
+            report["ci"]["expected"] = primary_nodes
+        else:
+            marks = (
+                ["unit"]
+                if profile == ci.PRIMARY
+                else [
+                    {
+                        "engine": "engine_postgres",
+                        "warehouse-local": "harness",
+                        "warehouse-iceberg": "warehouse_trino_iceberg",
+                    }.get(profile, "e2e_pip")
+                ]
+            )
+            if profile.startswith("e2e-"):
+                old = report["collected"][0]
+                node = old + "-" + profile.removeprefix("e2e-") + "]"
+                report["collected"] = [node]
+                report["tests"] = [{"nodeid": node, "outcome": "passed"}]
+                report["ci"]["expected"] = [node]
+            catalog.update(dict.fromkeys(report["ci"]["expected"], marks))
+        path.write_text(json.dumps(report))
+    for path in paths:
+        report = json.loads(path.read_text())
+        report["ci"]["catalog"] = catalog
+        path.write_text(json.dumps(report))
     for name in ci.VALIDATIONS:
         folder = tmp_path / name
         folder.mkdir()
@@ -243,7 +281,9 @@ def test_job_failure_or_omission_fails_before_artifact_accounting(tmp_path, monk
 
 def test_python_and_platform_are_checked_for_each_coverage_matrix():
     data = copy.deepcopy(reports()[:1])
-    data[0].update(python="3.12.1", platform_key="darwin", marker=None)
+    data[0].update(
+        python="3.12.1", platform_key="darwin", marker=ci.selection("coverage-3.11-ubuntu-latest")
+    )
     data[0]["ci"].update(profile="coverage-3.11-ubuntu-latest", index=0, count=1)
     data[0]["ci"]["expected"] = ["test_one"]
     assert any(
@@ -252,14 +292,20 @@ def test_python_and_platform_are_checked_for_each_coverage_matrix():
     )
 
 
-def test_a_skipped_partition_does_not_hide_an_entirely_skipped_combination():
+def test_complete_suite_rejects_even_one_skipped_case():
     data = reports()
     for report in data:
-        report.update(python="3.11.1", platform_key="linux", marker=None)
+        report.update(
+            python="3.11.1",
+            platform_key="linux",
+            marker=ci.selection("coverage-3.11-ubuntu-latest"),
+        )
         report["ci"]["profile"] = "coverage-3.11-ubuntu-latest"
     data[0]["tests"][0]["outcome"] = "skipped"
     data[0]["counts"] = {"skipped": 1}
-    assert ci.check_profile("coverage-3.11-ubuntu-latest", data, 2) == []
+    assert any(
+        "skipped" in problem for problem in ci.check_profile("coverage-3.11-ubuntu-latest", data, 2)
+    )
     data[1]["tests"][0]["outcome"] = "skipped"
     data[1]["counts"] = {"skipped": 1}
     assert any(
@@ -402,10 +448,10 @@ def omit_one(self, report):
 
 EvidenceRecorder.pytest_runtest_logreport = omit_one
 """)
-    pytester.makeini("[pytest]\nmarkers = engine_sqlite: local test\n")
+    pytester.makeini("[pytest]\nmarkers = engine_postgres: local test\n")
     pytester.makepyfile("""
 import pytest
-pytestmark = pytest.mark.engine_sqlite
+pytestmark = pytest.mark.engine_postgres
 
 def test_kept():
     assert True
@@ -433,3 +479,174 @@ def test_lost():
         "outcomes do not cover exactly" in problem
         for problem in ci.check_profile("engine", [report], 1)
     )
+
+
+def test_complete_pr_ownership_refuses_missing_duplicate_and_unknown_cases():
+    catalog = {
+        "unit_case": ["unit"],
+        "sqlite_case": ["engine_sqlite"],
+        "postgres_case": ["engine_postgres"],
+        "cloud_case": ["cloud_snowflake"],
+    }
+    groups = {
+        ci.PRIMARY: [{"ci": {"catalog": catalog, "expected": ["unit_case", "sqlite_case"]}}],
+        "engine": [{"ci": {"expected": ["postgres_case"]}}],
+    }
+    assert ci.check_collections(groups) == []
+    groups["engine"][0]["ci"]["expected"].append("sqlite_case")
+    assert any("duplicated ownership" in p for p in ci.check_collections(groups))
+    groups["engine"][0]["ci"]["expected"] = []
+    assert any("missing" in p for p in ci.check_collections(groups))
+    catalog["new_case"] = ["new_suite"]
+    assert any("unassigned" in p for p in ci.check_collections(groups))
+
+
+def test_platform_jobs_run_units_and_sqlite_transitions_without_complete_engine_duplication(
+    tmp_path, monkeypatch
+):
+    commands = []
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    monkeypatch.setattr(
+        ci.subprocess,
+        "run",
+        lambda command, **_: commands.append(command) or SimpleNamespace(returncode=0, stdout=""),
+    )
+    ci.run("coverage-3.13-macos-latest", 0, 1, tmp_path)
+    assert "tests/unit" not in commands[0]
+    assert commands[0][commands[0].index("-m", 3) + 1] == "unit or engine_sqlite"
+    assert ci.selection("engine") == "engine_postgres and not warehouse_postgres"
+
+
+def test_every_collected_marker_has_a_complete_pr_or_existing_cloud_owner():
+    from plugins.suites import suite_markers
+
+    for marker in suite_markers() - {"chaos", "cluster"}:
+        assert ci.assigned_profile("test_case", [marker]) != "unassigned", marker
+
+
+@pytest.mark.parametrize("profile", ["coverage-3.11-ubuntu-latest", "coverage-3.13-macos-latest"])
+def test_unfiltered_catalog_survives_marker_selection_and_xdist(pytester, monkeypatch, profile):
+    from pathlib import Path
+
+    monkeypatch.setenv("ETL_CRAFT_CI_PROFILE", profile)
+    tests = Path(__file__).parents[1]
+    pytester.makeconftest(
+        f"import sys\nsys.path.insert(0, {str(tests)!r})\n"
+        "pytest_plugins = ['plugins.evidence', 'plugins.ci_shards']\n"
+    )
+    pytester.makeini("[pytest]\nmarkers = unit: units\n engine_postgres: engine\n")
+    pytester.makepyfile(
+        "import pytest\n@pytest.mark.unit\ndef test_kept(): pass\n"
+        "@pytest.mark.engine_postgres\ndef test_elsewhere(): pass\n"
+    )
+    evidence = pytester.path / "results.json"
+    result = pytester.runpytest_subprocess(
+        "-q", "-n", "2", "-m", "unit", "--ci-shard=0/1", "--evidence=" + str(evidence)
+    )
+    result.assert_outcomes(passed=1)
+    report = json.loads(evidence.read_text())
+    assert len(report["ci"]["expected"]) == 1
+    assert len(report["ci"]["catalog"]) == 2
+
+
+def test_unfiltered_catalog_disagreement_between_shards_fails():
+    data = reports()
+    data[0]["ci"]["catalog"] = {"test_one": ["engine_postgres"]}
+    data[1]["ci"]["catalog"] = {"test_two": ["engine_postgres"]}
+    assert any("unfiltered collections disagree" in p for p in ci.check_profile("engine", data, 2))
+
+
+def test_timing_uses_needs_chain_not_wall_or_slowest_job():
+    timing = load("ci_timing")
+    workflow = {
+        "jobs": {
+            "prepare": {"name": "prepare"},
+            "test": {"name": "test (${{ matrix.index }})", "needs": "prepare"},
+            "static": {"name": "static"},
+            "package": {"name": "package", "needs": "static"},
+            "verify": {"name": "verify", "needs": ["test", "package"]},
+        }
+    }
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 10, 28, tzinfo=UTC)
+
+    def job(name, created, began, ended):
+        return {
+            "name": name,
+            "status": "completed",
+            "created_at": (start + timedelta(seconds=created)).isoformat(),
+            "started_at": (start + timedelta(seconds=began)).isoformat(),
+            "completed_at": (start + timedelta(seconds=ended)).isoformat(),
+        }
+
+    jobs = [
+        job("prepare", 0, 2, 12),
+        job("test (0)", 12, 15, 115),
+        job("test (1)", 12, 15, 95),
+        job("static", 0, 2, 62),
+        job("package", 62, 662, 722),
+        job("verify", 722, 724, 744),
+    ]
+    result = timing.measure(
+        {"id": 1, "conclusion": "success", "created_at": start.isoformat()}, jobs, workflow
+    )
+    assert result["execution_seconds"] == 140
+    assert result["wall_seconds"] == 744
+    assert result["queue_seconds"] == 612
+    assert result["longest_job_queue_seconds"] == 600
+    assert result["workflow_queue_seconds"] == 0
+    assert result["slowest_jobs"][0]["name"] == "test (0)"
+    jobs[-1]["status"] = "queued"
+    with pytest.raises(ValueError, match="has not completed"):
+        timing.measure({}, jobs, workflow)
+
+
+def test_timing_fetches_every_job_page_and_workflow_at_run_revision(monkeypatch, capsys):
+    import base64
+
+    timing = load("ci_timing")
+    calls = []
+
+    def api(path):
+        calls.append(path)
+        if "/contents/" in path:
+            return {"content": base64.b64encode(b"jobs:\n  verify:\n    name: verify\n").decode()}
+        if "/jobs?" in path:
+            job = {
+                "name": "verify",
+                "status": "completed",
+                "created_at": "2026-10-28T00:00:00Z",
+                "started_at": "2026-10-28T00:00:02Z",
+                "completed_at": "2026-10-28T00:00:12Z",
+            }
+            return {"total_count": 2, "jobs": [job]}
+        return {
+            "id": 42,
+            "run_attempt": 2,
+            "head_sha": "exact-commit",
+            "path": ".github/workflows/ci.yml",
+            "conclusion": "success",
+            "created_at": "2026-10-28T00:00:00Z",
+        }
+
+    monkeypatch.setattr(timing, "api", api)
+    assert ci.main(["timing", "42"]) == 0
+    assert json.loads(capsys.readouterr().out)["execution_seconds"] == 10
+    assert any("page=2" in path for path in calls)
+    assert calls[-1].endswith("?ref=exact-commit")
+
+
+def test_timing_refuses_missing_or_ambiguous_jobs():
+    timing = load("ci_timing")
+    job = {
+        "name": "same",
+        "status": "completed",
+        "created_at": "2026-10-28T00:00:00Z",
+        "started_at": "2026-10-28T00:00:00Z",
+        "completed_at": "2026-10-28T00:00:01Z",
+    }
+    with pytest.raises(ValueError, match="unambiguous"):
+        timing.measure({}, [job], {"jobs": {"one": {"name": "same"}, "two": {"name": "same"}}})
+    with pytest.raises(ValueError, match="missing"):
+        timing.measure({}, [job], {"jobs": {"one": {"name": "same"}, "two": {"name": "other"}}})

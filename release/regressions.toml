@@ -261,3 +261,6 @@ oidc-clock-and-cache = ["tests/unit/test_oidc_device.py::test_oidc_clock_leeway_
 dependency-bounds = ["tests/unit/test_dependency_bounds.py::test_dependency_bounds_install_matrix"]
 unattended-admin-setup = ["tests/integration/engine/test_setup_audit.py::test_unattended_setup_admin_contract", "tests/integration/engine/test_setup_audit.py::test_setup_retries_password_policy"]
 catalog-repair-rates = ["tests/integration/engine/test_catalog.py::test_catalog_first_endings_and_repair_labels"]
+test-telemetry-after-database-drop = [
+    "tests/integration/engine/test_fixture_templates.py::test_database_cleanup_finishes_telemetry_before_dropping_its_database",
+]

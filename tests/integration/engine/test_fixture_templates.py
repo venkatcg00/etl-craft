@@ -44,3 +44,56 @@ def test_postgres_template_clones_have_independent_rows_and_working_audit_guards
         postgres_engine_db(monkeypatch, postgres_schema_template) as second,
     ):
         check_isolation(first, second)
+
+
+@pytest.mark.engine_postgres
+def test_database_cleanup_finishes_telemetry_before_dropping_its_database(
+    postgres_schema_template, monkeypatch
+):
+    import threading
+
+    from fixtures.engine_db import postgres_admin
+    from fixtures.races import paused_after
+
+    ready, release, joining, finished = (threading.Event() for _ in range(4))
+    state = {}
+    original_join = threading.Thread.join
+
+    def join(worker, *args, **kwargs):
+        if worker.name == "token-usage":
+            joining.set()
+        return original_join(worker, *args, **kwargs)
+
+    def write():
+        ready.set()
+        assert release.wait(10)
+        with postgres_admin() as conn:
+            state["database_alive"] = conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=%s)", (state["name"],)
+            ).fetchone()[0]
+        finished.set()
+
+    def lifecycle():
+        with postgres_engine_db(monkeypatch, postgres_schema_template) as db:
+            state["name"] = db.engine.url.database
+            state["worker"] = threading.Thread(target=write, name="token-usage", daemon=True)
+            state["worker"].start()
+
+    monkeypatch.setattr(threading.Thread, "join", join)
+    try:
+        with paused_after(
+            lifecycle,
+            owner=threading.Thread,
+            name="start",
+            when=lambda worker: worker.name == "token-usage",
+        ) as continue_cleanup:
+            assert ready.wait(5)
+            continue_cleanup.set()
+            assert joining.wait(5), "database teardown did not wait for its telemetry writer"
+            assert not finished.is_set()
+            release.set()
+        assert finished.is_set() and state["database_alive"]
+    finally:
+        release.set()
+        if "worker" in state:
+            original_join(state["worker"], timeout=5)
