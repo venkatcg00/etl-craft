@@ -115,6 +115,7 @@ def project_rows(index: int, scale: Scale) -> dict[str, list[dict]]:
             rows["tasks.csv"].append({**identity, "TASK_TYPE": "ETL", "HANDLER": "PYTHON"})
             for name, value in {
                 "SCRIPT_FILE": "python_scripts/work.py",
+                "SCRIPT_KIND": "INGESTION",
                 "INPUT_PARAMS": json.dumps(
                     {"seconds": scale.seconds, "failure_rate": scale.failure_rate}
                 ),

@@ -128,7 +128,7 @@ def test_steps(project, capsys):
     assert out.splitlines() == [
         "TASK_CODE\tSTATUS\tHANDLER\tTASK_TYPE\tRUN_CONDITION\tPARAMETERS",
         "alert\tNOT-RUN\tEMAIL_ALERT\tETL\tANY\t",
-        "extract\tFAILED\tPYTHON\tETL\tALL\tSCRIPT_FILE=python_scripts/x.py",
+        "extract\tFAILED\tPYTHON\tETL\tALL\tSCRIPT_FILE=python_scripts/x.py, SCRIPT_KIND=INGESTION",
         "load\tNOT-RUN\tSQL\tETL\tALL\tSQL_ACTION=SCD1_MERGE, TARGET_OBJECT=s.orders",
     ]
 

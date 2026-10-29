@@ -1,12 +1,15 @@
 """Item evidence shared by Python helpers, local task stores and the agent protocol."""
 
 import itertools
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
 from etl_craft.core.enums import ItemStatus
 from etl_craft.core.errors import HandlerError
+
+COUNTED = frozenset({ItemStatus.SUCCESS, ItemStatus.SKIPPED})
 
 
 @dataclass(frozen=True)
@@ -73,19 +76,16 @@ class ItemProgress:
 
 def progress(records: tuple[ItemRecord, ...]) -> ItemProgress:
     """Count persisted results, including retained successes and operator decisions."""
+    statuses = Counter(r.status for r in records)
+    done = statuses[ItemStatus.SUCCESS] + statuses[ItemStatus.SKIPPED]
+    unmeasured = sum(r.row_count is None for r in records if r.status in COUNTED)
     return ItemProgress(
         len(records),
-        sum(r.status in {ItemStatus.SUCCESS, ItemStatus.SKIPPED} for r in records),
-        sum(r.status in {ItemStatus.FAILED, ItemStatus.CANCELLED} for r in records),
-        sum(r.status == ItemStatus.SKIPPED for r in records),
-        sum(
-            r.status in {ItemStatus.SUCCESS, ItemStatus.SKIPPED} and r.row_count is not None
-            for r in records
-        ),
-        sum(
-            r.status in {ItemStatus.SUCCESS, ItemStatus.SKIPPED} and r.row_count is None
-            for r in records
-        ),
+        done,
+        statuses[ItemStatus.FAILED] + statuses[ItemStatus.CANCELLED],
+        statuses[ItemStatus.SKIPPED],
+        done - unmeasured,
+        unmeasured,
     )
 
 

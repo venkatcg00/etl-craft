@@ -75,6 +75,7 @@ def test_working_set_retains_admitted_graphs_across_edits_and_restart(engine_db)
     working.refresh(ctx)
     assert working.graphs[run] is graph
     with ctx.engine.begin() as conn:
+        conn.execute(text("DELETE FROM CFG_TASK_PARAMETERS WHERE TASK_ID=:id"), {"id": task})
         conn.execute(text("DELETE FROM CFG_TASKS WHERE TASK_ID=:id"), {"id": task})
     working.refresh(ctx)
     assert working.graphs[run] is graph

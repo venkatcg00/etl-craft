@@ -268,3 +268,6 @@ unmanaged-side-effect-retry = [
     "tests/unit/test_script_kind_contract.py::test_unmanaged_default_retry_policy",
     "tests/integration/execution/test_script_kinds.py::test_utility_automatic_retries_require_an_explicit_policy",
 ]
+fan-out-progress-cost = [
+    "tests/unit/test_fan_out.py::test_a_thousand_items_at_width_two_hundred_have_bounded_pending_work",
+]

@@ -68,27 +68,21 @@ def test_a_thousand_items_at_width_two_hundred_have_bounded_pending_work(monkeyp
     release = threading.Event()
     lock = threading.Lock()
     issued = 0
-    outstanding = 0
+    pending = set()
     peak = 0
     calls = []
     original = ThreadPoolExecutor.submit
 
     def submit(executor, *args, **kwargs):
-        nonlocal outstanding, peak
-        counted = executor._thread_name_prefix == "etl-item"
-        if counted:
-            with lock:
-                outstanding += 1
-                peak = max(peak, outstanding)
+        nonlocal peak
         future = original(executor, *args, **kwargs)
-        if counted:
-
-            def finished(_):
-                nonlocal outstanding
-                with lock:
-                    outstanding -= 1
-
-            future.add_done_callback(finished)
+        if executor._thread_name_prefix == "etl-item":
+            with lock:
+                # Completion wakes the scheduler before callbacks necessarily finish.
+                pending.difference_update(tuple(f for f in pending if f.done()))
+                if not future.done():
+                    pending.add(future)
+                peak = max(peak, len(pending))
         return future
 
     def item(key):

@@ -443,7 +443,8 @@ def test_postgres_direct_primary_key_edits_preserve_history_identity(engine_db):
         rows = conn.execute(
             text(
                 "SELECT TASK_PARAMETER_ID AS id,CURRENT_FLAG AS current FROM "
-                "AUD_CFG_TASK_PARAMETERS_HISTORY WHERE TASK_ID=:task"
+                "AUD_CFG_TASK_PARAMETERS_HISTORY WHERE TASK_ID=:task "
+                "AND PARAMETER_NAME='SCRIPT_FILE'"
             ),
             {"task": task},
         ).all()
