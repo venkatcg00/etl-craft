@@ -1,8 +1,8 @@
 # Business rules
 
-A task with `HANDLER = 'BUSINESS_RULES'` checks the rows of warehouse tables against rules and
-flags the ones that break them. The flags are rows of `AUD_BUSINESS_RULES_RESULTS` in the Engine DB;
-the warehouse tables are only read.
+A task with `HANDLER = 'BUSINESS_RULES'` checks warehouse tables. A `ROW` rule flags the
+individual rows that break it in `AUD_BUSINESS_RULES_RESULTS`. A `TABLE` rule records one
+result on `AUD_BUSINESS_RULES_RUN_LOG`. The warehouse tables are only read.
 
 ## Writing a rule
 
@@ -12,9 +12,10 @@ Each rule is a row of `CFG_BUSINESS_RULES` for the task:
 |---|---|
 | `BUSINESS_RULE_NAME` | a name, used in logs and messages |
 | `TARGET_TABLE_ID` | the checked table’s `CFG_TABLES.TABLE_ID`; config files name its separate catalog, schema and table |
-| `BUSINESS_RULE_KEY_COLUMN` | the column that identifies a row, usually `ROW_ID` |
-| `BUSINESS_RULE_SQL` | one complete read-only `SELECT` returning breaking target row keys |
-| `BUSINESS_RULE_TYPE` | `INCOMPLETE`, `REJECT` or `REPORT`, copied onto each flag |
+| `BUSINESS_RULE_LEVEL` | `ROW` (the insert default) or `TABLE` |
+| `BUSINESS_RULE_KEY_COLUMN` | required for `ROW`; empty for `TABLE` |
+| `BUSINESS_RULE_SQL` | one complete read-only `SELECT`; output follows the level below |
+| `BUSINESS_RULE_TYPE` | `ROW`: `INCOMPLETE`, `REJECT`, `REPORT`; `TABLE`: `REJECT`, `REPORT` |
 | `SEQUENCE_NUMBER` | the wave the rule runs in |
 
 Declare only project objects that need a contract in `CFG_TABLES`; this does not copy the
@@ -22,6 +23,8 @@ warehouse information schema. A rule’s target contract must be active. An empt
 config files resolves against the configured warehouse when applying current metadata.
 Execution derives the qualified target from the referenced contract. Later target edits do
 not change previously recorded rule-result targets or earlier configuration versions.
+
+## Row rules
 
 `BUSINESS_RULE_SQL` is a complete read-only SELECT. Its output must include the column named
 by `BUSINESS_RULE_KEY_COLUMN`, containing the target row keys to flag; other output columns
@@ -91,6 +94,79 @@ checks before pending upgrades and again inside the migration transaction. Confl
 legacy flags stop the upgrade with their rule, key and result IDs. Use the previous package
 and an explicit project migration to clear the conflicts while retaining inactive evidence;
 then retry the upgrade. The engine never deletes history or selects a winner automatically.
+
+## Table rules
+
+Set `BUSINESS_RULE_LEVEL=TABLE`, leave `BUSINESS_RULE_KEY_COLUMN` empty, and choose `REJECT`
+or `REPORT`. The query must return **exactly one row** with:
+
+| Output | Contract |
+|---|---|
+| `PASSED` | required text `Y` or `N`, exactly; booleans, numbers, lower case and NULL fail |
+| `OBSERVED` | optional text or NULL, at most 4,096 characters |
+| `DETAIL` | optional text or NULL, at most 4,096 characters |
+
+No other output column is allowed. Cast measurements to text explicitly (`STRING` instead
+of `VARCHAR` on Databricks). Both text fields
+use a 4,096-character storage limit, consistent with bounded Engine DB error/reason evidence.
+An overlong value fails with its field, length, limit and remedy; it is never truncated.
+Malformed outputs are FAILED rule runs with the diagnostic in `DETAIL` and the attempt log.
+Validation checks explicit output lists statically, as for ROW rules; wildcard or unresolved
+outputs need a zero-row warehouse probe. This lets a pipeline refresh before its upstream
+setup task creates the target. Execution always checks the actual columns and values.
+
+A valid `PASSED=N` on `REJECT` fails the task and prevents its success-dependent tasks from
+starting. `REPORT` stores `N` and continues. `INCOMPLETE` has no table meaning and is refused.
+The result is stored once per rule/task run, including `PASSED`, `OBSERVED` and `DETAIL`;
+a table check never appends or clears per-row flags, or rewrites earlier evidence.
+
+At least one row this run (`REJECT`):
+
+```sql
+SELECT CASE WHEN COUNT(*) > 0 THEN 'Y' ELSE 'N' END AS PASSED,
+       CAST(COUNT(*) AS VARCHAR) AS OBSERVED,
+       'At least one row is required' AS DETAIL
+FROM $$rows_in_scope
+```
+
+NULL rate under 5% (`REPORT`):
+
+```sql
+SELECT CASE WHEN COUNT(*) > 0
+                 AND SUM(CASE WHEN amount IS NULL THEN 1 ELSE 0 END) * 100.0
+                     < COUNT(*) * 5 THEN 'Y' ELSE 'N' END AS PASSED,
+       CAST(SUM(CASE WHEN amount IS NULL THEN 1 ELSE 0 END) AS VARCHAR) AS OBSERVED,
+       'NULL amounts; limit is under 5 percent' AS DETAIL
+FROM $$rows_in_scope
+```
+
+Totals reconcile (whole-table form; `REJECT`):
+
+```sql
+WITH actual AS (SELECT SUM(amount) AS total FROM sales.orders),
+     expected AS (SELECT SUM(amount) AS total FROM landing.order_totals)
+SELECT CASE WHEN actual.total = expected.total THEN 'Y' ELSE 'N' END AS PASSED,
+       CAST(actual.total - expected.total AS VARCHAR) AS OBSERVED,
+       'Difference between order and landing totals' AS DETAIL
+FROM actual CROSS JOIN expected
+```
+
+`$$rows_in_scope` uses the existing run/active-version scope. With `--force`, it includes all
+active target rows. A whole-table query runs against the table it names; it does not receive
+a row-key intersection. Sequence waves and retry/resume stay the same: successful rule
+executions are skipped on a retry unless forced. A `REPORT` result of `N` is a successful
+execution of a failing check and is retained; failed `REJECT` checks run again on retry.
+
+`status`, `explain`, run detail and the catalog table page show the recorded fields. The
+existing run-detail read exposes `rules`; pipeline/task history exposes recent observations
+in `rules` over the latest fifty pipeline runs, with rule and run identities. These share
+one repository read for the future table page and Pipeline Insights; no new route is needed.
+UI pages remain separate work.
+
+On upgrade, existing rules and their historical versions become `ROW`; earlier run-log
+values are unchanged and the new result fields are NULL. Config files are partial helpers:
+new rules default to `ROW`, while an omitted level keeps an existing rule's stored value.
+Changing a level is an ordinary update that preserves the rule id. Export includes the level.
 
 ## Execution identities
 

@@ -95,7 +95,7 @@ def output_key(sql: str, key: str, dialect: str | None) -> str | None:
     return None
 
 
-def rule_problem(sql: str, key: str, dialect: str | None) -> str | None:
+def rule_problem(sql: str, key: str | None, dialect: str | None) -> str | None:
     """Check a complete rule, including unresolved legacy outer-row references."""
     statements = split_statements(expand_scope(sql))
     if len(statements) != 1:
@@ -111,11 +111,15 @@ def rule_problem(sql: str, key: str, dialect: str | None) -> str | None:
         return f"is {root.key.upper()}; expected a read-only SELECT; select target row keys instead"
     scope = build_scope(root) if root is not None else None
     if scope is not None and any(column.table.lower() == "t" for column in scope.external_columns):
+        if key is None:
+            return "has an unbound outer t; select FROM $$rows_in_scope t or name the target table"
         return (
             "uses the old correlated fragment form; replace BUSINESS_RULE_SQL with: "
             + converted_rule(sql, key, dialect)
         )
     columns = output_columns(expanded, dialect=dialect)
+    if key is None:
+        return None
     if columns is not None and key.lower() not in {name.lower() for name in columns}:
         return (
             f"returns {columns!r}; expected BUSINESS_RULE_KEY_COLUMN={key!r}; "

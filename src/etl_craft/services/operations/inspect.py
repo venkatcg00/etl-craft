@@ -25,6 +25,7 @@ from etl_craft.engine.logs import (
 )
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.audit_reads import fetch_audit_records
+from etl_craft.engine.repository.business_rules import fetch_rule_observations
 from etl_craft.engine.repository.dependencies import (
     fetch_cross_pipeline_task_edges,
     fetch_pipeline_dependency_edges,
@@ -262,6 +263,13 @@ def _pipeline_history(ctx: OperationContext, request: HistoryInput) -> HistoryVi
             entries,
             changes,
             entries[-1].pipeline_run_id if more else None,
+            rules=tuple(
+                r
+                for r in fetch_rule_observations(
+                    conn, pipeline_id, None if selected is None else selected.pipeline_run_id
+                )
+                if task_code is None or r.task_code == task_code
+            ),
         )
 
 

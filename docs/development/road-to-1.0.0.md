@@ -171,7 +171,7 @@ item's text, or work done early under another item.
 | S7.AA Pipeline refresh | Done | #267 | Refresh records findings; runs use the last passing version unless blocked; parallel CI and local affected-test selection |
 | S7.AB Standing task controls | Done | #268 | Versioned task pauses, admitted outcomes and explicit scheduled resume choices |
 | S7.AJ Required CI under ten minutes | Done | #269 | Complete PR suite once, explicit platform compatibility, fail-closed ownership and three clean execution-time runs |
-| S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
+| S7.AC Table-level business rules | Done | #271 | Strict TABLE results on the existing run log, scoped checks and shared observation history; ROW flags unchanged |
 | S7.AD Python script kinds | Done | #270 | Explicit ingestion/utility contracts, nullable utility counts and safe unmanaged retry defaults |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
@@ -389,6 +389,12 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.AC covers TABLE REJECT/REPORT checks, malformed output, scoped/whole-table queries,
+sequence waves, retry/force, result reads and catalog rendering on both Engine DBs and all
+four local warehouses. Real-row upgrades from every released schema preserve existing ROW
+rules and run-log values. Databricks and Snowflake each passed the focused TABLE checks.
+The complete platform matrix and installed-wheel demos remain CI gates.
 
 S7.AD validates both script kinds, nullable fan-out counts, retries/resumes, standing SUCCESS,
 reset refusals and last-good refresh execution on SQLite and PostgreSQL. Real-row upgrades
@@ -891,6 +897,22 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AC reuses the existing per-rule/task-run binding, sequence waves, renewable rule lock,
+  retry skip and force path. The previous run log had no bounded measurement text columns;
+  OBSERVED and DETAIL use a documented 4,096-character limit, enforced before publication
+  and by both databases. Output is never truncated. An oversized failure diagnostic is kept
+  in full in the attempt log with a bounded rule/task-id summary in DETAIL.
+  There was no separate rule-result read action: existing RUN_DETAIL exposes TABLE results,
+  HISTORY exposes observations over the latest fifty pipeline runs, and exact older run reads
+  remain available. The catalog uses the same repository read; no action, route or setting is
+  added. REPORT=N is a successfully executed check and is skipped on a same-run retry;
+  REJECT=N fails and is checked again. Earlier ROW evidence is not rewritten by a level edit.
+  Old admitted images without the level read as ROW without changing their text or hash.
+  Explicit TABLE output lists are checked statically like ROW output; only unresolved or
+  wildcard projections probe the warehouse. This preserves first-run target creation.
+  S8.H gains the requested TABLE REJECT/REPORT demonstration bullet; no sample or stewardship
+  execution behavior is implemented here.
 
 - S7.AD owner decision, 2026-10-29: utility fan-out totals are NULL if any successful item
   is unmeasured; each item retains its own count, and empty utility fan-out is unmeasured.
@@ -8440,6 +8462,9 @@ Every slice updates its runnable README walkthroughs and tests in the same examp
    controls, correction and clearing of flags, recurrence, unchanged out-of-scope flags,
    retries and thresholds. Reconciliation and view reference queries follow these
    policies; do not assume that every flag excludes a record from the mart.
+   - Demonstrate a `TABLE` rule of each allowed type (`REJECT`, `REPORT`) on a Support
+     Insights client: scoped and whole-table checks, their `PASSED`, `OBSERVED` and `DETAIL`
+     evidence, and the rejecting check's downstream failure.
 3. Add S7.M stewardable pipelines and assigned stewards for two kinds of target, correcting
    the same Alpha, Beta and Gamma records rather than a disconnected upload-only dataset:
    - **Business data, at ODS:** `SI_STEWARD_BUSINESS` takes the client chain (LND → PRS →

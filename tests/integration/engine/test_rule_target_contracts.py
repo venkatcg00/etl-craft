@@ -87,8 +87,11 @@ def test_conversion_reuses_contract_preserves_stamps_history_and_old_names(
             )
             values.pop("target_table")
             values["target_table_id"] = parent
-            expected.append(tuple(values.values()))
-        assert [tuple(row) for row in after] == expected
+            values["business_rule_level"] = "ROW"
+            expected.append(values)
+        assert [
+            {key.lower(): value for key, value in row._mapping.items()} for row in after
+        ] == expected
         assert [
             row[:6]
             for row in conn.execute(

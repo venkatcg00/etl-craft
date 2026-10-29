@@ -13,9 +13,10 @@ from sqlalchemy.engine import Connection, Engine
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.targets import active_catalog
 from etl_craft.core.actor import current_actor
+from etl_craft.core.business_rules import RULE_TEXT_LIMIT, table_result
 from etl_craft.core.definitions import Definition, using
-from etl_craft.core.enums import RunStatus, SqlAction
-from etl_craft.core.errors import StaleTransitionError
+from etl_craft.core.enums import BusinessRuleLevel, RunStatus, SqlAction, YesNo
+from etl_craft.core.errors import HandlerError, StaleTransitionError
 from etl_craft.core.items import ItemRecord, ItemState, ItemStore
 from etl_craft.core.ownership import ResourceLocker, attempt_holder
 from etl_craft.engine import locks, resource_locks, transitions
@@ -104,6 +105,9 @@ class RuleEnding:
     status: RunStatus
     new_keys: tuple[str, ...] = ()
     passing_keys: tuple[str, ...] = ()
+    passed: YesNo | None = None
+    observed: str | None = None
+    detail: str | None = None
 
 
 class TaskStore(ResourceLocker, ItemStore, Protocol):
@@ -415,6 +419,49 @@ class LocalTaskStore:
                 raise PermissionDeniedError(
                     f"rule run {ending.rule_run_id}: not bound to task run "
                     f"{self.identity.task_run_id}; use the binding returned to this attempt"
+                )
+            if rule.business_rule_level == BusinessRuleLevel.TABLE:
+                if ending.new_keys or ending.passing_keys:
+                    raise HandlerError(
+                        f"rule {rule.business_rule_name!r}: TABLE publication contains row keys; "
+                        "expected only PASSED/OBSERVED/DETAIL; publish a table result"
+                    )
+                if ending.passed is not None:
+                    result = table_result(
+                        ending.passed, ending.observed, ending.detail, rule.business_rule_name
+                    )
+                    if ending.status != result.run_status(rule.business_rule_type):
+                        raise HandlerError(
+                            f"rule {rule.business_rule_name!r}: TABLE result "
+                            f"PASSED={ending.passed}, "
+                            f"type={rule.business_rule_type}, status={ending.status}; expected "
+                            f"{result.run_status(rule.business_rule_type)}; "
+                            "publish the check outcome"
+                        )
+                elif (
+                    ending.status != RunStatus.FAILED
+                    or not ending.detail
+                    or len(ending.detail) > RULE_TEXT_LIMIT
+                ):
+                    raise HandlerError(
+                        f"rule {rule.business_rule_name!r}: missing TABLE result; "
+                        "expected PASSED or a bounded failure DETAIL; report the query outcome"
+                    )
+                conn.execute(
+                    statement(conn, "table_rule_result"),
+                    {
+                        "business_rule_run_id": ending.rule_run_id,
+                        "passed": ending.passed,
+                        "observed": ending.observed,
+                        "detail": ending.detail,
+                    },
+                )
+            elif any(
+                value is not None for value in (ending.passed, ending.observed, ending.detail)
+            ):
+                raise HandlerError(
+                    f"rule {rule.business_rule_name!r}: ROW publication contains TABLE fields; "
+                    "expected row keys; publish the row-rule result"
                 )
             if ending.status == RunStatus.SUCCESS:
                 flag_rule_keys(conn, rule, ending.rule_run_id, ending.new_keys, now)

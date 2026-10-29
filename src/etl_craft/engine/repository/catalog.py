@@ -74,7 +74,8 @@ class RuleRow:
     name: str
     rule_type: str
     sql: str
-    key_column: str
+    key_column: str | None
+    business_rule_level: str
     target_table: str
     sequence_number: int
     pipeline_code: str

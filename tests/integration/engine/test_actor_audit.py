@@ -196,6 +196,7 @@ def seeded_tables(db):
             "role": "viewer",
             "permission": Permission.CAN_VIEW,
             "grantee_role": ApiRole.VIEWER,
+            "business_rule_key_column": "id",
             "account_kind": AccountKind.SERVICE,
             "token_sha256": "0" * 64,
             "pipeline_id": p1,

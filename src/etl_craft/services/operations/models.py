@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, ClassVar
 
+from etl_craft.core.business_rules import RuleObservation
 from etl_craft.core.enums import AttemptStatus, FailureClass, RunStatus, SlaStatus, TriggerKind
 from etl_craft.engine.repository.intervention_rows import Intervention
 from etl_craft.engine.repository.pauses import Pause, Resume
@@ -43,6 +44,7 @@ class RunView:
     metadata_version: str | None = None
     newer_metadata_available: bool = False
     item_progress: str | None = None
+    rules: tuple[RuleObservation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,7 @@ class TaskRunView:
     attempts: tuple[AttemptView, ...]
     child_run_ids: tuple[int, ...] = ()
     item_progress: str | None = None
+    rules: tuple[RuleObservation, ...] = ()
 
     standing_pause: TaskPause | None = None
 
@@ -235,6 +238,7 @@ class HistoryView:
     entries: tuple[RunView | TaskRunView, ...]
     changes: tuple[Intervention, ...]
     before: int | None = None
+    rules: tuple[RuleObservation, ...] = ()
 
 
 @dataclass(frozen=True)

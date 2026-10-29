@@ -37,10 +37,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import python_script, sql_script
 from etl_craft.config.targets import active_catalog, parse_warehouse_url
-from etl_craft.core.enums import GapState, Handler, RunStatus, SlaStatus, SqlAction
+from etl_craft.core.business_rules import RuleObservation
+from etl_craft.core.enums import GapState, Handler, SqlAction
 from etl_craft.core.errors import EtlCraftError, MetadataError
 from etl_craft.core.text import is_safe_identifier
 from etl_craft.core.time import as_utc
+from etl_craft.engine.repository.business_rules import fetch_rule_observations
 from etl_craft.engine.repository.catalog import (
     Consumption,
     LastRun,
@@ -79,6 +81,8 @@ from etl_craft.handlers.sql.creation import writer_action
 from etl_craft.handlers.sql.spec import read_action, read_setup_for
 from etl_craft.handlers.sql.tables import AUDIT_COLUMNS
 from etl_craft.services.catalog.gaps import infers_output_columns, table_records
+from etl_craft.services.catalog.metrics import RunKpis as RunKpis
+from etl_craft.services.catalog.metrics import run_kpis as run_kpis
 from etl_craft.services.lineage import Edge, TaskLineage, collect, stored_edge, table_name
 from etl_craft.services.source_columns import nullable, warehouse_kind
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_dialect
@@ -212,6 +216,7 @@ class RuleAsset:
 
     row: RuleRow
     table: str
+    observations: tuple[RuleObservation, ...] = ()
 
     @property
     def task(self) -> str:
@@ -381,13 +386,8 @@ def collect_catalog(
             continue
         waiting.upstream.append((upstream.label, dependency.dependency_type))
         upstream.downstream.append((waiting.label, dependency.dependency_type))
-    for rule_row in rule_rows:
-        rule = RuleAsset(rule_row, name_of(rule_row.target_table))
-        catalog.rules[rule_row.business_rule_id] = rule
-        if rule.task in catalog.tasks:
-            catalog.tasks[rule.task].rules.append(rule_row.business_rule_id)
-        _table(catalog, rule.table).rules.append(rule_row.business_rule_id)
-        _table(catalog, rule.table).add_column(rule_row.key_column.lower())
+    with engine.connect() as conn:
+        _rules(catalog, rule_rows, fetch_rule_observations(conn), name_of)
     _compare_catalog(catalog, engine, config, with_warehouse)
     return catalog
 
@@ -678,65 +678,6 @@ def _comparison_identity(catalog: Catalog, config: ConnectorConfig, requested: b
                 )
 
 
-@dataclass(frozen=True)
-class RunKpis:
-    """What a pipeline's or task's recent runs add up to."""
-
-    runs: int
-    finished: int
-    succeeded: int
-    failed: int
-    sla_breached: int
-    average_seconds: float | None
-    longest_seconds: float | None
-    average_rows: float | None = None
-    repaired: int = 0
-
-    @property
-    def success_rate(self) -> float | None:
-        """The share of finished runs that succeeded, or ``None`` before any finished."""
-        return None if not self.finished else self.succeeded / self.finished
-
-
-def run_kpis(runs: Sequence[RunSummary | TaskRunSummary]) -> RunKpis:
-    """Return the KPIs of ``runs``: successes, failures, SLA misses, durations and rows.
-
-    A run counts as finished once it is ``SUCCESS``, ``FAILED`` or ``CANCELLED``; ``SKIPPED``
-    runs did no work and ``IN-PROGRESS`` ones have not ended, so neither counts either way.
-    """
-    finished = [
-        r
-        for r in runs
-        if (r.first_status or r.status)
-        in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELLED)
-    ]
-    seconds = [s for r in finished if (s := r.seconds) is not None]
-    rows = [
-        r.target_count
-        for r in runs
-        if isinstance(r, TaskRunSummary)
-        and r.status == RunStatus.SUCCESS
-        and r.target_count is not None
-    ]
-    return RunKpis(
-        runs=len(runs),
-        finished=len(finished),
-        succeeded=sum(1 for r in finished if (r.first_status or r.status) == RunStatus.SUCCESS),
-        failed=sum(1 for r in finished if (r.first_status or r.status) != RunStatus.SUCCESS),
-        sla_breached=sum(
-            1 for r in runs if isinstance(r, RunSummary) and r.sla_status == SlaStatus.BREACHED
-        ),
-        average_seconds=sum(seconds) / len(seconds) if seconds else None,
-        longest_seconds=max(seconds) if seconds else None,
-        average_rows=sum(rows) / len(rows) if rows else None,
-        repaired=sum(
-            r.first_status in (RunStatus.FAILED, RunStatus.CANCELLED)
-            and r.status == RunStatus.SUCCESS
-            for r in runs
-        ),
-    )
-
-
 def latest_run(runs: Iterable[LastRun | None]) -> LastRun | None:
     """Return the run that ended last, or ``None`` when none has."""
     finished = [run for run in runs if run is not None and run.end is not None]
@@ -795,3 +736,24 @@ def build_catalog(
     catalog = collect_catalog(engine, config, with_warehouse=with_warehouse)
     _lineage_history(catalog, engine)
     return catalog
+
+
+def _rules(
+    catalog: Catalog,
+    rule_rows: Sequence[RuleRow],
+    observations: Sequence[RuleObservation],
+    name_of: Callable[[str], str],
+) -> None:
+    """Attach rules and their measurements without inventing table-level key columns."""
+    for rule_row in rule_rows:
+        rule = RuleAsset(
+            rule_row,
+            name_of(rule_row.target_table),
+            tuple(r for r in observations if r.business_rule_id == rule_row.business_rule_id),
+        )
+        catalog.rules[rule_row.business_rule_id] = rule
+        if rule.task in catalog.tasks:
+            catalog.tasks[rule.task].rules.append(rule_row.business_rule_id)
+        _table(catalog, rule.table).rules.append(rule_row.business_rule_id)
+        if rule_row.key_column:
+            _table(catalog, rule.table).add_column(rule_row.key_column.lower())

@@ -6,6 +6,7 @@ from collections.abc import Container
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from etl_craft.core.business_rules import rule_shape_problem
 from etl_craft.core.enums import RunCondition
 from etl_craft.core.errors import MetadataFileError
 from etl_craft.core.text import is_metadata_code, is_safe_identifier
@@ -40,6 +41,14 @@ def row_problem(
         return (
             "TARGET_OBJECT is derived; set TARGET_CATALOG_NAME, TARGET_SCHEMA_NAME and"
             " TARGET_TABLE_NAME in tasks.csv"
+        )
+    if table is BUSINESS_RULES and provided is None:
+        return rule_shape_problem(
+            str(values["BUSINESS_RULE_LEVEL"]),
+            None
+            if values["BUSINESS_RULE_KEY_COLUMN"] is None
+            else str(values["BUSINESS_RULE_KEY_COLUMN"]),
+            str(values["BUSINESS_RULE_TYPE"]),
         )
     if table is TASKS:
         schema, target = values["TARGET_SCHEMA_NAME"], values["TARGET_TABLE_NAME"]

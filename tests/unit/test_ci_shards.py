@@ -514,7 +514,7 @@ def test_platform_jobs_run_units_and_sqlite_transitions_without_complete_engine_
     ci.run("coverage-3.13-macos-latest", 0, 1, tmp_path)
     assert "tests/unit" not in commands[0]
     assert commands[0][commands[0].index("-m", 3) + 1] == "unit or engine_sqlite"
-    assert ci.selection("engine") == "engine_postgres and not warehouse_postgres"
+    assert "engine_postgres" in ci.selection("engine")
 
 
 def test_every_collected_marker_has_a_complete_pr_or_existing_cloud_owner():
@@ -650,3 +650,26 @@ def test_timing_refuses_missing_or_ambiguous_jobs():
         timing.measure({}, [job], {"jobs": {"one": {"name": "same"}, "two": {"name": "same"}}})
     with pytest.raises(ValueError, match="missing"):
         timing.measure({}, [job], {"jobs": {"one": {"name": "same"}, "two": {"name": "other"}}})
+
+
+@pytest.mark.parametrize("engine", ["engine_sqlite", "engine_postgres"])
+@pytest.mark.parametrize(
+    "warehouse",
+    [
+        "warehouse_duckdb",
+        "warehouse_postgres",
+        "warehouse_duckdb_iceberg",
+        "warehouse_trino_iceberg",
+    ],
+)
+def test_combined_engine_warehouse_cases_have_exactly_their_service_owner(engine, warehouse):
+    from _pytest.mark.expression import Expression
+
+    markers = {engine, warehouse}
+    profiles = [ci.PRIMARY, *ci.SERVICE_MARKERS]
+    actual = [
+        profile
+        for profile in profiles
+        if Expression.compile(ci.selection(profile)).evaluate(lambda name, **_: name in markers)
+    ]
+    assert actual == [ci.assigned_profile("case", list(markers))]

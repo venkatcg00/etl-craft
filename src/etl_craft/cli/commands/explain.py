@@ -13,6 +13,7 @@ from etl_craft.cli.commands.common import (
 )
 from etl_craft.cli.output import Output
 from etl_craft.core.enums import ActionName
+from etl_craft.services.operations.models import TaskRunView
 from etl_craft.services.operations.requests import TaskSelection
 from etl_craft.services.operations.status import Explanation
 
@@ -53,12 +54,7 @@ def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
             f"metadata_version={done.run.metadata_version} bundle_id={done.run.bundle_id} "
             f"newer_metadata_available={done.run.newer_metadata_available}"
         )
-        if done.task is not None and done.task.watermark_from is not None:
-            out.line(f"watermark={done.task.watermark_from} -> {done.task.watermark_to}")
-        if done.task is not None:
-            for attempt in done.task.attempts:
-                if attempt.retry_reason is not None:
-                    out.line(f"attempt {attempt.attempt_number}: {attempt.retry_reason}")
+        _task_details(out, done.task)
         if done.pipeline.paused is not None:
             out.line(done.pipeline.paused.describe())
         out.line(f"run_condition={done.run_condition} required_count={done.required_count}")
@@ -83,6 +79,18 @@ def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
 
     out.result(done, args.output_format, text=render)
     return 0
+
+
+def _task_details(out: Output, task: TaskRunView | None) -> None:
+    """Render measured task evidence alongside its attempt retry explanations."""
+    if task is not None and task.watermark_from is not None:
+        out.line(f"watermark={task.watermark_from} -> {task.watermark_to}")
+    if task is not None:
+        for attempt in task.attempts:
+            if attempt.retry_reason is not None:
+                out.line(f"attempt {attempt.attempt_number}: {attempt.retry_reason}")
+    for rule in () if task is None else task.rules:
+        out.line(rule.describe())
 
 
 COMMAND = Command(

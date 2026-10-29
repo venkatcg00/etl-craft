@@ -1,4 +1,4 @@
-"""Run complete business-rule queries, publishing one serialized flag snapshot per rule.
+"""Run complete row and table checks, publishing serialized evidence per rule.
 
 Normal checks flag and clear current-run active rows only. Forced checks also clear flags
 for corrected rows outside the run and rows deleted from the warehouse.
@@ -21,7 +21,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
 
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import RunStatus
+from etl_craft.core.business_rules import (
+    RULE_TEXT_LIMIT,
+    TableRuleResult,
+    rule_shape_problem,
+    table_columns_problem,
+    table_result,
+)
+from etl_craft.core.enums import BusinessRuleLevel, RunStatus
 from etl_craft.core.errors import ConfigurationError, HandlerError, SqlGuardError
 from etl_craft.core.text import (
     as_subquery,
@@ -40,6 +47,7 @@ from etl_craft.dialects.business_rules import (
     scope_cte,
     table_identifier,
 )
+from etl_craft.dialects.query_analysis import output_columns
 from etl_craft.engine import locks
 from etl_craft.engine.repository.business_rules import BusinessRule
 from etl_craft.engine.task_store import RuleEnding, TaskStore
@@ -59,6 +67,7 @@ class RuleOutcome:
     flagged: int = 0
     cleared: int = 0
     skipped: bool = False
+    result: TableRuleResult | None = None
 
 
 @dataclass(frozen=True)
@@ -74,7 +83,7 @@ class _RuleFailedError(Exception):
 
 
 def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
-    """Run every active business rule of the task, wave by wave; return flagged and cleared."""
+    """Run active rules wave by wave and return row counts and table observations."""
     config = context.config
     if config.warehouse is None:
         raise ConfigurationError("a BUSINESS_RULES task needs a Warehouse section")
@@ -116,6 +125,13 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                         "cleared": outcome.cleared,
                         "dropped": outcome.dropped,
                     }
+            for outcome in outcomes:
+                if outcome.result is not None:
+                    values[f"BUSINESS_RULE_{outcome.rule_id}"] = {
+                        "passed": outcome.result.passed,
+                        "observed": outcome.result.observed,
+                        "detail": outcome.result.detail,
+                    }
             flagged += sum(outcome.flagged for outcome in outcomes)
             cleared += sum(outcome.cleared for outcome in outcomes)
     logger.info("business rules done: %d key(s) flagged, %d cleared", flagged, cleared)
@@ -133,7 +149,13 @@ def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> 
             f"{name}: target contract {rule.target_table!r} has ACTIVE_FLAG=N; "
             "reactivate its CFG_TABLES row or deactivate this rule"
         )
-    if not is_safe_identifier(rule.business_rule_key_column):
+    if problem := rule_shape_problem(
+        rule.business_rule_level, rule.business_rule_key_column, rule.business_rule_type
+    ):
+        raise SqlGuardError(f"{name}: {problem}")
+    if rule.business_rule_level == BusinessRuleLevel.ROW and not is_safe_identifier(
+        rule.business_rule_key_column or ""
+    ):
         raise SqlGuardError(
             f"{name}: BUSINESS_RULE_KEY_COLUMN={rule.business_rule_key_column!r} is not a plain "
             "column name"
@@ -142,7 +164,13 @@ def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> 
         split_object_ref(rule.target_table, param_name="TARGET_TABLE")
     except HandlerError as error:
         raise SqlGuardError(f"{name}: {error}") from error
-    problem = rule_problem(rule.business_rule_sql, rule.business_rule_key_column, dialect)
+    problem = rule_problem(
+        rule.business_rule_sql,
+        None
+        if rule.business_rule_level == BusinessRuleLevel.TABLE
+        else rule.business_rule_key_column,
+        dialect,
+    )
     if problem is not None:
         raise SqlGuardError(f"{name}: BUSINESS_RULE_SQL {problem}")
     table = qualify(rule.target_table, catalog)
@@ -157,6 +185,29 @@ def check_rule(rule: BusinessRule, catalog: str, dialect: str | None = None) -> 
 def check_output(checked: _Rule, context: TaskContext, warehouse: Engine) -> str:
     """Resolve wildcard or unparsed projections through the warehouse without returning rows."""
     rule = checked.rule
+    if rule.business_rule_level == BusinessRuleLevel.TABLE:
+        columns = output_columns(
+            expand_scope(rule.business_rule_sql),
+            dialect=warehouse_dialect(context.config).sqlglot_dialect,
+        )
+        if columns is not None:
+            if problem := table_columns_problem(columns):
+                raise SqlGuardError(
+                    f"business rule {rule.business_rule_name!r} on task "
+                    f"{context.pipeline_code}.{context.task_code}: query {problem}"
+                )
+            return ""
+        try:
+            table_query(checked, context, warehouse, None)
+        except SQLAlchemyError as error:
+            raise SqlGuardError(
+                f"business rule {rule.business_rule_name!r} on task "
+                f"{context.pipeline_code}.{context.task_code}: could not verify TABLE output; "
+                "expected PASSED and optionally OBSERVED, DETAIL; correct BUSINESS_RULE_SQL "
+                f"or restore target {checked.table!r}/the warehouse; warehouse reported: {error}"
+            ) from error
+        return ""
+    assert rule.business_rule_key_column is not None
     prefix = rule_namespace(rule.business_rule_sql)
     rows = prefix + "scope"
     query = expand_scope(rule.business_rule_sql, rows)
@@ -258,6 +309,8 @@ class _RuleRunner:
                 rule.business_rule_name,
             )
             return RuleOutcome(skipped=True)
+        if rule.business_rule_level == BusinessRuleLevel.TABLE:
+            return self._table(checked, binding.business_rule_run_id)
         started = time.monotonic()
         step = "prepare"
         try:
@@ -314,6 +367,58 @@ class _RuleRunner:
         )
         return RuleOutcome(rule.business_rule_id, returned, dropped, len(new), len(passing))
 
+    def _table(self, checked: _Rule, run_id: int) -> RuleOutcome:
+        rule = checked.rule
+        label = (
+            f"business rule {rule.business_rule_name!r} on task "
+            f"{self.context.pipeline_code}.{self.context.task_code}"
+        )
+        try:
+            result = table_query(checked, self.context, self.warehouse, self._scope(checked))
+            assert result is not None
+            rejected = result.run_status(rule.business_rule_type) == RunStatus.FAILED
+            self.store.end_rule(
+                RuleEnding(
+                    rule.business_rule_id,
+                    run_id,
+                    RunStatus.FAILED if rejected else RunStatus.SUCCESS,
+                    passed=result.passed,
+                    observed=result.observed,
+                    detail=result.detail,
+                )
+            )
+        except Exception as error:
+            # The worker boundary records malformed outputs and warehouse failures before failing.
+            message = f"{label}: query failed: {error}; correct BUSINESS_RULE_SQL and retry"
+            logger.error("%s", message)
+            recorded = (
+                message
+                if len(message) <= RULE_TEXT_LIMIT
+                else (
+                    f"business rule {rule.business_rule_id} on task {self.context.task_id}: "
+                    f"query failure diagnostic length={len(message)} "
+                    f"exceeds DETAIL limit={RULE_TEXT_LIMIT}; "
+                    "see the full attempt log, correct BUSINESS_RULE_SQL and retry"
+                )
+            )
+            self.store.end_rule(
+                RuleEnding(rule.business_rule_id, run_id, RunStatus.FAILED, detail=recorded)
+            )
+            raise _RuleFailedError(message) from error
+        logger.info(
+            "%s: PASSED=%s OBSERVED=%s DETAIL=%s",
+            label,
+            result.passed,
+            result.observed,
+            result.detail,
+        )
+        if rejected:
+            raise _RuleFailedError(
+                f"{label}: returned PASSED=N OBSERVED={result.observed!r} "
+                f"DETAIL={result.detail!r}; correct the failing data and retry"
+            )
+        return RuleOutcome(rule_id=rule.business_rule_id, result=result)
+
     def _scope(self, checked: _Rule) -> str:
         """Return the rows the rule judges: the run's scope, and only active versions."""
         table = table_identifier(
@@ -329,6 +434,7 @@ class _RuleRunner:
         rule = checked.rule
         result_key = check_output(checked, self.context, self.warehouse)
         dialect = warehouse_dialect(self.context.config).sqlglot_dialect
+        assert rule.business_rule_key_column is not None
         key = key_identifier(rule.business_rule_key_column, dialect)
         prefix = rule_namespace(rule.business_rule_sql)
         rows = prefix + "scope"
@@ -391,3 +497,47 @@ class _RuleRunner:
         except SQLAlchemyError:
             logger.error("the failing statement was:\n%s", sql)
             raise
+
+
+def table_query(
+    checked: _Rule, context: TaskContext, warehouse: Engine, scope: str | None
+) -> TableRuleResult | None:
+    """Probe output columns or read at most two rows to enforce the table contract."""
+    rule = checked.rule
+    label = (
+        f"business rule {rule.business_rule_name!r} on task "
+        f"{context.pipeline_code}.{context.task_code}"
+    )
+    prefix = rule_namespace(rule.business_rule_sql)
+    rows = prefix + "scope"
+    dialect = warehouse_dialect(context.config).sqlglot_dialect
+    query = expand_scope(rule.business_rule_sql, rows)
+    sql = (
+        f"WITH {scope_cte(checked.table, scope or '1=0', rows, dialect)} "
+        f"SELECT * FROM {as_subquery(query)} {prefix}output "
+    )
+    sql += "WHERE 1=0" if scope is None else "LIMIT 2"
+    with (
+        warehouse.connect() as conn,
+        conn.execute(
+            text(sql),
+            {
+                "pipeline_id": context.pipeline_id,
+                "pipeline_run_id": context.pipeline_run_id,
+                "task_run_id": context.task_run_id,
+            },
+        ) as result,
+    ):
+        columns = list(result.keys())
+        if problem := table_columns_problem(columns):
+            raise SqlGuardError(f"{label}: query {problem}")
+        if scope is None:
+            return None
+        found = result.fetchmany(2)
+    if len(found) != 1:
+        raise HandlerError(
+            f"{label}: query returned {'at least ' if found else ''}{len(found)} rows; "
+            "expected exactly one; return one aggregate result in BUSINESS_RULE_SQL"
+        )
+    values = dict(zip((name.upper() for name in columns), found[0], strict=True))
+    return table_result(values["PASSED"], values.get("OBSERVED"), values.get("DETAIL"), label)

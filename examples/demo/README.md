@@ -14,7 +14,7 @@ aud: the Engine DB's own tables, cloned on its own schedule
 |---|---|
 | `CLIENT_ALPHA` | lands Client Alpha's interactions (a number offset), parses them, removes its test calls (`DELETE_ROWS`, hard) |
 | `CLIENT_BETA` | lands Client Beta's events (a timestamp offset) and parses them into the shared names |
-| `SUPPORT_DM` | once both clients have succeeded: agents (`SCD1_MERGE`, keeping an email the feed leaves out), their teams over time (`SCD2_MERGE`), retired agents (`DELETE_ROWS`, soft), the support fact (`SETUP_TABLE`, `OVERWRITE_TABLE`), three business rules in two waves, a summary, a scratch table dropped at the end, an alert when it ends and a watcher that alerts when a feed fails |
+| `SUPPORT_DM` | once both clients have succeeded: agents (`SCD1_MERGE`, keeping an email the feed leaves out), their teams over time (`SCD2_MERGE`), retired agents (`DELETE_ROWS`, soft), the support fact (`SETUP_TABLE`, `OVERWRITE_TABLE`), three row rules in two waves plus REJECT/REPORT table checks in a third wave, a summary, a scratch table dropped at the end, an alert when it ends and a watcher that alerts when a feed fails |
 | `SUPPORT_EXPORT` | a slow export that overruns its time limit and its SLA |
 | `SUPPORT_BACKFILL` | a long backfill, to stop and resume |
 
@@ -341,3 +341,8 @@ Every Python task declares `SCRIPT_KIND` in its parameters. Source loaders use `
 the export/backfill wait scripts use `UTILITY` and report neither offsets nor row counts.
 Their counts remain **Not measured**, not zero. Utility tasks default to `RETRY_ON=NONE`;
 set a retry policy explicitly only when repeating the external action is safe.
+
+The `quality` task also records `TABLE` results: `fact has rows` rejects an empty fact, and
+`missing teams` reports the NULL-team count against a five-percent threshold. Their
+`PASSED`, `OBSERVED` and `DETAIL` values appear in status/explain and catalog table pages;
+they create no per-row flags. Existing row rules retain their flag counts.

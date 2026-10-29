@@ -20,6 +20,7 @@ from etl_craft.core.errors import RunStateError, UsageError
 from etl_craft.core.failures import retry_reason
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.business_rules import fetch_rule_observations
 from etl_craft.engine.repository.pauses import fetch_open_pause
 from etl_craft.engine.repository.pipelines import fetch_pipeline_detail
 from etl_craft.engine.repository.triggers import fetch_trigger_links
@@ -73,6 +74,7 @@ def run_view(conn: Connection, pipeline_id: int, pipeline_run_id: int) -> RunVie
     parent = next((link for link in links if link.child_run_id == pipeline_run_id), None)
     return replace(
         run_document(row._mapping),
+        rules=fetch_rule_observations(conn, pipeline_id, pipeline_run_id),
         triggered_by_task_run_id=None if parent is None else parent.task_run_id,
         parent_run_id=None if parent is None else parent.parent_run_id,
         child_run_ids=tuple(
@@ -136,6 +138,7 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
 
     values = dict(row)
     has_items = values.pop("has_items", False)
+    has_table_rules = values.pop("has_table_rules", False)
     item_progress = None
     by_attempt = {}
     if has_items:
@@ -159,6 +162,15 @@ def task_document(conn: Connection, row: RowMapping) -> TaskRunView:
     return TaskRunView(
         **values,
         standing_pause=applied(conn, row.pipeline_run_id, row.task_id),
+        rules=(
+            tuple(
+                r
+                for r in fetch_rule_observations(conn, row.pipeline_id, row.pipeline_run_id)
+                if r.task_run_id == row.task_run_id
+            )
+            if has_table_rules
+            else ()
+        ),
         attempts=tuple(attempts),
         item_progress=item_progress,
         child_run_ids=tuple(

@@ -26,7 +26,14 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config.model import DEFAULT_MAX_PARALLEL_TASKS
-from etl_craft.core.enums import DependencyType, Handler, RefreshType, RunCondition, YesNo
+from etl_craft.core.enums import (
+    BusinessRuleLevel,
+    DependencyType,
+    Handler,
+    RefreshType,
+    RunCondition,
+    YesNo,
+)
 from etl_craft.core.errors import MetadataFileError
 from etl_craft.engine.queries import statement
 
@@ -303,7 +310,13 @@ BUSINESS_RULES = ConfigTable(
             required=True,
             choices=("INCOMPLETE", "REJECT", "REPORT"),
         ),
-        Column("BUSINESS_RULE_KEY_COLUMN", required=True),
+        Column(
+            "BUSINESS_RULE_LEVEL",
+            "choice",
+            default=BusinessRuleLevel.ROW,
+            choices=tuple(BusinessRuleLevel),
+        ),
+        Column("BUSINESS_RULE_KEY_COLUMN"),
         Column("CATALOG_NAME"),
         Column("SCHEMA_NAME", required=True),
         Column("TABLE_NAME", required=True),
@@ -315,6 +328,7 @@ BUSINESS_RULES = ConfigTable(
         "SEQUENCE_NUMBER",
         "BUSINESS_RULE_TYPE",
         "BUSINESS_RULE_KEY_COLUMN",
+        "BUSINESS_RULE_LEVEL",
         "BUSINESS_RULE_SQL",
     ),
     parents=(("task_id", "tasks.csv"), ("table_id", "tables.csv")),

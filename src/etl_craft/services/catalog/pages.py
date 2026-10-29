@@ -633,7 +633,24 @@ class Pages:
         )
         comparison = comparison_grid(self.catalog, table, self._task_link, self._table_link)
         history = lineage_history(table, self.catalog)
-        return f"{facts}{comparison}{self._graph(name)}{history}"
+        results = _table(
+            ["Rule", "Run", "PASSED", "OBSERVED", "DETAIL"],
+            [
+                [
+                    _e(r.business_rule_name),
+                    str(r.pipeline_run_id),
+                    _e(r.passed or ""),
+                    _e(r.observed or ""),
+                    _e(r.detail or ""),
+                ]
+                for rule_id in table.rules
+                for r in self.catalog.rules[rule_id].observations
+            ],
+            "No table results recorded.",
+        )
+        return (
+            f"{facts}<h2>Table rule results</h2>{results}{comparison}{self._graph(name)}{history}"
+        )
 
     def _graph(self, name: str) -> str:
         drawing = lineage_drawing(self.catalog, name)
@@ -688,8 +705,9 @@ class Pages:
         facts = _facts(
             [
                 ("Type", _e(row.rule_type)),
+                ("Level", _e(row.business_rule_level)),
                 ("Table", self._table_link(rule.table)),
-                ("Key column", f"<code>{_e(row.key_column)}</code>"),
+                ("Key column", f"<code>{_e(row.key_column or '')}</code>"),
                 ("Wave", _e(row.sequence_number)),
                 ("Task", self._task_link(rule.task)),
             ]
