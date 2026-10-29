@@ -168,6 +168,11 @@ def run_handler(
         context = replace(context, attempt_id=identity[0], owner=identity[1])
     logger.info("running the %s handler", context.handler)
     try:
+        if "WATERMARK_SOURCE_PIPELINES" in context.task_params:
+            from etl_craft.execution.reconcile import settle_sources
+            from etl_craft.handlers.sql.watermarks import source_pipelines
+
+            settle_sources(engine, context.config, source_pipelines(context.task_params))
         if context.handler == Handler.RUN_PIPELINE and trigger is not None:
             return trigger(engine, context)
         if identity is None:

@@ -8,6 +8,7 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.definitions import Definition, using
 from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import RunStateError
+from etl_craft.core.time import as_utc
 from etl_craft.engine import run_scopes
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.events import run_event_data
@@ -83,4 +84,5 @@ def build_task_context(
         event_keys=event_data.keys,
         event_rows=event_data.rows,
         writer=row.writer,
+        started_at=as_utc(row.started_at),
     )

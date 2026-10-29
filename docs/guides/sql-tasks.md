@@ -82,6 +82,8 @@ literal bodies from adjacent bare substitution tokens.
 
 ## SQL watermarks
 
+### Scalar lower bounds
+
 For a source table outside etl-craft, an incremental `APPEND_TABLE`, `SCD1_MERGE`,
 `SCD2_MERGE` or `DELETE_ROWS` task can track its own position. Set these three parameters:
 
@@ -90,6 +92,7 @@ For a source table outside etl-craft, an incremental `APPEND_TABLE`, `SCD1_MERGE
 | `WATERMARK_COLUMN` | A plain column name returned by the SELECT; its greatest value is the next position. |
 | `WATERMARK_TYPE` | `NUMBER`, `TEXT` or `TIMESTAMP`, matching that column's type. |
 | `WATERMARK_START` | The typed lower bound before the first successful run. An empty TEXT start is valid. |
+| `WATERMARK_SOURCE_PIPELINES` | Optional JSON array of unique existing project pipeline codes whose running write attempts fence a bounded TIMESTAMP window. Requires `$$watermark_max`. |
 
 ```sql
 SELECT event_id, changed_at, payload
@@ -127,6 +130,59 @@ would discard earlier rows.
 To reload an earlier range, use [mark --watermark](run-control.md#reset-a-sql-watermark).
 A merge reloads without inserting duplicate keys; an append reset can repeat rows from earlier
 successful task runs. See [the parameter and SQL example](../examples/sql-watermark.md).
+
+### Bounded timestamp windows
+
+Use `WATERMARK_TYPE=TIMESTAMP` and both tokens to freeze a half-open window before SQL:
+
+```sql
+SELECT customer_id, status, UPDATE_DATE AS ods_changed_at
+FROM ods.customers
+WHERE UPDATE_DATE >= $$watermark AND UPDATE_DATE < $$watermark_max
+```
+
+Set `WATERMARK_COLUMN=ods_changed_at`, a UTC `WATERMARK_START`, and, for example,
+`WATERMARK_SOURCE_PIPELINES=["CLIENT_ALPHA","CLIENT_BETA","STEWARD_BUSINESS"]`.
+Alias the source `UPDATE_DATE`: the target's `UPDATE_DATE` is reserved for the engine.
+Leave the projected watermark out of `MERGE_COMPARE_COLUMNS`; it is a source position,
+not a business change. Configuration apply, validate and refresh report malformed JSON,
+duplicate or unknown codes and incomplete bounded definitions as findings.
+
+The upper bound is the earliest of the reader's recorded attempt start and the recorded
+starts of running source attempts. With no source attempts, or no source list, it is the
+reader's start. A pipeline waiting on an event without a write attempt does not hold this
+bound. Committed source writes are eligible even while their pipeline run remains open.
+List every source pipeline that writes the tables, including correction pipelines.
+A lost, failed, timed-out or cancelled source attempt with unconfirmed process/query endings
+continues to hold its start fence. Its successful retry or confirmed physical endings settle
+that fence; an outcome label or an expired lease alone does not prove writes have stopped.
+
+Admission records both bounds in `AUD_TASK_RUN_LOG` before executing SQL. Every attempt of
+that task run reuses them, including an explicit rerun. Success advances to the admitted
+upper bound even when zero rows were read. Failure preserves the committed low and pending
+owner/high in `AUD_TASK_OFFSET_TRACKER`; a lost lease cannot release the window. Another
+task run cannot take that cursor. A row stamped exactly at the boundary belongs to the next
+window. Repairs of an older source run get a new attempt stamp and enter a later window;
+run IDs remain provenance. Backfills keep their frozen ranges without advancing the live cursor.
+
+Managed task writes stamp `UPDATE_DATE` with their attempt's recorded Engine DB start:
+**written by the attempt that started at**, rather than the warehouse commit time. Every row
+one attempt writes shares that stamp. The agent START response supplies the same timestamp;
+agent and warehouse clocks do not choose it. Agents must run the controller's package version.
+SQLite preserves all six fractional digits. Clock rollback behind a recorded offset write or
+pending high is refused, naming the timestamps; restore the Engine DB clock before resuming.
+
+**Upgrade:** existing rows retain their stamps. New managed writes follow the recorded-start
+rule. Every existing managed `UPDATE_DATE` and bounded source watermark column must preserve
+at least microseconds. A coarse column such as PostgreSQL `TIMESTAMPTZ(0)` now fails before
+writing; apply a project migration widening it to `TIMESTAMPTZ(6)` (or the warehouse's
+`TIMESTAMP(6)` equivalent). etl-craft never widens it automatically. Finer storage, such as
+Snowflake `TIMESTAMP_TZ(9)`, is accepted; Engine DB window bounds remain at microseconds.
+
+Cancel/abandon a pending owner only after its processes and warehouse queries are fenced and
+confirmed ended. Completion of that control clears the pending pair without advancing the
+committed low and retains the range evidence. An explicit reset then uses the same attributed
+mutation path as scalar and partition offsets. See [run control](run-control.md#reset-a-sql-watermark).
 
 ## The actions
 

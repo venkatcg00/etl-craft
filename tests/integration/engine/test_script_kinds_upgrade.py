@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.engine import migrations
-from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset, save_task_offset
+from etl_craft.engine.repository.offsets import StoredOffset, fetch_task_offset
 from fixtures.metadata import add_pipeline
-from fixtures.released_schema import SCHEMAS, install
+from fixtures.released_schema import SCHEMAS, install, seed_offset
 
 RELEASES = sorted(path.name for path in SCHEMAS.iterdir() if path.is_dir())
 
@@ -36,7 +36,7 @@ def test_script_kind_upgrade_preserves_every_python_offset(
                 ),
                 {"pipeline": pipeline, "code": kind},
             ).scalar_one()
-            save_task_offset(conn, task, StoredOffset(kind, value))
+            seed_offset(conn, task, StoredOffset(kind, value))
             positions[task] = StoredOffset(kind, value)
     original = migrations.migration_streams
 
@@ -60,7 +60,7 @@ def test_script_kind_upgrade_preserves_every_python_offset(
             {"pipeline": pipeline},
         ).scalar_one()
         positions[task] = StoredOffset("PARTITIONS", '{"0":17,"3":120}')
-        save_task_offset(conn, task, positions[task])
+        seed_offset(conn, task, positions[task])
     migrations.apply_pending_migrations(
         db.engine, project_default=tmp_path / "migrations", warehouse_dialect="duckdb"
     )

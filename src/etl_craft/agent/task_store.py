@@ -15,6 +15,7 @@ from etl_craft.engine.alerts import AlertState
 from etl_craft.engine.repository.business_rules import RuleRunBinding
 from etl_craft.engine.resource_locks import confirm_stale, holder_tag
 from etl_craft.engine.task_store import RuleEnding, TargetPublication, TargetState, TaskState
+from etl_craft.engine.timestamp_windows import TimestampWindow, WindowDefinition
 from etl_craft.services.operations.agent_models import AgentTask
 from etl_craft.services.operations.serialization import from_json
 
@@ -70,6 +71,13 @@ class RemoteTaskStore:
         """Report a staged range; only the successful ending advances the checkpoint."""
         self.call(
             replace(self.request(AgentReport.WATERMARK), watermark_from=start, watermark_to=end)
+        )
+
+    def window(self, definition: WindowDefinition) -> TimestampWindow:
+        """Admit the window at the API tier under the source-start fence."""
+        return from_json(
+            TimestampWindow,
+            self.call(replace(self.request(AgentReport.WATERMARK), window=definition)),
         )
 
     def items(self) -> ItemState:

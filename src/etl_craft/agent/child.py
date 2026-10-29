@@ -21,6 +21,7 @@ from etl_craft.core.counts import Counts
 from etl_craft.core.enums import AgentReport, AttemptStatus, Handler
 from etl_craft.core.errors import ConfigurationError, EtlCraftError, ExitCode
 from etl_craft.core.text import mask_arguments
+from etl_craft.core.time import as_utc
 from etl_craft.engine.resource_locks import holder_tag
 from etl_craft.execution.child import exit_now
 from etl_craft.execution.classify import classify_failure
@@ -85,6 +86,7 @@ def main() -> int:
     if isinstance(started, dict) and started.get("trigger"):
         (folder / "result").write_text(json.dumps({"trigger": True}), encoding="utf-8")
         return ExitCode.SUCCESS
+    context = started_context(context, started)
     result = AgentTask(
         version=__version__,
         attempt_id=args.attempt_id,
@@ -135,6 +137,16 @@ def failed(kind: type[BaseException], error: BaseException, trace: TracebackType
     """Log a masked process-boundary failure and exit without waiting for script threads."""
     logger.error("agent task failed", exc_info=(kind, error, trace))
     exit_now(error.exit_code if isinstance(error, EtlCraftError) else ExitCode.UNEXPECTED)
+
+
+def started_context(context: TaskContext, started: object) -> TaskContext:
+    """Require the Engine DB start in the agent protocol before invoking a handler."""
+    if not isinstance(started, dict) or not isinstance(started.get("started_at"), str):
+        raise ConfigurationError(
+            "agent START response lacks an Engine DB started_at; upgrade the controller "
+            f"and agent to etl-craft {__version__} together"
+        )
+    return replace(context, started_at=as_utc(started["started_at"]))
 
 
 if __name__ == "__main__":

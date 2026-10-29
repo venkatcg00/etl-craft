@@ -242,6 +242,7 @@ def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[
         AgentReport.BUNDLE: lambda: bundle_report(ctx, task, request),
         AgentReport.STATE: lambda: store.state(task.task_params.get("SQL_ACTION")),
         AgentReport.ALERT: lambda: store.alert(task.task_params.get("EMAIL_PIPELINES")),
+        AgentReport.WATERMARK: lambda: _watermark(store, task, request),
         AgentReport.ITEMS: store.items,
         AgentReport.ITEM_PREPARE: lambda: store.prepare_items(request.item_keys),
         AgentReport.ITEM_EVENT: lambda: store.item_event(required(request.item, "item")),
@@ -261,11 +262,6 @@ def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[
             publication = required(request.publication, "publication")
             _target(ctx, task, publication.target)
             store.publish(publication)
-        case AgentReport.WATERMARK:
-            store.watermark(
-                required(request.watermark_from, "watermark_from"),
-                required(request.watermark_to, "watermark_to"),
-            )
         case AgentReport.RULE_BEGIN:
             return AgentReply(store.begin_rule(required(request.rule_id, "rule_id")))
         case AgentReport.RULE_KEYS:
@@ -295,7 +291,11 @@ def _start(ctx: OperationContext, task: TaskContext, request: AgentTask) -> Agen
 
         execute_trigger(ctx.engine, task)
         return AgentReply({"trigger": True})
-    return AgentReply({"trigger": False})
+    from etl_craft.engine.timestamp_windows import recorded_start
+
+    with ctx.engine.connect() as conn:
+        started_at = recorded_start(conn, task.task_run_id, request.attempt_id)
+    return AgentReply({"trigger": False, "started_at": started_at})
 
 
 def _end(ctx: OperationContext, request: AgentTask) -> AgentReply:
@@ -401,3 +401,38 @@ def _cancel(ctx: OperationContext, request: AgentTask) -> AgentReply:
 
     advance(ctx.engine, row.pipeline_run_id, observed=True, reason=request.error_message)
     return AgentReply()
+
+
+def _watermark(store: LocalTaskStore, task: TaskContext, request: AgentTask) -> object:
+    """Admit a window or record a range under the same exact attempt credential."""
+    if request.window is not None:
+        from etl_craft.engine.repository.offsets import StoredOffset
+        from etl_craft.engine.timestamp_windows import WindowDefinition
+        from etl_craft.handlers.sql.spec import read_sql_task
+        from etl_craft.handlers.sql.watermarks import source_pipelines
+
+        spec = read_sql_task(task)
+        if spec.watermark is None or not spec.bounded:
+            raise UsageError(
+                "agent window: expected the admitted bounded SQL task; report its range"
+            )
+        initial = spec.watermark.start
+        definition = WindowDefinition(
+            StoredOffset(initial.datatype, initial.stored()),
+            source_pipelines(task.task_params),
+            task.backfill,
+        )
+        if request.window != definition:
+            raise UsageError(
+                "agent window differs from the pinned reader definition; expected its configured "
+                "start, sources and backfill mode; report the admitted task's window"
+            )
+        from etl_craft.execution.reconcile import settle_sources
+
+        settle_sources(store.engine, store.config, definition.source_codes)
+        return store.window(definition)
+    store.watermark(
+        required(request.watermark_from, "watermark_from"),
+        required(request.watermark_to, "watermark_to"),
+    )
+    return None

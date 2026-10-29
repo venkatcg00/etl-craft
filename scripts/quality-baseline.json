@@ -49,7 +49,7 @@
       "src/etl_craft/core/text.py": 2,
       "src/etl_craft/engine/repository/source_contracts.py": 2,
       "src/etl_craft/execution/scheduler.py": 7,
-      "src/etl_craft/handlers/sql/spec.py": 2
+      "src/etl_craft/handlers/sql/spec.py": 1
     },
     "broad-except": {
       "src/etl_craft/api/serve.py": 1,
@@ -81,13 +81,12 @@
       "src/etl_craft/execution/scheduler.py": 5
     },
     "function-lines": {
-      "src/etl_craft/core/text.py": 17,
+      "src/etl_craft/core/text.py": 3,
       "src/etl_craft/engine/repository/source_contracts.py": 7,
       "src/etl_craft/execution/gates.py": 11,
-      "src/etl_craft/execution/interventions.py": 11,
+      "src/etl_craft/execution/interventions.py": 7,
       "src/etl_craft/execution/pipeline.py": 13,
       "src/etl_craft/execution/scheduler.py": 37,
-      "src/etl_craft/handlers/sql/spec.py": 1,
       "src/etl_craft/services/catalog/collect.py": 26,
       "src/etl_craft/services/lineage.py": 35,
       "src/etl_craft/services/operations/status.py": 8
@@ -103,7 +102,7 @@
       "src/etl_craft/services/cloning.py": 2
     },
     "module-lines": {
-      "src/etl_craft/engine/transitions.py": 24
+      "src/etl_craft/engine/transitions.py": 3
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

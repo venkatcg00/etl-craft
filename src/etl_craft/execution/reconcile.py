@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 import psutil
 from sqlalchemy.engine import Engine
 
+from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.errors import RunStateError, StaleTransitionError
 from etl_craft.core.time import as_utc
@@ -126,3 +127,17 @@ def reconcile(
             ):
                 report.released.append(row.pipeline_run_id)
     return report
+
+
+@acting_as(SYSTEM_ACTOR)
+def settle_sources(engine: Engine, config: ConnectorConfig, source_codes: tuple[str, ...]) -> None:
+    """Reconcile expired source attempts before a reader calculates its timestamp fence."""
+    from etl_craft.engine.timestamp_windows import source_pipeline_ids
+    from etl_craft.execution.control_flow import reconcile_endings
+
+    with engine.connect() as conn:
+        sources = source_pipeline_ids(conn, source_codes)
+    for pipeline_id in sources:
+        lost = reconcile(engine, pipeline_id=pipeline_id).lost
+        if lost:
+            reconcile_endings(engine, config, tuple(lost), pipeline_id=pipeline_id)

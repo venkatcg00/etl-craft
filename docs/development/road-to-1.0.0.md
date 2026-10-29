@@ -166,7 +166,7 @@ item's text, or work done early under another item.
 | S7.K Organization-hosted catalog | Done | #166 | Organization URLs and prefixes, explicit proxy trust, coordinated regeneration and service examples |
 | S7.A.0 Wireframes | Done | #253 | Approved by merging; the capability matrix in the design records coverage the wireframes do not show. |
 | S7.Y Command-managed pipeline access | Done | #261, #263, #264 | Project isolation complete; owner moved catalog sign-in to S7.A.7. |
-| S7.X Bounded timestamp windows | Planned | | Extend S5.L using the existing offset tracker; prerequisite for S8 SI_DM. |
+| S7.X Bounded timestamp windows | Done | #272 | Engine-clock attempt stamps, frozen timestamp windows and one fenced offset/reset store |
 | S7.Z Environments, governance and admin-managed projects | Done | #266 | Admin environment/governance fields, shared intervention policy, PostgreSQL direct-edit history and complete guard checks; product-audit skill. |
 | S7.AA Pipeline refresh | Done | #267 | Refresh records findings; runs use the last passing version unless blocked; parallel CI and local affected-test selection |
 | S7.AB Standing task controls | Done | #268 | Versioned task pauses, admitted outcomes and explicit scheduled resume choices |
@@ -389,6 +389,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.X exercises bounded windows, pending ownership, rollback, resets, abandonment, retention,
+standing SUCCESS/FAILED/SKIPPED and real-row upgrades on SQLite and PostgreSQL. Source/window
+races, including late commits and old-run repairs, passed twenty local rounds across both
+Engine DBs and all four local warehouses. Databricks passed its selected native/Iceberg
+checks; Snowflake passed after correcting the test fixtures to declare microsecond source
+columns. No cloud was unavailable. Complete platform coverage and wheel demos remain CI gates.
 
 S7.AC covers TABLE REJECT/REPORT checks, malformed output, scoped/whole-table queries,
 sequence waves, retry/force, result reads and catalog rendering on both Engine DBs and all
@@ -897,6 +904,29 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.X owner decision, 2026-10-29: every managed UPDATE_DATE and bounded source watermark
+  column must preserve at least microseconds; never round an attempt stamp to fit storage.
+  Refuse coarse columns from the action's existing metadata, naming table, column, found and
+  required precision, and the project-migration remedy; etl-craft never widens them itself.
+  Known definitions produce validate/refresh findings. New audit columns retain microseconds
+  on each local warehouse; finer Snowflake columns are accepted. SQLite exposes its shared
+  host clock through a SQL function with six fractional digits, using its existing normalized
+  UTC storage/comparison format. This is a breaking upgrade note; old rows retain their stamps.
+  Attempt start acknowledgment had moved to engine/attempt_starts.py; the guarded transition
+  remains the single start writer. START returns that recorded instant and the existing
+  same-package agent check remains in force before 0.9.0's rolling-compatibility guarantee.
+  S7.AA's config/validate/refresh path checks source JSON/codes and bounded definitions while
+  execution retains the pinned image. S7.AD's INGESTION reset refusal stays in the shared
+  reset mutation path. S7.AB standing outcomes never reach window admission or touch offsets.
+  Existing scalar watermark and PARTITIONS commit boundaries are retained; only bounded
+  TIMESTAMP ranges freeze a pending owner/high. Uncertain source endings remain fences until
+  process/query endings or a successful retry settle them. Pending history protection includes
+  attempts, ranges, logs, interventions and run-linked action records. Source and admission
+  share a transaction fence; all reset kinds use it too. S7.AJ's CI layout is unchanged;
+  repeated races remain local. Existing per-action warehouse/Engine DB round-trip budgets
+  remain unchanged; one real attempt adds three Engine DB clock/fence statements. Indexed
+  clock maxima and pending-owner probes retain bounded query plans as history grows.
 
 - S7.AC reuses the existing per-rule/task-run binding, sequence waves, renewable rule lock,
   retry skip and force path. The previous run log had no bounded measurement text columns;

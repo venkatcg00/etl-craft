@@ -22,6 +22,7 @@ SELECT origin.catalog_name AS catalog_name, origin.schema_name AS schema_name,
        origin.table_name AS table_name, h.HASH_VERSION AS hash_version,
        v.STATEMENT_SHA256 AS statement_sha256,
        off.OFFSET_TYPE AS offset_type, off.OFFSET_VALUE AS offset_value,
+       off.PENDING_TASK_RUN_ID AS pending_task_run_id, off.PENDING_UPPER_BOUND AS pending_upper_bound,
        peer.task_id AS task_id, peer.task_code AS task_code, peer.sql_action AS sql_action,
        r.STATUS AS status,
        (SELECT upper(trim(w.sql_action)) FROM writers w WHERE w.pipeline_active='Y'

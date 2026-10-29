@@ -46,14 +46,16 @@ from sqlglot import exp
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.config.project import sql_script
-from etl_craft.core.enums import SqlAction
+from etl_craft.core.enums import OffsetType, SqlAction
 from etl_craft.core.errors import MetadataError, SqlGuardError
 from etl_craft.core.text import (
     LINEAGE_RUN_DATE,
+    TOKEN,
     is_safe_identifier,
     is_safe_object_ref,
     is_safe_order_term,
     split_statements,
+    sql_parts,
     substitute_task_tokens,
     suggest,
 )
@@ -61,7 +63,7 @@ from etl_craft.dialects.query_analysis import read_only_problem
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.handlers.registry import TaskContext
-from etl_craft.handlers.sql.watermarks import Watermark, read_watermark
+from etl_craft.handlers.sql.watermarks import Watermark, read_watermark, source_pipelines
 from etl_craft.warehouse.connection import warehouse_dialect
 
 MERGES = frozenset({SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE})
@@ -108,6 +110,7 @@ PARAMETERS = frozenset(
         "WATERMARK_COLUMN",
         "WATERMARK_TYPE",
         "WATERMARK_START",
+        "WATERMARK_SOURCE_PIPELINES",
         *FLAGS,
         *STORAGE_PARAMETERS,
     }
@@ -154,6 +157,7 @@ class SqlTask:
     reject_limit: RejectLimit | None = None
     skip_rejects_over_limit: bool = False
     watermark: Watermark | None = None
+    bounded: bool = False
 
 
 def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> SqlTask:
@@ -181,8 +185,8 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
 
     select_sql, source = None, "none"
     if action == SqlAction.DROP_TABLE:
-        given = [name for name in ("SELECT_QUERY", "SCRIPT_FILE") if params.get(name)]
-        if given:
+        names = ("SELECT_QUERY", "SCRIPT_FILE", "WATERMARK_SOURCE_PIPELINES")
+        if given := [name for name in names if params.get(name)]:
             raise SqlGuardError(f"SQL_ACTION=DROP_TABLE takes no SELECT, but {given[0]} is set")
     else:
         select_sql, source = resolve_select(
@@ -197,9 +201,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
             event_values={"event_files": context.event_files, "event_keys": context.event_keys},
         )
 
-    merge_key: tuple[str, ...] = ()
-    if action in KEYED:
-        merge_key = _columns(params, "MERGE_KEY", action, context)
+    merge_key = _columns(params, "MERGE_KEY", action, context) if action in KEYED else ()
     compare: tuple[str, ...] = ()
     dedupe_order = None
     if action in MERGES:
@@ -236,6 +238,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
         reject_limit=reject_limit,
         skip_rejects_over_limit=flags["SKIP_REJECTS_OVER_LIMIT"],
         watermark=watermark,
+        bounded=action != SqlAction.DROP_TABLE and bounded_definition(context.config, params),
     )
 
 
@@ -292,30 +295,10 @@ def resolve_select(
     Also returns where it came from, for messages. ``SqlGuardError`` or ``MetadataError`` when
     the task has no usable single read-only SELECT.
     """
-    inline = params.get("SELECT_QUERY")
-    file_name = params.get("SCRIPT_FILE")
-    if inline and file_name:
-        raise SqlGuardError(
-            "set SELECT_QUERY or SCRIPT_FILE, not both: the task would have two SELECTs"
-        )
-    if file_name:
-        path = sql_script(config, file_name)
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as error:
-            raise MetadataError(
-                f"SCRIPT_FILE={file_name!r}: cannot read {path}: {error}"
-            ) from error
-        source = f"SCRIPT_FILE={file_name!r}"
-    elif inline:
-        raw, source = inline, "SELECT_QUERY"
-    else:
-        raise SqlGuardError(
-            f"SQL_ACTION={params.get('SQL_ACTION')} needs a SELECT: set SELECT_QUERY, or "
-            "SCRIPT_FILE naming a project path such as sql_scripts/orders.sql"
-        )
+    raw, source = read_select(config, params)
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
     watermark = read_watermark(params, stored)
+    bounded = bounded_definition(config, params)
     substituted = substitute_task_tokens(
         raw,
         pipeline_run_id=pipeline_run_id,
@@ -329,7 +312,7 @@ def resolve_select(
         source=source,
         run_date=run_date,
         run_date_substitution=parse_flag(params, "RUN_DATE_SUBSTITUTION"),
-        watermark_literal=watermark.literal(config) if watermark is not None else None,
+        watermark_literals=watermark.literals(config, bounded) if watermark is not None else None,
         event_literals={
             name: event_literals(config, (event_values or {}).get(name, ()))
             for name in ("event_files", "event_keys")
@@ -432,3 +415,60 @@ def event_literals(config: ConnectorConfig, values: tuple[str, ...]) -> str:
     return ", ".join(
         exp.Literal.string(value).sql(dialect=dialect).replace(":", "\\:") for value in values
     )
+
+
+def read_select(config: ConnectorConfig, params: Mapping[str, str]) -> tuple[str, str]:
+    """Read the one configured SELECT without substituting its tokens."""
+    inline = params.get("SELECT_QUERY")
+    file_name = params.get("SCRIPT_FILE")
+    if inline and file_name:
+        raise SqlGuardError(
+            "set SELECT_QUERY or SCRIPT_FILE, not both: the task would have two SELECTs"
+        )
+    if file_name:
+        path = sql_script(config, file_name)
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise MetadataError(
+                f"SCRIPT_FILE={file_name!r}: cannot read {path}: {error}"
+            ) from error
+        source = f"SCRIPT_FILE={file_name!r}"
+    elif inline:
+        raw, source = inline, "SELECT_QUERY"
+    else:
+        raise SqlGuardError(
+            f"SQL_ACTION={params.get('SQL_ACTION')} needs a SELECT: set SELECT_QUERY, or "
+            "SCRIPT_FILE naming a project path such as sql_scripts/orders.sql"
+        )
+    return raw, source
+
+
+def bounded_definition(config: ConnectorConfig, params: Mapping[str, str]) -> bool:
+    """Require an explicit max token before enabling a bounded timestamp reader."""
+    raw, _ = read_select(config, params)
+    bounded = any(
+        match[1] == "watermark_max"
+        for part, protected in sql_parts(raw, placeholders=True)
+        if not protected
+        for match in TOKEN.finditer(part)
+    )
+    if bounded and params.get("WATERMARK_TYPE", "").strip().upper() != OffsetType.TIMESTAMP:
+        raise SqlGuardError(
+            f"WATERMARK_TYPE={params.get('WATERMARK_TYPE')!r} with $$watermark_max; "
+            "bounded windows require TIMESTAMP and both $$watermark and $$watermark_max"
+        )
+    compared = {name.strip().lower() for name in params.get("MERGE_COMPARE_COLUMNS", "").split("|")}
+    if bounded and params.get("WATERMARK_COLUMN", "").strip().lower() in compared:
+        raise SqlGuardError(
+            f"WATERMARK_COLUMN={params.get('WATERMARK_COLUMN')!r} is in MERGE_COMPARE_COLUMNS; "
+            "a bounded source position is not a business change; remove it from compare columns"
+        )
+    if "WATERMARK_SOURCE_PIPELINES" in params:
+        source_pipelines(params)
+        if not bounded:
+            raise SqlGuardError(
+                "WATERMARK_SOURCE_PIPELINES requires a bounded TIMESTAMP definition; "
+                "use both $$watermark and $$watermark_max"
+            )
+    return bounded

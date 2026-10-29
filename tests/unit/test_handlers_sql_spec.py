@@ -415,3 +415,53 @@ def test_repeated_merge_columns_name_the_task_parameter_column_and_remedy(
     assert repr(value.split("|")[-1].strip()) in message
     assert "keep each column once" in message
     assert "order" in message
+
+
+@pytest.mark.parametrize("kind", ["NUMBER", "TEXT"])
+def test_bounded_mode_requires_timestamp_even_when_both_tokens_are_present(project, kind):
+    with pytest.raises(HandlerError, match="bounded windows require TIMESTAMP"):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT="s.t",
+                SELECT_QUERY="SELECT 1 AS changed WHERE 1 >= $$watermark AND 1 < $$watermark_max",
+                WATERMARK_COLUMN="changed",
+                WATERMARK_TYPE=kind,
+                WATERMARK_START="0",
+            )
+        )
+
+
+def test_source_fences_cannot_silently_enable_a_scalar_definition(project):
+    with pytest.raises(HandlerError, match="requires a bounded TIMESTAMP definition"):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="APPEND_TABLE",
+                TARGET_OBJECT="s.t",
+                SELECT_QUERY="SELECT changed FROM s.t WHERE changed > $$watermark",
+                WATERMARK_COLUMN="changed",
+                WATERMARK_TYPE="TIMESTAMP",
+                WATERMARK_START="2000-01-01T00:00:00+00:00",
+                WATERMARK_SOURCE_PIPELINES='["P"]',
+            )
+        )
+
+
+def test_a_bounded_source_position_is_not_a_business_compare_column(project):
+    with pytest.raises(HandlerError, match="remove it from compare columns"):
+        read_sql_task(
+            context(
+                project,
+                SQL_ACTION="SCD1_MERGE",
+                TARGET_OBJECT="s.t",
+                SELECT_QUERY="SELECT id, changed FROM raw.t "
+                "WHERE changed >= $$watermark AND changed < $$watermark_max",
+                MERGE_KEY="id",
+                MERGE_COMPARE_COLUMNS="changed",
+                WATERMARK_COLUMN="changed",
+                WATERMARK_TYPE="TIMESTAMP",
+                WATERMARK_START="2000-01-01T00:00:00+00:00",
+            )
+        )

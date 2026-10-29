@@ -590,6 +590,32 @@ class WarehouseDialect:
         """Whether a stored column has the signed BIGINT type used for task-run ids."""
         return self.same_column_type(data_type, "BIGINT")
 
+    timestamp_default_precision = 6
+
+    def timestamp_precision(self, data_type: str) -> int | None:
+        """Read fractional-second capacity from an already loaded column definition."""
+        kind = data_type.upper().strip()
+        if not kind.startswith(("TIMESTAMP", "TIMESTAMPTZ")):
+            return None
+        match = re.search(r"\((\d+)\)", kind)
+        if match:
+            return int(match[1])
+        return {"TIMESTAMP_S": 0, "TIMESTAMP_MS": 3, "TIMESTAMP_NS": 9}.get(
+            kind, self.timestamp_default_precision
+        )
+
+    def timestamp_precision_problem(self, table: str, column: str, kind: str) -> str | None:
+        """Refuse storage that cannot preserve the Engine DB's microsecond write stamp."""
+        precision = self.timestamp_precision(kind)
+        if precision is not None and precision >= 6:
+            return None
+        return (
+            f"{table}.{column}: type {kind} has timestamp precision {precision!r}; "
+            "expected at least 6 fractional digits (microseconds). Apply a project migration "
+            "to widen the column to TIMESTAMP(6) or the dialect's equivalent before running; "
+            "etl-craft does not alter existing timestamp columns"
+        )
+
     def audit_column_type(self, column: str) -> str:
         """Return the DDL type of an engine-managed audit column."""
         return AUDIT_COLUMN_TYPES[column]

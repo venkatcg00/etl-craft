@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from sqlalchemy.engine import Connection, Engine
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.config.targets import active_catalog
 from etl_craft.core.actor import Actor, current_actor
 from etl_craft.core.enums import (
     FINISHED_RUN_STATUSES,
@@ -44,7 +43,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import HandlerError, RunRefusedError, RunStateError, UsageError
 from etl_craft.core.governance import check_reason
 from etl_craft.core.script_kinds import script_kind
-from etl_craft.engine import controls, locks, runlog, transitions
+from etl_craft.engine import controls, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import intervention_rows as record
 from etl_craft.engine.repository import pauses
@@ -57,9 +56,7 @@ from etl_craft.engine.repository.tasks import (
 )
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.handlers.registry import TaskContext
-from etl_craft.handlers.resources import LocalLocker
 from etl_craft.handlers.sql.spec import read_sql_task
-from etl_craft.handlers.sql.watermarks import read_watermark
 from etl_craft.scripting import Offset
 
 logger = logging.getLogger(__name__)
@@ -520,6 +517,7 @@ class OffsetReset:
     task_code: str
     value: str
     reason: str
+    watermark: bool = False
 
 
 def reset_offset(
@@ -529,53 +527,34 @@ def reset_offset(
     *,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """Move a Python task's stored offset on purpose, recording before and after values.
-
-    For a ``PARTITIONS`` offset, ``change.value`` is a JSON object: each named partition is set
-    or added, and ``null`` removes it. For another type it is the new value, cast to that type.
-    """
-    pipeline_code, task_code, value, reason = (
-        change.pipeline_code,
-        change.task_code,
-        change.value,
-        change.reason,
-    )
-    _check(config, "an offset reset", reason, None, None)
+    """Reset every offset kind through one serialized, attributed mutation path."""
+    label = "watermark" if change.watermark else "offset"
+    _check(config, f"a {label} reset", change.reason, None, None)
     with engine.begin() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        task_id = resolve_task_id(conn, pipeline_id, task_code)
-        handler = fetch_task_execution_detail(conn, task_id).handler
-        if handler != Handler.PYTHON:
-            raise UsageError(
-                f"{pipeline_code}.{task_code} has HANDLER={handler}; `offset` needs a Python task; "
-                "a SQL task's position is reset with `watermark`"
-            )
-        if (
-            script_kind(fetch_task_parameters(conn, task_id), f"{pipeline_code}.{task_code}")
-            == ScriptKind.UTILITY
-        ):
-            raise UsageError(
-                f"{pipeline_code}.{task_code}: SCRIPT_KIND=UTILITY has no offset to reset; "
-                "use SCRIPT_KIND=INGESTION for a source with a position"
-            )
+        conn.execute(statement(conn, "window_lock"))
+        pipeline_id = resolve_pipeline_id(conn, change.pipeline_code)
+        task_id = resolve_task_id(conn, pipeline_id, change.task_code)
         selected = runlog.select_run(conn, pipeline_id, selector)
         active = conn.execute(
             statement(conn, "watermark_active_attempts"), {"task_id": task_id}
         ).scalar_one()
         if active:
             raise RunRefusedError(
-                f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
-                "to end or cancel and reconcile before resetting its offset"
+                f"{change.pipeline_code}.{change.task_code} has {active} active attempt(s); "
+                f"wait for them to end or cancel and reconcile before resetting its {label}"
             )
         before = fetch_task_offset(conn, task_id)
-        try:
-            wanted = _reset_value(f"{pipeline_code}.{task_code}", before, value)
-        except HandlerError as error:
-            raise UsageError(f"{pipeline_code}.{task_code}: `offset` {value!r}: {error}") from error
+        if before is not None and before.pending_task_run_id is not None:
+            raise RunRefusedError(
+                f"{change.pipeline_code}.{change.task_code}: pending timestamp window belongs "
+                f"to task_run_id={before.pending_task_run_id}; resume its owner or cancel and "
+                "reconcile all writers before resetting the cursor"
+            )
+        wanted, shown = _reset_definition(conn, config, change, task_id, before)
         save_task_offset(conn, task_id, StoredOffset(wanted.datatype, wanted.stored()))
-        shown = "none" if before is None else f"{before.offset_value} ({before.offset_type})"
         message = (
-            f"{pipeline_code}.{task_code}: offset {shown} -> {wanted.stored()} ({wanted.datatype})"
+            f"{change.pipeline_code}.{change.task_code}: {label} {shown} "
+            f"-> {wanted.stored()} ({wanted.datatype})"
         )
         record.record_intervention(
             conn,
@@ -584,11 +563,62 @@ def reset_offset(
             task_id=task_id,
             action=InterventionAction.MARK,
             details=record.InterventionDetails(previous_message=message),
-            reason=reason,
+            reason=change.reason,
             requested_by=current_actor().name,
         )
-    logger.warning("%s (by %s: %s)", message, current_actor().name, reason)
+    logger.warning("%s (by %s: %s)", message, current_actor().name, change.reason)
     return Intervened(message, selected.pipeline_run_id)
+
+
+def _reset_definition(
+    conn: Connection,
+    config: ConnectorConfig,
+    change: OffsetReset,
+    task_id: int,
+    before: StoredOffset | None,
+) -> tuple[Offset, str]:
+    """Check handler eligibility and typed values inside the common reset transaction."""
+    detail = fetch_task_execution_detail(conn, task_id)
+    params = fetch_task_parameters(conn, task_id)
+    task = f"{change.pipeline_code}.{change.task_code}"
+    if change.watermark:
+        if detail.handler != Handler.SQL:
+            raise UsageError(f"{task} has HANDLER={detail.handler}; `watermark` needs a SQL task")
+        context = TaskContext(
+            config,
+            detail.pipeline_id,
+            change.pipeline_code,
+            task_id,
+            change.task_code,
+            0,
+            0,
+            0,
+            Handler.SQL,
+            detail.refresh_type,
+            params,
+        )
+        spec = read_sql_task(context, before)
+        if spec.watermark is None:
+            raise UsageError(
+                f"{task} has no WATERMARK_COLUMN; define a SQL watermark before resetting it"
+            )
+        return Offset(change.value, spec.watermark.start.datatype), spec.watermark.start.stored()
+    if detail.handler != Handler.PYTHON:
+        raise UsageError(
+            f"{task} has HANDLER={detail.handler}; `offset` needs a Python task; "
+            "a SQL task's position is reset with `watermark`"
+        )
+    if script_kind(params, task) == ScriptKind.UTILITY:
+        raise UsageError(
+            f"{task}: SCRIPT_KIND=UTILITY has no offset to reset; "
+            "use SCRIPT_KIND=INGESTION for a source with a position"
+        )
+    try:
+        wanted = _reset_value(task, before, change.value)
+    except HandlerError as error:
+        raise UsageError(f"{task}: `offset` {change.value!r}: {error}") from error
+    shown = "none" if before is None else f"{before.offset_value} ({before.offset_type})"
+    return wanted, shown
 
 
 def _reset_value(task: str, before: StoredOffset | None, value: str) -> Offset:
@@ -637,77 +667,10 @@ def reset_watermark(
     *,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """Set a SQL task's typed offset, recording the before and after values as an intervention."""
-    _check(config, "a watermark reset", reason, None, None)
-    with engine.connect() as conn:
-        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
-        task_id = resolve_task_id(conn, pipeline_id, task_code)
-        detail = fetch_task_execution_detail(conn, task_id)
-        params = fetch_task_parameters(conn, task_id)
-        active = conn.execute(
-            statement(conn, "watermark_active_attempts"), {"task_id": task_id}
-        ).scalar_one()
-    if active:
-        raise RunRefusedError(
-            f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
-            "to end or cancel and reconcile before resetting its watermark"
-        )
-    if detail.handler != Handler.SQL:
-        raise UsageError(
-            f"{pipeline_code}.{task_code} has HANDLER={detail.handler}; "
-            "`watermark` needs a SQL task"
-        )
-    task = read_sql_task(
-        TaskContext(
-            config,
-            pipeline_id,
-            pipeline_code,
-            task_id,
-            task_code,
-            0,
-            0,
-            0,
-            Handler.SQL,
-            detail.refresh_type,
-            params,
-        )
+    """Keep the watermark selector while sharing every reset mutation and ownership check."""
+    return reset_offset(
+        engine,
+        config,
+        OffsetReset(pipeline_code, task_code, value, reason, watermark=True),
+        selector=selector,
     )
-    if task.watermark is None:
-        raise UsageError(
-            f"{pipeline_code}.{task_code} has no WATERMARK_COLUMN; "
-            "define a SQL watermark before resetting it"
-        )
-    wanted = Offset(value, task.watermark.start.datatype)
-    with (
-        locks.target(task.target_object, active_catalog(config)).hold(LocalLocker(engine, config)),
-        engine.begin() as conn,
-    ):
-        selected = runlog.select_run(conn, pipeline_id, selector)
-        active = conn.execute(
-            statement(conn, "watermark_active_attempts"), {"task_id": task_id}
-        ).scalar_one()
-        if active:
-            raise RunRefusedError(
-                f"{pipeline_code}.{task_code} has {active} active attempt(s); wait for them "
-                "to end or cancel and reconcile before resetting its watermark"
-            )
-        before = fetch_task_offset(conn, task_id)
-        checked = read_watermark(params, before)
-        assert checked is not None
-        save_task_offset(conn, task_id, StoredOffset(wanted.datatype, wanted.stored()))
-        message = (
-            f"{pipeline_code}.{task_code}: watermark {checked.start.stored()} "
-            f"-> {wanted.stored()} ({wanted.datatype})"
-        )
-        record.record_intervention(
-            conn,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=selected.pipeline_run_id,
-            task_id=task_id,
-            action=InterventionAction.MARK,
-            details=record.InterventionDetails(previous_message=message),
-            reason=reason,
-            requested_by=current_actor().name,
-        )
-    logger.warning("%s (by %s: %s)", message, current_actor().name, reason)
-    return Intervened(message, selected.pipeline_run_id)

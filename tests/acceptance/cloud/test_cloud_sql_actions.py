@@ -30,7 +30,11 @@ from fixtures.sql_rejects import check_rejects
 from fixtures.sql_replacement import check_replacement_failure
 from fixtures.sql_row_ids import check_row_id_generation
 from fixtures.sql_warehouse import SqlWorld
-from fixtures.sql_watermarks import check_watermark_literals
+from fixtures.sql_watermarks import (
+    check_empty_bounded_window,
+    check_timestamp_stamps,
+    check_watermark_literals,
+)
 
 pytestmark = [pytest.mark.timeout(1200), pytest.mark.usefixtures("engine_actor")]
 
@@ -604,8 +608,10 @@ def walk_watermark_literals(w):
     target = f"etl_craft_watermark_literal_{uuid.uuid4().hex[:8]}"
     try:
         check_watermark_literals(w, target)
+        check_timestamp_stamps(w, target + "_stamp")
+        check_empty_bounded_window(w, target + "_empty")
     finally:
-        for name in (target, target + "_ts"):
+        for name in (target, target + "_ts", target + "_stamp", target + "_empty"):
             w.execute(f"DROP TABLE IF EXISTS {w.name(name)}")
         close_world(w)
 

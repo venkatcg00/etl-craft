@@ -123,6 +123,10 @@ class SqlWorld:
                     )
             pipeline_run_id = run_id or self.pipeline_run_id
             binding = transitions.find_or_create_task_run(conn, self.tasks[code], pipeline_run_id)
+            started_at = conn.execute(
+                text("SELECT START_DATE AS started_at FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID=:id"),
+                {"id": binding.task_run_id},
+            ).scalar_one()
         return TaskContext(
             config=self.config,
             pipeline_id=self.pipeline_id,
@@ -132,6 +136,7 @@ class SqlWorld:
             pipeline_run_id=pipeline_run_id,
             task_run_id=binding.task_run_id,
             attempt=1,
+            started_at=started_at,
             handler="SQL",
             refresh_type=self.refresh_type,
             task_params=params,

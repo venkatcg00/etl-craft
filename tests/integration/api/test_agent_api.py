@@ -11,7 +11,12 @@ from etl_craft import __version__
 from etl_craft.api.app import create_app
 from etl_craft.config import ConnectionProfile
 from etl_craft.core.actor import SYSTEM_ACTOR
-from etl_craft.core.enums import ActionName, ApiRole, DeploymentProfile
+from etl_craft.core.enums import (
+    ActionName,
+    ApiRole,
+    AttemptStatus,
+    DeploymentProfile,
+)
 from etl_craft.core.ownership import attempt_holder
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine import transitions
@@ -1765,3 +1770,49 @@ def test_attempt_renewal_at_lease_boundary_is_refused(agent_scene, monkeypatch):
     assert response.status_code == 409, response.text
     for detail in (f"attempt {attempt}", "lease expired", "expected a live lease", "reconcile"):
         assert detail in response.text
+
+
+def test_agent_start_returns_the_exact_recorded_microsecond_clock(agent_scene):
+    from etl_craft.core.time import as_utc
+
+    db, _, _, _, _, _ = agent_scene
+    attempt = claim(agent_scene)
+    response = post(agent_scene, "report", attempt_id=attempt, operation="START", pid=123)
+    assert response.status_code == 200, response.text
+    with db.engine.connect() as conn:
+        recorded = conn.execute(
+            text("SELECT STARTED_AT AS started_at FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"),
+            {"id": attempt},
+        ).scalar_one()
+    assert as_utc(response.json()["data"]["started_at"]) == recorded
+    repeated = post(agent_scene, "report", attempt_id=attempt, operation="START", pid=123)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["data"]["started_at"] == response.json()["data"]["started_at"]
+    with db.engine.begin() as conn:
+        task = conn.execute(
+            text(
+                "SELECT t.TASK_ID AS task_id FROM AUD_TASK_RUN_LOG t JOIN AUD_TASK_ATTEMPTS a "
+                "ON a.TASK_RUN_ID=t.TASK_RUN_ID WHERE a.ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO AUD_TASK_OFFSET_TRACKER "
+                "(TASK_ID,OFFSET_TYPE,OFFSET_VALUE,LAST_UPDATED_TIMESTAMP) "
+                "VALUES (:task,'NUMBER','1',:future)"
+            ),
+            {"task": task, "future": datetime.now(UTC) + timedelta(days=1)},
+        )
+    refused = post(agent_scene, "report", attempt_id=attempt, operation="START", pid=123)
+    assert refused.status_code == 409, refused.text
+    assert "Engine DB clock" in refused.text and "restore the Engine DB clock" in refused.text
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT STARTED_AT AS started_at,STATUS AS status "
+                "FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:id"
+            ),
+            {"id": attempt},
+        ).one()
+        assert row.started_at == recorded and row.status == AttemptStatus.RUNNING

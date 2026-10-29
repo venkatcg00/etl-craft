@@ -1,0 +1,1 @@
+SELECT WATERMARK_FROM AS watermark_from, WATERMARK_TO AS watermark_to FROM AUD_TASK_RUN_LOG WHERE TASK_RUN_ID=:task_run_id

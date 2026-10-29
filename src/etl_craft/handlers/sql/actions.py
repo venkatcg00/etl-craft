@@ -51,6 +51,7 @@ from etl_craft.handlers.sql.tables import (
     check_or_evolve,
     check_stage_columns,
     check_target_audit,
+    check_update_precision,
     dedupe,
     refuse_null_keys,
     require_target,
@@ -509,6 +510,7 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
                 "SETUP_TABLE task for it, add the columns, or set HARD_DELETE=true"
             )
         check_identity_types(session)
+        check_update_precision(session)
     if session.protection is not None:
         stage = session.protection.stage(stage, delete=True)
     key_match = _key_match(task.merge_key)

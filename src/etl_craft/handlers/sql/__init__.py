@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from datetime import UTC, datetime
 
 from sqlalchemy.engine import Engine
 
@@ -23,7 +22,9 @@ from etl_craft.core.faults import fault_point
 from etl_craft.core.text import qualify as qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.engine import locks
-from etl_craft.engine.task_store import TargetPublication, TaskStore
+from etl_craft.engine.repository.offsets import StoredOffset
+from etl_craft.engine.task_store import TargetPublication, TaskState, TaskStore
+from etl_craft.engine.timestamp_windows import WindowDefinition
 from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.handlers.sql.actions import ACTIONS
 from etl_craft.handlers.sql.context import ActionContext
@@ -34,7 +35,8 @@ from etl_craft.handlers.sql.protection import (
     refuse_evidence_target,
 )
 from etl_craft.handlers.sql.session import Session
-from etl_craft.handlers.sql.spec import read_sql_task
+from etl_craft.handlers.sql.spec import SqlTask, read_sql_task
+from etl_craft.handlers.sql.watermarks import source_pipelines
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_task
 
 logger = logging.getLogger(__name__)
@@ -85,10 +87,12 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                     f"{task.target_object}: {task.action} conflicts with an active {other} writer; "
                     "give the target one merge action before running"
                 )
-        if task.watermark is not None:
-            assert state is not None
-            stored = None if context.backfill else state.offset
-            task = read_sql_task(context, stored)
+        task = _watermarked_task(task, context, store, state)
+        if context.started_at is None:
+            raise SqlGuardError(
+                f"{context.pipeline_code}.{context.task_code}: recorded start is NULL; "
+                "expected the Engine DB attempt start; start the task through etl-craft run"
+            )
         with warehouse.begin() as conn:
             session = Session(
                 conn,
@@ -104,7 +108,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                 context=context,
                 store=store,
                 user=context.writer,
-                now=datetime.now(UTC),
+                now=context.started_at,
                 state=state,
             )
             outcome = _apply(session, action)
@@ -191,3 +195,26 @@ def _apply(session: Session, action: ActionContext) -> HandlerResult | SqlGuardE
         return error
     finally:
         session.sweep()
+
+
+def _watermarked_task(
+    task: SqlTask, context: TaskContext, store: TaskStore, state: TaskState | None
+) -> SqlTask:
+    """Freeze the run cursor before executing or staging its managed SELECT."""
+    if task.watermark is not None:
+        assert state is not None
+        stored = None if context.backfill else state.offset
+        if task.bounded:
+            mark = task.watermark.start
+            window = store.window(
+                WindowDefinition(
+                    StoredOffset(mark.datatype, mark.stored()),
+                    source_pipelines(context.task_params),
+                    context.backfill,
+                )
+            )
+            stored = StoredOffset(
+                mark.datatype, window.low.isoformat(), context.task_run_id, window.high
+            )
+        task = read_sql_task(context, stored)
+    return task

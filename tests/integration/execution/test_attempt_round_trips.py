@@ -94,6 +94,8 @@ def test_sql_attempt_round_trips_include_supervisor_and_child(
     queries = Counter(
         row["query"] for row in events if row["kind"] == "engine" and row["measure"] == "statements"
     )
+    assert queries["engine_clock"] == 1
+    assert queries["window_clock_floor"] == 1
     assert observed == budgets["attempt"], (
         "One CREATE_TABLE attempt's round trips changed; investigate growth or record the "
         f"improvement with ETL_CRAFT_RECORD_QUERY_BUDGET=1. Observed: {observed}; by query: "

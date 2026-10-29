@@ -11,6 +11,7 @@ from etl_craft.core.failures import Failure
 from etl_craft.core.items import ItemRecord
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import RuleEnding, TargetPublication
+from etl_craft.engine.timestamp_windows import WindowDefinition
 from etl_craft.services.operations.requests import Request, require_text
 
 
@@ -63,6 +64,7 @@ class AgentTask(AgentRequest):
     publication: TargetPublication | None = None
     watermark_from: str | None = None
     watermark_to: str | None = None
+    window: WindowDefinition | None = None
     rule_id: int | None = None
     rule_ending: RuleEnding | None = None
     lock_key: int | None = None

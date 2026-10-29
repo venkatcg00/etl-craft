@@ -337,6 +337,7 @@ def sqlite_creator(database: str) -> Callable[[], Any]:
         )
         from etl_craft.core.text import sha256_hex
 
+        conn.create_function("etl_craft_now", 0, lambda: _adapt_datetime(datetime.now(UTC)))
         conn.create_function(
             "etl_craft_sha256", 1, lambda value: sha256_hex(value.encode()), deterministic=True
         )

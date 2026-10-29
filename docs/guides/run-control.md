@@ -102,6 +102,18 @@ or are cancelled and reconciled. The target lock serializes resets with SQL read
 `AUD_RUN_INTERVENTIONS` records the actor, reason and old/new typed positions as a `MARK`;
 `AUD_ACTIONS` records the full request. Backfills do not change the stored position.
 
+For bounded TIMESTAMP SQL, the existing tracker also holds `PENDING_TASK_RUN_ID` and
+`PENDING_UPPER_BOUND`. Failed/lost attempts keep that exact window for retry; they do not
+advance the committed mark. Every reset refuses both active attempts and pending ownership.
+Use the pending run's explicit identity to resume it, or abort/cancel it and confirm that all
+its processes and warehouse queries ended. Only then does the control clear the pending pair,
+without advancing the mark; the reset can proceed with its reason and actor recorded.
+History retention protects pending run/attempt ranges and intervention evidence. Reopening an
+old run refuses a cursor that has since moved to another run's range.
+
+A standing SUCCESS, FAILED or SKIPPED executes no SQL, admits no window and changes no cursor.
+The next real execution reads the whole window it would have read without the standing outcome.
+
 ## Reset a Python script's offset
 
 Only `SCRIPT_KIND=INGESTION` Python tasks have an offset to reset. Utility tasks refuse
