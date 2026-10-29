@@ -7,7 +7,7 @@ import pytest
 
 from etl_craft.cli.commands import COMMANDS
 from etl_craft.core.enums import ActionName, ActionScope, ApiRole, Audit, HttpMethod, Placement
-from etl_craft.services.operations.actions import ACTIONS
+from etl_craft.services.operations.actions import ACTIONS, PROJECT_MANAGE_ACTIONS
 
 pytestmark = pytest.mark.unit
 
@@ -33,6 +33,7 @@ def test_every_action_is_reachable_from_the_cli_or_a_route():
         (ActionName.ACCOUNT_LIST, ApiRole.ADMIN),
         (ActionName.TOKEN_CREATE, ApiRole.ADMIN),
         (ActionName.CONFIG_APPLY, ApiRole.DEVELOPER),
+        (ActionName.RENAME, ApiRole.DEVELOPER),
         (ActionName.CONFIG_PLAN, ApiRole.VIEWER),
         (ActionName.CONFIG_EXPORT, ApiRole.VIEWER),
         (ActionName.LINEAGE, ApiRole.VIEWER),
@@ -112,7 +113,10 @@ def test_pipeline_selections_use_pipeline_scope_and_identity_administration_stay
         if action.role == ApiRole.AGENT:
             continue
         if names & {"pipeline_code", "run_id", "attempt_id", "control_id", "task_run_id"}:
-            assert action.scope == ActionScope.PIPELINE, action.name
+            expected = (
+                ActionScope.PROJECT if action.name == ActionName.RENAME else ActionScope.PIPELINE
+            )
+            assert action.scope == expected, action.name
     for name in (ActionName.PIPELINES, ActionName.LINEAGE, ActionName.DOCS_VERSION_CHECK):
         assert ACTIONS[name].scope == ActionScope.PIPELINE
     for name in (
@@ -127,5 +131,7 @@ def test_pipeline_selections_use_pipeline_scope_and_identity_administration_stay
         assert ACTIONS[name].scope == ActionScope.DEPLOYMENT
 
 
-def test_config_apply_has_project_scope():
-    assert ACTIONS[ActionName.CONFIG_APPLY].scope == ActionScope.PROJECT
+@pytest.mark.parametrize("name", [ActionName.CONFIG_APPLY, ActionName.RENAME])
+def test_metadata_identity_changes_require_project_management(name):
+    assert ACTIONS[name].scope == ActionScope.PROJECT
+    assert name in PROJECT_MANAGE_ACTIONS
