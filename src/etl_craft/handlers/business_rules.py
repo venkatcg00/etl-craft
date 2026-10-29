@@ -190,11 +190,13 @@ def check_output(checked: _Rule, context: TaskContext, warehouse: Engine) -> str
             expand_scope(rule.business_rule_sql),
             dialect=warehouse_dialect(context.config).sqlglot_dialect,
         )
-        if columns is not None and (problem := table_columns_problem(columns)):
-            raise SqlGuardError(
-                f"business rule {rule.business_rule_name!r} on task "
-                f"{context.pipeline_code}.{context.task_code}: query {problem}"
-            )
+        if columns is not None:
+            if problem := table_columns_problem(columns):
+                raise SqlGuardError(
+                    f"business rule {rule.business_rule_name!r} on task "
+                    f"{context.pipeline_code}.{context.task_code}: query {problem}"
+                )
+            return ""
         try:
             table_query(checked, context, warehouse, None)
         except SQLAlchemyError as error:

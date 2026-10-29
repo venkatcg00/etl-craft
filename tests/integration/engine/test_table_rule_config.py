@@ -224,7 +224,7 @@ def test_table_reject_stops_downstream_and_records_the_attempt_log(rule_project)
     "sql,expected",
     [
         ("SELECT 1 AS other", "returned columns"),
-        ("SELECT 'Y' AS PASSED FROM missing_table", "could not verify TABLE output"),
+        ("SELECT * FROM missing_table", "could not verify TABLE output"),
     ],
 )
 def test_table_output_validation_findings_keep_last_good_version(rule_project, sql, expected):
@@ -378,3 +378,17 @@ def test_table_result_fields_reach_the_existing_api_reads(rule_project):
         )
         assert response.status_code == 200, response.text
         assert response.json()["rules"][0] == result
+
+
+def test_table_refresh_checks_explicit_output_before_the_target_is_created(rule_project):
+    ctx, _, _, _ = rule_project
+    warehouse = build_warehouse_engine(ctx.config)
+    try:
+        with warehouse.begin() as conn:
+            conn.execute(text("DROP TABLE main.data"))
+        report = validate(ctx.engine, ctx.config)
+        assert not any("has no $$rows_in_scope" in f.message for f in report.findings)
+        result = act(ctx, ActionName.PIPELINE_REFRESH, pipeline_code="P")
+        assert not result.failed, result.refreshes[0].findings
+    finally:
+        warehouse.dispose()

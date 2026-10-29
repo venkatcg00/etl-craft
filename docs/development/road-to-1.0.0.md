@@ -909,6 +909,8 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   added. REPORT=N is a successfully executed check and is skipped on a same-run retry;
   REJECT=N fails and is checked again. Earlier ROW evidence is not rewritten by a level edit.
   Old admitted images without the level read as ROW without changing their text or hash.
+  Explicit TABLE output lists are checked statically like ROW output; only unresolved or
+  wildcard projections probe the warehouse. This preserves first-run target creation.
   S8.H gains the requested TABLE REJECT/REPORT demonstration bullet; no sample or stewardship
   execution behavior is implemented here.
 

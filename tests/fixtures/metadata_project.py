@@ -18,7 +18,6 @@ from sqlalchemy.engine import Engine
 from etl_craft.config import ConnectorConfig, load_config
 from etl_craft.engine.migrations import apply_pending_migrations
 from etl_craft.engine.schema import init_db
-from etl_craft.warehouse.connection import build_warehouse_engine
 
 EXAMPLES = Path(__file__).parents[2] / "docs" / "examples" / "migrations"
 SCRIPT = "def run(task):\n    return None\n"
@@ -96,16 +95,4 @@ def metadata_project(empty_engine_db, tmp_path, monkeypatch) -> MetadataProject:
         (scripts / f"{name}.py").write_text(SCRIPT, "utf-8")
     (root / "migrations").mkdir()
     monkeypatch.chdir(root)
-    config = load_config(root / "craft-connector.yml")
-    warehouse = build_warehouse_engine(config)
-    with warehouse.begin() as conn:
-        conn.execute(text("CREATE SCHEMA sales"))
-        for region in REGIONS:
-            conn.execute(
-                text(
-                    f"CREATE TABLE sales.orders_{region} "
-                    "(ROW_ID BIGINT,PIPELINE_RUN_ID BIGINT,amount DOUBLE)"
-                )
-            )
-    warehouse.dispose()
-    return MetadataProject(engine_db.engine, config, root)
+    return MetadataProject(engine_db.engine, load_config(root / "craft-connector.yml"), root)

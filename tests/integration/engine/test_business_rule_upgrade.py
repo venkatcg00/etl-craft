@@ -11,8 +11,8 @@ from etl_craft.core.errors import MigrationError
 from etl_craft.dialects.engine.base import EngineDialect
 from etl_craft.engine import migration_steps, migrations, transitions
 from etl_craft.engine.repository.business_rules import (
+    BusinessRule,
     begin_rule_run,
-    fetch_business_rules_for_task,
     flag_rule_keys,
 )
 from etl_craft.services.config_files import export_config, read_config_files
@@ -60,7 +60,15 @@ def legacy_rules(empty_engine_db, monkeypatch, tmp_path):
         )
         task_run = transitions.find_or_create_task_run(conn, task, run).task_run_id
         binding = begin_rule_run(conn, rule_id, task_run, datetime.now(UTC))
-        rule = fetch_business_rules_for_task(conn, task)[0]
+        rule = BusinessRule(
+            rule_id,
+            "negative",
+            "SELECT 1 WHERE t.amount < 0 -- keep this body",
+            "REPORT",
+            "id",
+            "analytics.sales.orders",
+            1,
+        )
         flag_rule_keys(conn, rule, binding.business_rule_run_id, ["11"], datetime.now(UTC))
     return db, task, rule, binding
 
@@ -98,7 +106,12 @@ def test_conversion_preserves_results_and_exports_the_new_form(legacy_rules, tmp
         "SELECT 1 WHERE t.amount < 0 -- keep this body\n)"
     )
     before_rules[0][sql_key] = after_rules[0][sql_key]
-    assert after_rules == before_rules
+    for before, after in zip(before_rules, after_rules, strict=True):
+        assert {key: after[key] for key in before} == before
+        assert (
+            next(value for key, value in after.items() if key.lower() == "business_rule_level")
+            == "ROW"
+        )
     export_config(db.engine, tmp_path / "export")
     exported = read_config_files(tmp_path / "export")
     assert (

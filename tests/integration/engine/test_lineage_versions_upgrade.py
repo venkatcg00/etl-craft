@@ -157,10 +157,12 @@ def test_demo_lineage_graph_and_documentation_survive_the_cache_reset(
         statements = db.dialect.split_statements(
             (project / "metadata/support_insights.sql").read_text()
         )
-        # The graph fixture predates placement columns; keep its graph SQL unchanged.
+        # This schema predates placement and table rules; neither changes its lineage graph.
         placement = [sql for sql in statements if "MAX_PARALLEL_TASKS" in sql]
         assert len(placement) == 1
-        run_script(conn, [sql for sql in statements if sql not in placement])
+        table_rules = [sql for sql in statements if "BUSINESS_RULE_LEVEL" in sql]
+        assert len(table_rules) == 1
+        run_script(conn, [sql for sql in statements if sql not in placement + table_rules])
     before = legacy_lineage(db, config, monkeypatch)
     assert before and not [item.error for item in before if item.error]
     migrations.apply_pending_migrations(db.engine, warehouse_dialect="duckdb")

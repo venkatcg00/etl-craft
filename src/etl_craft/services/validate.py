@@ -431,22 +431,26 @@ def _unread_sql(conn: Connection, context: TaskContext) -> list[str]:
     if context.config.warehouse is None:
         return []
     dialect, _ = dialect_and_catalog(context.config)
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, str]] = []
     if context.handler == Handler.BUSINESS_RULES:
         found = [
-            (f"business rule {rule.business_rule_name!r}", rule.business_rule_sql)
+            (
+                f"business rule {rule.business_rule_name!r}",
+                rule.business_rule_sql,
+                rule.business_rule_level,
+            )
             for rule in fetch_business_rules_for_task(conn, context.task_id)
         ]
     warnings = [
         f"{where}: BUSINESS_RULE_SQL has no $$rows_in_scope; use FROM $$rows_in_scope to avoid "
         "checking rows outside this run (returned keys are still intersected with its scope)"
-        for where, sql in found
-        if context.handler == Handler.BUSINESS_RULES and expand_scope(sql) == sql
+        for where, sql, level in found
+        if level == BusinessRuleLevel.ROW and expand_scope(sql) == sql
     ]
     return warnings + [
         f"{where}: sqlglot cannot read it as {dialect or 'standard'} SQL ({reading.unparsed}); "
         "the warehouse decides when the task runs, and column lineage cannot trace it"
-        for where, sql in found
+        for where, sql, _level in found
         if (reading := read_query(expand_scope(sql), dialect)).unparsed is not None
     ]
 

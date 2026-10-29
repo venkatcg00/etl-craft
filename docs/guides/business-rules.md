@@ -111,6 +111,9 @@ of `VARCHAR` on Databricks). Both text fields
 use a 4,096-character storage limit, consistent with bounded Engine DB error/reason evidence.
 An overlong value fails with its field, length, limit and remedy; it is never truncated.
 Malformed outputs are FAILED rule runs with the diagnostic in `DETAIL` and the attempt log.
+Validation checks explicit output lists statically, as for ROW rules; wildcard or unresolved
+outputs need a zero-row warehouse probe. This lets a pipeline refresh before its upstream
+setup task creates the target. Execution always checks the actual columns and values.
 
 A valid `PASSED=N` on `REJECT` fails the task and prevents its success-dependent tasks from
 starting. `REPORT` stores `N` and continues. `INCOMPLETE` has no table meaning and is refused.

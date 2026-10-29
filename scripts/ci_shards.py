@@ -16,8 +16,11 @@ from release_gate import check_outcomes, git, node_ids, sha256_of
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_WAREHOUSES = ("duckdb", "postgres", "duckdb_iceberg", "trino_iceberg")
+WAREHOUSE_TESTS = (
+    "warehouse_duckdb or warehouse_postgres or warehouse_duckdb_iceberg or warehouse_trino_iceberg"
+)
 SERVICE_MARKERS = {
-    "engine": "engine_postgres and not warehouse_postgres",
+    "engine": f"engine_postgres and not ({WAREHOUSE_TESTS})",
     "warehouse-local": "warehouse_duckdb or warehouse_postgres or harness or connections",
     "warehouse-iceberg": "warehouse_duckdb_iceberg or warehouse_trino_iceberg",
 }
@@ -84,7 +87,7 @@ PRIMARY = "coverage-3.11-ubuntu-latest"
 def selection(profile: str) -> str:
     """Select complete ordinary suites once, plus explicit platform compatibility checks."""
     if profile == PRIMARY:
-        return "(unit or engine_sqlite or docs) and not warehouse_postgres"
+        return f"(unit or engine_sqlite or docs) and not ({WAREHOUSE_TESTS})"
     if profile.startswith("coverage-"):
         return "unit or engine_sqlite"
     if profile == "e2e-duckdb":
