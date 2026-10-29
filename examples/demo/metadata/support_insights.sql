@@ -117,6 +117,7 @@ DROP TABLE task_targets;
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
+    ('CLIENT_ALPHA', 'land', 'SCRIPT_KIND', 'INGESTION'),
     ('CLIENT_ALPHA', 'land', 'SCRIPT_FILE', 'python_scripts/alpha.py'),
     ('CLIENT_ALPHA', 'land', 'INPUT_PARAMS', '{"rows": 12}'),
     ('CLIENT_ALPHA', 'land', 'SOURCE_OBJECT', 'Client Alpha support desk'),
@@ -131,6 +132,7 @@ FROM (VALUES
     ('CLIENT_ALPHA', 'purge_test_calls', 'SELECT_QUERY', 'SELECT interaction_id FROM prs.alpha_interactions WHERE agent_code = ''TEST'''),
     ('CLIENT_ALPHA', 'purge_test_calls', 'MERGE_KEY', 'interaction_id'),
     ('CLIENT_ALPHA', 'purge_test_calls', 'HARD_DELETE', 'true'),
+    ('CLIENT_BETA', 'land', 'SCRIPT_KIND', 'INGESTION'),
     ('CLIENT_BETA', 'land', 'SCRIPT_FILE', 'python_scripts/beta.py'),
     ('CLIENT_BETA', 'land', 'INPUT_PARAMS', '{"rows": 8}'),
     ('CLIENT_BETA', 'land', 'SOURCE_OBJECT', 'Client Beta event stream'),
@@ -139,10 +141,12 @@ FROM (VALUES
     ('CLIENT_BETA', 'parse', 'SQL_ACTION', 'APPEND_TABLE'),
     ('CLIENT_BETA', 'parse', 'SCRIPT_FILE', 'sql_scripts/prs_beta.sql'),
     ('CLIENT_BETA', 'parse', 'PIPELINE_RUN_ID_SUBSTITUTION', 'true'),
+    ('SUPPORT_DM', 'land_agents', 'SCRIPT_KIND', 'INGESTION'),
     ('SUPPORT_DM', 'land_agents', 'SCRIPT_FILE', 'python_scripts/agents.py'),
     ('SUPPORT_DM', 'land_agents', 'SOURCE_OBJECT', 'HR agent directory'),
     ('SUPPORT_DM', 'support_areas', 'SQL_ACTION', 'CREATE_TABLE'),
     ('SUPPORT_DM', 'support_areas', 'SCRIPT_FILE', 'sql_scripts/support_areas.sql'),
+    ('SUPPORT_DM', 'flaky_feed', 'SCRIPT_KIND', 'INGESTION'),
     ('SUPPORT_DM', 'flaky_feed', 'SCRIPT_FILE', 'python_scripts/flaky.py'),
     ('SUPPORT_DM', 'flaky_feed', 'DOCUMENTATION', 'A feed that is not ready the first time it is read.'),
     ('SUPPORT_DM', 'on_failure', 'EMAIL_TO', 'support-oncall@example.com'),
@@ -183,11 +187,14 @@ FROM (VALUES
     ('SUPPORT_DM', 'alert', 'EMAIL_SUBJECT', '$$pipeline_code: $$status'),
     ('SUPPORT_DM', 'alert', 'EMAIL_BODY', 'Run $$pipeline_run_id of $$pipeline_code ended $$status.'),
     ('SUPPORT_DM', 'alert', 'EMAIL_PIPELINES', 'CLIENT_ALPHA|CLIENT_BETA|SUPPORT_DM'),
+    ('SUPPORT_EXPORT', 'export', 'SCRIPT_KIND', 'UTILITY'),
     ('SUPPORT_EXPORT', 'export', 'SCRIPT_FILE', 'python_scripts/wait.py'),
     ('SUPPORT_EXPORT', 'export', 'INPUT_PARAMS', '{"seconds": 8}'),
     ('SUPPORT_EXPORT', 'export', 'TASK_TIMEOUT_SECONDS', '2'),
+    ('SUPPORT_BACKFILL', 'prepare', 'SCRIPT_KIND', 'UTILITY'),
     ('SUPPORT_BACKFILL', 'prepare', 'SCRIPT_FILE', 'python_scripts/wait.py'),
     ('SUPPORT_BACKFILL', 'prepare', 'INPUT_PARAMS', '{"seconds": 0}'),
+    ('SUPPORT_BACKFILL', 'backfill', 'SCRIPT_KIND', 'UTILITY'),
     ('SUPPORT_BACKFILL', 'backfill', 'SCRIPT_FILE', 'python_scripts/wait.py'),
     ('SUPPORT_BACKFILL', 'backfill', 'INPUT_PARAMS', '{"seconds": 30}')
 ) v

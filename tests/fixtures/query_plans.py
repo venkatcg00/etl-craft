@@ -17,6 +17,7 @@ UTILITIES = {
 INTEGER_NAMES = frozenset(
     {
         "id",
+        "count",
         "sequence",
         "offset",
         "length",

@@ -21,6 +21,7 @@ class Definition:
     columns: dict[str, tuple[str, ...]]
     rows: dict[str, tuple[dict[str, object], ...]]
     bundle_id: str | None = None
+    format_version: int = 1
 
     @classmethod
     def read(cls, text: str, run_id: int | None = None, bundle_id: str | None = None) -> Definition:
@@ -31,6 +32,9 @@ class Definition:
         )
         try:
             data = json.loads(text)
+            version = data.pop("_version", 1)
+            if type(version) is not int or version not in {1, 2}:
+                raise problem
             columns = {}
             rows = {}
             for name, table in data.items():
@@ -49,7 +53,7 @@ class Definition:
                     raise problem
                 columns[name] = tuple(fields)
                 rows[name] = tuple(records)
-            return cls(text, run_id, columns, rows, bundle_id)
+            return cls(text, run_id, columns, rows, bundle_id, version)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
             raise problem from error
 

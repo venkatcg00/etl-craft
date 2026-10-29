@@ -84,8 +84,8 @@ class TaskRunState:
     """What one dependency edge needs from its upstream's ``AUD_TASK_RUN_LOG`` row.
 
     ``status`` is ``None`` while the task has no row under the active run. ``rows_written`` is
-    what the attempt inserted, updated or deleted; ``None`` on a row recorded before it was kept,
-    where ``target_count`` stands in for it.
+    reported inserts, updates or deletes, or ``None`` when unmeasured. A reported
+    ``target_count`` stands in when write counts are absent.
     """
 
     status: str | None = None

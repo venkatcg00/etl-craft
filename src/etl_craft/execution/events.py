@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as, current_actor
 from etl_craft.core.counts import Counts
-from etl_craft.core.enums import ConnectionUse, RunStatus
+from etl_craft.core.enums import ConnectionUse, Handler, RunStatus
 from etl_craft.core.errors import EtlCraftError, LockTimeoutError, RunRefusedError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.time import as_utc
@@ -118,7 +118,7 @@ def _check_event(wait: _EventWait, now: datetime) -> EventCheck:
     message = ""
     try:
         task_timeout_seconds(task_params, config)
-        task_retry_policy(task_params, config)
+        task_retry_policy(task_params, config, Handler.EVENT_WAIT)
         event = replace(read_event(config, task_params), task_id=task_id)
         deadline = (
             (as_utc(row.wait_until) if row.wait_until is not None else None)
@@ -278,7 +278,9 @@ def _complete(
         transitions.finish_task_run(conn, task_run_id, status=status, error_message=message)
     else:
         attempt = transitions.queue_attempt(conn, task_run_id, current_actor())
-        policy = task_retry_policy(fetch_task_parameters(conn, wait.task_id), wait.config)
+        policy = task_retry_policy(
+            fetch_task_parameters(conn, wait.task_id), wait.config, Handler.EVENT_WAIT
+        )
         transitions.set_attempt_retry_policy(conn, attempt, policy.retry_on)
         owner = f"event:{attempt}"
         from etl_craft.engine.agent_transitions import claim_with_capacity

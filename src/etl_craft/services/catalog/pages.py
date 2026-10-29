@@ -425,7 +425,10 @@ class Pages:
                 (
                     float(r.target_count) if r.target_count is not None else None,
                     r.status,
-                    f"run {r.pipeline_run_id} {r.status} {r.target_count or 0} row(s)",
+                    f"run {r.pipeline_run_id} {r.status}: "
+                    + (
+                        f"{r.target_count} row(s)" if r.target_count is not None else "Not measured"
+                    ),
                     "../" + run_url(r.pipeline_run_id),
                 )
                 for r in reversed(task.runs)

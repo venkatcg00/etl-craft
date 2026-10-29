@@ -29,6 +29,7 @@ from etl_craft.core.enums import DependencyType, EmailFlavour, Handler, SqlActio
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.graph import build_graph, cycles
 from etl_craft.core.placement import ResourceRequest, resource_request
+from etl_craft.core.script_kinds import script_kind
 from etl_craft.core.text import is_metadata_code, qualify, suggest
 from etl_craft.dialects.business_rules import expand_scope, output_key
 from etl_craft.dialects.engine import for_engine
@@ -403,7 +404,7 @@ def _task(
             params.get("POOL", data.placement.default_pool),
         )
         task_timeout_seconds(params, config)
-        task_retry_policy(params, config)
+        task_retry_policy(params, config, task.handler)
     except EtlCraftError as error:
         report.fail(where, str(error))
     known = KNOWN_PARAMETERS.get(task.handler)
@@ -583,6 +584,7 @@ def _business_rules(conn: Connection, context: TaskContext, data: _Metadata) -> 
 
 def _python(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     params = context.task_params
+    script_kind(params, f"{context.pipeline_code}.{context.task_code}")
     name = (params.get("SCRIPT_FILE") or "").strip()
     if not name:
         return ["SCRIPT_FILE is required for HANDLER=PYTHON, such as python_scripts/load.py"]

@@ -147,8 +147,8 @@ def test_handler_wrapper_preserves_script_cause(error, kind):
 )
 def test_policy_classes_and_project_override(policy, allowed):
     config = replace(CONFIG, retry_on=policy)
-    assert task_retry_policy({}, config).retry_on == policy
-    assert task_retry_policy({"RETRY_ON": RetryOn.NONE}, config).retry_on == RetryOn.NONE
+    assert task_retry_policy({}, config, "SQL").retry_on == policy
+    assert task_retry_policy({"RETRY_ON": RetryOn.NONE}, config, "SQL").retry_on == RetryOn.NONE
     assert {kind for kind in FailureClass if policy.permits(kind)} == allowed
 
 

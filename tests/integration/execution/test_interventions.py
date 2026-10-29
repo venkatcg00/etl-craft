@@ -828,6 +828,12 @@ def test_the_pause_and_skip_commands(config, pipeline, capsys, monkeypatch, engi
         conn.execute(
             text(
                 "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
+                "SELECT TASK_ID,'SCRIPT_KIND','INGESTION' FROM CFG_TASKS"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_TASK_PARAMETERS (TASK_ID,PARAMETER_NAME,PARAMETER_VALUE) "
                 "SELECT TASK_ID,'SCRIPT_FILE','python_scripts/skip.py' FROM CFG_TASKS"
             )
         )

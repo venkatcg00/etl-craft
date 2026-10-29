@@ -20,11 +20,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from etl_craft.core.enums import ItemStatus
+from etl_craft.core.enums import ItemStatus, ScriptKind
 from etl_craft.core.errors import HandlerError, PermanentError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.items import ItemRecord, ItemState, ItemStore, bounded_keys, progress
 from etl_craft.core.log import log_context
+from etl_craft.core.script_kinds import reported_count, script_kind
 from etl_craft.core.text import mask_arguments
 
 if TYPE_CHECKING:
@@ -106,9 +107,11 @@ def execute(
         )
     if not callable(fn):
         raise HandlerError(f"fan_out fn={fn!r}; expected a callable; pass the item function")
+    kind = script_kind(task.task_params, f"{task.pipeline_code}.{task.task_code}")
+    empty = None if kind == ScriptKind.UTILITY else 0
     keys = bounded_keys(items, max_items)
     if not keys and task._items is None:
-        return ScriptResult(0)
+        return ScriptResult(empty)
     if task._items is None:
         raise HandlerError(
             f"{task.task_code}: fan_out has no admitted item store; expected an "
@@ -116,7 +119,7 @@ def execute(
         )
     state = task._items.items()
     if not keys and not state.records:
-        return ScriptResult(0)
+        return ScriptResult(empty)
     width = options(
         max_items,
         requested.max_parallel,
@@ -146,7 +149,12 @@ def execute(
             f"{task.task_code}: fan_out items did not succeed: {detail}; fix the "
             f"failed items and retry this task run"
         )
-    return ScriptResult(sum(r.row_count for r in final))
+    counts = [r.row_count for r in final]
+    return ScriptResult(
+        sum(value for value in counts if value is not None)
+        if all(value is not None for value in counts)
+        else None
+    )
 
 
 def prepare_work(
@@ -256,8 +264,16 @@ class Work:
     def future(self, key: str) -> Future[ScriptResult]:
         """Preserve actors and task sessions in threads; spawn processes without inherited DBs."""
         if isinstance(self.executor, ThreadPoolExecutor):
-            return self.executor.submit(copy_context().run, evaluate, self.fn, key)
-        return self.executor.submit(evaluate, self.fn, key)
+            return self.executor.submit(
+                copy_context().run,
+                evaluate,
+                self.fn,
+                key,
+                script_kind(self.task.task_params, self.task.task_code),
+            )
+        return self.executor.submit(
+            evaluate, self.fn, key, script_kind(self.task.task_params, self.task.task_code)
+        )
 
     def submit(self, key: str, number: int) -> ItemRecord:
         """Respect a mark or cancel committed before this start."""
@@ -283,23 +299,19 @@ class Work:
         self.task.logger.info("%s; projected finish in %.1fs", progress(tuple(known.values())), eta)
 
 
-def evaluate(fn: Callable[[str], ScriptResult], key: str) -> ScriptResult:
+def evaluate(fn: Callable[[str], ScriptResult], key: str, kind: ScriptKind) -> ScriptResult:
     """Validate a worker's result inside its future so failures remain retryable evidence."""
     from etl_craft.scripting import ScriptResult
 
     with log_context(item_key=key):
         result = fn(key)
-    if (
-        not isinstance(result, ScriptResult)
-        or type(result.row_count) is not int
-        or result.row_count < 0
-        or result.offset is not None
-    ):
+    if not isinstance(result, ScriptResult) or result.offset is not None:
         raise HandlerError(
             f"item {key}: result type={type(result).__name__}; expected "
             "ScriptResult with nonnegative row_count "
             "and no item offset; return the offset from the task"
         )
+    reported_count(result.row_count, kind, f"item {key}")
     return result
 
 

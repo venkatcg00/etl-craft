@@ -65,6 +65,7 @@ DROP TABLE task_targets;
 INSERT INTO CFG_TASK_PARAMETERS (TASK_ID, PARAMETER_NAME, PARAMETER_VALUE)
 SELECT t.TASK_ID, v.column3, v.column4
 FROM (VALUES
+    ('SALES_DAILY', 'fetch_orders', 'SCRIPT_KIND', 'INGESTION'),
     ('SALES_DAILY', 'fetch_orders', 'SCRIPT_FILE', 'python_scripts/sales/fetch_orders.py'),
     ('SALES_DAILY', 'fetch_orders', 'INPUT_PARAMS', '{"region": "uk", "days": 1}'),
     ('SALES_DAILY', 'fetch_orders', 'SOURCE_OBJECT', 'Order service API'),

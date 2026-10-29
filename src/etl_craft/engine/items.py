@@ -128,9 +128,9 @@ def record(conn: Connection, task_run_id: int, attempt_id: int, event: ItemRecor
 def validate_numbers(event: ItemRecord) -> None:
     """Refuse malformed counts before any lifecycle write."""
     if (
-        type(event.row_count) is not int
+        (event.row_count is not None and (type(event.row_count) is not int or event.row_count < 0))
         or type(event.number) is not int
-        or min(event.row_count, event.number) < 0
+        or event.number < 0
     ):
         raise HandlerError(
             f"item {event.key}: rows={event.row_count}, attempt={event.number}; expected "
@@ -215,13 +215,19 @@ def summaries(conn: Connection, task_runs: Sequence[int]) -> dict[int, ItemProgr
     if not task_runs:
         return {}
     rows = conn.execute(statement(conn, "item_summaries"), {"task_run_ids": json.dumps(task_runs)})
-    return {r.task_run_id: ItemProgress(r.total, r.done, r.failed, r.skipped) for r in rows}
+    return {
+        r.task_run_id: ItemProgress(r.total, r.done, r.failed, r.skipped, r.measured, r.unmeasured)
+        for r in rows
+    }
 
 
 def attempt_summaries(conn: Connection, task_run: int) -> dict[int, ItemProgress]:
     """Keep each attempt's historical item counts alongside the current task-run counts."""
     rows = conn.execute(statement(conn, "item_attempt_summaries"), {"task_run_id": task_run})
-    return {r.attempt_id: ItemProgress(r.total, r.done, r.failed, r.skipped) for r in rows}
+    return {
+        r.attempt_id: ItemProgress(r.total, r.done, r.failed, r.skipped, r.measured, r.unmeasured)
+        for r in rows
+    }
 
 
 def prepare(conn: Connection, run: int, attempt: int, keys: list[str]) -> None:

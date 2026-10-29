@@ -129,7 +129,10 @@ def test_task_can_reference_pipeline_only_in_engine_db(populated, tmp_path):
         folder,
         "task_parameters.csv",
         "PIPELINE_CODE,TASK_CODE,PARAMETER_NAME,PARAMETER_VALUE",
-        [("STORED", "load", "SCRIPT_FILE", "python_scripts/patch.py")],
+        [
+            ("STORED", "load", "SCRIPT_FILE", "python_scripts/patch.py"),
+            ("STORED", "load", "SCRIPT_KIND", "INGESTION"),
+        ],
     )
     assert apply(project, folder).applied
     assert apply(project, folder).changes == ()

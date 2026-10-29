@@ -116,6 +116,8 @@ class Explanation:
     next_action: str
     dependents: tuple[str, ...] = ()
     standing_pause: TaskPause | None = None
+    retry_on: str | None = None
+    retry_source: str | None = None
 
 
 def explain(snapshot: TaskSnapshot) -> Explanation:
@@ -587,7 +589,35 @@ def explain_task(ctx: OperationContext, request: TaskSelection) -> Explanation:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         snapshots = _snapshots(conn, pipeline_id, selector, ctx.config.dependency_gates, task_code)
         dependents = visible_dependents(conn, ctx, pipeline_code)
-    return replace(explain(snapshots[0]), dependents=dependents)
+        from etl_craft.engine.repository.tasks import (
+            fetch_task_execution_detail,
+            fetch_task_parameters,
+        )
+        from etl_craft.engine.run_definitions import for_run
+        from etl_craft.execution.retries import task_retry_policy
+
+        with for_run(conn, snapshots[0].run.pipeline_run_id):
+            task_id = snapshots[0].task_id
+            policy = task_retry_policy(
+                fetch_task_parameters(conn, task_id),
+                ctx.config,
+                fetch_task_execution_detail(conn, task_id).handler,
+            )
+    actual: str | None = policy.retry_on
+    source = policy.source
+    task = snapshots[0].task
+    if task is not None and task.attempts and task.attempts[-1].retry_on is not None:
+        captured = task.attempts[-1]
+        actual = captured.retry_on
+        if actual != policy.retry_on:
+            origin = "parameter" if "parameter" in source else "default"
+            source = f"{origin} recorded on attempt {captured.attempt_id}"
+    return replace(
+        explain(snapshots[0]),
+        dependents=dependents,
+        retry_on=actual,
+        retry_source=source,
+    )
 
 
 def item_action(task: TaskRunView | None, action: str) -> str:

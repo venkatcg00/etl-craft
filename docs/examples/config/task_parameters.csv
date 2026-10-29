@@ -5,6 +5,7 @@ SALES_DAILY,alert,EMAIL_TO,sales-data@example.com|sales-leads@example.com,Y
 SALES_DAILY,fetch_orders,INPUT_PARAMS,"{""region"": ""uk"", ""days"": 1}",Y
 SALES_DAILY,fetch_orders,RETRIES,2,Y
 SALES_DAILY,fetch_orders,SCRIPT_FILE,python_scripts/sales/fetch_orders.py,Y
+SALES_DAILY,fetch_orders,SCRIPT_KIND,INGESTION,Y
 SALES_DAILY,fetch_orders,SOURCE_OBJECT,Order service API,Y
 SALES_DAILY,fetch_orders,TASK_TIMEOUT_SECONDS,1800,Y
 SALES_DAILY,load_orders,DOCUMENTATION,Appends the day's orders to the region's table.,Y
@@ -19,6 +20,7 @@ SALES_DAILY,setup_orders,SCRIPT_FILE,sql_scripts/sales/orders_uk.sql,Y
 SALES_DAILY,setup_orders,SQL_ACTION,SETUP_TABLE,Y
 SALES_DAILY,validate_feed,INPUT_PARAMS,"{""table"": ""lnd.orders_uk"", ""min_rows"": 1}",Y
 SALES_DAILY,validate_feed,SCRIPT_FILE,python_scripts/sales/validate_feed.py,Y
+SALES_DAILY,validate_feed,SCRIPT_KIND,INGESTION,Y
 SALES_DAILY_EU,alert,EMAIL_BODY,Run $$pipeline_run_id ended $$status.,Y
 SALES_DAILY_EU,alert,EMAIL_SUBJECT,$$pipeline_code: $$status,Y
 SALES_DAILY_EU,alert,EMAIL_TO,sales-data@example.com|sales-leads@example.com,Y
@@ -26,6 +28,7 @@ SALES_DAILY_EU,fetch_orders,INPUT_PARAMS,"{""region"": ""eu"", ""days"": 1}",Y
 SALES_DAILY_EU,fetch_orders,RETRIES,2,Y
 SALES_DAILY_EU,fetch_orders,RETRY_DELAY_SECONDS,300,Y
 SALES_DAILY_EU,fetch_orders,SCRIPT_FILE,python_scripts/sales/fetch_orders.py,Y
+SALES_DAILY_EU,fetch_orders,SCRIPT_KIND,INGESTION,Y
 SALES_DAILY_EU,fetch_orders,SOURCE_OBJECT,Order service API,Y
 SALES_DAILY_EU,fetch_orders,TASK_TIMEOUT_SECONDS,1800,Y
 SALES_DAILY_EU,load_orders,DOCUMENTATION,Appends the day's orders to the region's table.,Y
@@ -44,5 +47,6 @@ SALES_MART,daily_totals,SELECT_QUERY,"SELECT CAST(ordered_at AS DATE) AS order_d
 SALES_MART,daily_totals,SQL_ACTION,CREATE_TABLE,Y
 SALES_MART,publish,INPUT_PARAMS,"{""partner"": ""acme""}",Y
 SALES_MART,publish,SCRIPT_FILE,python_scripts/sales/publish_to_partner.py,Y
+SALES_MART,publish,SCRIPT_KIND,UTILITY,Y
 SALES_MART,totals_by_region,SELECT_QUERY,"SELECT 'uk' AS region, SUM(amount) AS total_amount FROM sales.orders_uk",Y
 SALES_MART,totals_by_region,SQL_ACTION,CREATE_TABLE,Y

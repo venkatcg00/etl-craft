@@ -201,9 +201,9 @@ def test_rule_reporting_uses_admitted_rules_after_they_are_disabled(engine_db):
             {"pipeline": pipeline, "task": task, "target": target},
         ).scalar_one()
         run = start_run(conn, pipeline)
-        import json
+        from etl_craft.core.definitions import Definition
 
-        snapshot = json.loads(
+        snapshot = Definition.read(
             conn.execute(
                 text(
                     "SELECT METADATA_SNAPSHOT AS snapshot FROM AUD_PIPELINES_RUN_LOG "
@@ -212,9 +212,9 @@ def test_rule_reporting_uses_admitted_rules_after_they_are_disabled(engine_db):
                 {"id": run},
             ).scalar_one()
         )
-        for name, table in snapshot.items():
-            for row in table["rows"]:
-                assert set(row) == set(table["columns"]), (name, set(row), set(table["columns"]))
+        for name, rows in snapshot.rows.items():
+            for row in rows:
+                assert set(row) == set(snapshot.columns[name]), name
         binding = transitions.find_or_create_task_run(conn, task, run)
         conn.execute(text("UPDATE CFG_BUSINESS_RULES SET ACTIVE_FLAG='N'"))
         conn.execute(text("UPDATE CFG_TASKS SET ACTIVE_FLAG='N' WHERE TASK_ID=:id"), {"id": task})

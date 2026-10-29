@@ -17,6 +17,14 @@ All notable changes are recorded here. The format follows
 
 ### Changed
 
+- **Breaking:** Python tasks require `SCRIPT_KIND=INGESTION` or `UTILITY`. Utility scripts
+  receive no offset and may omit row counts; unmeasured counts remain NULL. Upgrade assigns
+  `INGESTION` to existing tasks and preserves scalar and partitioned offsets. Existing pinned
+  runs retain ingestion semantics; new configuration must declare the kind explicitly.
+- **Breaking:** `SQL_SCRIPT` and utility Python default to `RETRY_ON=NONE`. Repeating side
+  effects after disconnects is unsafe; an explicit task parameter overrides the default.
+  Ingestion and managed SQL keep their existing default. `explain` shows the policy and source.
+
 - Pull-request CI separates complete-suite execution from Python/platform compatibility checks,
   verifies ownership against the unfiltered test collection, and retains the full release matrix.
 

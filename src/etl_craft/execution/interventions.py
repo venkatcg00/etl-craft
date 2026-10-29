@@ -39,9 +39,11 @@ from etl_craft.core.enums import (
     InterventionAction,
     OffsetType,
     RunStatus,
+    ScriptKind,
 )
 from etl_craft.core.errors import HandlerError, RunRefusedError, RunStateError, UsageError
 from etl_craft.core.governance import check_reason
+from etl_craft.core.script_kinds import script_kind
 from etl_craft.engine import controls, locks, runlog, transitions
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository import intervention_rows as record
@@ -547,6 +549,14 @@ def reset_offset(
             raise UsageError(
                 f"{pipeline_code}.{task_code} has HANDLER={handler}; `offset` needs a Python task; "
                 "a SQL task's position is reset with `watermark`"
+            )
+        if (
+            script_kind(fetch_task_parameters(conn, task_id), f"{pipeline_code}.{task_code}")
+            == ScriptKind.UTILITY
+        ):
+            raise UsageError(
+                f"{pipeline_code}.{task_code}: SCRIPT_KIND=UTILITY has no offset to reset; "
+                "use SCRIPT_KIND=INGESTION for a source with a position"
             )
         selected = runlog.select_run(conn, pipeline_id, selector)
         active = conn.execute(

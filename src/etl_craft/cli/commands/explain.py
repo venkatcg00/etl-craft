@@ -45,7 +45,7 @@ def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
             f"attempts={done.task.attempt_count if done.task else 0}"
             + (
                 f" rejected={done.task.reject_count}"
-                if done.task and done.task.reject_count
+                if done.task and done.task.reject_count is not None
                 else ""
             )
         )
@@ -72,6 +72,9 @@ def _render(args: argparse.Namespace, out: Output, done: Explanation) -> int:
                 f"gate task_id={wait.task_id} next_check_at={wait.next_check_at} "
                 f"wait_until={wait.wait_until or 'indefinite'} looks={wait.looks}"
             )
+        out.line(
+            f"RETRY_ON={done.retry_on or 'Not recorded'} ({done.retry_source or 'Not recorded'})"
+        )
         if done.retry_at is not None:
             out.line(f"retry_at={done.retry_at.isoformat()}")
         if done.dependents:

@@ -94,7 +94,14 @@ def run_demo(config: Path) -> tuple[str, ...]:
                         "PARAMETER_NAME": "SCRIPT_FILE",
                         "PARAMETER_VALUE": "python_scripts/pool_demo.py",
                         "ACTIVE_FLAG": "Y",
-                    }
+                    },
+                    {
+                        "PIPELINE_CODE": "POOL_DEMO",
+                        "TASK_CODE": "load",
+                        "PARAMETER_NAME": "SCRIPT_KIND",
+                        "PARAMETER_VALUE": "INGESTION",
+                        "ACTIVE_FLAG": "Y",
+                    },
                 ],
             }
             for name, rows in wanted.items():

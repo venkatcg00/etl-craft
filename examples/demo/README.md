@@ -334,3 +334,10 @@ pipeline and task code to hold it, optionally `--outcome SUCCESS|FAILED|SKIPPED`
 `--expires-at` timestamp with an offset. Replacement requires `--replace`; task `resume`
 removes both the pause and outcome and creates no runs. A scheduled pipeline `resume` requires
 `--then run-now|catch-up|wait`. See the run-control guide for admission and expiry semantics.
+
+### Python script kinds
+
+Every Python task declares `SCRIPT_KIND` in its parameters. Source loaders use `INGESTION`;
+the export/backfill wait scripts use `UTILITY` and report neither offsets nor row counts.
+Their counts remain **Not measured**, not zero. Utility tasks default to `RETRY_ON=NONE`;
+set a retry policy explicitly only when repeating the external action is safe.

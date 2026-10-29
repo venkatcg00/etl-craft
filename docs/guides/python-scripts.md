@@ -2,7 +2,7 @@
 
 A task with `HANDLER = 'PYTHON'` runs your team's Python code. Ingestion is one use: it reads
 its source from where the last run left off and writes a warehouse table. The engine runs it,
-captures everything it prints and logs, records its counts, and keeps its offset.
+captures everything it prints and logs, records reported counts, and keeps ingestion offsets.
 
 Project upgrades move `ingestion_scripts/` to `python_scripts/` and change each Python task's
 `SCRIPT_NAME` parameter to `SCRIPT_FILE` in its config CSV, written as a path from the project
@@ -12,10 +12,53 @@ in `craft-connector.yml`; the old setting and folder are not aliases. SQL files 
 `sql_files/` to `sql_scripts/`, shared by managed SELECTs and unmanaged SQL scripts, and
 `SCRIPT_FILE` values gain the `sql_scripts/` prefix.
 
+## Script kinds
+
+Every Python task requires a `SCRIPT_KIND=INGESTION` or `SCRIPT_KIND=UTILITY` task parameter.
+Supply it in `task_parameters.csv` for new tasks; partial updates need not repeat a stored kind.
+Apply, validate and refresh refuse metadata with missing or invalid values. An upgrade
+adds `INGESTION` to existing tasks and preserves their offsets, including partitions.
+
+- `INGESTION` reads source data. Its `row_count` is required (zero is a measured empty batch),
+  and its offset commits with success. Partitioned offsets and fan-out keep the same rules.
+- `UTILITY` performs work such as dropping a delivery file, calling an API or starting an
+  Informatica data-movement job. `task.offset` is always `None`, across retries and resumes.
+  Returning an offset fails; use `INGESTION` for work with a source position. `row_count` is
+  optional. Omit it when rows were not measured: the database stores NULL, never an invented
+  zero. Reports omit it or show **Not measured**. A reported zero stays zero.
+
+Utility example ([drop_file.py](../examples/python_scripts/drop_file.py)):
+
+```python
+from etl_craft.scripting import ScriptResult
+
+
+def run(task):
+    assert task.offset is None
+    folder = task.config.host_dir / "outbox"
+    folder.mkdir(exist_ok=True)
+    (folder / "ready.signal").write_text(str(task.pipeline_run_id), encoding="utf-8")
+    return ScriptResult()
+```
+
+With utility fan-out, each item retains its reported count. The task total is NULL when any
+successful item has no count, and an empty fan-out is also unmeasured. Detail, status and
+explain report, for example, `Not measured: 3 of 10 items reported no count`, derived from
+stored items. When every item reports a count the total is their sum. Ingestion still requires
+a count from every item, and an empty ingestion fan-out reports zero. Totals never reconstruct
+an unmeasured task count from its items.
+
+Use `task.config.host_dir` for delivery files: `project_dir` may point at pinned, immutable code.
+
+Utility Python and `SQL_SCRIPT` default to `RETRY_ON=NONE`: repeating external side effects
+after a lost connection is unsafe. An explicit `RETRY_ON` parameter overrides it. Ingestion
+and managed SQL keep `Orchestration.Retry_on`. `explain` shows the effective policy and source.
+
 ## The task
 
 | Parameter | Value |
 |---|---|
+| `SCRIPT_KIND` | required: `INGESTION` or `UTILITY` |
 | `SCRIPT_FILE` | the script's path from the project directory, inside `python_scripts/`, such as `python_scripts/crm/customers.py` |
 | `INPUT_PARAMS` | optional: a JSON object the script receives as a dictionary, such as `{"region": "eu", "days": 30}` |
 | `SOURCE_OBJECT` | optional: where the script reads from, for the [catalog](catalog.md)'s lineage graphs |
@@ -51,7 +94,7 @@ def run(task: ScriptTask) -> ScriptResult:
 
 | Attribute | Holds |
 |---|---|
-| `offset` | where the last successful run left off, an `Offset` with its `value` and `datatype`, or `None` on the first run |
+| `offset` | ingestion: where the last successful run left off, an `Offset` with its `value` and `datatype`, or `None` on the first run; utility: always `None` |
 | `input_params` | `INPUT_PARAMS` as a dictionary, empty when unset |
 | `pipeline_id` | the pipeline definition's id; stamp it on every row you write |
 | `pipeline_run_id` | the pipeline execution's id; stamp it on every row you write |
@@ -75,7 +118,8 @@ warehouse the task retains its reservation until those connections close. A new 
 new engine. Pooled connections using minted credentials are recycled and authenticate afresh;
 do not use temporary tables to carry durable state between tasks or across credential refreshes.
 
-`ScriptResult` holds `row_count`, the rows the script wrote, a required whole number that the
+`ScriptResult` holds `row_count`, the rows the script wrote, required for ingestion and optional
+for utility work. A supplied count is a nonnegative whole number that the
 engine records as the task's source, target and insert counts; `offset`, the new offset, or `None`
 to keep the stored one; and `variables`, a mapping of names to any values of your own, listed
 in the task log. The engine validates the whole result before storing its offset.

@@ -5,7 +5,7 @@ SELECT e.report_id AS report_id,:task_run_id AS task_run_id,:attempt_id AS attem
 e.key AS key,COALESCE(old.ITEM_ATTEMPT_NUMBER,0) AS number,
 CASE WHEN old.ITEM_RECORD_ID IS NULL THEN 'QUEUED' ELSE 'SKIPPED' END AS status,
 old.STARTED_AT AS started,CASE WHEN old.ITEM_RECORD_ID IS NULL THEN NULL ELSE :now END AS ended,
-COALESCE(old.ROW_COUNT,0) AS row_count,old.ERROR_MESSAGE AS error,:actor AS actor,:now AS now
+old.ROW_COUNT AS row_count,old.ERROR_MESSAGE AS error,:actor AS actor,:now AS now
 FROM (SELECT json_extract(value,'$.key') AS key,json_extract(value,'$.report_id') AS report_id
       FROM json_each(:entries)) e
 LEFT JOIN AUD_TASK_ITEMS old ON old.ITEM_RECORD_ID=(

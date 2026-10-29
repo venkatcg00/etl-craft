@@ -185,11 +185,12 @@ def _timestamp(value: object, failure: HandlerError) -> datetime:
 class ScriptResult:
     """What a script reports: the rows it wrote, where it left off, and any values of its own.
 
-    ``row_count`` is required, a whole number of 0 or more. ``offset`` of ``None`` keeps the
+    ``row_count`` is required for INGESTION and optional for UTILITY; reported values are
+    whole numbers of 0 or more. ``offset`` of ``None`` keeps the
     stored offset. ``variables`` are listed in the task log as ``NAME = value`` lines.
     """
 
-    row_count: int
+    row_count: int | None = None
     offset: Offset | None = None
     variables: Mapping[str, Any] = field(default_factory=dict)
 

@@ -156,6 +156,7 @@ def check_signal_queries(world, target):
         downstream,
         task_params={
             "SCRIPT_FILE": "python_scripts/signals.py",
+            "SCRIPT_KIND": "INGESTION",
             "INPUT_PARAMS": '{"keys":"$$event_keys"}',
         },
         event_rows=context.event_rows,

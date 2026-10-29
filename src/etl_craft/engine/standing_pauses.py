@@ -7,10 +7,12 @@ from sqlalchemy import BigInteger, bindparam
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, acting_as
-from etl_craft.core.enums import InterventionAction, RunStatus
+from etl_craft.core.enums import Handler, InterventionAction, RunStatus, ScriptKind
+from etl_craft.core.script_kinds import script_kind
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.intervention_rows import InterventionDetails, record_intervention
+from etl_craft.engine.repository.tasks import fetch_task_execution_detail, fetch_task_parameters
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,11 @@ def apply(conn: Connection, pause: TaskPause, run_id: int) -> None:
     previous = applied(conn, run_id, pause.task_id)
     if previous is not None and previous.outcome is not None:
         return
+    params = fetch_task_parameters(conn, pause.task_id)
+    utility = fetch_task_execution_detail(conn, pause.task_id).handler == Handler.PYTHON and (
+        script_kind(params, pause.task_code) == ScriptKind.UTILITY
+    )
+    count = None if utility else 0
     binding = transitions.find_or_create_task_run(conn, pause.task_id, run_id)
     assert pause.outcome is not None
     transitions.mark_task_run(
@@ -135,9 +142,12 @@ def apply(conn: Connection, pause: TaskPause, run_id: int) -> None:
             f"actor={pause.actor}, expiry={pause.expires_at or 'until resume'}, "
             f"reason={pause.reason}"
         ),
-        target_count=0,
+        target_count=count,
     )
-    conn.execute(statement(conn, "standing_pause_summary"), {"task_run_id": binding.task_run_id})
+    conn.execute(
+        statement(conn, "standing_pause_summary"),
+        {"task_run_id": binding.task_run_id, "count": count},
+    )
     record_intervention(
         conn,
         pipeline_id=pause.pipeline_id,
@@ -145,7 +155,7 @@ def apply(conn: Connection, pause: TaskPause, run_id: int) -> None:
         task_id=pause.task_id,
         action=InterventionAction.PAUSE_APPLIED,
         to_status=pause.outcome,
-        target_count=0,
+        target_count=count,
         reason=pause.reason,
         requested_by=SYSTEM_ACTOR.name,
         details=InterventionDetails(item_key=str(pause.pause_id)),
