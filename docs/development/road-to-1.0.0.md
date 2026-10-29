@@ -172,7 +172,7 @@ item's text, or work done early under another item.
 | S7.AB Standing task controls | Done | #268 | Versioned task pauses, admitted outcomes and explicit scheduled resume choices |
 | S7.AJ Required CI under ten minutes | Done | #269 | Complete PR suite once, explicit platform compatibility, fail-closed ownership and three clean execution-time runs |
 | S7.AC Table-level business rules | Planned | | `BUSINESS_RULE_LEVEL` TABLE rules return one PASSED/OBSERVED row per run on the run log, never per-row results |
-| S7.AD Python script kinds | Planned | | Required `SCRIPT_KIND` INGESTION/UTILITY; utility scripts get no offset and may report no row count |
+| S7.AD Python script kinds | Done | #270 | Explicit ingestion/utility contracts, nullable utility counts and safe unmanaged retry defaults |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Planned | | Guard project rows, admin/audit data and owned team-table DDL |
@@ -227,7 +227,7 @@ requests this plan text together with S7.AF's code; only S7.AF is implemented in
 Owner clarification for S7.AF: disabling a parent preserves unchanged existing children.
 New or changed active children require active parents. Columns must still retire before their table.
 
-Run order is S7.AF, S7.Y B, S7.AI, S7.Z, S7.AA, S7.AB, S7.AJ. S7.Y stays In progress until B merges.
+Run order (owner, 2026-10-29): S7.AD, S7.AC, S7.X, S7.AH, S7.AG, then S7.A page code.
 
 - S7.Z: Engine DB truth replaces file drift reporting; direct edits need no drift report.
   Reuse S7.AG's project/admin/team-table guards for direct edits; its bullets remain unchanged.
@@ -389,6 +389,13 @@ does not move worker work ahead of the metadata, account or operator-control cor
     implementing pull requests update `AGENTS.md`'s design rules to match.
 
 **Acceptance availability.**
+
+S7.AD validates both script kinds, nullable fan-out counts, retries/resumes, standing SUCCESS,
+reset refusals and last-good refresh execution on SQLite and PostgreSQL. Real-row upgrades
+cover every released schema and preserve scalar and partitioned offsets. Concurrent fan-out
+checks passed twenty local rounds. Static checks and strict docs passed; the complete matrix
+and installed-wheel demos remain CI gates. No warehouse SQL changed; cloud acceptance was
+not needed.
 
 S7.AJ (#269) passed three consecutive complete required-CI runs below ten minutes of
 execution time, including a cold-cache run. Ownership verification, zero-skip outcomes and
@@ -884,6 +891,17 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.AD owner decision, 2026-10-29: utility fan-out totals are NULL if any successful item
+  is unmeasured; each item retains its own count, and empty utility fan-out is unmeasured.
+  All-measured totals are summed. Ingestion still requires every item count and reports zero
+  for an empty fan-out. Detail/status/explain derive measured/unmeasured item counts from
+  existing rows; readers never reconstruct an unmeasured task total from its items.
+  Existing count columns already represent absent measurements with NULL; only the item
+  ROW_COUNT column needs to become nullable. No new column or table is added. Older admitted
+  untagged images retain ingestion semantics without rewriting their hash or bundle; new
+  images carry an internal format tag and require an explicit kind.
+  SQL watermark reset already refuses tasks without a watermark; S7.A's panels remain UI work.
 
 - S7.AJ owner decisions, 2026-10-28: plan text and CI implementation ship in one PR.
   The ten-minute gate measures the longest chain of job execution durations through workflow
@@ -7640,7 +7658,7 @@ release candidate.
      | Task/pipeline rename replays offsets or consumed events | Preserve IDs and refuse active runs; planned test_rename_preserves_offsets_and_events | S7.AH |
      | Pipeline manager reaches project editing or hidden upstreams | Project access gates all grants; restricted pipelines retain matching-grant rules, project CAN_MANAGE administers its project, upstream CAN_VIEW is required; test_project_edit_and_dependency_permissions | S7.Y B |
      | Local log names collide across projects | Project-ID log directory, readable legacy locations; test_project_log_paths | S7.Y B |
-     | Arbitrary SQL/utility side effects retried after disconnect | Default RETRY_ON=NONE; planned test_unmanaged_default_retry_policy | S7.AD |
+     | Arbitrary SQL/utility side effects retried after disconnect | Default RETRY_ON=NONE; test_unmanaged_default_retry_policy | S7.AD |
      | All active admins become locked or disabled | Refuse last unlocked admin removal; planned test_last_unlocked_admin_guard | S7.A.7 |
      | Served catalog has no sign-in | API-hosted, project-filtered, same browser session | S7.A.7 |
      | Agent token registers in another pool | Bind tokens to pool; test_agent_token_pool_binding | S7.AI |
@@ -8163,7 +8181,7 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | `SI_SETUP` (manual, once and on schema change) | one `SETUP_TABLE` per target table in `lnd`, `prs`, `cdc`, `pre_ods`, `ods`, `dm`, `dwh` | SQL `SETUP_TABLE` | `infra/sql/06` to `11` |
 | `SI_REFERENCE` (deploy after `seed apply`, or detached stewardship trigger; no daily schedule) | `ds_*_to_dwh`, `info_data_dictionary_to_dwh` | SQL `SCD2_MERGE` for the four `ds` tables and dictionary | reference-history triggers |
 | | `<table>_deletes_to_dwh` (one per copy) | SQL `DELETE_ROWS` (soft), selecting `dwh` keys absent from the source | the triggers' `D` rows |
-| `SI_CLIENT_ALPHA` (every 15 min outside the maintenance hour; `OVERLAP_POLICY=SKIP`) | `alpha_source_to_lnd` | PYTHON `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
+| `SI_CLIENT_ALPHA` (every 15 min outside the maintenance hour; `OVERLAP_POLICY=SKIP`) | `alpha_source_to_lnd` | PYTHON (`SCRIPT_KIND=INGESTION`) `mongo_to_lnd.py`: reads documents after the stored offset, writes `lnd.client_alpha_cs_data`, returns the new offset | `client_alpha_check_new_data`, `client_alpha_branch`, `client_alpha_source_to_lnd` |
 | | `alpha_lnd_to_prs` (depends on the ingestion with `HAS_DATA`) | SQL `SCD2_MERGE` on `source_system_identifier`, `MERGE_DEDUPE_ORDER` on the source timestamp, so `prs` keeps every version of a source record | `client_alpha_lnd_to_prs` (insert, update and duplicate counts) |
 | | `alpha_prs_to_cdc` | SQL `OVERWRITE_TABLE` with `$$pipeline_run_id` and `ACTIVE_FLAG = 'Y'` (the versions `prs` opened in this run) | `client_alpha_prs_to_cdc` |
 | | `alpha_preods_delete` | SQL `DELETE_ROWS`, `HARD_DELETE = true`: selects Alpha's keys from `pre_ods.customer_support_stage` | replacement of Alpha's stage rows |
@@ -8171,17 +8189,17 @@ Every Airflow task maps to an etl-craft task; nothing in the example runs Spark 
 | | `alpha_rules` | BUSINESS_RULES on only Alpha's rows in `pre_ods.customer_support_stage`: `INCOMPLETE`, `REJECT` and `REPORT` checks with explicit downstream policies and known generator cases (S8.H) | the validity half of `client_alpha_cdc_to_predm` and `aud.data_error_history` |
 | | `alpha_preods_to_ods` (one task per ODS table, depending on the rules) | SQL `SCD1_MERGE` into the normalized ODS: one table per entity (interactions, customers, agents, support areas and the like), each keyed on its own business key and referring to the others by key, excluding rejected keys | the normalized half of `client_alpha_predm_to_dm` |
 | | `alpha_failure_alert` (depends on every task with `FAILURE`, run condition `ANY`) | EMAIL_ALERT to the team | Airflow failure emails |
-| `SI_CLIENT_BETA` (every 15 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `beta_source_to_lnd`, then Beta-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS tasks as Alpha; ends at ODS | One PYTHON `kafka_to_lnd.py` task, S5.AK `task.fan_out`, one item per Kafka partition; S5.AH PARTITIONS offsets | `Client_Beta_ETL_Task_Flow` |
+| `SI_CLIENT_BETA` (every 15 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `beta_source_to_lnd`, then Beta-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS tasks as Alpha; ends at ODS | One PYTHON (`SCRIPT_KIND=INGESTION`) `kafka_to_lnd.py` task, S5.AK `task.fan_out`, one item per Kafka partition; S5.AH PARTITIONS offsets | `Client_Beta_ETL_Task_Flow` |
 | `SI_CLIENT_GAMMA` (every 5 min outside maintenance; `OVERLAP_POLICY=SKIP`) | `gamma_wait_objects` at the head | EVENT_WAIT, S5.AI keyed `EVENT_SQL` on `lnd.gamma_object_events` with `EVENT_KEY_COLUMN=object_key`, `EVENT_TIMEOUT_MINUTES=55`, `EVENT_ON_TIMEOUT=SKIP` | event-driven Gamma delivery |
-| | `gamma_source_to_lnd` with `SUCCESS` dependency on wait; then Gamma-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS; ends at ODS | PYTHON `minio_to_lnd.py`: reads exactly the consumed object keys from `task.event_keys` (ETag and size from `task.event_rows`) through the S3 API; no bucket listing or second TEXT cursor | `Client_Gamma_ETL_Task_Flow` |
+| | `gamma_source_to_lnd` with `SUCCESS` dependency on wait; then Gamma-prefixed LND → PRS → CDC → PRE_ODS → rules → ODS; ends at ODS | PYTHON (`SCRIPT_KIND=INGESTION`) `minio_to_lnd.py`: reads exactly the consumed object keys from `task.event_keys` (ETag and size from `task.event_rows`) through the S3 API; no bucket listing or second TEXT cursor | `Client_Gamma_ETL_Task_Flow` |
 | `SI_DM` (`0 */6 * * *`; no client pipeline dependency gate) | `ods_to_dm` | SQL `SCD2_MERGE` into flattened `dm.customer_support_fact`; S7.X bounded UPDATE_DATE window over committed ODS writes, including steward corrections; the mart has no human writes | all former per-client ODS-to-DM tasks |
 | `SI_STEWARD_DS_<TABLE>` (`STEWARDABLE_FLAG = 'Y'`, one per stewarded `ds` table; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION (S7.M) with the table's own script in `validation_scripts/` | hand-loaded reference corrections |
-| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py`: reads every file in `task.uploads` into the table's landing table, each row with its `UPLOAD_ID` | |
+| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON (`SCRIPT_KIND=INGESTION`) `steward_to_lnd.py`: reads every file in `task.uploads` into the table's landing table, each row with its `UPLOAD_ID` | |
 | | `steward_to_ds` (depends on `steward_to_lnd`) | SQL `SCD1_MERGE` into the `ds` table | |
 | | `reference_refresh` (final task after the merge) | S5.AC `RUN_PIPELINE` for `SI_REFERENCE`, `DETACH` | carries corrections to `dwh` |
 | `SI_MAINTENANCE` (nightly, outside client schedules) | one task per layer | S5.X `SQL_SCRIPT`, explicit lake-table maintenance; `RETRY_ON = NONE` | Iceberg file and snapshot maintenance |
 | `SI_STEWARD_BUSINESS` (`STEWARDABLE_FLAG = 'Y'`; no schedule, runs only from an upload) | `validate_file` | FILE_VALIDATION with the business file's own script | hand-corrected business records |
-| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON `steward_to_lnd.py` into `lnd.steward_cs_data`, each row with its `UPLOAD_ID` and source `STEWARD` | |
+| | `steward_to_lnd` (depends on `validate_file` with `SUCCESS`) | PYTHON (`SCRIPT_KIND=INGESTION`) `steward_to_lnd.py` into `lnd.steward_cs_data`, each row with its `UPLOAD_ID` and source `STEWARD` | |
 | | `steward_lnd_to_prs`, `steward_prs_to_cdc`, `steward_preods_delete`, `steward_cdc_to_preods`, `steward_rules` | The client chain's actions: the delete selects only `STEWARD` rows of `pre_ods.customer_support_stage`; the same business rules run on corrections | |
 | | `steward_preods_to_ods` (one per ODS table, depending on the rules) | SQL `SCD1_MERGE` into the normalized ODS as human writes under S5.O.3's locks, attributed to the uploader | |
 

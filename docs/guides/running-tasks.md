@@ -78,7 +78,9 @@ dependencies wait for this retry to settle. Retry budgets count persisted attemp
 one task-run identity; restarting a supervisor does not grant extra attempts.
 
 Automatic retries also require an eligible failure class. `Orchestration.Retry_on` defaults to
-`TRANSIENT`; the task parameter `RETRY_ON` overrides it:
+`TRANSIENT`. `SQL_SCRIPT` and `SCRIPT_KIND=UTILITY` Python default to `NONE`, because
+repeating arbitrary SQL or external side effects may duplicate work. The task parameter
+`RETRY_ON` overrides either default; `explain` names the effective policy and its source:
 
 | Policy | Eligible failures |
 |---|---|

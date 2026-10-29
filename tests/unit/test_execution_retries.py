@@ -18,12 +18,12 @@ pytestmark = pytest.mark.unit
 
 
 def test_defaults_overrides_and_capped_backoff():
-    assert task_retry_policy({}, CONFIG) == RetryPolicy(0, 60, 2.0)
+    assert task_retry_policy({}, CONFIG, "SQL") == RetryPolicy(0, 60, 2.0)
     config = replace(CONFIG, retries=3)
-    assert task_retry_policy({}, config).retries == 3
-    assert task_retry_policy({"RETRIES": "0", "RETRY_DELAY_SECONDS": "0"}, config) == RetryPolicy(
-        0, 0, 2.0
-    )
+    assert task_retry_policy({}, config, "SQL").retries == 3
+    assert task_retry_policy(
+        {"RETRIES": "0", "RETRY_DELAY_SECONDS": "0"}, config, "SQL"
+    ) == RetryPolicy(0, 0, 2.0)
     policy = RetryPolicy(10000, 60, 2.0)
     assert [policy.delay(n) for n in (1, 2, 3, 7, 10000)] == [60, 120, 240, 3600, 3600]
     assert RetryPolicy(2, 0, 2).delay(10000) == 0
@@ -44,7 +44,7 @@ def test_defaults_overrides_and_capped_backoff():
 )
 def test_invalid_parameters_fail_before_admission(params):
     with pytest.raises(MetadataError, match="CFG_TASK_PARAMETERS"):
-        task_retry_policy(params, CONFIG)
+        task_retry_policy(params, CONFIG, "SQL")
 
 
 def test_failure_classification():

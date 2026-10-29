@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.definitions import Definition, current
-from etl_craft.core.enums import Handler, YesNo
+from etl_craft.core.enums import Handler, ScriptKind, YesNo
 from etl_craft.core.errors import MetadataError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import with_suggestions
@@ -175,6 +175,9 @@ def admitted_parameters(definition: Definition, task_id: int) -> dict[str, str]:
                 )
             params[str(row["parameter_name"])] = value
     task = definition.row("CFG_TASKS", "task_id", task_id)
+    # Untagged images used the ingestion-only contract, even for custom SCRIPT_KIND parameters.
+    if task["handler"] == Handler.PYTHON and definition.format_version == 1:
+        params["SCRIPT_KIND"] = ScriptKind.INGESTION
     if task.get("target_active_flag") == YesNo.YES and task.get("target_table_id") is not None:
         target = definition.row("CFG_TABLES", "table_id", task["target_table_id"])
         name = ".".join(

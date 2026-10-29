@@ -264,3 +264,7 @@ catalog-repair-rates = ["tests/integration/engine/test_catalog.py::test_catalog_
 test-telemetry-after-database-drop = [
     "tests/integration/engine/test_fixture_templates.py::test_database_cleanup_finishes_telemetry_before_dropping_its_database",
 ]
+unmanaged-side-effect-retry = [
+    "tests/unit/test_script_kind_contract.py::test_unmanaged_default_retry_policy",
+    "tests/integration/execution/test_script_kinds.py::test_utility_automatic_retries_require_an_explicit_policy",
+]

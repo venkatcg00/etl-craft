@@ -68,6 +68,9 @@ def _text_status(out: Output, done: StatusView) -> None:
     if run.child_run_ids:
         out.line(f"triggered child pipeline_run_ids={run.child_run_ids}")
     for task in done.tasks:
+        detail = task.explanation.task
+        if detail is not None and detail.item_progress:
+            out.line(f"{task.task_code}: {detail.item_progress}")
         if task.explanation.standing_pause is not None:
             out.line(task.explanation.standing_pause.describe())
         if task.explanation.state == "waiting on child":

@@ -43,7 +43,7 @@ def admit_attempt(
             handler = detail.handler
         reason = check_admission(config, detail, params)
         timeout = task_timeout_seconds(params, config)
-        policy = task_retry_policy(params, config)
+        policy = task_retry_policy(params, config, handler)
         fault_point("runner.after_timeout")
         with engine.begin() as conn:
             binding = transitions.find_or_create_task_run(conn, task.task_id, task.pipeline_run_id)

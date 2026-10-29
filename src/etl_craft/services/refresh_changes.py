@@ -20,6 +20,8 @@ def differences(
     ).one_or_none()
     old = {} if previous is None else json.loads(previous.snapshot)
     current = json.loads(snapshot)
+    old.pop("_version", None)
+    current.pop("_version", None)
     changes = []
     for table in sorted(old.keys() | current.keys()):
         before = old.get(table, {}).get("rows", [])

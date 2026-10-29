@@ -57,7 +57,7 @@ def scene(engine_db):
         "FULL",
         None,
         {},
-        {},
+        {"SCRIPT_KIND": "INGESTION"},
         False,
         engine_db.config,
         logging.getLogger("etl_craft.items"),
@@ -376,7 +376,7 @@ def test_reusing_a_report_id_for_another_observation_is_refused(scene):
     with pytest.raises(StaleTransitionError, match="original report"):
         scene.store.item_event(replace(start, row_count=999))
     with scene.db.connect() as conn:
-        assert latest(conn, scene.summary)[0].row_count == 0
+        assert latest(conn, scene.summary)[0].row_count == start.row_count
 
 
 def test_error_urls_are_masked_in_the_immediate_reply_and_persisted_evidence(scene):

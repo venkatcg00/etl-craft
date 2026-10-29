@@ -104,6 +104,9 @@ or are cancelled and reconciled. The target lock serializes resets with SQL read
 
 ## Reset a Python script's offset
 
+Only `SCRIPT_KIND=INGESTION` Python tasks have an offset to reset. Utility tasks refuse
+`mark --offset` through both the CLI and API; they always receive `task.offset=None`.
+
 ```bash
 etl-craft mark --pipeline-code CLICKS --task-code read_topic \
   --offset '{"3": 120, "7": null}' --reason 'partition 7 removed; replay partition 3'

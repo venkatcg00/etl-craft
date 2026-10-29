@@ -33,9 +33,10 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config.model import PYTHON_SCRIPTS_DIRNAME
 from etl_craft.config.project import python_script
-from etl_craft.core.enums import OffsetType
+from etl_craft.core.enums import OffsetType, ScriptKind
 from etl_craft.core.errors import HandlerError, PermanentError, TransientError
 from etl_craft.core.log import capture_all_loggers
+from etl_craft.core.script_kinds import reported_count, script_kind
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import TaskStore
 from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
@@ -44,7 +45,7 @@ from etl_craft.warehouse.connection import warehouse_task
 
 logger = logging.getLogger(__name__)
 
-PARAMETERS = frozenset({"SCRIPT_FILE", "INPUT_PARAMS"})
+PARAMETERS = frozenset({"SCRIPT_FILE", "INPUT_PARAMS", "SCRIPT_KIND"})
 """The task parameters a Python-script task reads."""
 
 SCRIPT_LOGGER = "etl_craft_script"
@@ -55,6 +56,7 @@ SCRIPT_LOGGER = "etl_craft_script"
 def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     """Run the task's Python script and return the counts it reports."""
     params = context.task_params
+    kind = script_kind(params, f"{context.pipeline_code}.{context.task_code}")
     name = (params.get("SCRIPT_FILE") or "").strip()
     if not name:
         raise HandlerError(
@@ -63,7 +65,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     path = python_script(context.config, name)
     input_params = event_input_params(context)
     store = task_store(context, engine_db)
-    stored = store.state().offset
+    stored = store.state().offset if kind == ScriptKind.INGESTION else None
     offset = (
         Offset.from_stored(stored.offset_type, stored.offset_value)
         if stored is not None and stored.offset_value is not None and not context.backfill
@@ -74,7 +76,11 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     logger.info(
         "running %s from offset %s with input params %s",
         name,
-        "none (first run)" if offset is None else f"{offset.stored()} ({offset.datatype})",
+        "none (UTILITY)"
+        if kind == ScriptKind.UTILITY
+        else "none (first run)"
+        if offset is None
+        else f"{offset.stored()} ({offset.datatype})",
         ", ".join(sorted(input_params)) or "none",
     )
     started = time.monotonic()
@@ -96,11 +102,13 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
         variables["OFFSET"] = f"{checked.offset.stored()} ({checked.offset.datatype})"
     variables.update(result_variables)
     logger.info(
-        "%s wrote %d row(s) (%.2fs); offset %s",
+        "%s wrote %s row(s) (%.2fs); offset %s",
         name,
-        checked.row_count,
+        "Not measured" if checked.row_count is None else checked.row_count,
         elapsed,
-        "unchanged"
+        "not applicable (UTILITY)"
+        if kind == ScriptKind.UTILITY
+        else "unchanged"
         if checked.offset is None or context.backfill
         else f"returned {checked.offset.stored()}",
     )
@@ -257,10 +265,12 @@ def check_result(
         raise HandlerError(
             f"{name} returned {type(result).__name__}, not a ScriptResult with its row count"
         )
-    count = result.row_count
-    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+    kind = script_kind(task.task_params, f"{task.pipeline_code}.{task.task_code}")
+    reported_count(result.row_count, kind, f"{task.pipeline_code}.{task.task_code}: {name}")
+    if kind == ScriptKind.UTILITY and result.offset is not None:
         raise HandlerError(
-            f"{name} returned row_count={count!r}; it must be a whole number, 0 or more"
+            f"{task.pipeline_code}.{task.task_code}: {name} returned offset={result.offset!r}; "
+            "UTILITY has no offset; remove it or set SCRIPT_KIND=INGESTION"
         )
     if result.offset is not None and not isinstance(result.offset, Offset):
         raise HandlerError(
@@ -344,7 +354,7 @@ def script_task(
         refresh_type=context.refresh_type,
         offset=offset,
         input_params=input_params,
-        task_params=params,
+        task_params=types.MappingProxyType(dict(params)),
         force=context.force,
         config=context.config,
         _locks=store,

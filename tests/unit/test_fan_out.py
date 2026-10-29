@@ -4,6 +4,7 @@ import logging
 import threading
 import tracemalloc
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -53,7 +54,7 @@ def task(memory=512):
         "FULL",
         None,
         {},
-        {},
+        {"SCRIPT_KIND": "INGESTION"},
         False,
         SimpleNamespace(),
         logging.getLogger("etl_craft.items"),
@@ -301,3 +302,27 @@ def test_invalid_item_control_fields_fail_at_the_shared_request_boundary(given):
     }
     with pytest.raises(UsageError):
         ItemControl(**(args | given))
+
+
+def test_utility_fan_out_preserves_item_counts_and_honest_totals():
+    for counts, expected in [([2, None, 0], None), ([2, 0, 3], 5), ([], None)]:
+        helper = replace(task(), task_params={"SCRIPT_KIND": "UTILITY"})
+        keys = [str(i) for i in range(len(counts))]
+        result = helper.fan_out(
+            keys, lambda key, counts=counts: ScriptResult(counts[int(key)]), max_items=10
+        )
+        assert helper.offset is None
+        assert result.row_count == expected
+        assert {key: record.row_count for key, record in helper._items.records.items()} == dict(
+            zip(keys, counts, strict=True)
+        )
+        if None in counts:
+            from etl_craft.core.items import progress
+
+            text = str(progress(tuple(helper._items.records.values())))
+            assert "Not measured: 1 of 3 items reported no count" in text
+        again = helper.fan_out(
+            keys, lambda key: pytest.fail("successful item ran twice"), max_items=10
+        )
+        assert again.row_count == expected
+    assert task().fan_out([], lambda _: ScriptResult(1), max_items=1).row_count == 0

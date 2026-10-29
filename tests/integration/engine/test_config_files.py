@@ -149,6 +149,7 @@ def test_apply_inserts_updates_and_preserves_absent_keys(exported):
                 }
                 for name, value in (
                     ("SCRIPT_FILE", "python_scripts/sales/publish.py"),
+                    ("SCRIPT_KIND", "UTILITY"),
                     ("RETRIES", "2"),
                 )
             ]
@@ -209,6 +210,7 @@ def test_apply_inserts_updates_and_preserves_absent_keys(exported):
     assert by_operation["insert"] == {
         ("tasks.csv", "SALES_MART.archive"),
         ("task_parameters.csv", "SALES_MART.archive SCRIPT_FILE"),
+        ("task_parameters.csv", "SALES_MART.archive SCRIPT_KIND"),
         ("task_parameters.csv", "SALES_MART.archive RETRIES"),
         ("task_dependencies.csv", "SALES_MART.archive on SALES_MART.publish SUCCESS"),
         ("task_dependencies.csv", "SALES_MART.alert on SALES_MART.archive ALWAYS"),

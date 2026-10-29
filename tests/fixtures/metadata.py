@@ -37,6 +37,8 @@ def add_task(conn, pipeline_id, code, handler="SQL", **params):
         handler=handler,
     )
     params = dict(params)
+    if handler == "PYTHON":
+        params.setdefault("SCRIPT_KIND", "INGESTION")
     target = params.get("TARGET_OBJECT")
     task_name = "cfg_tasks" if conn.dialect.name == "postgresql" else "CFG_TASKS"
     if target is not None and any(

@@ -94,11 +94,13 @@ handler's guide lists the ones it reads. Every task may also set:
 | Parameter | Value |
 |---|---|
 | `TASK_TIMEOUT_SECONDS` | the task's time limit, overriding `Orchestration.Task_timeout_seconds`; `0` for none |
-| `RETRY_ON` | `NONE`, `TRANSIENT` (default), `TRANSIENT_AND_UNKNOWN` or `ANY`; overrides `Orchestration.Retry_on` |
+| `RETRY_ON` | `NONE`, `TRANSIENT`, `TRANSIENT_AND_UNKNOWN` or `ANY`; utility Python and `SQL_SCRIPT` default to `NONE`; other tasks use `Orchestration.Retry_on` (default `TRANSIENT`) |
 | `RETRIES` | additional local attempts; defaults to `Orchestration.Retries`, or `0` |
 | `RETRY_DELAY_SECONDS` | first retry delay in seconds; default `60`, `0` for immediate |
 | `RETRY_BACKOFF` | finite multiplier of at least `1`; default `2.0`, delay capped at `3600` seconds |
 | `DOCUMENTATION` | what the task does; kept in versions by [`docs-version`](lineage.md) and shown in the catalog |
+
+Python tasks also require `SCRIPT_KIND=INGESTION` or `UTILITY`; see [Python scripts](python-scripts.md).
 
 A parameter no handler reads is a `validate` warning, with the nearest names, except on `PYTHON`
 tasks, whose scripts may read any.

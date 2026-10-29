@@ -16,7 +16,7 @@ class ItemRecord:
     key: str
     number: int
     status: ItemStatus
-    row_count: int = 0
+    row_count: int | None = None
     error: str | None = None
     started: str | None = None
     ended: str | None = None
@@ -57,10 +57,18 @@ class ItemProgress:
     done: int
     failed: int
     skipped: int
+    measured: int = 0
+    unmeasured: int = 0
 
     def __str__(self) -> str:
         """Use the same progress text in logs, status, explain and catalog pages."""
-        return f"items {self.done} / {self.total}, {self.failed} failed, {self.skipped} skipped"
+        text = f"items {self.done} / {self.total}, {self.failed} failed, {self.skipped} skipped"
+        if self.unmeasured:
+            text += (
+                f"; Not measured: {self.unmeasured} of {self.measured + self.unmeasured} "
+                "items reported no count"
+            )
+        return text
 
 
 def progress(records: tuple[ItemRecord, ...]) -> ItemProgress:
@@ -70,6 +78,14 @@ def progress(records: tuple[ItemRecord, ...]) -> ItemProgress:
         sum(r.status in {ItemStatus.SUCCESS, ItemStatus.SKIPPED} for r in records),
         sum(r.status in {ItemStatus.FAILED, ItemStatus.CANCELLED} for r in records),
         sum(r.status == ItemStatus.SKIPPED for r in records),
+        sum(
+            r.status in {ItemStatus.SUCCESS, ItemStatus.SKIPPED} and r.row_count is not None
+            for r in records
+        ),
+        sum(
+            r.status in {ItemStatus.SUCCESS, ItemStatus.SKIPPED} and r.row_count is None
+            for r in records
+        ),
     )
 
 

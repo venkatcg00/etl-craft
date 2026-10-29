@@ -13,6 +13,13 @@ from etl_craft.core.errors import EtlCraftError
 E = TypeVar("E", bound=StrEnum)
 
 
+class ScriptKind(StrEnum):
+    """Whether Python reports ingestion positions or performs utility work."""
+
+    INGESTION = "INGESTION"
+    UTILITY = "UTILITY"
+
+
 class GapState(StrEnum):
     """Comparison outcomes displayed in project documentation."""
 
