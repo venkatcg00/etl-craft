@@ -595,6 +595,7 @@ def test_timing_uses_needs_chain_not_wall_or_slowest_job():
     assert result["wall_seconds"] == 744
     assert result["queue_seconds"] == 612
     assert result["longest_job_queue_seconds"] == 600
+    assert result["workflow_queue_seconds"] == 0
     assert result["slowest_jobs"][0]["name"] == "test (0)"
     jobs[-1]["status"] = "queued"
     with pytest.raises(ValueError, match="has not completed"):

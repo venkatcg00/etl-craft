@@ -45,7 +45,8 @@ and cache hits. `scripts/ci-durations.json` holds measured case estimates groupe
 for coverage, by platform. An unmeasured test runs with a one-second estimate; it is never omitted.
 Re-measure a completed CI run with `uv run python scripts/ci_shards.py timing <run-id>`.
 It reads that run's workflow and reports the longest execution chain through `needs`, summed
-job queue time, the longest individual queue, wall time and the five slowest jobs. Queue
+job queue time, initial workflow queue time, the longest individual queue, wall time and
+the five slowest jobs. Initial queue time ends when the first job is created. Job queue
 time can overlap across jobs, so its sum is not added to execution time. The ten-minute
 gate excludes runner queues; wall time remains visible.
 Both CI and Docs accept a manual `cache=cold|warm` input for deliberate timing validation.

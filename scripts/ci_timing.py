@@ -75,6 +75,12 @@ def measure(
         "conclusion": run["conclusion"],
         "execution_seconds": execution,
         "queue_seconds": sum(job["queue_seconds"] for job in waits),
+        "workflow_queue_seconds": max(
+            0,
+            (
+                min(timestamp(job["created_at"]) for job in jobs) - timestamp(run["created_at"])
+            ).total_seconds(),
+        ),
         "longest_job_queue_seconds": max(job["queue_seconds"] for job in waits),
         "wall_seconds": wall,
         "slowest_jobs": sorted(waits, key=lambda job: job["execution_seconds"], reverse=True)[:5],
