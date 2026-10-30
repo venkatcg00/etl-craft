@@ -14,7 +14,8 @@ from etl_craft.api import routes
 from etl_craft.api.app import create_app
 from etl_craft.cli.client import ApiClient
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ActionScope, ApiRole, Audit, HttpMethod, Permission, TokenKind
+from etl_craft.core.enums import ActionScope, ApiRole, Audit, HttpMethod, TokenKind
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.services.operations import OperationContext, actions
 from etl_craft.services.operations.actions import ACTIONS, action_path, invoke

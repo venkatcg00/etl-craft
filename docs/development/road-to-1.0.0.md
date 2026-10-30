@@ -966,8 +966,9 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   business day once, even after the range). A moved tick takes the same wall time on the next
   business day, so it merges with that day's own tick; the scheduler always returns the earliest
   effective tick, keeping the persisted cursor ordered. Choices that differ from the item text:
-  `NonBusinessDay` lives in `core/calendars.py` because `core/enums.py` is at the 800-line
-  module limit; manual runs keep their given date; holidays are read live rather than from the
+  `core/enums.py` reached the 800-line module limit, so (owner decision) the access and
+  governance enums moved to `core/enums_access.py` and AGENTS.md names such splits; manual runs
+  keep their given date; holidays are read live rather than from the
   pinned refresh snapshot, which pins only the pipeline's CALENDAR_ID and NON_BUSINESS_DAY.
 
 - S7.V, 2026-10-30: `ALLOW_EMPTY` takes `true`/`false` like every other SQL flag, since

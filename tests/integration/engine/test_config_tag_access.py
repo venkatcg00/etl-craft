@@ -8,7 +8,8 @@ from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
-from etl_craft.core.enums import ActionName, ApiRole, Permission
+from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.core.enums_access import Permission
 from etl_craft.services.operations import OperationContext
 from fixtures.actions import act
 from fixtures.auth import service_token

@@ -6,7 +6,8 @@ from typing import ClassVar
 from sqlalchemy.engine import Connection, Row
 
 from etl_craft.core.cron import timezone
-from etl_craft.core.enums import ApiRole, EnvironmentType, Governance, YesNo
+from etl_craft.core.enums import ApiRole, YesNo
+from etl_craft.core.enums_access import EnvironmentType, Governance
 from etl_craft.core.errors import MetadataError, UsageError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.engine import locks

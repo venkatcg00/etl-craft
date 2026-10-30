@@ -26,11 +26,11 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.types import TypeEngine
 
 from etl_craft.config.model import DEFAULT_MAX_PARALLEL_TASKS
-from etl_craft.core.calendars import NonBusinessDay
 from etl_craft.core.enums import (
     BusinessRuleLevel,
     DependencyType,
     Handler,
+    NonBusinessDay,
     RefreshType,
     RunCondition,
     YesNo,

@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.engine import Connection, Row
 
-from etl_craft.core.calendars import NonBusinessDay, Schedule, parse_weekend
+from etl_craft.core.calendars import Schedule, parse_weekend
 from etl_craft.core.cron import business_rule, parse, timezone
+from etl_craft.core.enums import NonBusinessDay
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.calendars import load_calendar

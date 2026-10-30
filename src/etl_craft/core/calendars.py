@@ -18,22 +18,15 @@ import calendar as month_calendar
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from etl_craft.core.cron import business_rule, day_ticks, matches_day, next_after
+from etl_craft.core.enums import NonBusinessDay
 from etl_craft.core.errors import MetadataError
 
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 SEARCH_DAYS = 366 * 8 + 1
 """How far a search looks: a full Gregorian leap-day cycle of days, as ``core.cron`` does."""
-
-
-class NonBusinessDay(StrEnum):
-    """What a pipeline's schedule does with a tick on a day its calendar is closed."""
-
-    SKIP = "SKIP"
-    NEXT_BUSINESS_DAY = "NEXT_BUSINESS_DAY"
 
 
 @dataclass(frozen=True)

@@ -5,8 +5,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from etl_craft.core.calendars import BusinessCalendar, NonBusinessDay, Schedule, parse_weekend
+from etl_craft.core.calendars import BusinessCalendar, Schedule, parse_weekend
 from etl_craft.core.cron import business_rule, next_after, parse
+from etl_craft.core.enums import NonBusinessDay
 from etl_craft.core.errors import MetadataError
 
 pytestmark = pytest.mark.unit

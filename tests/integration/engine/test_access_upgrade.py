@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
-from etl_craft.core.enums import ApiRole, Permission
+from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums_access import Permission
 from etl_craft.dialects.engine.base import EngineDialect
 from etl_craft.engine import migrations
 from etl_craft.services.operations import OperationContext

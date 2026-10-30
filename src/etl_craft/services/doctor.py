@@ -33,11 +33,11 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     EmailTransport,
     GatePolicy,
-    Governance,
     IcebergMaintenance,
     ProcessRole,
     YesNo,
 )
+from etl_craft.core.enums_access import Governance
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.resources import (
     MIB,

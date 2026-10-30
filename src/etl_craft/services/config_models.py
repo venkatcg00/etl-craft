@@ -7,7 +7,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from etl_craft.core.enums import Permission, YesNo
+from etl_craft.core.enums import YesNo
+from etl_craft.core.enums_access import Permission
 from etl_craft.engine.repository.config_rows import ACTIVE_FLAG, Key, Value
 from etl_craft.engine.standing_pauses import TaskPause
 from etl_craft.services.refresh_models import PipelineRefresh

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from etl_craft.core.enums import EnvironmentType, Governance
+from etl_craft.core.enums_access import EnvironmentType, Governance
 from etl_craft.core.errors import UsageError
 
 

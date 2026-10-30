@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import Permission
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.core.time import as_utc
 from etl_craft.engine.queries import statement

@@ -8,7 +8,8 @@ from sqlalchemy import text
 
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import ActionName, ActionScope, ApiRole, HttpMethod, Permission
+from etl_craft.core.enums import ActionName, ActionScope, ApiRole, HttpMethod
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError
 from etl_craft.engine.repository.pipelines import selected_project
 from etl_craft.services.operations import OperationContext

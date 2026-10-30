@@ -7,7 +7,7 @@ from typing import ClassVar
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.actor import migration
-from etl_craft.core.enums import Permission
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import ResourceNotFoundError, RunRefusedError, SqlGuardError, UsageError
 from etl_craft.core.governance import check_reason
 from etl_craft.core.text import is_metadata_code

@@ -17,11 +17,11 @@ from etl_craft.core.enums import (
     ApiRole,
     Audit,
     HttpMethod,
-    Permission,
     Placement,
     Transport,
     YesNo,
 )
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import (
     ConfigurationError,
     PermissionDeniedError,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from etl_craft.core import enums
+from etl_craft.core import enums, enums_access
 from etl_craft.core.enums import RunStatus
 
 pytestmark = pytest.mark.unit
@@ -10,11 +10,11 @@ pytestmark = pytest.mark.unit
 EXPECTED = {
     enums.BusinessRuleLevel: {"ROW", "TABLE"},
     enums.ScriptKind: {"INGESTION", "UTILITY"},
-    enums.EnvironmentType: {"DEV", "SIT", "UAT", "PROD", "SANDBOX", "CUSTOM"},
-    enums.Governance: {"STRICT", "RELAXED"},
-    enums.Permission: {"CAN_VIEW", "CAN_RUN", "CAN_MANAGE"},
-    enums.AccessIntent: {"GRANT", "REVOKE"},
-    enums.AccessChange: {"added", "changed permission", "revoked", "unchanged"},
+    enums_access.EnvironmentType: {"DEV", "SIT", "UAT", "PROD", "SANDBOX", "CUSTOM"},
+    enums_access.Governance: {"STRICT", "RELAXED"},
+    enums_access.Permission: {"CAN_VIEW", "CAN_RUN", "CAN_MANAGE"},
+    enums_access.AccessIntent: {"GRANT", "REVOKE"},
+    enums_access.AccessChange: {"added", "changed permission", "revoked", "unchanged"},
     enums.IcebergMaintenance: {"expire_snapshots", "remove_orphan_files"},
     enums.ArchiveKind: {
         "TEXT",
@@ -60,6 +60,7 @@ EXPECTED = {
         "Not declared",
         "Expected before first deployment",
     },
+    enums.NonBusinessDay: {"SKIP", "NEXT_BUSINESS_DAY"},
     enums.YesNo: {"Y", "N"},
     enums.RunStatus: {"QUEUED", "IN-PROGRESS", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"},
     enums.AttemptStatus: {
@@ -203,7 +204,8 @@ def test_enum_values_match_the_stored_values(enum):
 def test_every_enum_in_the_module_is_checked():
     defined = {
         obj
-        for obj in vars(enums).values()
+        for module in (enums, enums_access)
+        for obj in vars(module).values()
         if isinstance(obj, type) and issubclass(obj, enums.StrEnum) and obj is not enums.StrEnum
     }
     # Action names grow with the action table, whose own test covers every member.

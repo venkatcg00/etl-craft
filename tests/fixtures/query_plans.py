@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 
 from sqlalchemy import bindparam, text
 
-from etl_craft.core.enums import ApiRole, Permission
+from etl_craft.core.enums import ApiRole
+from etl_craft.core.enums_access import Permission
 
 UTILITIES = {
     "controller_listen": "LISTEN has no query plan.",

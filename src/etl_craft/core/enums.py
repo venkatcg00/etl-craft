@@ -562,6 +562,13 @@ class TlsMode(StrEnum):
     SSL = "SSL"
 
 
+class NonBusinessDay(StrEnum):
+    """What a pipeline's schedule does with a tick on a day its calendar is closed."""
+
+    SKIP = "SKIP"
+    NEXT_BUSINESS_DAY = "NEXT_BUSINESS_DAY"
+
+
 class YesNo(StrEnum):
     """A Y/N flag column: active, current, backfill, catch-up."""
 
@@ -756,45 +763,3 @@ class IcebergMaintenance(StrEnum):
 
     EXPIRE_SNAPSHOTS = "expire_snapshots"
     REMOVE_ORPHAN_FILES = "remove_orphan_files"
-
-
-class AccessIntent(StrEnum):
-    """Bulk access command intent."""
-
-    GRANT = "GRANT"
-    REVOKE = "REVOKE"
-
-
-class AccessChange(StrEnum):
-    """The actual change relative to current access rows."""
-
-    ADDED = "added"
-    CHANGED_PERMISSION = "changed permission"
-    REVOKED = "revoked"
-    UNCHANGED = "unchanged"
-
-
-class Permission(StrEnum):
-    """Increasing permissions on a pipeline or tag."""
-
-    CAN_VIEW = "CAN_VIEW"
-    CAN_RUN = "CAN_RUN"
-    CAN_MANAGE = "CAN_MANAGE"
-
-
-class EnvironmentType(StrEnum):
-    """Administrator-selected purpose of a project."""
-
-    DEV = "DEV"
-    SIT = "SIT"
-    UAT = "UAT"
-    PROD = "PROD"
-    SANDBOX = "SANDBOX"
-    CUSTOM = "CUSTOM"
-
-
-class Governance(StrEnum):
-    """Project intervention policy; authorization is independent."""
-
-    STRICT = "STRICT"
-    RELAXED = "RELAXED"
