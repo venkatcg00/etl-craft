@@ -1,5 +1,6 @@
 """Browser views render the same actor-scoped reads as the CLI and API."""
 
+import secrets
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote
@@ -92,7 +93,8 @@ def add_pages(app: FastAPI, ctx: OperationContext) -> None:
         methods = invoke(
             replace(ctx, actor=SYSTEM_ACTOR, role=None), ActionName.LOGIN_METHODS, NoInput()
         )
-        csrf = browser.csrf_value(request)
+        fresh = None if browser.has_challenge(request) else secrets.token_urlsafe(32)
+        csrf = fresh or request.cookies[browser.CSRF]
         response = render(
             request,
             "signin.html",
@@ -106,7 +108,8 @@ def add_pages(app: FastAPI, ctx: OperationContext) -> None:
                 "notice": ctx.config.auth.signin_notice,
             },
         )
-        browser.challenge(response, csrf, ctx.config.auth.session_hours)
+        if fresh is not None:
+            browser.challenge(response, fresh, ctx.config.auth.session_hours)
         return response
 
     @app.get("/ui", include_in_schema=False)
