@@ -103,7 +103,24 @@ Actions act on the selection only: the whole run, or the selected task in it. Ea
 from the `capabilities` read: an unavailable one is disabled and says why. Choosing one opens a
 confirmation with the exact scope, its data effect and whether successful work is kept; the
 request goes to `POST /api/v1/projects/{project}/controls`, as `etl-craft control` does, and the
-page shows the recorded status. A request is not completion: reload to see the run's state.
+page shows the recorded status. A request is not completion: the page shows the run's state
+when it changes.
+
+The list, pipeline and run pages update live. Every 10 seconds the server re-reads what the
+page shows, as you, and the page fetches itself again when that changed; "Updated N s ago" says
+when it last checked. While a dialog is open or you are working inside the page, a notice says
+the page has changed and offers **Refresh now** instead, so nothing moves under you. A lost
+connection shows "Live updates lost, reconnecting"; signing out or losing access stops live
+updates with the reason.
+
+## Search
+
+The search box in the top bar (press `/` or Ctrl+K) finds pipelines and tasks by any part of
+their code or name, a run by its exact run id or run key, and tables when you can view the
+whole project. Results open the object's page; a table opens its catalog page. The search page
+also lists the pipelines and runs you opened recently in this browser; they are kept in the
+browser only. `etl-craft search TEXT` and `GET /api/v1/projects/{project}/search?q=TEXT` return
+the same hits.
 
 ## Upgrade
 

@@ -1,4 +1,4 @@
-"""Workflow Monitor pages: the pipeline list, one pipeline's runs and tasks, and one run's graph.
+"""Workflow Monitor pages: pipelines, one pipeline's runs and tasks, one run's graph, and search.
 
 Each view renders S5.AA read actions with the filters as their parameters; controls post to the
 same `/api/v1` routes as the CLI, and the page only shows what the capabilities read allows.
@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from etl_craft.api.ui_graph import run_graph, run_timeline
 from etl_craft.api.ui_pages import page_values
 from etl_craft.api.ui_templates import render
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, SearchKind
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.capabilities import CapabilitiesView
@@ -36,6 +36,7 @@ from etl_craft.services.operations.requests import (
     TagFilter,
     TaskSelection,
 )
+from etl_craft.services.operations.search import SearchHit, SearchInput, SearchView
 from etl_craft.services.operations.sessions import Identity
 
 PIPELINE_TABS = frozenset({"runs", "matrix", "tasks"})
@@ -90,6 +91,37 @@ def add_monitor_pages(app: FastAPI, ctx: OperationContext) -> None:
             | _run_values(caller, request, project, pipeline_code, run_id)
             | {"title": f"Run {run_id} · {pipeline_code} · etl-craft", "view": "pipelines"},
         )
+
+    @app.get("/ui/projects/{project}/search", include_in_schema=False)
+    def search(request: Request, project: str) -> Response:
+        caller, values = page_values(ctx, request)
+        text = request.query_params.get("q", "")
+        found = invoke(caller, ActionName.SEARCH, SearchInput(q=text)) if text.strip() else None
+        assert found is None or isinstance(found, SearchView)
+        return render(
+            request,
+            "monitor/search.html",
+            values
+            | {
+                "title": f"Search · {project} · etl-craft",
+                "view": "search",
+                "search_text": text,
+                "found": found,
+                "hit_url": lambda hit: hit_url(project, hit),
+            },
+        )
+
+
+def hit_url(project: str, hit: SearchHit) -> str:
+    """Return the page that shows a search hit."""
+    if hit.kind == SearchKind.TABLE:
+        return f"/ui/projects/{quote(project, safe='')}/catalog?page={quote(str(hit.catalog_path))}"
+    code = str(hit.pipeline_code)
+    if hit.kind == SearchKind.RUN and hit.run_id is not None:
+        return run_url(project, code, hit.run_id)
+    if hit.kind == SearchKind.TASK:
+        return f"{pipeline_url(project, code)}?tab=tasks"
+    return pipeline_url(project, code)
 
 
 def _list_values(caller: OperationContext, request: Request, project: str) -> dict[str, object]:

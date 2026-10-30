@@ -279,6 +279,7 @@ class ActionName(StrEnum):
     WHOAMI = "whoami"
     HEALTH = "health"
     PIPELINES = "pipelines"
+    SEARCH = "search"
     PIPELINE_REFRESH = "pipelines refresh"
     PIPELINE_REFRESH_HISTORY = "pipeline refresh history"
     PIPELINE = "pipeline"
@@ -784,3 +785,12 @@ class TimeDisplay(StrEnum):
 
     RELATIVE = "relative"
     ABSOLUTE = "absolute"
+
+
+class SearchKind(StrEnum):
+    """The kinds of object one search box finds."""
+
+    PIPELINE = "PIPELINE"
+    TASK = "TASK"
+    TABLE = "TABLE"
+    RUN = "RUN"

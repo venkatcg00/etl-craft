@@ -223,3 +223,31 @@ def test_list_shows_next_run_recent_runs_and_sla_from_the_read(monitor):
         for run in pipeline["recent_runs"]:
             assert f'/{code}/runs/{run["pipeline_run_id"]}" title="Run' in page.text
     assert 'data-bulk="PAUSE" disabled' in page.text and 'data-csv="pipeline-table"' in page.text
+
+
+def test_search_page_lists_the_search_reads_hits_with_links_to_their_pages(monitor):
+    _, client, active = monitor
+    login(client)
+    page = client.get("/ui/projects/default/search", params={"q": "ex"})
+    assert page.status_code == 200
+    hits = api(client, "/search", q="ex")["hits"]
+    links = re.findall(r'<td><a href="([^"]+)">([^<]+)</a>', page.text)
+    assert [label for _, label in links] == [hit["label"] for hit in hits]
+    assert set(links) == {
+        ("/ui/projects/default/pipelines/SALES?tab=tasks", "EXTRACT"),
+        ("/ui/projects/default/pipelines/OPS?tab=tasks", "EXTRACT"),
+    }
+    run = client.get("/ui/projects/default/search", params={"q": str(active)})
+    assert f'href="{BASE}/OPS/runs/{active}"' in run.text
+    empty = client.get("/ui/projects/default/search")
+    assert empty.status_code == 200 and 'id="recent-list"' in empty.text
+    assert 'id="global-search"' in empty.text
+    too_long = client.get("/ui/projects/default/search", params={"q": "x" * 201})
+    assert too_long.status_code == 400 and "expected 1 to 200" in too_long.text
+
+
+def test_catalog_wrapper_opens_only_a_valid_catalog_page(monitor):
+    _, client, _ = monitor
+    login(client)
+    refused = client.get("/ui/projects/default/catalog", params={"page": "../secret.html"})
+    assert refused.status_code == 400 and "relative generated" in refused.text

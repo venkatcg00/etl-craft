@@ -151,3 +151,54 @@ def test_bulk_pause_run_now_and_csv_export(run_site, tmp_path):
             )
         ).scalar_one()
     assert paused == {"OPS", "SALES"} and runs == 1
+
+
+@pytest.mark.parametrize("browser_name", ["chromium", "firefox"])
+def test_search_shortcut_finds_a_run_and_remembers_recently_viewed_pages(run_site, browser_name):
+    _, url, active = run_site
+    with sync_playwright() as pw:
+        browser = getattr(pw, browser_name).launch()
+        page = browser.new_context(ignore_https_errors=True).new_page()
+        sign_in_to(page, url, "/ui/projects/default/pipelines/OPS")
+        expect(page.get_by_role("heading", name="OPS")).to_be_visible()
+        page.wait_for_load_state("load")
+        page.locator("main").click()
+        page.keyboard.press("/")
+        expect(page.get_by_role("searchbox", name="Search")).to_be_focused()
+        page.keyboard.type(str(active))
+        page.keyboard.press("Enter")
+        page.get_by_role("link", name=f"Run {active}", exact=True).click()
+        expect(page.get_by_text(f"Selected: the whole run {active}")).to_be_visible()
+        page.goto(url + "/ui/projects/default/search")
+        recent = page.locator("#recent-list a")
+        expect(recent).to_have_text([f"Run {active} · OPS", "Pipeline OPS"])
+        browser.close()
+
+
+def test_live_updates_refresh_the_page_or_warn_while_a_dialog_is_open(run_site, monkeypatch):
+    from etl_craft.api import ui_live
+
+    monkeypatch.setattr(ui_live, "CHECK_SECONDS", 1)
+    ctx, url, active = run_site
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_context(ignore_https_errors=True).new_page()
+        sign_in_to(page, url, "/ui/projects/default/pipelines/OPS")
+        page.wait_for_load_state("load")
+        expect(page.locator("#live-updated")).to_contain_text("s ago")
+        with acting_as(Actor("owner", ActorKind.USER)), ctx.engine.begin() as conn:
+            finish_run(conn, active)
+        expect(page.locator("#live").get_by_title(f"Run {active} · IN-PROGRESS")).to_have_count(0)
+        page.get_by_role("button", name="Pause", exact=True).click()
+        with acting_as(Actor("owner", ActorKind.USER)), ctx.engine.begin() as conn:
+            pipeline = conn.execute(
+                text("SELECT PIPELINE_ID FROM CFG_PIPELINES WHERE PIPELINE_CODE='OPS'")
+            ).scalar_one()
+            newer = start_run(conn, pipeline)
+        expect(page.locator("#live-notice")).to_have_text("This page has changed since it loaded.")
+        newer_link = page.locator("#live").get_by_role("link", name=str(newer), exact=True)
+        expect(newer_link).to_have_count(0)
+        page.get_by_role("dialog").get_by_role("button", name="Cancel").click()
+        expect(newer_link).to_be_visible()
+        expect(page.locator("#live-notice")).to_have_text("")
+        browser.close()

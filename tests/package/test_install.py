@@ -35,6 +35,8 @@ SHIPPED = (
     "etl_craft/api/templates/signin.html",
     "etl_craft/api/static/shell.js",
     "etl_craft/api/templates/monitor/run.html",
+    "etl_craft/api/templates/monitor/search.html",
+    "etl_craft/api/templates/monitor/_live_state.html",
     "etl_craft/api/static/monitor.js",
     "etl_craft/api/static/monitor.css",
     "etl_craft/api/static/htmx.min.js",

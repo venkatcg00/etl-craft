@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 2b of 6 | #277, #281, slice 2b PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b) |
+| S7.A Web UI pages | In progress, slice 2c of 6 | #277, #281, #282, slice 2c PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
@@ -915,6 +915,15 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.A slice 2c (owner, 2026-10-30): one `search` read action (CLI `etl-craft search`, API
+  `/search`, the top-bar box) matches visible pipeline and task codes and names by substring,
+  runs by exact id or key, and tables only for whole-project viewers, as the catalog requires.
+  Recently viewed pipelines and runs stay in the browser's storage, not account settings. Live
+  updates are a server-sent stream that re-reads the page's own documents every 10 seconds as
+  the caller and says `changed`; it adds no change-token query or action, so visibility rules
+  stay those of the reads. Run-now parameter overrides leave S7.A for their own engine item
+  (per-run override records, CLI first); run now keeps `run_date`. Timeline gate and event
+  waits still need their rows in a read.
 - S7.A slice 2b (owner, 2026-10-30: "you need to bring them"): `PIPELINES` and `PIPELINE` add
   `next_run`, `schedule_problem` and `recent_runs`; one schedule row read and one bounded recent-run
   query (PostgreSQL uses a LATERAL index range) serve every listed pipeline. A schedule that cannot

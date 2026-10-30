@@ -139,18 +139,92 @@ function exportCsv(button) {
   URL.revokeObjectURL(link.href);
 }
 
+// Listeners sit on the document so content replaced by live updates keeps working.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || !dialog) return;
+  if (button.matches("[data-control]")) open(button, "control");
+  else if (button.matches("[data-bulk]")) open(button, "bulk");
+  else if (button.matches("[data-run-now]")) open(button, "run");
+});
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-csv]");
+  if (button) exportCsv(button);
+});
+document.addEventListener("change", (event) => {
+  if (event.target.matches("#select-all")) {
+    document.querySelectorAll("[data-select]").forEach((box) => { box.checked = event.target.checked; });
+  }
+  if (event.target.matches("#select-all, [data-select]")) refreshSelection();
+});
 if (dialog) {
-  document.querySelectorAll("[data-control]").forEach((b) => b.addEventListener("click", () => open(b, "control")));
-  document.querySelectorAll("[data-bulk]").forEach((b) => b.addEventListener("click", () => open(b, "bulk")));
-  document.querySelectorAll("[data-run-now]").forEach((b) => b.addEventListener("click", () => open(b, "run")));
   form.addEventListener("submit", submit);
   dialog.querySelector("#control-cancel").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", () => opener?.focus());
+  dialog.addEventListener("close", () => {
+    if (opener?.isConnected) opener.focus();
+    if (stale) refresh();
+  });
 }
-document.querySelector("#select-all")?.addEventListener("change", (event) => {
-  document.querySelectorAll("[data-select]").forEach((box) => { box.checked = event.target.checked; });
-  refreshSelection();
-});
-document.querySelectorAll("[data-select]").forEach((box) => box.addEventListener("change", refreshSelection));
-document.querySelectorAll("[data-csv]").forEach((button) => button.addEventListener("click", () => exportCsv(button)));
 if (document.querySelector("#select-all")) refreshSelection();
+
+// Live updates: the server re-reads this page's documents and says when they changed. Fresh
+// content replaces the page's live region unless someone is working in it; then a notice offers
+// the refresh instead, so a selection or an open dialog never changes under the user.
+const region = document.querySelector("#live[data-live-url]");
+const updated = document.querySelector("#live-updated");
+const notice = document.querySelector("#live-notice");
+const refreshButton = document.querySelector("#live-refresh");
+let checkedAt = Date.now();
+let stale = false;
+
+function busy() {
+  return dialog?.open || region.contains(document.activeElement) && document.activeElement !== region;
+}
+
+async function refresh() {
+  const kept = new Set(selected());
+  const response = await fetch(location.href, { headers: { Accept: "text/html" } });
+  if (!response.ok) {
+    notice.textContent = `Could not refresh (HTTP ${response.status}). Reload the page.`;
+    return;
+  }
+  const fresh = new DOMParser().parseFromString(await response.text(), "text/html").querySelector("#live");
+  if (!fresh) return;
+  region.replaceChildren(...fresh.childNodes);
+  region.querySelectorAll("[data-select]").forEach((box) => { box.checked = kept.has(box.dataset.select); });
+  if (document.querySelector("#select-all")) refreshSelection();
+  stale = false;
+  refreshButton.hidden = true;
+  notice.textContent = "";
+}
+
+function changed() {
+  if (busy()) {
+    stale = true;
+    refreshButton.hidden = false;
+    notice.textContent = "This page has changed since it loaded.";
+  } else {
+    refresh();
+  }
+}
+
+if (region && typeof EventSource === "function") {
+  const source = new EventSource(region.dataset.liveUrl);
+  const mark = (event) => {
+    checkedAt = Date.parse(event.data) || Date.now();
+    if (notice.textContent.startsWith("Live updates lost")) notice.textContent = "";
+  };
+  source.addEventListener("checked", mark);
+  source.addEventListener("changed", (event) => { mark(event); changed(); });
+  source.addEventListener("ended", (event) => {
+    source.close();
+    notice.textContent = `Live updates stopped: ${event.data}`;
+  });
+  source.addEventListener("error", () => {
+    if (source.readyState !== EventSource.CLOSED) notice.textContent = "Live updates lost, reconnecting…";
+  });
+  refreshButton.addEventListener("click", refresh);
+  const tick = () => { updated.textContent = `Updated ${Math.max(0, Math.round((Date.now() - checkedAt) / 1000))} s ago.`; };
+  tick();
+  setInterval(tick, 1000);
+}

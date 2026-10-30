@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css">{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <span aria-current="page">Search</span></nav>
+<h1>Search</h1>
+{% if found %}
+<p role="status">{{ found.hits|length }} result{{ '' if found.hits|length == 1 else 's' }} for “{{ found.q }}”{% if found.truncated %}; more matched, so type more of the name{% endif %}.</p>
+{% if found.hits %}
+<table class="list" id="search-results">
+  <caption class="sr-only">Search results</caption>
+  <thead><tr><th scope="col">Kind</th><th scope="col">Name</th><th scope="col">Pipeline</th><th scope="col">Detail</th></tr></thead>
+  <tbody>{% for hit in found.hits %}<tr><td>{{ hit.kind|lower }}</td><td><a href="{{ hit_url(hit) }}">{{ hit.label }}</a></td><td>{{ hit.pipeline_code or '' }}</td><td>{{ hit.detail }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}
+<p class="note">Nothing you can see matches. Names match on any part; run ids and run keys match exactly. Tables are listed only with whole-project view.</p>
+{% endif %}
+{% else %}
+<p class="note">Type part of a pipeline, task or table name, or an exact run id or run key. Press <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> on any page.</p>
+{% endif %}
+<section class="panel" aria-labelledby="recent-title"><h2 id="recent-title">Recently viewed in this browser</h2><ul id="recent-list" data-project="{{ project.project }}"></ul><p id="recent-empty" class="note">Pipelines and runs you open appear here.</p></section>
+{% endblock %}

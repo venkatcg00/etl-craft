@@ -3,7 +3,9 @@
 {% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <a href="{{ pipeline_page }}">{{ run.pipeline_code }}</a> › {% if task_code %}<a href="{{ run_page }}">Run {{ run.pipeline_run_id }}</a> › <span aria-current="page">{{ task_code }}</span>{% else %}<span aria-current="page">Run {{ run.pipeline_run_id }}</span>{% endif %}</nav>
-<header class="object-header">
+{% include 'monitor/_live_state.html' %}
+<div id="live" data-live-url="/ui/projects/{{ project.project|urlencode }}/live?pipeline={{ run.pipeline_code|urlencode }}&amp;run={{ run.pipeline_run_id }}">
+<header class="object-header" data-recent="Run {{ run.pipeline_run_id }} · {{ run.pipeline_code }}">
   <h1>Run {{ run.pipeline_run_id }} <span class="note" id="run-key">{{ run.run_key }}</span></h1>
   <button type="button" data-copy="run-key">Copy run key</button>
   <p>{{ status(run.status) }} · {{ run.trigger_kind }}{% if run.backfill %} backfill{% endif %} · run date {{ run.run_date or "none" }}{% if run.sla_status %} · SLA {{ run.sla_status }}{% endif %}</p>
@@ -96,6 +98,7 @@
     {% endif %}
   </aside>
   {% endif %}
+</div>
 </div>
 {% with pipeline_code=run.pipeline_code, run_id=run.pipeline_run_id %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
 {% endblock %}
