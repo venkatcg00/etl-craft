@@ -101,8 +101,8 @@
     <h3>Attempts</h3>
     {% if task_run.attempts %}
     <div class="scroll"><table class="list">
-      <thead><tr><th scope="col">#</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Host</th><th scope="col">Exit</th></tr></thead>
-      <tbody>{% for a in task_run.attempts %}<tr><td><a href="{{ run_page }}/attempts/{{ a.attempt_id }}" aria-label="Attempt {{ a.attempt_number }} log and details">{{ a.attempt_number }}</a></td><td>{{ status(a.status) }}</td><td>{{ a.started_at|zoned(settings.timezone) }}</td><td>{{ a.host or "Not recorded" }}</td><td>{{ a.exit_code if a.exit_code is not none else "None" }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th scope="col">#</th><th scope="col">Status</th><th scope="col">Started</th></tr></thead>
+      <tbody>{% for a in task_run.attempts %}<tr><td><a href="{{ run_page }}/attempts/{{ a.attempt_id }}" aria-label="Attempt {{ a.attempt_number }} log and details">{{ a.attempt_number }}</a></td><td>{{ status(a.status) }}</td><td>{{ a.started_at|zoned(settings.timezone) }}</td></tr>{% endfor %}</tbody>
     </table></div>
     {% else %}<p class="note">No attempts yet.</p>{% endif %}
     {% else %}<p class="note">This task has not started in this run.</p>{% endif %}

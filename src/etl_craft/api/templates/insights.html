@@ -35,7 +35,7 @@
       <rect class="segment FAILED" x="{{ bar.x }}" y="{{ chart_height - bar.succeeded - bar.failed }}" width="{{ bar_width }}" height="{{ bar.failed }}"/>
       <rect class="segment queued" x="{{ bar.x }}" y="{{ chart_height - bar.succeeded - bar.failed - bar.other }}" width="{{ bar_width }}" height="{{ bar.other }}"/></g>{% endfor %}
   </svg></div>
-  <p class="legend" id="trend-table-note"><span><span class="swatch" aria-hidden="true"></span> Succeeded</span> <span><span class="swatch failed" aria-hidden="true"></span> Failed</span> <span><span class="swatch queued" aria-hidden="true"></span> Running, skipped or cancelled</span>; the table below lists each day.</p>
+  <p class="legend" id="trend-table-note"><span><span class="swatch" aria-hidden="true"></span> Succeeded</span> <span><span class="swatch failed" aria-hidden="true"></span> Failed</span> <span><span class="swatch other" aria-hidden="true"></span> Running, skipped or cancelled</span>; the table below lists each day.</p>
   <table class="list" id="insights-days"><thead><tr><th scope="col">Day (UTC)</th><th scope="col">Runs</th><th scope="col">Succeeded</th><th scope="col">Failed</th><th scope="col">Average duration</th></tr></thead>
   <tbody>{% for d in found.days %}<tr><td>{{ d.day }}</td><td>{{ d.runs }}</td><td>{{ d.succeeded }}</td><td>{{ d.failed }}</td><td>{{ secs(d.average_seconds) }}</td></tr>{% endfor %}</tbody></table>
   {% else %}<p>No runs started in this window. Widen the window or check the pipelines' schedules.</p>{% endif %}

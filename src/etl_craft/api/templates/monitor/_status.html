@@ -1,5 +1,5 @@
+{% set marks = {"SUCCESS": "✓", "FAILED": "✕", "LOST": "✕", "IN-PROGRESS": "▶", "RUNNING": "▶", "CLAIMED": "▶", "QUEUED": "○", "WAITING": "◷", "SKIPPED": "–", "CANCELLED": "■", "CANCEL_REQUESTED": "■", "PAUSED": "⏸", "REQUESTED": "◷", "ACKNOWLEDGED": "✓", "MET": "✓", "BREACHED": "✕"} %}
 {% macro status(value) -%}
-{%- set marks = {"SUCCESS": "✓", "FAILED": "✕", "LOST": "✕", "IN-PROGRESS": "▶", "QUEUED": "○", "WAITING": "◷", "SKIPPED": "■", "CANCELLED": "■", "REQUESTED": "◷", "ACKNOWLEDGED": "✓", "MET": "✓", "BREACHED": "✕"} -%}
 {%- if value -%}
 <span class="status {{ value }}"><span aria-hidden="true">{{ marks.get(value, "•") }}</span> {{ value }}</span>
 {%- else -%}
@@ -40,7 +40,7 @@
 
 {% macro recent_runs(runs, base) -%}
 {%- if runs -%}
-<span class="dots">{% for r in runs|reverse %}<a class="dot {{ r.status }}" href="{{ base }}/runs/{{ r.pipeline_run_id }}" title="Run {{ r.pipeline_run_id }} · {{ r.status }}"><span class="sr-only">Run {{ r.pipeline_run_id }} {{ r.status }}</span></a>{% endfor %}</span>
+<span class="dots">{% for r in runs|reverse %}<a class="dot {{ r.status }}" href="{{ base }}/runs/{{ r.pipeline_run_id }}" title="Run {{ r.pipeline_run_id }} · {{ r.status }}"><span aria-hidden="true">{{ marks.get(r.status, "•") }}</span><span class="sr-only">Run {{ r.pipeline_run_id }} {{ r.status }}</span></a>{% endfor %}</span>
 {%- else -%}<span class="note">No runs</span>{%- endif -%}
 {%- endmacro %}
 
