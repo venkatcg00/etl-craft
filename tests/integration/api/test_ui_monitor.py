@@ -157,7 +157,7 @@ def test_a_hold_from_the_run_page_posts_the_api_control_and_a_viewer_is_refused(
     assert [(row.action, row.reason) for row in rows] == [("HOLD", "check the load")]
 
 
-def ran_extract(ctx, active):
+def ran_extract(ctx, active, *, finish=True):
     from datetime import UTC, datetime, timedelta
 
     from etl_craft.core.enums import AttemptStatus
@@ -176,7 +176,22 @@ def ran_extract(ctx, active):
         lease = datetime.now(UTC) + timedelta(minutes=1)
         transitions.claim_attempt(conn, attempt, OWNER, owner="w1", lease_expires_at=lease)
         transitions.start_attempt(conn, attempt, OWNER, owner="w1", host="worker-1")
-        transitions.finish_attempt(conn, attempt, AttemptStatus.SUCCESS, OWNER, owner="w1")
+        if finish:
+            transitions.finish_attempt(conn, attempt, AttemptStatus.SUCCESS, OWNER, owner="w1")
+    return attempt
+
+
+def attempt_log(ctx, active, attempt, text_value):
+    """Place the attempt's local log where the engine records it and point LOG_PATH at it."""
+    path = ctx.config.log_dir / "project-1" / "OPS" / f"run-{active}" / "EXTRACT.attempt-1.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text_value)
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LOG_PATH=:path WHERE ATTEMPT_ID=:id"),
+            {"path": str(path.absolute()), "id": attempt},
+        )
+    return path
 
 
 def test_matrix_cells_match_each_tasks_history_and_link_to_the_task(monitor):
@@ -251,3 +266,33 @@ def test_catalog_wrapper_opens_only_a_valid_catalog_page(monitor):
     login(client)
     refused = client.get("/ui/projects/default/catalog", params={"page": "../secret.html"})
     assert refused.status_code == 400 and "relative generated" in refused.text
+
+
+def test_attempt_page_shows_the_attempt_read_and_links_its_log(monitor):
+    ctx, client, active = monitor
+    attempt = ran_extract(ctx, active)
+    attempt_log(ctx, active, attempt, "extract started\nextract done\n")
+    login(client)
+    run_page = client.get(f"{BASE}/OPS/runs/{active}", params={"task": "EXTRACT"})
+    assert f'href="{BASE}/OPS/runs/{active}/attempts/{attempt}"' in run_page.text
+    page = client.get(f"{BASE}/OPS/runs/{active}/attempts/{attempt}")
+    assert page.status_code == 200
+    document = api(client, f"/attempts/{attempt}")
+    assert document["host"] == "worker-1" and ">worker-1<" in page.text
+    log_api = f"/api/v1/projects/default/attempts/{attempt}/log"
+    assert f'href="{log_api}" download="attempt-{attempt}.log"' in page.text
+    assert client.get(log_api).text == "extract started\nextract done\n"
+    assert client.get(log_api, params={"offset": 16}).text == "extract done\n"
+
+
+def test_attempt_page_refuses_another_runs_or_pipelines_attempt_alike(monitor):
+    ctx, client, active = monitor
+    attempt = ran_extract(ctx, active)
+    login(client)
+    for path in (
+        f"{BASE}/OPS/runs/{active - 1}/attempts/{attempt}",
+        f"{BASE}/SALES/runs/{active}/attempts/{attempt}",
+        f"{BASE}/OPS/runs/{active}/attempts/999999",
+    ):
+        page = client.get(path)
+        assert page.status_code == 404 and "Not found or no access" in page.text, path

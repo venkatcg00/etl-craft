@@ -255,6 +255,10 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Browser attempt pages: an attempt's status, owner, host, exit code, times, rows and error,
+  with its log tail followed live while the attempt runs and a download of the whole log, read
+  through the existing attempt log route.
+
 - `etl-craft search TEXT [--limit N]` and `GET /api/v1/projects/{project}/search?q=…` find
   visible pipelines and tasks by any part of their code or name, runs by exact run id or run
   key, and (with whole-project view) tables. The browser adds a search box (`/` or Ctrl+K), a

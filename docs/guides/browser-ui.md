@@ -113,6 +113,13 @@ the page has changed and offers **Refresh now** instead, so nothing moves under 
 connection shows "Live updates lost, reconnecting"; signing out or losing access stops live
 updates with the reason.
 
+Each attempt in a task's panel opens the attempt's page: status, owner, host and process, exit
+code, times, rows, the error with its failure class, and the log. The log shows its last
+256 KiB (the download has all of it) and, while the attempt is queued or running, follows new
+lines every 2 seconds; clear **Follow the end** to stop scrolling. **Download log** saves the
+same bytes as `etl-craft logs --attempt-id ID` and
+`GET /api/v1/projects/{project}/attempts/{attempt_id}/log`.
+
 ## Search
 
 The search box in the top bar (press `/` or Ctrl+K) finds pipelines and tasks by any part of

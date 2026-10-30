@@ -169,6 +169,7 @@ def test_search_shortcut_finds_a_run_and_remembers_recently_viewed_pages(run_sit
         page.keyboard.press("Enter")
         page.get_by_role("link", name=f"Run {active}", exact=True).click()
         expect(page.get_by_text(f"Selected: the whole run {active}")).to_be_visible()
+        page.wait_for_load_state("load")
         page.goto(url + "/ui/projects/default/search")
         recent = page.locator("#recent-list a")
         expect(recent).to_have_text([f"Run {active} · OPS", "Pipeline OPS"])
@@ -201,4 +202,44 @@ def test_live_updates_refresh_the_page_or_warn_while_a_dialog_is_open(run_site, 
         page.get_by_role("dialog").get_by_role("button", name="Cancel").click()
         expect(newer_link).to_be_visible()
         expect(page.locator("#live-notice")).to_have_text("")
+        browser.close()
+
+
+def test_attempt_log_follows_new_lines_until_the_attempt_ends(run_site):
+    from datetime import UTC, datetime, timedelta
+
+    from etl_craft.core.enums import AttemptStatus
+    from etl_craft.engine import transitions
+
+    ctx, url, active = run_site
+    owner = Actor("owner", ActorKind.USER)
+    with acting_as(owner), ctx.engine.begin() as conn:
+        task = conn.execute(
+            text("SELECT TASK_ID FROM CFG_TASKS WHERE TASK_CODE='EXTRACT'")
+        ).scalar_one()
+        summary = transitions.find_or_create_task_run(conn, task, active).task_run_id
+        attempt = transitions.queue_attempt(conn, summary, owner)
+        lease = datetime.now(UTC) + timedelta(minutes=5)
+        transitions.claim_attempt(conn, attempt, owner, owner="w1", lease_expires_at=lease)
+        transitions.start_attempt(conn, attempt, owner, owner="w1", host="worker-1")
+        log = ctx.config.log_dir / "project-1" / "OPS" / f"run-{active}" / "EXTRACT.attempt-1.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("reading orders\n")
+        conn.execute(
+            text("UPDATE AUD_TASK_ATTEMPTS SET LOG_PATH=:path WHERE ATTEMPT_ID=:id"),
+            {"path": str(log.absolute()), "id": attempt},
+        )
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_context(ignore_https_errors=True).new_page()
+        sign_in_to(page, url, f"/ui/projects/default/pipelines/OPS/runs/{active}?task=EXTRACT")
+        page.get_by_role("link", name="Attempt 1 log and details").click()
+        shown = page.locator("#log")
+        expect(shown).to_have_text("reading orders\n")
+        with log.open("a") as stream:
+            stream.write("wrote 42 rows\n")
+        expect(shown).to_have_text("reading orders\nwrote 42 rows\n")
+        with acting_as(owner), ctx.engine.begin() as conn:
+            transitions.finish_attempt(conn, attempt, AttemptStatus.SUCCESS, owner, owner="w1")
+        expect(page.locator("#log-state")).to_contain_text("Attempt ended SUCCESS")
         browser.close()

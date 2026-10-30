@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/attempt.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <a href="{{ pipeline_page }}">{{ run.pipeline_code }}</a> › <a href="{{ run_page }}">Run {{ run.pipeline_run_id }}</a> › <a href="{{ run_page }}?task={{ task_code|urlencode }}">{{ task_code }}</a> › <span aria-current="page">Attempt {{ attempt.attempt_number }}</span></nav>
+<header class="object-header" data-recent="Attempt {{ attempt.attempt_number }} · {{ task_code }} · Run {{ run.pipeline_run_id }}">
+  <h1>Attempt {{ attempt.attempt_number }} of {{ task_code }} <span class="note">attempt id {{ attempt.attempt_id }}</span></h1>
+  <p><span id="attempt-status">{{ status(attempt.status) }}</span>{% if attempt.failure_class and attempt.error_message %} · {{ attempt.failure_class }}{% endif %}</p>
+</header>
+<dl class="facts inline">
+  <dt>Owner</dt><dd>{{ attempt.owner_id or "Not claimed" }}</dd>
+  <dt>Host</dt><dd>{{ attempt.host or "Not recorded" }}{% if attempt.pid %} · PID {{ attempt.pid }}{% endif %}</dd>
+  <dt>Exit code</dt><dd id="attempt-exit">{{ attempt.exit_code if attempt.exit_code is not none else "None yet" }}</dd>
+  <dt>Queued</dt><dd>{{ attempt.queued_at|zoned(settings.timezone) }}</dd>
+  <dt>Started</dt><dd>{{ attempt.started_at|zoned(settings.timezone) }}</dd>
+  <dt>Ended</dt><dd id="attempt-ended">{{ attempt.ended_at|zoned(settings.timezone) }}</dd>
+  <dt>Requested by</dt><dd>{{ attempt.requested_by or "The engine" }}</dd>
+  <dt>Rows written</dt><dd>{{ attempt.rows_written if attempt.rows_written is not none else "None" }}{% if attempt.reject_count %} · {{ attempt.reject_count }} rejected{% endif %}</dd>
+</dl>
+{% if attempt.error_message %}<section class="panel" aria-labelledby="error-title"><h2 id="error-title">Error</h2><pre class="log">{{ attempt.error_message }}</pre>{% if attempt.failure_source or attempt.failure_code %}<p class="note">{{ attempt.failure_source or "" }} {{ attempt.failure_code or "" }}{% if attempt.retryable %} · retryable{% endif %}</p>{% endif %}</section>{% endif %}
+<section class="panel" aria-labelledby="log-title">
+  <h2 id="log-title">Log</h2>
+  <div class="toolbar"><a class="button" href="{{ log_api }}" download="attempt-{{ attempt.attempt_id }}.log">Download log</a>
+  <label><input type="checkbox" id="log-follow" {% if live %}checked{% endif %}> Follow the end</label>
+  <span id="log-state" role="status">{% if live %}Following while the attempt runs.{% endif %}</span></div>
+  <pre class="log" id="log" tabindex="0" aria-labelledby="log-title" data-log-url="{{ log_api }}" data-attempt-url="{{ attempt_api }}" data-live="{{ 'yes' if live else 'no' }}">Loading the log…</pre>
+</section>
+{% endblock %}
