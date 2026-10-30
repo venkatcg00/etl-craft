@@ -9,7 +9,7 @@
   <h1>{{ pipeline.pipeline_code }} <span class="note">{{ pipeline.pipeline_name }}</span></h1>
   <p>{% if pipeline.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Automatic runs paused</span> {{ pipeline.paused.describe() }}{% else %}Automatic runs active{% endif %}</p>
   <div class="header-actions">
-    <button type="button" data-run-now data-scope="pipeline {{ pipeline.pipeline_code }}" data-effect="Admit one manual run of the whole pipeline for the controller; scheduled runs are unaffected." data-preserves="yes">Run now</button>
+    <button type="button" class="primary" data-run-now data-scope="pipeline {{ pipeline.pipeline_code }}" data-effect="Admit one manual run of the whole pipeline for the controller; scheduled runs are unaffected." data-preserves="yes">Run now</button>
     {% if pipeline.paused %}
     <button type="button" data-control="RESUME" data-scope="pipeline {{ pipeline.pipeline_code }}" data-preserves="yes" data-scheduled="{{ 'yes' if pipeline.run_schedule else 'no' }}" data-effect="Resume automatic runs of this pipeline; running work is unaffected.">Resume</button>
     {% else %}
@@ -28,13 +28,13 @@
   {% if tab == 'runs' %}
     {% if runs %}
     <figure class="bars">
-      <svg viewBox="0 0 {{ runs|length * 14 + 4 }} 64" width="{{ runs|length * 14 + 4 }}" height="64" role="img" aria-label="Durations of the runs listed below, newest on the right">
+      <svg viewBox="0 0 {{ runs|length * 24 + 4 }} 64" width="{{ runs|length * 24 + 4 }}" height="64" role="group" aria-label="Durations of the runs listed below, newest on the right">
         {% for r in runs|reverse %}
-        {% set h = (60 * seconds(r) / longest)|round(0, 'ceil')|int or 2 %}
-        <a href="{{ run_url(r.pipeline_run_id) }}"><rect class="bar {{ r.status }}" x="{{ loop.index0 * 14 + 2 }}" y="{{ 62 - h }}" width="10" height="{{ h }}"><title>Run {{ r.pipeline_run_id }} · {{ r.status }} · {{ duration(seconds(r)) }}</title></rect></a>
+        {% set h = [(58 * seconds(r) / longest)|round(0, 'ceil')|int, 8]|max %}
+        <a href="{{ run_url(r.pipeline_run_id) }}" aria-label="Run {{ r.pipeline_run_id }}, {{ r.status }}, {{ duration(seconds(r)) }}"><rect class="track" x="{{ loop.index0 * 24 + 2 }}" y="2" width="20" height="60" rx="3"/><rect class="bar {{ r.status }}" x="{{ loop.index0 * 24 + 2 }}" y="{{ 62 - h }}" width="20" height="{{ h }}" rx="3"/><title>Run {{ r.pipeline_run_id }} · {{ r.status }} · {{ duration(seconds(r)) }}</title></a>
         {% endfor %}
       </svg>
-      <figcaption>Run durations; select a bar to open its run.</figcaption>
+      <figcaption>Run durations, newest on the right; select a bar to open its run.</figcaption>
     </figure>
     <div class="toolbar"><button type="button" data-csv="run-table" data-csv-name="{{ pipeline.pipeline_code }}-runs.csv">Export CSV</button></div>
     <div class="scroll"><table class="list" id="run-table">
@@ -42,7 +42,7 @@
       <tbody>
       {% for r in runs %}
       <tr>
-        <th scope="row"><a href="{{ run_url(r.pipeline_run_id) }}">{{ r.pipeline_run_id }}</a> <span class="note">{{ r.run_key }}</span></th>
+        <th scope="row"><a href="{{ run_url(r.pipeline_run_id) }}">{{ r.pipeline_run_id }}</a> <span class="note run-key" title="{{ r.run_key }}">{{ r.run_key }}</span></th>
         <td>{{ status(r.status) }}</td>
         <td>{{ r.trigger_kind }}{% if r.backfill %} · backfill{% endif %}</td>
         <td>{{ r.run_date or "None" }}</td>

@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "ponytail@ponytail": true
+    "ponytail@ponytail": true,
+    "frontend-design@claude-plugins-official": true
   }
 }

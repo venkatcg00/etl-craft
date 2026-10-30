@@ -311,3 +311,19 @@ def test_task_actions_pause_with_a_standing_outcome_and_mark_from_the_dialog(run
             {"run": active},
         ).scalar_one()
     assert (pause.outcome, pause.reason, marked) == ("SKIPPED", "source late", "FAILED")
+
+
+def test_a_run_duration_tile_opens_its_run(run_site):
+    _, url, active = run_site
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_context(ignore_https_errors=True).new_page()
+        sign_in_to(page, url, "/ui/projects/default/pipelines/OPS")
+        page.wait_for_url("**/ui/projects/default/pipelines/OPS")
+        tile = page.locator("figure.bars a").last
+        box = tile.bounding_box()
+        assert box is not None and box["width"] >= 20 and box["height"] >= 24
+        tile.click()
+        page.wait_for_url(f"**/runs/{active}")
+        expect(page.get_by_role("heading", level=1)).to_contain_text(f"Run {active}")
+        browser.close()

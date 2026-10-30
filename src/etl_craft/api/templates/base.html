@@ -2,7 +2,7 @@
 <html lang="en" data-theme="{{ settings.theme }}" data-theme-server="true">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false}'>
-<meta name="csrf-token" content="{{ csrf }}"><title>{{ title }}</title>
+<meta name="csrf-token" content="{{ csrf }}"><meta name="theme-color" content="#edf1f5" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)"><title>{{ title }}</title>
 <link rel="icon" href="/static/shared/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/shared/catalog.css"><link rel="stylesheet" href="/static/ui/shell.css">
 <script src="/static/ui/htmx.min.js" defer></script><script src="/static/shared/theme.js" defer></script>
@@ -11,7 +11,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar"><a class="brand product-lockup" href="/ui" aria-label="etl-craft home">{% include 'shared/mark.html' %}<span>etl-craft</span></a>
 {% if identity %}<form action="/ui" method="get" class="project-switch"><label for="project-switch">Project</label><select id="project-switch" name="project"><option value="">All visible projects</option>{% for p in projects %}<option value="{{ p.project }}" {% if project and p.project == project.project %}selected{% endif %}>{{ p.project_name }} ({{ p.project }})</option>{% endfor %}</select><button type="submit">Open</button></form>{% endif %}
-{% if identity and project %}<form action="/ui/projects/{{ project.project|urlencode }}/search" method="get" role="search" class="project-switch"><label for="global-search">Search</label><input id="global-search" name="q" type="search" maxlength="200" placeholder="Pipelines, tasks, tables, run id or key" value="{{ search_text or '' }}" aria-keyshortcuts="/ Control+K"><button type="submit">Search</button></form>{% endif %}
+{% if identity and project %}<form action="/ui/projects/{{ project.project|urlencode }}/search" method="get" role="search" class="project-switch"><label for="global-search">Search</label><input id="global-search" name="q" type="search" maxlength="200" placeholder="Pipelines, tasks, tables, run id or key…" autocomplete="off" value="{{ search_text or '' }}" aria-keyshortcuts="/ Control+K"><button type="submit">Search</button></form>{% endif %}
 <span class="environment {% if project and project.environment_type == 'PROD' %}production{% endif %}">{% if project %}{% if project.environment_type == 'PROD' %}PRODUCTION{% else %}{{ project.environment_type }}{% endif %}{% if project.environment_name %} · {{ project.environment_name }}{% endif %} · {{ project.governance }}{% else %}No project selected{% endif %}</span>
 {% include 'shared/theme_button.html' %}
 {% if identity %}<details class="profile"><summary>{{ identity.name }} · Profile</summary><div>
@@ -25,4 +25,4 @@
 <div class="layout">{% if identity %}<nav class="sidebar" aria-label="Main"><a href="/ui" {% if view == 'home' %}aria-current="page"{% endif %}>Home</a>{% if project %}<a href="/ui/projects/{{ project.project|urlencode }}/pipelines" {% if view == 'pipelines' %}aria-current="page"{% endif %}>Pipelines</a><a href="/ui/projects/{{ project.project|urlencode }}/insights" {% if view == 'insights' %}aria-current="page"{% endif %}>Insights</a><a href="/ui/projects/{{ project.project|urlencode }}/console" {% if view == 'console' %}aria-current="page"{% endif %}>Console</a><a href="/ui/projects/{{ project.project|urlencode }}/catalog" {% if view == 'catalog' %}aria-current="page"{% endif %}>Catalog</a>{% endif %}<a href="/ui/profile/settings" {% if view == 'settings' %}aria-current="page"{% endif %}>Personal settings</a><a href="/ui/about" {% if view == 'about' %}aria-current="page"{% endif %}>About</a></nav>{% endif %}
 <main id="main" tabindex="-1"><div id="result" aria-live="polite"></div><div id="loading" class="htmx-indicator" role="status">Loading…</div>{% block content %}{% endblock %}</main></div>
 <dialog id="shortcuts" aria-labelledby="shortcuts-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><p><kbd>?</kbd> opens this list. <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> moves to search. <kbd>Escape</kbd> closes dialogs and the profile menu.</p><p>Use Tab and Shift+Tab to move; Enter or Space activates a control.</p><form method="dialog"><button>Close shortcuts</button></form></dialog>
-<footer>Minimum width: 320 CSS px. Desktop layout: 960 px or wider. All times name their timezone.</footer></body></html>
+<footer>etl-craft · times show their timezone · <a href="/ui/about">About and help</a></footer></body></html>

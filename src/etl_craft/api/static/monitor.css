@@ -20,17 +20,21 @@
 .actions li { display: flex; flex-direction: column; max-width: 16rem; }
 .actions button[disabled] { cursor: not-allowed; opacity: .6; }
 .why { color: var(--muted); font-size: .8rem; }
-.status.none, .status.QUEUED { color: var(--muted); }
-.status.PAUSED, .status.WAITING, .status.REQUESTED { color: var(--warn); }
+.status.none, .status.QUEUED, .status.WAITING, .status.REQUESTED { color: var(--muted); }
+.status.RUNNING, .status.CLAIMED { color: var(--run); }
+.status.PAUSED, .status.CANCELLED, .status.CANCEL_REQUESTED { color: var(--neutral); }
+.status.RETRY { color: var(--warn); }
 .status.LOST { color: var(--bad); }
 .status.ACKNOWLEDGED { color: var(--ok); }
 tr.selected { background: var(--accent-soft); }
 .run-graph a:focus-visible .box, .run-graph a.selected .box { stroke: var(--accent); stroke-width: 3; }
 .run-graph .box.state-SUCCESS { stroke: var(--ok); }
 .run-graph .box.state-FAILED, .run-graph .box.state-LOST { stroke: var(--bad); }
-.run-graph .box.state-IN-PROGRESS, .run-graph .box.state-WAITING { stroke: var(--warn); }
+.run-graph .box.state-IN-PROGRESS { stroke: var(--run); }
+.run-graph .box.state-SKIPPED, .run-graph .box.state-CANCELLED { stroke: var(--neutral); }
+.run-graph .box.state-NONE, .run-graph .box.state-QUEUED, .run-graph .box.state-WAITING { stroke-dasharray: 5 3; }
 .run-graph .box { stroke-width: 2; }
-.met { color: var(--ok); } .unmet { color: var(--warn); }
+.met { color: var(--ok); } .unmet { color: var(--muted); }
 .error-text { color: var(--bad); overflow-wrap: anywhere; }
 #control-dialog .facts dd { overflow-wrap: anywhere; }
 #control-reason { margin-bottom: .75rem; }
@@ -47,10 +51,12 @@ table.list tbody th { font-size: inherit; color: var(--text); }
 .navigator h2 { margin-top: 0; font-size: 1rem; }
 .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0; }
 .dots { display: inline-flex; gap: 4px; }
-.dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: var(--muted); }
+.dot { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--neutral); color: var(--bg); font-size: 10px; line-height: 1; text-decoration: none; }
+.dot:hover { text-decoration: none; filter: brightness(1.1); }
 .dot.SUCCESS { background: var(--ok); }
-.dot.FAILED, .dot.LOST, .dot.CANCELLED { background: var(--bad); }
-.dot.IN-PROGRESS, .dot.WAITING, .dot.QUEUED { background: var(--warn); }
+.dot.FAILED, .dot.LOST { background: var(--bad); }
+.dot.IN-PROGRESS { background: var(--run); }
+.dot.QUEUED, .dot.WAITING { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--muted); }
 .dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .matrix td, .matrix th { text-align: center; white-space: nowrap; }
 .matrix tbody th { text-align: left; }
@@ -60,12 +66,56 @@ table.list tbody th { font-size: inherit; color: var(--text); }
 .timeline .segment.queued { fill: var(--border); }
 .timeline .segment.SUCCESS { fill: var(--ok); }
 .timeline .segment.FAILED, .timeline .segment.LOST { fill: var(--bad); }
-.timeline .segment.RUNNING, .timeline .segment.IN-PROGRESS { fill: var(--warn); }
+.timeline .segment.RUNNING, .timeline .segment.CLAIMED, .timeline .segment.IN-PROGRESS { fill: var(--run); }
+.timeline .segment.CANCELLED, .timeline .segment.SKIPPED { fill: var(--neutral); }
 .timeline a.selected .lane-label, .timeline a:focus-visible .lane-label { font-weight: 700; fill: var(--accent); }
 .legend .swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: middle; background: var(--ok); }
 .legend .swatch.queued { background: var(--border); }
+.legend .swatch.running { background: var(--run); }
+.legend .swatch.other { background: var(--neutral); }
 .matrix caption { text-align: left; }
 .live-state{color:var(--muted);font-size:.85rem;min-height:1.5rem}.live-state #live-notice{color:var(--text);font-weight:600}
 pre.log{max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--border);padding:.75rem;font-size:.85rem}a.button{display:inline-block;border:1px solid var(--muted);border-radius:.25rem;padding:.4rem .7rem}
-.filters{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:end}.filters label{margin:0}.filters input,.filters select{width:auto!important;display:inline-block!important;margin:0!important}.trend .segment.SUCCESS{fill:var(--ok)}.trend .segment.FAILED{fill:var(--bad)}.trend .segment.queued{fill:var(--border)}.legend .swatch.failed{background:var(--bad)}.counts>div{min-width:9rem}
+.filters{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:end}.filters label{margin:0}.filters input,.filters select{width:auto!important;display:inline-block!important;margin:0!important}.trend .segment.SUCCESS{fill:var(--ok)}.trend .segment.FAILED{fill:var(--bad)}.trend .segment.queued{fill:var(--neutral)}.legend .swatch.failed{background:var(--bad)}.counts>div{min-width:9rem}
 .console #console-output{min-height:16rem;max-height:55vh}.console #console-output .command{font-weight:600}.console #console-output .error{color:var(--bad)}.console #console-output .note{color:var(--muted)}.console-line{display:flex;gap:.5rem;align-items:center;margin-top:.5rem}.console-line label{margin:0;font-family:monospace;white-space:nowrap}.console-line input{flex:1;width:auto!important;margin:0!important;font-family:monospace}.command-list{columns:12rem;list-style:none;padding:0}
+/* Design pass: one action bar per scope, title-row headers, values that do not wrap. */
+.actions li { flex-direction: row; max-width: none; }
+.actions { gap: .5rem; }
+.why-list { margin-top: .75rem; font-size: .85rem; color: var(--muted); }
+.why-list summary { cursor: pointer; }
+.why-list dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: .5rem 0 0; }
+.why-list dt { font-weight: 600; color: var(--text); }
+.why-list dd { margin: 0; overflow-wrap: anywhere; }
+button.primary, a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.danger:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+button[disabled], button[disabled]:hover { cursor: not-allowed; opacity: .55; filter: none; }
+.object-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1.5rem; align-items: start; }
+.object-header > * { grid-column: 1; }
+.object-header > .header-actions { grid-column: 2; grid-row: 1 / span 3; justify-content: flex-end; }
+.run-key { display: inline-block; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+table.list td, table.list th { white-space: nowrap; }
+table.list td.wrap, table.list td:has(.error-text) { white-space: normal; min-width: 14rem; }
+.live-state { font-size: .8rem; margin: 0 0 .5rem; }
+@media (min-width: 651px) { .breadcrumbs + .live-state { float: right; margin-top: -2.1rem; } }
+@media (max-width: 650px) {
+  .object-header { grid-template-columns: 1fr; }
+  .object-header > .header-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-top: .5rem; }
+  .run-key { max-width: 100%; }
+}
+.list .run-key { max-width: 14rem; }
+.pick { padding: 0; width: 2.25rem; }
+.pick label { display: grid; place-items: center; min-height: 2.25rem; margin: 0; cursor: pointer; }
+/* Targets at least 24 px (WCAG 2.2 target size) and links in sentences underlined. */
+.dot { width: 20px; height: 20px; font-size: 11px; }
+.matrix a.cell { min-height: 24px; padding: 2px 0; }
+table.list td > a, table.list th > a { display: inline-block; min-height: 24px; line-height: 24px; }
+.bars .track { fill: var(--node); stroke: var(--border); }
+.bars a { cursor: pointer; }
+.bars a:hover .track { fill: var(--accent-soft); stroke: var(--accent); }
+.bars a:focus-visible { outline: none; }
+.bars a:focus-visible .track { stroke: var(--accent); stroke-width: 3; }
+main p a, .selection a, .note a, .why-list a { text-decoration: underline; text-underline-offset: 2px; }
+.navigator a[aria-current=true] { color: var(--text); }
+#recent-list a, #console-history li, .command-list code { display: inline-block; min-height: 24px; line-height: 24px; }

@@ -2,3 +2,5 @@ body{margin:0;min-width:320px}.topbar{display:flex;align-items:center;gap:1rem;p
 @media(max-width:650px){.profile>div{position:fixed;left:1rem;right:1rem;top:5rem;width:auto;max-width:none}}
 
 .signin-mark .product-mark{width:56px;height:56px}
+.environment{display:inline-block;width:fit-content}footer a{color:inherit}
+h1,h2{text-wrap:balance}button,a,summary,label{touch-action:manipulation}dialog{overscroll-behavior:contain}table.list td,.counts dd{font-variant-numeric:tabular-nums}
