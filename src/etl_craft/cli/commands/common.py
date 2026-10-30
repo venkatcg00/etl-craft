@@ -29,6 +29,8 @@ from etl_craft.execution.attempt_types import ChildOptions
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.actions import ACTIONS, invoke
 from etl_craft.services.operations.identity import authenticated_context
+from etl_craft.services.operations.tokens import TokenView
+from etl_craft.services.operations.upgrade_signin import UpgradeAdmin
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -158,6 +160,12 @@ def command_context(
         )
         yield (
             authenticated_context(context, scoped.identity)
+            if scoped is not None and isinstance(scoped.identity, TokenView)
+            else replace(
+                context,
+                actor=scoped.identity.actor,
+                upgrade_signin=isinstance(scoped.identity, UpgradeAdmin),
+            )
             if scoped is not None and scoped.identity is not None
             else context
         )

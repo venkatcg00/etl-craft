@@ -57,7 +57,7 @@ from etl_craft.services.catalog.storage import check_folder, swap_site
 from etl_craft.services.catalog.trigger_html import trigger_edges
 from etl_craft.services.operations.serialization import to_json
 
-ASSETS = ("catalog.css", "catalog.js")
+ASSETS = ("catalog.css", "catalog.js", "theme.js", "favicon.svg")
 BACKFILL_BADGE = ' <span class="badge">backfill</span>'
 TABS = (
     ("search", "index.html", "Search"),
@@ -126,7 +126,7 @@ class _Writer(Pages):
 
     def write_all(self) -> None:
         for name in ASSETS:
-            source = resources.files("etl_craft.services").joinpath("catalog_assets", name)
+            source = resources.files("etl_craft.core").joinpath("static", name)
             (self.folder / name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         (self.folder / "search-index.js").write_text(
             "window.CATALOG_INDEX = " + json.dumps(self._index(), ensure_ascii=True) + ";\n",
@@ -275,23 +275,35 @@ class _Writer(Pages):
         kind_label = f'<div class="kind-label">{_e(kind)}</div>' if kind else ""
         generated = _e(self.catalog.generated_at.isoformat())
         compared = _e(self.catalog.compared_at.isoformat()) if self.catalog.compared_at else ""
+        mark = (
+            resources.files("etl_craft.core")
+            .joinpath("static", "mark.html")
+            .read_text(encoding="utf-8")
+        )
         document = (
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<meta name="robots" content="noindex, nofollow">'
             f"<title>{_e(title)} · etl-craft catalog</title>"
-            f'<link rel="stylesheet" href="{root}catalog.css"></head>'
+            f'<link rel="stylesheet" href="{root}catalog.css">'
+            f'<link rel="icon" href="{root}favicon.svg" type="image/svg+xml"></head>'
             f'<body data-root="{root}" data-generated="{generated}" data-compared="{compared}">'
             '<header class="top">'
-            f'<a class="brand" href="{root}index.html">etl-craft catalog</a><nav>{nav}</nav>'
+            f'<a class="brand product-lockup" href="{root}index.html" '
+            f'aria-label="etl-craft home">{mark}<span>etl-craft</span></a><nav>{nav}</nav>'
             '<div class="search"><input type="search" placeholder="Search pipelines, tasks, '
             'tables, columns, rules…" aria-label="Search the catalog" autocomplete="off">'
-            '<div class="results"></div></div></header>'
+            '<div class="results"></div></div>'
+            + resources.files("etl_craft.core")
+            .joinpath("static", "theme_button.html")
+            .read_text(encoding="utf-8")
+            + "</header>"
             f"<main>{crumb_bar}{kind_label}<h1>{_e(title)}</h1>{body()}</main>"
             f'<footer class="foot">Generated {_e(_when(self.catalog.generated_at))}; run '
             "details are as of then. <code>etl-craft generate-docs</code> writes the site "
             "again.</footer>"
             f'<script src="{root}search-index.js"></script>'
+            f'<script src="{root}theme.js"></script>'
             f'<script src="{root}catalog.js"></script></body></html>'
         )
         target = self.folder / path

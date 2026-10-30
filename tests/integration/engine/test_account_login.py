@@ -10,8 +10,8 @@ import yaml
 from sqlalchemy import text
 
 from etl_craft.cli import main
-from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind
-from etl_craft.core.enums import AccountKind, ActionName, ApiRole, YesNo
+from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as
+from etl_craft.core.enums import AccountKind, ActionName, ActionOutcome, ApiRole, YesNo
 from etl_craft.core.errors import PermissionDeniedError, UsageError
 from etl_craft.services import credentials
 from etl_craft.services.oidc import IdentityClaims
@@ -186,7 +186,12 @@ def test_account_cli_and_local_recovery(project, monkeypatch, capsys):
     assert main(["account", "disable", "--name", "alice"]) == 0
     capsys.readouterr()
     act(ctx, ActionName.ACCOUNT_DISABLE, name="owner")
-    act(ctx, ActionName.ACCOUNT_DISABLE, name="automation")
+    with pytest.raises(UsageError, match="last unlocked active admin"):
+        act(ctx, ActionName.ACCOUNT_DISABLE, name="automation")
+    assert tokens.authenticate(ctx, service.token) is not None
+    # Recovery also supports installations whose administrators are already unavailable.
+    with acting_as(SYSTEM_ACTOR), ctx.engine.begin() as conn:
+        conn.execute(text("UPDATE CFG_ACCOUNTS SET ACTIVE_FLAG='N' WHERE ROLE='admin'"))
     monkeypatch.delenv("ETL_CRAFT_TOKEN")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     assert main(["setup"]) == 2
@@ -408,3 +413,100 @@ def test_sign_ins_do_not_serialize(project, monkeypatch):
     assert tokens.authenticate(project, second.access_token).name == "second"
     with pytest.raises(UsageError, match="sign-in refused"):
         act(project, ActionName.LOGIN, name="missing", password=PASSWORD)
+
+
+def test_cli_lockout_unlock_forced_change_and_personal_settings(project, monkeypatch, capsys):
+    ctx = project
+    user(ctx)
+    monkeypatch.setattr("builtins.input", lambda _: "alice")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("getpass.getpass", lambda _: "wrong")
+    for _ in range(ctx.config.auth.lockout_after):
+        assert main(["login"]) == 2
+        assert "sign-in refused" in capsys.readouterr().err
+    monkeypatch.setattr("getpass.getpass", lambda _: PASSWORD)
+    assert main(["login"]) == 2
+    assert "Account locked" in capsys.readouterr().err
+    admin = act(ctx, ActionName.TOKEN_CREATE, name="automation", role=ApiRole.ADMIN)
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", admin.token)
+    assert main(["account", "unlock", "--name", "alice"]) == 0
+    assert main(["account", "reset-password", "--name", "alice"]) == 0
+    monkeypatch.delenv("ETL_CRAFT_TOKEN")
+    assert main(["login"]) == 0
+    assert main(["about", "--json"]) == 26
+    assert "temporary password" in capsys.readouterr().err
+    answers = iter((PASSWORD, "replacement password", "replacement password"))
+    monkeypatch.setattr("getpass.getpass", lambda _: next(answers))
+    assert main(["account", "change-password"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr("getpass.getpass", lambda _: "replacement password")
+    assert main(["login"]) == 0
+    capsys.readouterr()
+    assert (
+        main(["account", "settings", "--theme", "dark", "--timezone", "UTC", "--format", "json"])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["theme"] == "dark"
+
+
+def test_concurrent_wrong_passwords_serialize_lockout_and_proof_cost(project, monkeypatch):
+    from fixtures.races import two_at_once
+
+    ctx = replace(
+        project, config=replace(project.config, auth=replace(project.config.auth, lockout_after=2))
+    )
+    user(ctx)
+    calls = []
+    original = sessions.verify_password
+
+    def verify(password, stored):
+        calls.append(stored)
+        return original(password, stored)
+
+    monkeypatch.setattr(sessions, "verify_password", verify)
+
+    def wrong():
+        with pytest.raises(UsageError, match="sign-in refused"):
+            act(ctx, ActionName.LOGIN, name="alice", password="wrong")
+
+    two_at_once(wrong, wrong, at=(sessions, "verify_password"))
+    with ctx.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT FAILED_SIGNINS AS failed, LOCKED_DATE AS locked FROM CFG_ACCOUNTS "
+                "WHERE ACCOUNT_NAME='alice'"
+            )
+        ).one()
+    assert row.failed == 2 and row.locked is not None
+    with pytest.raises(UsageError, match="Account locked"):
+        act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD)
+    with pytest.raises(UsageError, match="sign-in refused"):
+        act(ctx, ActionName.LOGIN, name="missing", password="wrong")
+    assert len(calls) == 4 and all(value for value in calls)
+
+
+def test_successful_signin_audit_commits_with_session_and_supplies_last_signin(
+    project, monkeypatch
+):
+    from etl_craft.engine.audit import ActionRequest
+
+    ctx = project
+    user(ctx)
+    original = ActionRequest.write
+
+    def unavailable(request, conn):
+        if request.command == ActionName.LOGIN and request.outcome == ActionOutcome.SUCCESS:
+            raise UsageError("audit unavailable")
+        return original(request, conn)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ActionRequest, "write", unavailable)
+        with pytest.raises(UsageError, match="audit unavailable"):
+            act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD)
+    with ctx.engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM CFG_API_TOKENS")).scalar_one() == 0
+    session = act(ctx, ActionName.LOGIN, name="alice", password=PASSWORD)
+    from etl_craft.services.operations.identity import authenticated_context
+
+    who = act(authenticated_context(ctx, session.metadata), ActionName.WHOAMI)
+    assert who.last_signin is not None

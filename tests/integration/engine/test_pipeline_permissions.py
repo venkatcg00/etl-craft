@@ -26,6 +26,10 @@ OWNER = Actor("owner", ActorKind.USER)
 
 @pytest.fixture
 def scene(engine_db):
+    from etl_craft.engine.migrations import mark_packaged_migrations_applied
+
+    with engine_db.engine.begin() as conn:
+        mark_packaged_migrations_applied(conn)
     ctx = OperationContext(engine_db.engine, engine_db.config, OWNER, role=ApiRole.ADMIN)
     credential = act(ctx, ActionName.TOKEN_CREATE, name="reader", role=ApiRole.VIEWER)
     reader = authenticated_context(ctx, credential.metadata)

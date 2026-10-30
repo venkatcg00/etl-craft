@@ -95,8 +95,15 @@ def page_versions(
             if p.name.startswith("catalog") and p.name.endswith(".py")
         ]
         + [
-            (name, package.joinpath("catalog_assets", name).read_bytes())
-            for name in ("catalog.css", "catalog.js")
+            (name, resources.files("etl_craft.core").joinpath("static", name).read_bytes())
+            for name in (
+                "catalog.css",
+                "catalog.js",
+                "theme.js",
+                "theme_button.html",
+                "mark.html",
+                "favicon.svg",
+            )
         ]
     )
     context = (

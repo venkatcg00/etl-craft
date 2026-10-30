@@ -9,7 +9,16 @@ from etl_craft.config.resolve import Resolver
 from etl_craft.core.errors import ConfigurationError
 
 AUTH_KEYS = frozenset(
-    {"Session_hours", "Refresh_days", "Oidc_issuer", "Oidc_client_id", "Oidc_groups_claim"}
+    {
+        "Session_hours",
+        "Refresh_days",
+        "Oidc_issuer",
+        "Oidc_client_id",
+        "Oidc_groups_claim",
+        "Lockout_after",
+        "Admin_contact",
+        "Signin_notice",
+    }
 )
 
 
@@ -49,4 +58,14 @@ def parse_auth(
                 f"{path}: Auth.Oidc_issuer is invalid; expected a credential-free HTTPS issuer URL "
                 "without a query or fragment; correct the setting"
             )
-    return AuthConfig(hours, issuer, client, refresh_days=refresh_days, oidc_groups_claim=groups)
+    lockout = whole_number(settings, "Lockout_after", 5, path, minimum=0, maximum=1000000)
+    return AuthConfig(
+        hours,
+        issuer,
+        client,
+        refresh_days=refresh_days,
+        oidc_groups_claim=groups,
+        lockout_after=lockout,
+        admin_contact=settings.text("Admin_contact") or "your administrator",
+        signin_notice=settings.text("Signin_notice"),
+    )

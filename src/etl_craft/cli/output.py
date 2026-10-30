@@ -6,6 +6,7 @@ to the log records.
 
 from __future__ import annotations
 
+import codecs
 import json
 import sys
 from collections.abc import Callable, Iterable
@@ -42,6 +43,18 @@ class Output:
     def line(self, text: str = "") -> None:
         """Write one line of results."""
         print(text, file=self.stdout)
+
+    def chunks(self, chunks: Iterable[bytes], *, binary: bool = False) -> None:
+        """Preserve download bytes; text-only sinks decode across chunk boundaries."""
+        stream = getattr(self.stdout, "buffer", None) if binary else None
+        if stream is not None:
+            for chunk in chunks:
+                stream.write(chunk)
+            return
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="strict" if binary else "replace")
+        for chunk in chunks:
+            self.stdout.write(decoder.decode(chunk))
+        self.stdout.write(decoder.decode(b"", final=True))
 
     def document(self, result: object) -> None:
         """Write the same JSON document returned by the service serializer."""

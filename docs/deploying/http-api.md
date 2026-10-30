@@ -247,3 +247,17 @@ it never falls back to chunks or returns an empty log. Legacy terminal attempts 
 file or chunks report that absence and direct the operator to preserved `TASK_LOG` text.
 The existing attempt document supplies task, task-run, run, attempt, owner and exit identity.
 Run-log synthesis and whole-run zip manifests remain the S7.A.3 work described by the wireframes.
+
+## Browser UI reads and account changes
+
+The server-rendered `/ui` pages call the same action table. Viewer reads:
+`GET /api/v1/project-health` (optional project, after and bounded limit),
+`GET /api/v1/about`, and `GET /api/v1/projects/{project}/catalog/page?path=index.html`
+(streamed, whole-project viewers only). Health returns rolling UTC window boundaries and
+grant-filtered running, failed, SLA-miss and queued-task counts; failed/SLA are last 24 h.
+
+`POST /api/v1/account/settings` changes only the caller's supplied preferences.
+`POST /api/v1/account/password` takes current_password and password, then revokes sessions.
+`POST /api/v1/accounts/unlock` takes name and requires admin. Cookie-authorized changes,
+including sign-in and sign-out, require a CSRF challenge; bearer callers retain their JSON
+protocol. Browser sign-in returns only secure cookies and a same-site redirect, never token JSON.

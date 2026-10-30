@@ -169,14 +169,18 @@ def test_controller_refuses_mismatched_package_schema_before_supervising(cli_pro
             )
     code, output = p.run("controller", "--no-ui")
     assert code == 13, output
-    for part in ("Engine DB", "package version", __version__, "etl-craft migrate"):
+    for part in ("Engine DB", "etl-craft migrate"):
         assert part in output
+    if mismatch == "missing":
+        assert "is at migration" in output and "this etl-craft needs" in output
+    else:
+        assert "package version" in output and __version__ in output
     with p.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) AS n FROM AUD_CONTROLLERS")).scalar_one() == 0
     if p.config.engine.auth_mode != "NONE":
         code, output = p.run("ui")
         assert code == 13, output
-        assert "package version" in output and __version__ in output
+        assert "is at migration" in output if mismatch == "missing" else "package version" in output
 
 
 def test_ui_missing_extra_is_refused_and_plain_controller_keeps_health_only(

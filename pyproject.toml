@@ -86,6 +86,7 @@ dev = [
     "ruff>=0.16.8",
     "types-psutil>=6.0,<7",
     "types-pyyaml>=6.0.12",
+    "playwright>=1.64.1",
 ]
 docs = [
     "etl-craft[ui]",
@@ -164,6 +165,7 @@ testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 timeout = 120
 markers = [
+    "browser: real Chromium and Firefox browser sessions over HTTPS",
     "unit: pure Python, no services",
     "cluster: shared local/queue pool contracts on PostgreSQL",
     "engine_sqlite: Engine DB on SQLite",

@@ -154,11 +154,15 @@ def test_password_sign_in_keeps_only_tokens_locally_and_whoami_reads_the_server(
     assert [row.kind for row in tokens_of(server["ctx"], "alice")] == ["REFRESH", "ACCESS"]
     code, out, _ = run(capsys, "whoami", "--api", url, "--format", "json")
     assert code == 0
-    assert json.loads(out) == {
+    identity = json.loads(out)
+    assert {key: identity[key] for key in ("schema", "name", "role")} == {
         "schema": "etl-craft/identity/1",
         "name": "alice",
         "role": "operator",
     }
+    assert identity["account_kind"] == "USER" and identity["local_password"]
+    assert identity["last_signin"] and identity["session_expires_at"]
+    assert identity["settings"]["theme"] == "system"
 
 
 def test_an_expired_access_token_is_renewed_and_an_expired_refresh_needs_sign_in(

@@ -13,6 +13,7 @@ from etl_craft.core.errors import UsageError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.accounts import find_account, unlocked_admins
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.requests import NoInput, Request
 from etl_craft.services.passwords import hash_password
@@ -131,7 +132,7 @@ def local_provisioning(engine: Engine, command: str) -> bool:
 def has_admin(engine: Engine) -> bool:
     """Check whether interactive provisioning requires a signed-in administrator."""
     with engine.connect() as conn:
-        return bool(conn.execute(statement(conn, "account_admin")).scalar_one())
+        return bool(unlocked_admins(conn))
 
 
 def list_accounts(ctx: OperationContext, request: NoInput) -> Accounts:
@@ -182,6 +183,11 @@ def disable(ctx: OperationContext, request: AccountName) -> Accounts:
     return _update(ctx, request.name, "account_disable", {}, revoke=True)
 
 
+def unlock(ctx: OperationContext, request: AccountName) -> Accounts:
+    """Unlock a local user without changing its password or authority."""
+    return _update(ctx, request.name, "account_unlock", {})
+
+
 def reset_password(ctx: OperationContext, request: AccountPassword) -> Accounts:
     """Replace a user's password and revoke existing sessions."""
     values: dict[str, object] = {"password_hash": hash_password(request.password)}
@@ -192,6 +198,19 @@ def _update(
     ctx: OperationContext, name: str, query: str, values: dict[str, object], *, revoke: bool = False
 ) -> Accounts:
     with locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30), ctx.engine.begin() as conn:
+        if query in ("account_disable", "account_role") and values.get("role") != ApiRole.ADMIN:
+            target = find_account(conn, name)
+            if (
+                target is not None
+                and target.role == ApiRole.ADMIN
+                and target.active_flag == YesNo.YES
+                and target.locked_date is None
+                and unlocked_admins(conn) <= 1
+            ):
+                raise UsageError(
+                    f"account {name!r}: last unlocked active admin; expected another recovery "
+                    "administrator; add one before disabling or changing this account's role"
+                )
         account_id = conn.execute(
             statement(conn, query), {"name": name, **values}
         ).scalar_one_or_none()

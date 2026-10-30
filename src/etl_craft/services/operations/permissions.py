@@ -1,9 +1,9 @@
 """Current pipeline grants, shared by action admission and filtered read selections."""
 
-from collections.abc import Sequence
+import json
 from dataclasses import dataclass, field, replace
 
-from sqlalchemy.engine import Connection, Row
+from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import ApiRole, YesNo
 from etl_craft.core.enums_access import Permission
@@ -48,38 +48,36 @@ class PipelineAccess:
             )
 
 
+def visibility_parameters(ctx: OperationContext) -> dict[str, object]:
+    """Bind the authenticated principal to the shared SQL permission relations."""
+    return {
+        "project_id": ctx.project_id or current_project_id(),
+        "account": ctx.actor.name,
+        "role": ctx.role,
+        "sso_group_ids": json.dumps(ctx.sso_group_ids),
+        "after_project": None,
+        "project_limit": 1,
+    }
+
+
+def validate_visibility(conn: Connection, params: dict[str, object]) -> None:
+    """Validate one SQL-selected malformed definition with the shared tag diagnostic."""
+    row = conn.execute(statement(conn, "permission_invalid"), params).one_or_none()
+    if row is not None:
+        read_tags(row.pipeline_parameters, row.pipeline_code)
+
+
 def eligible_grants(
-    conn: Connection, ctx: OperationContext, grants: Sequence[Row[tuple[object, ...]]] | None = None
+    conn: Connection,
+    ctx: OperationContext,
 ) -> list[tuple[str | None, str | None, Permission, str]]:
-    """Match principals against current accounts/roles and active retained group identities."""
+    """Read current principal matches from the shared query-catalog relation."""
     if ctx.role is None or ctx.role == ApiRole.AGENT:
         return []
-    groups = {
-        row.group_id
-        for row in conn.execute(statement(conn, "permission_groups"), {"account": ctx.actor.name})
-        if row.explicit_member == YesNo.YES or row.group_id in ctx.sso_group_ids
-    }
-    selected = []
-    if grants is None:
-        grants = conn.execute(
-            statement(conn, "permission_grants"),
-            {"project_id": ctx.project_id or current_project_id()},
-        ).all()
-    for row in grants:
-        source = None
-        if row.group_id in groups:
-            source = f"group:{row.group_id}"
-        elif row.account_name == ctx.actor.name and row.account_active == YesNo.YES:
-            source = f"account:{row.account_name}"
-        elif (
-            row.grantee_role
-            and ctx.role is not None
-            and tuple(ApiRole).index(ctx.role) >= tuple(ApiRole).index(ApiRole(row.grantee_role))
-        ):
-            source = f"role:{row.grantee_role}"
-        if source is not None:
-            selected.append((row.pipeline_code, row.tag, Permission(row.permission), source))
-    return selected
+    return [
+        (r.pipeline_code, r.tag, Permission(r.permission), r.source)
+        for r in conn.execute(statement(conn, "permission_eligible"), visibility_parameters(ctx))
+    ]
 
 
 def strongest(levels: list[Permission]) -> Permission | None:
@@ -87,19 +85,14 @@ def strongest(levels: list[Permission]) -> Permission | None:
     return max(levels, key=tuple(Permission).index, default=None)
 
 
-def _project_level(
-    ctx: OperationContext, matched: list[tuple[str | None, str | None, Permission, str]]
-) -> Permission | None:
-    if ctx.role == ApiRole.ADMIN:
-        return Permission.CAN_MANAGE
-    return strongest(
-        [level for pipeline, tag, level, _ in matched if pipeline is None and tag is None]
-    )
-
-
 def project_permission(conn: Connection, ctx: OperationContext) -> Permission | None:
-    """Resolve project grants independently of pipeline and tag grants."""
-    return _project_level(ctx, eligible_grants(conn, ctx))
+    """Use the shared SQL project policy, including principal and active-project checks."""
+    if ctx.role is None or ctx.role == ApiRole.AGENT:
+        return None
+    row = conn.execute(
+        statement(conn, "permission_projects"), visibility_parameters(ctx)
+    ).one_or_none()
+    return tuple(Permission)[row.level - 1] if row is not None else None
 
 
 def project_not_found(code: str | None) -> ResourceNotFoundError:
@@ -128,7 +121,7 @@ def require_project(
 def tag_permission(conn: Connection, ctx: OperationContext, tag: str) -> Permission | None:
     """Only a direct tag permission can authorize delegation on that tag."""
     matched = eligible_grants(conn, ctx)
-    project = _project_level(ctx, matched)
+    project = project_permission(conn, ctx)
     if project == Permission.CAN_MANAGE:
         return project
     if project is None:
@@ -137,32 +130,16 @@ def tag_permission(conn: Connection, ctx: OperationContext, tag: str) -> Permiss
 
 
 def pipeline_access(conn: Connection, ctx: OperationContext) -> PipelineAccess:
-    """Resolve project gating and matching grants without opening restricted pipelines."""
-    params = {"project_id": ctx.project_id or current_project_id()}
-    grants = tuple(conn.execute(statement(conn, "permission_grants"), params))
-    matched = eligible_grants(conn, ctx, grants)
-    project = _project_level(ctx, matched)
+    """Resolve exactly the same effective SQL visibility used by aggregate reads."""
+    validate_visibility(conn, visibility_parameters(ctx))
     roles: dict[str, ApiRole | None] = {}
     levels: dict[str, Permission | None] = {}
     sources: dict[str, tuple[str, ...]] = {}
-    for row in conn.execute(statement(conn, "permission_pipelines"), params):
+    for row in conn.execute(statement(conn, "permission_effective"), visibility_parameters(ctx)):
+        if row.pipeline_id is None:
+            continue
+        level = tuple(Permission)[row.level - 1] if row.level else None
         code = row.pipeline_code
-        tags = read_tags(row.pipeline_parameters, code)
-        applicable = [g for g in grants if g.pipeline_code == code or g.tag in tags]
-        assigned = [
-            (level, source)
-            for pipeline, tag, level, source in matched
-            if pipeline == code or tag in tags
-        ]
-        selected: tuple[str, ...]
-        if project is None:
-            level, selected = None, ()
-        elif project == Permission.CAN_MANAGE or not applicable:
-            level = project
-            selected = ("project:" + str(project),)
-        else:
-            level = strongest([level for level, _ in assigned])
-            selected = tuple(source for _, source in assigned)
         levels[code] = level
         roles[code] = (
             ApiRole.ADMIN
@@ -173,7 +150,8 @@ def pipeline_access(conn: Connection, ctx: OperationContext) -> PipelineAccess:
             if level is not None
             else None
         )
-        sources[code] = selected
+        values = json.loads(row.sources) if isinstance(row.sources, str) else row.sources
+        sources[code] = tuple(values)
     return PipelineAccess(roles, levels, sources)
 
 

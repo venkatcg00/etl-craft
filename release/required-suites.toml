@@ -131,3 +131,7 @@ linux = [
     "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[local-postgresql]",
     "tests/integration/execution/test_pool_contract.py::test_controller_restart_preserves_the_run_and_does_not_duplicate_live_work[queue-postgresql]",
 ]
+
+[suites.browser]
+marker = "browser"
+description = "HTTPS browser sessions and accessible themes in Chromium and Firefox."

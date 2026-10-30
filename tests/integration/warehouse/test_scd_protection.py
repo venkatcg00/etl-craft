@@ -421,6 +421,10 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
         role=ApiRole.ADMIN,
         password="correct horse battery",
     )
+    from etl_craft.engine.migrations import mark_packaged_migrations_applied
+
+    with ctx.engine.begin() as conn:
+        mark_packaged_migrations_applied(conn)
     token = act(ctx, ActionName.LOGIN, name="alice", password="correct horse battery").access_token
     headers = {"Authorization": "Bearer " + token}
     path = "/api/v1/projects/default/values"
@@ -472,6 +476,13 @@ def test_values_api_uses_human_credentials_and_shared_role_policy(sql_world, req
         assert current(w)[0].get("UPDATED_BY", current(w)[0].get("updated_by")) == "alice"
         assert client.post(path, json={**body, "unknown": True}, headers=headers).status_code == 400
         act(ctx, ActionName.PROJECT_SET, project="default", governance="STRICT", reason="restore")
+        act(
+            ctx,
+            ActionName.ACCOUNT_ADD,
+            name="recovery",
+            role=ApiRole.ADMIN,
+            password="recovery horse battery",
+        )
         act(ctx, ActionName.ACCOUNT_SET_ROLE, name="alice", role=ApiRole.OPERATOR)
         assert client.post(path, json=body, headers=headers).status_code == 403
         denied = client.post(

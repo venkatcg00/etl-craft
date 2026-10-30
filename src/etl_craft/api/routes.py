@@ -15,13 +15,18 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import TypeAdapter, ValidationError
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from etl_craft.api import browser_sessions as browser
+from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.enums import ActionName, HttpMethod, HttpScheme, Transport
 from etl_craft.core.errors import UsageError
 from etl_craft.core.text import sha256_hex
 from etl_craft.services.operations import OperationContext, to_json
-from etl_craft.services.operations.actions import ACTIONS, Action, action_path, invoke
+from etl_craft.services.operations.action_types import Action
+from etl_craft.services.operations.actions import ACTIONS, action_path, invoke
+from etl_craft.services.operations.catalog_pages import CatalogPage
 from etl_craft.services.operations.identity import authenticated_context
 from etl_craft.services.operations.tokens import authenticate
 
@@ -62,7 +67,17 @@ def _endpoint(ctx: OperationContext, action: Action) -> Endpoint:
     if action.role is None:
 
         async def open_route(request: Request) -> Response:
-            return await _answer(replace(ctx, transport=Transport.HTTP), action, request)
+            return await _answer(
+                replace(
+                    ctx,
+                    actor=SYSTEM_ACTOR,
+                    role=None,
+                    transport=Transport.HTTP,
+                    browser_session=browser.browser_request(request),
+                ),
+                action,
+                request,
+            )
 
         return open_route
 
@@ -70,16 +85,18 @@ def _endpoint(ctx: OperationContext, action: Action) -> Endpoint:
         request: Request,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(BEARER)],
     ) -> Response:
-        caller = await run_in_threadpool(_caller, ctx, credentials)
+        caller = await run_in_threadpool(_caller, ctx, credentials, request)
         return await _answer(caller, action, request)
 
     return signed_in
 
 
 def _caller(
-    ctx: OperationContext, credentials: HTTPAuthorizationCredentials | None
+    ctx: OperationContext, credentials: HTTPAuthorizationCredentials | None, request: Request
 ) -> OperationContext:
     """Prove the bearer token's account; the action table decides what it may do."""
+    if credentials is None and browser.browser_request(request):
+        return browser.cookie_context(ctx, request)
     identity = None if credentials is None else authenticate(ctx, credentials.credentials)
     if identity is None:
         raise HTTPException(
@@ -103,6 +120,7 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
     project = given.pop("project", None)
     if project is not None:
         caller = replace(caller, project=str(project), project_id=None)
+    destination = "/ui"
     if action.method == HttpMethod.GET:
         properties = _adapter(action.name).json_schema().get("properties", {})
         given.update(
@@ -117,12 +135,33 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
         body = await read_body(request, getattr(action.request, "MAX_BODY_BYTES", None))
         if not isinstance(body, dict):
             raise UsageError("the request body must be a JSON object")
+        if browser.browser_request(request):
+            await run_in_threadpool(
+                browser.csrf_check,
+                caller,
+                action.name,
+                request,
+                request.headers.get("X-CSRF-Token", str(body.pop("_csrf", ""))),
+            )
+            destination = browser.return_path(str(body.pop("_return_to", "/ui")))
+            _browser_fields(body, action.name, request)
         given.update(body)
     parsed = _parse(action, given)
     result = await run_in_threadpool(invoke, caller, action.name, parsed)
     if isawaitable(result):
         result = await result
+    if action.method == HttpMethod.POST and browser.browser_request(request):
+        response = browser.browser_answer(caller, action.name, request, result, destination)
+        if response is not None:
+            return response
     if action.streams:
+        if isinstance(result, CatalogPage):
+            return StreamingResponse(
+                result,
+                media_type=result.content_type,
+                headers={"X-Content-Type-Options": "nosniff"},
+                background=BackgroundTask(result.close),
+            )
         assert isinstance(result, Iterator)
         return StreamingResponse(result, media_type="text/plain")
     if action.result is None:
@@ -130,8 +169,18 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
     return JSONResponse(to_json(result))
 
 
+def _browser_fields(body: dict[str, object], action: ActionName, request: Request) -> None:
+    """Consume browser-only proof fields before the action request is parsed."""
+    confirmation = body.pop("_confirm_password", None)
+    if confirmation is not None and confirmation != body.get("password"):
+        raise UsageError("password confirmation differs; enter the same new password twice")
+    if action == ActionName.LOGOUT:
+        body["token"] = request.cookies.get(browser.SESSION, "")
+
+
 async def read_body(request: Request, maximum: int | None) -> object:
     """Bound upload bytes before JSON parsing, including chunked requests without a length."""
+    maximum = maximum or (65536 if browser.browser_request(request) else None)
     content = bytearray()
     async for chunk in request.stream():
         found = len(content) + len(chunk)
@@ -141,7 +190,18 @@ async def read_body(request: Request, maximum: int | None) -> object:
                 f"at most {maximum}; send a smaller request with shorter paths or content"
             )
         content.extend(chunk)
-    return json.loads(content) if content else {}
+    try:
+        if request.headers.get("content-type", "").startswith("application/x-www-form-urlencoded"):
+            from urllib.parse import parse_qsl
+
+            return dict(
+                parse_qsl(content.decode("utf-8"), keep_blank_values=True, max_num_fields=32)
+            )
+        return json.loads(content) if content else {}
+    except (ValueError, UnicodeError) as error:
+        raise UsageError(
+            "request body is malformed; expected a JSON object or browser form; correct the input"
+        ) from error
 
 
 def _parse(action: Action, given: dict[str, object]) -> object:

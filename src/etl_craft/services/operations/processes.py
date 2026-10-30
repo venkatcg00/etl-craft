@@ -8,13 +8,11 @@ from importlib.util import find_spec
 
 from sqlalchemy.engine import Connection
 
-from etl_craft import __version__
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import ActionName, ApiRole, ConnectionUse, ProcessRole
-from etl_craft.core.errors import ConfigurationError, MigrationError
+from etl_craft.core.errors import ConfigurationError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.engine.guards import require_guards
-from etl_craft.engine.migrations import pending_migrations
 from etl_craft.engine.notifications import check_notifications
 from etl_craft.engine.process_reservations import (
     Allocation,
@@ -25,6 +23,7 @@ from etl_craft.engine.process_reservations import (
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import Health
 from etl_craft.services.operations.requests import NoInput
+from etl_craft.services.operations.schema_status import require_current_schema
 
 
 def controller(ctx: OperationContext, request: NoInput) -> None:
@@ -40,33 +39,19 @@ def ui(ctx: OperationContext, request: NoInput) -> None:
             "etl-craft ui dependencies are missing; expected the ui extra; "
             "install `etl-craft[ui]` on this host"
         )
+    check_package_schema(ctx)
     if not for_engine(ctx.engine).supports_api_replicas:
         raise ConfigurationError(
             f"{ctx.config.config_path}: Engine.Jdbc_url={ctx.config.engine.jdbc_url!r}; "
             "etl-craft ui requires PostgreSQL; use `etl-craft controller` with the ui extra "
             "for SQLite, or configure a PostgreSQL Engine DB"
         )
-    check_package_schema(ctx)
     check_notifications(ctx.config, ctx.engine)
 
 
 def check_package_schema(ctx: OperationContext, connection: Connection | None = None) -> None:
     """Require the existing migration ledger to match this package before using it."""
-    try:
-        pending = pending_migrations(
-            ctx.engine, project_default=ctx.config.migrations_dir, connection=connection
-        )
-    except MigrationError as error:
-        raise MigrationError(
-            f"Engine DB does not match etl-craft package version {__version__}: {error}; "
-            "install the matching package on every role and run `etl-craft migrate`"
-        ) from error
-    engine = [name for name in pending if name.startswith("engine/")]
-    if engine:
-        raise MigrationError(
-            f"Engine DB is missing migrations {engine}; expected etl-craft package version "
-            f"{__version__}; run `etl-craft migrate` before starting controller or ui"
-        )
+    require_current_schema(ctx, connection)
 
     if connection is not None:
         require_guards(connection)
