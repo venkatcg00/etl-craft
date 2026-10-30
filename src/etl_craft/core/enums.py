@@ -294,6 +294,7 @@ class ActionName(StrEnum):
     AUDIT = "audit"
     ATTEMPT = "attempt"
     LOGS = "logs"
+    RUN_LOG = "run log"
     CATALOG_GAPS = "catalog gaps"
     VALIDATE = "validate"
     DOCTOR = "doctor"

@@ -189,7 +189,8 @@ def test_browser_account_migration_retains_real_users_and_sessions(
     from etl_craft.services.operations.requests import NoInput
     from fixtures.engine_db import profile_block
 
-    expected = r"Engine DB .* is at migration 0074.*this etl-craft needs 0075.*migrate.*admin"
+    newest = max(path.stem for path in directory.glob("[0-9]*.sql"))
+    expected = rf"Engine DB .* is at migration 0074.*this etl-craft needs {newest}.*migrate.*admin"
     with pytest.raises(MigrationError, match=expected):
         act(ctx, ActionName.LOGIN, name="owner", password="owner password")
     with pytest.raises(MigrationError, match=expected):

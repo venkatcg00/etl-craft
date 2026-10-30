@@ -217,7 +217,7 @@ def test_timeline_draws_each_attempt_and_keeps_the_view_when_selecting(monitor):
     assert re.findall(r'class="segment ([A-Za-z_-]+)"', page.text) == ["queued", "SUCCESS"]
     assert f'href="{BASE}/OPS/runs/{active}?view=timeline&amp;task=EXTRACT"' in page.text
     bad = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "gantt"})
-    assert bad.status_code == 400 and "expected graph or timeline" in bad.text
+    assert bad.status_code == 400 and "expected graph, timeline or log" in bad.text
 
 
 def test_list_shows_next_run_recent_runs_and_sla_from_the_read(monitor):
@@ -296,3 +296,23 @@ def test_attempt_page_refuses_another_runs_or_pipelines_attempt_alike(monitor):
     ):
         page = client.get(path)
         assert page.status_code == 404 and "Not found or no access" in page.text, path
+
+
+def test_run_log_view_shows_the_run_log_read_and_links_its_download(monitor):
+    import html
+
+    ctx, client, active = monitor
+    ran_extract(ctx, active)
+    login(client)
+    page = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "log"})
+    assert page.status_code == 200
+    expected = client.get(
+        "/api/v1/projects/default/run-log", params={"pipeline_code": "OPS", "run_id": active}
+    ).text
+    assert "TASK_STARTED" in expected
+    shown = re.search(r'<pre class="log"[^>]*>(.*?)</pre>', page.text, re.S).group(1)
+    assert html.unescape(shown) == expected
+    link = f"/api/v1/projects/default/run-log?pipeline_code=OPS&amp;run_id={active}"
+    assert f'href="{link}" download="run-{active}.log"' in page.text
+    selected = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "log", "task": "EXTRACT"})
+    assert f'href="{BASE}/OPS/runs/{active}?view=log&amp;task=LOAD"' in selected.text

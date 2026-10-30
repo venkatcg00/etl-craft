@@ -11,6 +11,7 @@ from etl_craft import __version__
 from etl_craft.api.app import create_app
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.dialects.engine import for_engine
 from etl_craft.services.operations import OperationContext
 from fixtures.actions import act
 
@@ -195,7 +196,8 @@ def test_about_page_states_headers_and_session_expiry(browser_scene, monkeypatch
     assert [row["version"] for row in about["controllers"]] == ["live-controller"]
     assert "private-host" not in str(about)
     assert about["package_version"] == about["server_version"] == __version__
-    assert about["schema_version"].startswith("0075")
+    newest = max(path.name for path in for_engine(ctx.engine).migrations_dir().glob("[0-9]*.sql"))
+    assert about["schema_version"] == newest
     assert about["license"] == "Apache-2.0"
     page = client.get("/ui/about")
     assert __version__ in page.text and 'id="main"' in page.text

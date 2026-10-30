@@ -237,9 +237,8 @@ def finalize_pipeline_run(
 
 def mark_sla_breached(conn: Connection, pipeline_run_id: int) -> bool:
     """Mark a still running ``pipeline_run_id`` ``BREACHED``; return whether this call did."""
-    result = conn.execute(
-        statement(conn, "transition_mark_sla_breached"), {"pipeline_run_id": pipeline_run_id}
-    )
+    params = {"pipeline_run_id": pipeline_run_id, "now": datetime.now(UTC)}
+    result = conn.execute(statement(conn, "transition_mark_sla_breached"), params)
     return bool(result.rowcount)
 
 

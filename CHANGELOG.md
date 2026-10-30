@@ -255,6 +255,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- The pipeline run log: `etl-craft logs --pipeline-code CODE [--run-id ID | --run-key KEY]`,
+  `GET /api/v1/projects/{project}/run-log` and the run page's **Run log** view print one line per
+  audited event of a run (start, each attempt's queue, retry due time, admission, start, end or
+  loss, waits and gate decisions, controls, interventions, SLA and the end with task counts), in
+  time order with a stable message code. It is rendered from the audit tables.
+  `logs --attempt-id` is unchanged; giving neither or both selectors is refused.
+- Migration 0076 adds `AUD_PIPELINES_RUN_LOG.SLA_BREACHED_AT`, set when a running run is
+  marked BREACHED or ends past its SLA; earlier runs keep NULL. Run `etl-craft migrate`.
+
 - Browser attempt pages: an attempt's status, owner, host, exit code, times, rows and error,
   with its log tail followed live while the attempt runs and a download of the whole log, read
   through the existing attempt log route.

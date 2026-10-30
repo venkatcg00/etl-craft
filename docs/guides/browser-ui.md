@@ -120,6 +120,16 @@ lines every 2 seconds; clear **Follow the end** to stop scrolling. **Download lo
 same bytes as `etl-craft logs --attempt-id ID` and
 `GET /api/v1/projects/{project}/attempts/{attempt_id}/log`.
 
+A run's **Run log** view is the pipeline run log: one line per recorded event of the run, in
+time order, each with its time in UTC, a stable code (`RUN_STARTED`, `TASK_QUEUED`,
+`TASK_RETRY_DUE`, `TASK_ADMITTED`, `TASK_STARTED`, `TASK_ENDED`, `TASK_LOST`, `TASK_SETTLED`,
+`WAIT_OPENED`, `GATE_DECIDED`, `CONTROL_REQUESTED`, `CONTROL_ACKNOWLEDGED`, `CONTROL_COMPLETED`,
+`INTERVENTION`, `SLA_BREACHED`, `SLA_MET`, `RUN_ENDED`, and the cancel codes), the run, the
+task, the actor who caused it where one did, and the event's values. It is rendered from the
+audit tables, not written separately, so it matches `status`, `explain` and the audit, wherever
+the tasks ran. **Download run log** saves the same text as
+`etl-craft logs --pipeline-code CODE --run-id ID` and `GET /api/v1/projects/{project}/run-log`.
+
 ## Search
 
 The search box in the top bar (press `/` or Ctrl+K) finds pipelines and tasks by any part of

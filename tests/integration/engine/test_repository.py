@@ -11,6 +11,7 @@ from etl_craft.core.counts import Counts
 from etl_craft.core.enums import RunStatus, SlaStatus
 from etl_craft.core.errors import MetadataError, RunStateError
 from etl_craft.core.graph import TaskEdge, TaskRunState, build_graph
+from etl_craft.core.time import as_utc
 from etl_craft.engine import runlog, transitions
 from etl_craft.engine.repository import business_rules, dependencies, pipelines, runs, tasks
 from fixtures.metadata import add_table, set_task_target, start_run
@@ -500,13 +501,16 @@ def test_finalizing_a_run_judges_its_sla(seeded, hours_ago, sla, expected):
         )
         row = conn.execute(
             text(
-                "SELECT STATUS AS status, SLA_STATUS AS sla_status, END_DATE AS end_date "
-                "FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"
+                "SELECT STATUS AS status, SLA_STATUS AS sla_status, END_DATE AS end_date, "
+                "SLA_BREACHED_AT AS breached_at FROM AUD_PIPELINES_RUN_LOG "
+                "WHERE PIPELINE_RUN_ID = :id"
             ),
             {"id": run_id},
         ).one()
     assert (row.status, row.sla_status) == (RunStatus.SUCCESS, expected)
     assert row.end_date is not None
+    breached_at = row.end_date if expected == SlaStatus.BREACHED else None
+    assert row.breached_at == breached_at
     assert result.ended
     if expected is None:
         assert result.sla is None
@@ -580,3 +584,28 @@ def test_force_cannot_reopen_a_cancelled_run(seeded):
             )
         assert runlog.fetch_pipeline_run_status(conn, run) == "CANCELLED"
         assert runlog.fetch_active_pipeline_run_id(conn, ids["alpha"]) is None
+
+
+def test_a_breach_seen_while_running_keeps_its_own_time_when_the_run_ends(seeded):
+    engine, ids = seeded
+    with engine.begin() as conn:
+        run_id = start_run(conn, ids["alpha"])
+        conn.execute(
+            text(
+                "UPDATE AUD_PIPELINES_RUN_LOG SET START_DATE = :start WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"start": datetime.now(UTC) - timedelta(hours=3), "id": run_id},
+        )
+        before = datetime.now(UTC)
+        assert transitions.mark_sla_breached(conn, run_id)
+        assert not transitions.mark_sla_breached(conn, run_id)
+        transitions.finalize_pipeline_run(conn, run_id, RunStatus.SUCCESS, sla_in_hours=2)
+        row = conn.execute(
+            text(
+                "SELECT SLA_STATUS AS sla_status, SLA_BREACHED_AT AS breached_at, "
+                "END_DATE AS end_date FROM AUD_PIPELINES_RUN_LOG WHERE PIPELINE_RUN_ID = :id"
+            ),
+            {"id": run_id},
+        ).one()
+    assert row.sla_status == SlaStatus.BREACHED
+    assert before - timedelta(seconds=1) <= as_utc(row.breached_at) <= as_utc(row.end_date)
