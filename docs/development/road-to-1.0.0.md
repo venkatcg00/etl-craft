@@ -182,7 +182,7 @@ item's text, or work done early under another item.
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
 | S7.U Personal-data erasure | Planned | | A standing erasure register and ERASURE tasks remove subjects after loads, outside managed writes |
-| S7.V Empty replacements | Done | | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
+| S7.V Empty replacements | Done | #275 | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
 | S7.W Docs toolchain after MkDocs 1.x | Planned | | Evaluate Zensical against the API pages, navigation and published versions; migrate only when every requirement works |
 | S7.O Package and demo repositories | Planned | | A very small demo stays in package CI; Support Insights holds its project and supplies release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
