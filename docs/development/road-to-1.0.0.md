@@ -179,6 +179,7 @@ item's text, or work done early under another item.
 | S7.A Web UI pages | In progress, slice 4 of 6 | #277, #281, #282, #283, #284, #285, #286, slice 4 PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
+| S7.AK Schema checker | Planned | | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Done | #276 | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -8271,6 +8272,35 @@ before S7.Z, S7.AA and S7.AB.
 
 *Done when:* each fix has a test failing on old code, docs/CHANGELOG describe user-visible changes,
 and test-security plus the built-in security-review run with dispositions in the PR.
+
+### S7.AK Schema checker
+
+Owner decision, 2026-10-30, after S7.A slice 4: Insights shows schema and lineage check states,
+but nothing compares declared tables with the warehouse unless `generate-docs --with-warehouse`
+is run by hand, so most checks read Unchecked. Build both ways to check, each configurable per
+project:
+
+- **Scheduled.** An optional per-project schedule, set with `etl-craft project set` like the
+  other project settings (`--schema-check-schedule` with a cron expression and the project's
+  calendar and timezone, or `none`). The controller runs the existing comparison on it and
+  stores the dated result with the project's catalog publication. A project without a schedule
+  is not checked automatically, and Insights says so.
+- **On demand.** A **Check now** button on the Insights page and the catalog wrapper, and the
+  same action from the CLI and API, run the comparison once for operators of the project.
+  `--schema-check-on-demand Y|N` turns it off for a project whose warehouse should not take
+  ad-hoc metadata queries; the button is then shown disabled with that reason.
+- **One result.** Insights, the catalog's gaps pages and `catalog gaps` read the newest stored
+  comparison and show when it ran and how (schedule or by whom). A failed comparison is stored
+  as failed with its reason; it never turns states into Matched, and earlier results stay
+  until a newer check succeeds.
+- Reuse the S5.P comparison and `GapSnapshot`; no copy of warehouse metadata is kept beyond the
+  dated result. The two settings are columns on `CFG_PROJECTS` (migration in both dialects).
+- Tests: schedule ticks with calendars; on-demand refused when disabled and for viewers;
+  failed comparison keeps the earlier result; Insights and the catalog show the stored time;
+  upgrade from every released schema.
+
+*Done when:* a project can be checked on a schedule, on demand, both or neither, and Insights
+shows real check states with their time.
 
 ## Release candidate: the Support Insights example
 

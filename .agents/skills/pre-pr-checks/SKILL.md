@@ -106,7 +106,13 @@ uv run pytest -q -p no:cacheprovider tests/unit/test_x.py tests/integration/y/ \
 Never set `ETL_CRAFT_REQUIRE_SERVICES=1` for a run that includes the cloud suites or the wheel
 demos: their skips by design would turn into failures.
 
-`make test-changed` is the local default before a PR. It uses pytest-testmon with xdist,
+The local default before a PR is the touched suites (AGENTS.md → Validation): `tests/unit`,
+the test modules of the changed code, `tests/integration/api` and `tests/browser` for `api/`
+or template changes, `test_query_plans.py` for Engine DB SQL, `test_upgrade.py` for
+migrations and `schema.sql`, and `test_catalog.py` for catalog output, with `-n 3` and TMPDIR
+on disk. Name each suite in the pull request.
+
+`make test-changed` is available when its selection is small. It uses pytest-testmon with xdist,
 first running full Engine DB and warehouse suites when SQL, migrations, schema, marker or
 release TOML, examples or templates changed. CI never uses selection: its complete suite is
 the authority. `make test` uses automatic unit workers and four service workers; override
