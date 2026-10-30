@@ -10,9 +10,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException
 
 from etl_craft.api.browser_sessions import html_request
+from etl_craft.api.console import Console
 from etl_craft.api.gateway import Gateway, GatewayMiddleware
 from etl_craft.api.login import SIGN_IN, add_login_routes
 from etl_craft.api.routes import add_action_routes
+from etl_craft.api.ui_console import add_console_page
 from etl_craft.api.ui_errors import browser_error, http_error
 from etl_craft.api.ui_headers import BrowserHeaders, protect
 from etl_craft.api.ui_insights import add_insights_page
@@ -35,7 +37,9 @@ from etl_craft.services.operations.processes import probe, readiness
 logger = logging.getLogger(__name__)
 
 
-def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> FastAPI:
+def create_app(
+    ctx: OperationContext, *, gateway: Gateway | None = None, console: Console | None = None
+) -> FastAPI:
     """Build routes without opening connections or starting the controller."""
     app = FastAPI(
         title="etl-craft",
@@ -77,6 +81,7 @@ def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> Fast
     add_monitor_pages(app, ctx)
     add_live_route(app, ctx)
     add_insights_page(app, ctx)
+    add_console_page(app, ctx, console)
     add_login_routes(app, ctx)
     routed = frozenset(name for name, action in ACTIONS.items() if action.path is not None)
     add_action_routes(app, ctx, routed - SIGN_IN)

@@ -298,6 +298,9 @@ def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
         )
         for row in (*actions, *changes):
             row["at"] = as_utc(row["at"])
+        if request.mine:
+            mine = [row for row in actions if row["actor"] == ctx.actor.name]
+            return AuditView(tuple(ActionView(**row) for row in mine), ())
         return AuditView(
             tuple(ActionView(**row) for row in actions),
             tuple(MetadataChangeView(**row) for row in changes),

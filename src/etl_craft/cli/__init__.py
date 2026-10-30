@@ -70,9 +70,15 @@ def _global_options(*, defaults: bool) -> argparse.ArgumentParser:
     return parser
 
 
-def build_parser(commands: Sequence[Command] = COMMANDS) -> argparse.ArgumentParser:
-    """Build the top-level argument parser with one subcommand per entry in ``commands``."""
-    parser = argparse.ArgumentParser(
+def build_parser(
+    commands: Sequence[Command] = COMMANDS,
+    parser_class: type[argparse.ArgumentParser] = argparse.ArgumentParser,
+) -> argparse.ArgumentParser:
+    """Build the top-level argument parser with one subcommand per entry in ``commands``.
+
+    Subcommand parsers take ``parser_class`` too, so a caller can change how errors are shown.
+    """
+    parser = parser_class(
         prog="etl-craft",
         description="Metadata-driven ETL orchestration engine.",
         parents=[_global_options(defaults=True)],
@@ -117,7 +123,7 @@ def main(argv: Sequence[str] | None = None, commands: Sequence[Command] = COMMAN
         with access_context(args):
             return int(args.handler(args, out))
     except EtlCraftError as error:
-        out.error(_as_flags(str(error), parser))
+        out.error(as_flags(str(error), parser))
         return error.exit_code
     except Exception as error:
         logger.exception("unexpected error in etl-craft %s", args.command)
@@ -137,7 +143,7 @@ def _options(parser: argparse.ArgumentParser) -> dict[str, str]:
     return found
 
 
-def _as_flags(message: str, parser: argparse.ArgumentParser) -> str:
+def as_flags(message: str, parser: argparse.ArgumentParser) -> str:
     """Show each request field a message names in backticks as the option that sets it."""
     options = _options(parser)
     return re.sub(

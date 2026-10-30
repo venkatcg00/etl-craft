@@ -249,10 +249,11 @@ class HistoryInput(RunFilter):
 
 @dataclass(frozen=True, kw_only=True)
 class AuditInput(TagFilter):
-    """Recorded requests, optionally for one pipeline and since a moment."""
+    """Recorded requests, optionally for one pipeline, since a moment, or only the caller's."""
 
     pipeline_code: str | None = None
     since: datetime | None = None
+    mine: bool = False
 
     def __post_init__(self) -> None:
         """Refuse a blank code."""

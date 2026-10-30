@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 from etl_craft.cli.authentication import command_identity
 from etl_craft.cli.client import ApiClient
 from etl_craft.cli.output import Output
+from etl_craft.cli.prompts import CONSOLE
 from etl_craft.config import ConnectorConfig, load_config, resolve_config_path
 from etl_craft.config.discovery import CONFIG_PATH_ENV_VAR
 from etl_craft.config.loader import load_project
@@ -186,7 +187,10 @@ def call(
     *,
     role: Literal["run", "controller", "ui"] | None = None,
 ) -> object:
-    """Run one action: through the API with ``--api``, else on this project."""
+    """Run one action: as the web console's caller, through the API with ``--api``, else here."""
+    caller = CONSOLE.get()
+    if caller is not None:
+        return invoke(caller, name, request)
     if args.api:
         return ApiClient(
             args.api, command_project(args, required=ACTIONS[name].scope != ActionScope.DEPLOYMENT)

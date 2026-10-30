@@ -255,6 +255,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- The browser **Console** runs `etl-craft` command lines as the signed-in person with the CLI's
+  own parser and output, listing the commands their role and grants allow, with Tab completion,
+  recall and help; host, config-file, sign-in, server-file and password commands are refused
+  with the reason. `etl-craft audit --mine` (and `mine=true` on the API) lists only the
+  caller's own requests.
+
 - Schema checks: `project add|set --schema-check-schedule CRON|none` has the controller compare
   the project's declared tables with the warehouse on a schedule, and
   `--schema-check-on-demand Y|N` allows or refuses `generate-docs --with-warehouse` and the

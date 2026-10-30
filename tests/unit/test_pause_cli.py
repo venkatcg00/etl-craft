@@ -36,7 +36,7 @@ def test_interactive_scheduled_resume_prompt_preserves_json(monkeypatch):
         return OperationResult(RunStatus.SUCCESS, "P: resumed", 1, "P")
 
     monkeypatch.setattr(pause, "call", call)
-    monkeypatch.setattr(pause.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr("builtins.input", lambda: "wait")
     command = pause.command(ControlAction.RESUME)
     assert command.run(args, Output(stdout=stdout, stderr=stderr)) == 0

@@ -31,8 +31,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
                 serve_health(ctx, stop)
             else:
                 from etl_craft.api.serve import serve_http
+                from etl_craft.cli.console import console
 
-                serve_http(ctx, stop)
+                serve_http(ctx, stop, console=console())
     return ExitCode.SUCCESS
 
 
