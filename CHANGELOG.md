@@ -255,6 +255,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Browser pages read more easily: each scope's actions sit in one bar, with the reasons
+  unavailable ones are disabled folded into one line; page actions sit on the title row; the main
+  action is highlighted and Stop, Abort and Mark as are marked as destructive; dates, statuses
+  and schedules no longer wrap inside table cells; long run keys are shortened with the full key on
+  hover.
+
 - Browser run and task actions: a task's panel offers Rerun task, Rerun from here, Run task
   only, Mark as, Pause task (with a standing outcome and end time) and Resume task; fan-out tasks
   have an Items page with per-item Rerun, Cancel and Mark as and Rerun failed items; active runs

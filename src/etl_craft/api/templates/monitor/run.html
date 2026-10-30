@@ -6,17 +6,26 @@
 {% include 'monitor/_live_state.html' %}
 <div id="live" data-live-url="/ui/projects/{{ project.project|urlencode }}/live?pipeline={{ run.pipeline_code|urlencode }}&amp;run={{ run.pipeline_run_id }}">
 <header class="object-header" data-recent="Run {{ run.pipeline_run_id }} · {{ run.pipeline_code }}">
-  <h1>Run {{ run.pipeline_run_id }} <span class="note" id="run-key">{{ run.run_key }}</span></h1>
-  <button type="button" data-copy="run-key">Copy run key</button>
+  <h1>Run {{ run.pipeline_run_id }} <span class="note run-key" id="run-key" title="{{ run.run_key }}">{{ run.run_key }}</span></h1>
   <p>{{ status(run.status) }} · {{ run.trigger_kind }}{% if run.backfill %} backfill{% endif %} · run date {{ run.run_date or "none" }}{% if run.sla_status %} · SLA {{ run.sla_status }}{% endif %}</p>
   <dl class="facts inline">
     <dt>Started</dt><dd>{{ run.start_date|zoned(settings.timezone) }}{% if run.started_by %} by {{ run.started_by }}{% endif %}</dd>
     <dt>Ended</dt><dd>{% if run.end_date %}{{ run.end_date|zoned(settings.timezone) }}{% if run.ended_by %} by {{ run.ended_by }}{% endif %}{% else %}Still running{% endif %}</dd>
   </dl>
-  {% if not run.end_date %}<div class="header-actions">{{ post_button("Reconcile", project_api ~ "/reconciliations", {"pipeline_code": run.pipeline_code}, "attempts of pipeline " ~ run.pipeline_code ~ " whose lease expired", "Fence attempts whose owner stopped renewing their lease and record them as LOST, so their tasks can be retried; live attempts are untouched.") }}</div>{% endif %}
+  <div class="header-actions"><button type="button" data-copy="run-key">Copy run key</button>{% if not run.end_date %}{{ post_button("Reconcile", project_api ~ "/reconciliations", {"pipeline_code": run.pipeline_code}, "attempts of pipeline " ~ run.pipeline_code ~ " whose lease expired", "Fence attempts whose owner stopped renewing their lease and record them as LOST, so their tasks can be retried; live attempts are untouched.") }}{% endif %}</div>
 </header>
 <p class="selection" role="status">Selected: {% if task_code %}task <strong>{{ task_code }}</strong> in run {{ run.pipeline_run_id }} · <a href="{{ run_page }}">Select the whole run</a>{% else %}the whole run {{ run.pipeline_run_id }}. Select a task in the graph or the list to act on that task only.{% endif %}</p>
-{{ control_buttons(capabilities, ("task " ~ task_code ~ " in run " ~ run.pipeline_run_id) if task_code else ("run " ~ run.pipeline_run_id)) }}
+{% if panel %}{% call control_buttons(capabilities, "task " ~ task_code ~ " in run " ~ run.pipeline_run_id) %}
+    {% set at = {"pipeline_code": run.pipeline_code, "run_id": run.pipeline_run_id, "task_code": task_code} %}
+    {% set scope = "task " ~ task_code ~ " in run " ~ run.pipeline_run_id %}
+      <li>{{ post_button("Rerun task", project_api ~ "/runs", at | combine(rerun=true), scope, "Run this task again in this run; its downstream tasks are not rerun.") }}</li>
+      <li>{{ post_button("Rerun from here", project_api ~ "/runs", at | combine(rerun=true, with_downstream=true), scope ~ " and its downstream tasks", "Run this task again, then the tasks that depend on it in this run.") }}</li>
+      <li>{{ post_button("Run task only", project_api ~ "/runs", {"pipeline_code": run.pipeline_code, "task_code": task_code, "standalone": true}, "task " ~ task_code ~ " outside any pipeline run", "Run only this task in its own standalone execution; no pipeline run is started or changed.") }}</li>
+      <li>{{ post_button("Mark as", project_api ~ "/marks", at, scope, "Record the chosen status for this task run; downstream tasks use it.", "no", "status", "danger") }}</li>
+      <li>{{ post_button("Pause task", controls_url, {"pipeline_code": run.pipeline_code, "task_code": task_code, "action": "PAUSE"}, "task " ~ task_code ~ " in every run", "Stop starting this task in any run until it is resumed; optionally give downstream tasks a standing outcome.", "yes", "outcome") }}</li>
+      {% if panel.explanation.standing_pause %}<li>{{ post_button("Resume task", controls_url, {"pipeline_code": run.pipeline_code, "task_code": task_code, "action": "RESUME"}, "task " ~ task_code ~ " in every run", "Start this task again where its dependencies allow; remove its standing outcome.") }}</li>{% endif %}
+      {% if panel.task_run and panel.task_run.attempts and panel.task_run.attempts[-1].item_progress %}<li><a class="button" href="{{ run_page }}/tasks/{{ task_code|urlencode }}/items">Items ({{ panel.task_run.attempts[-1].item_progress }})</a></li>{% endif %}
+{% endcall %}{% else %}{{ control_buttons(capabilities, "run " ~ run.pipeline_run_id) }}{% endif %}
 <div class="monitor with-panel">
   <section class="listing" aria-labelledby="view-title">
     <h2 id="view-title" class="sr-only">Run views</h2>
@@ -97,18 +106,6 @@
     </table></div>
     {% else %}<p class="note">No attempts yet.</p>{% endif %}
     {% else %}<p class="note">This task has not started in this run.</p>{% endif %}
-    {% set at = {"pipeline_code": run.pipeline_code, "run_id": run.pipeline_run_id, "task_code": task_code} %}
-    {% set scope = "task " ~ task_code ~ " in run " ~ run.pipeline_run_id %}
-    <h3>Task actions</h3>
-    <ul class="actions">
-      <li>{{ post_button("Rerun task", project_api ~ "/runs", at | combine(rerun=true), scope, "Run this task again in this run; its downstream tasks are not rerun.") }}</li>
-      <li>{{ post_button("Rerun from here", project_api ~ "/runs", at | combine(rerun=true, with_downstream=true), scope ~ " and its downstream tasks", "Run this task again, then the tasks that depend on it in this run.") }}</li>
-      <li>{{ post_button("Run task only", project_api ~ "/runs", {"pipeline_code": run.pipeline_code, "task_code": task_code, "standalone": true}, "task " ~ task_code ~ " outside any pipeline run", "Run only this task in its own standalone execution; no pipeline run is started or changed.") }}</li>
-      <li>{{ post_button("Mark as", project_api ~ "/marks", at, scope, "Record the chosen status for this task run; downstream tasks use it.", "no", "status") }}</li>
-      <li>{{ post_button("Pause task", controls_url, {"pipeline_code": run.pipeline_code, "task_code": task_code, "action": "PAUSE"}, "task " ~ task_code ~ " in every run", "Stop starting this task in any run until it is resumed; optionally give downstream tasks a standing outcome.", "yes", "outcome") }}</li>
-      {% if explanation.standing_pause %}<li>{{ post_button("Resume task", controls_url, {"pipeline_code": run.pipeline_code, "task_code": task_code, "action": "RESUME"}, "task " ~ task_code ~ " in every run", "Start this task again where its dependencies allow; remove its standing outcome.") }}</li>{% endif %}
-      {% if task_run and task_run.attempts and task_run.attempts[-1].item_progress %}<li><a class="button" href="{{ run_page }}/tasks/{{ task_code|urlencode }}/items">Items ({{ task_run.attempts[-1].item_progress }})</a></li>{% endif %}
-    </ul>
     {% if explanation.dependencies %}
     <h3>Waits for</h3>
     <ul class="dependencies">{% for d in explanation.dependencies %}<li><span class="{{ 'met' if d.met else 'unmet' }}"><span aria-hidden="true">{{ '✓' if d.met else '◷' }}</span> {{ d.upstream }}</span> <span class="note">({{ d.dependency_type }}{% if d.status %}, {{ d.status }}{% endif %}) {{ d.reason }}</span></li>{% endfor %}</ul>

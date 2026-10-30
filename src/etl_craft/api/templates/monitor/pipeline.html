@@ -9,7 +9,7 @@
   <h1>{{ pipeline.pipeline_code }} <span class="note">{{ pipeline.pipeline_name }}</span></h1>
   <p>{% if pipeline.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Automatic runs paused</span> {{ pipeline.paused.describe() }}{% else %}Automatic runs active{% endif %}</p>
   <div class="header-actions">
-    <button type="button" data-run-now data-scope="pipeline {{ pipeline.pipeline_code }}" data-effect="Admit one manual run of the whole pipeline for the controller; scheduled runs are unaffected." data-preserves="yes">Run now</button>
+    <button type="button" class="primary" data-run-now data-scope="pipeline {{ pipeline.pipeline_code }}" data-effect="Admit one manual run of the whole pipeline for the controller; scheduled runs are unaffected." data-preserves="yes">Run now</button>
     {% if pipeline.paused %}
     <button type="button" data-control="RESUME" data-scope="pipeline {{ pipeline.pipeline_code }}" data-preserves="yes" data-scheduled="{{ 'yes' if pipeline.run_schedule else 'no' }}" data-effect="Resume automatic runs of this pipeline; running work is unaffected.">Resume</button>
     {% else %}
@@ -42,7 +42,7 @@
       <tbody>
       {% for r in runs %}
       <tr>
-        <th scope="row"><a href="{{ run_url(r.pipeline_run_id) }}">{{ r.pipeline_run_id }}</a> <span class="note">{{ r.run_key }}</span></th>
+        <th scope="row"><a href="{{ run_url(r.pipeline_run_id) }}">{{ r.pipeline_run_id }}</a> <span class="note run-key" title="{{ r.run_key }}">{{ r.run_key }}</span></th>
         <td>{{ status(r.status) }}</td>
         <td>{{ r.trigger_kind }}{% if r.backfill %} · backfill{% endif %}</td>
         <td>{{ r.run_date or "None" }}</td>

@@ -12,7 +12,7 @@
   <label for="insights-to">To (UTC day)</label><input id="insights-to" name="to" type="date" value="{{ end.isoformat() }}">
   <label for="insights-pipelines">Pipelines (none selected: all you can view)</label>
   <select id="insights-pipelines" name="pipeline" multiple size="{{ [choices|length, 6]|min or 1 }}">{% for code in choices %}<option value="{{ code }}" {% if code in chosen %}selected{% endif %}>{{ code }}</option>{% endfor %}</select>
-  <button type="submit">Refresh</button>
+  <button type="submit" class="primary">Refresh</button>
 </form>
 <p class="note">Runs started from {{ found.window_start|zoned(settings.timezone) }} up to {{ found.window_end|zoned(settings.timezone) }}. Rates use finished runs; counts a task did not report are shown as Not measured, never 0. The same numbers: <code>etl-craft insights --from {{ start.isoformat() }} --to {{ end.isoformat() }} --format json</code>.</p>
 {% set t = found.total %}
