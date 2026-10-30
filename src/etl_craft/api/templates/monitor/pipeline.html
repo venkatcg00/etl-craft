@@ -28,10 +28,10 @@
   {% if tab == 'runs' %}
     {% if runs %}
     <figure class="bars">
-      <svg viewBox="0 0 {{ runs|length * 14 + 4 }} 64" width="{{ runs|length * 14 + 4 }}" height="64" role="img" aria-label="Durations of the runs listed below, newest on the right">
+      <svg viewBox="0 0 {{ runs|length * 24 + 4 }} 64" width="{{ runs|length * 24 + 4 }}" height="64" role="group" aria-label="Durations of the runs listed below, newest on the right">
         {% for r in runs|reverse %}
         {% set h = (60 * seconds(r) / longest)|round(0, 'ceil')|int or 2 %}
-        <a href="{{ run_url(r.pipeline_run_id) }}"><rect class="bar {{ r.status }}" x="{{ loop.index0 * 14 + 2 }}" y="{{ 62 - h }}" width="10" height="{{ h }}"><title>Run {{ r.pipeline_run_id }} · {{ r.status }} · {{ duration(seconds(r)) }}</title></rect></a>
+        <a href="{{ run_url(r.pipeline_run_id) }}"><rect class="hit" x="{{ loop.index0 * 24 + 2 }}" y="0" width="20" height="64"/><rect class="bar {{ r.status }}" x="{{ loop.index0 * 24 + 2 }}" y="{{ 62 - h }}" width="20" height="{{ h }}"><title>Run {{ r.pipeline_run_id }} · {{ r.status }} · {{ duration(seconds(r)) }}</title></rect></a>
         {% endfor %}
       </svg>
       <figcaption>Run durations; select a bar to open its run.</figcaption>
