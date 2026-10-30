@@ -105,3 +105,5 @@ table.list td.wrap, table.list td:has(.error-text) { white-space: normal; min-wi
   .run-key { max-width: 100%; }
 }
 .list .run-key { max-width: 14rem; }
+.pick { padding: 0; width: 2.25rem; }
+.pick label { display: grid; place-items: center; min-height: 2.25rem; margin: 0; cursor: pointer; }

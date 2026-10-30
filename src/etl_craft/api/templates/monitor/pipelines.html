@@ -25,11 +25,11 @@
       <button type="button" data-csv="pipeline-table" data-csv-name="pipelines.csv">Export CSV</button>
     </div>
     <div class="scroll"><table class="list" id="pipeline-table">
-      <thead><tr><th scope="col"><input type="checkbox" id="select-all" aria-label="Select every listed pipeline"></th><th scope="col">Pipeline</th><th scope="col">Name</th><th scope="col">Tags</th><th scope="col">Schedule</th><th scope="col">Next run</th><th scope="col">Recent runs</th><th scope="col">SLA</th><th scope="col">Automatic runs</th><th scope="col">Paused tasks</th></tr></thead>
+      <thead><tr><th scope="col" class="pick"><label><input type="checkbox" id="select-all" aria-label="Select every listed pipeline"></label></th><th scope="col">Pipeline</th><th scope="col">Name</th><th scope="col">Tags</th><th scope="col">Schedule</th><th scope="col">Next run</th><th scope="col">Recent runs</th><th scope="col">SLA</th><th scope="col">Automatic runs</th><th scope="col">Paused tasks</th></tr></thead>
       <tbody>
       {% for p in pipelines %}
       <tr>
-        <td><input type="checkbox" data-select="{{ p.pipeline_code }}" aria-label="Select {{ p.pipeline_code }}"></td>
+        <td class="pick"><label><input type="checkbox" data-select="{{ p.pipeline_code }}" aria-label="Select {{ p.pipeline_code }}"></label></td>
         <th scope="row"><a href="{{ pipeline_url(p.pipeline_code) }}">{{ p.pipeline_code }}</a></th>
         <td>{{ p.pipeline_name }}</td>
         <td>{% for tag in p.tags %}<a class="badge" href="?tag={{ tag|urlencode }}">{{ tag }}</a> {% else %}<span class="note">None</span>{% endfor %}</td>
