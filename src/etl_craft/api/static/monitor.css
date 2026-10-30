@@ -66,3 +66,4 @@ table.list tbody th { font-size: inherit; color: var(--text); }
 .legend .swatch.queued { background: var(--border); }
 .matrix caption { text-align: left; }
 .live-state{color:var(--muted);font-size:.85rem;min-height:1.5rem}.live-state #live-notice{color:var(--text);font-weight:600}
+pre.log{max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--border);padding:.75rem;font-size:.85rem}a.button{display:inline-block;border:1px solid var(--muted);border-radius:.25rem;padding:.4rem .7rem}

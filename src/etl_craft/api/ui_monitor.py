@@ -15,10 +15,12 @@ from etl_craft.api.ui_pages import page_values
 from etl_craft.api.ui_templates import render
 from etl_craft.core.enums import ActionName, SearchKind
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
+from etl_craft.engine.logs import LIVE_ATTEMPTS
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.capabilities import CapabilitiesView
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import (
+    AttemptView,
     GraphView,
     HistoryView,
     PipelineListView,
@@ -28,6 +30,7 @@ from etl_craft.services.operations.models import (
     TaskRunView,
 )
 from etl_craft.services.operations.requests import (
+    AttemptId,
     CapabilitiesInput,
     HistoryInput,
     PipelineInput,
@@ -90,6 +93,20 @@ def add_monitor_pages(app: FastAPI, ctx: OperationContext) -> None:
             values
             | _run_values(caller, request, project, pipeline_code, run_id)
             | {"title": f"Run {run_id} · {pipeline_code} · etl-craft", "view": "pipelines"},
+        )
+
+    @app.get(
+        "/ui/projects/{project}/pipelines/{pipeline_code}/runs/{run_id}/attempts/{attempt_id}",
+        include_in_schema=False,
+    )
+    def attempt(
+        request: Request, project: str, pipeline_code: str, run_id: int, attempt_id: int
+    ) -> Response:
+        caller, values = page_values(ctx, request)
+        return render(
+            request,
+            "monitor/attempt.html",
+            values | _attempt_values(caller, project, pipeline_code, run_id, attempt_id),
         )
 
     @app.get("/ui/projects/{project}/search", include_in_schema=False)
@@ -271,6 +288,35 @@ def _run_values(
         "run_page": page,
         "pipeline_page": pipeline_url(project, pipeline_code),
         "controls_url": controls_url(project),
+    }
+
+
+def _attempt_values(
+    caller: OperationContext, project: str, pipeline_code: str, run_id: int, attempt_id: int
+) -> dict[str, object]:
+    """Read one attempt of the named run; any other pairing is not found, as for runs."""
+    run = invoke(caller, ActionName.RUN_DETAIL, RunId(run_id=run_id))
+    found = invoke(caller, ActionName.ATTEMPT, AttemptId(attempt_id=attempt_id))
+    assert isinstance(run, RunView) and isinstance(found, AttemptView)
+    if run.pipeline_code != pipeline_code or found.pipeline_run_id != run_id:
+        raise ResourceNotFoundError("Not found or no access")
+    steps = invoke(
+        caller, ActionName.STEPS, RunSelection(pipeline_code=pipeline_code, run_id=run_id)
+    )
+    assert isinstance(steps, StepsView)
+    task_code = next(s.task_code for s in steps.steps if s.task_run_id == found.task_run_id)
+    api = f"/api/v1/projects/{quote(project, safe='')}/attempts/{attempt_id}"
+    return {
+        "title": f"Attempt {found.attempt_number} · {task_code} · Run {run_id} · etl-craft",
+        "view": "pipelines",
+        "attempt": found,
+        "run": run,
+        "task_code": task_code,
+        "live": found.status in LIVE_ATTEMPTS,
+        "attempt_api": api,
+        "log_api": f"{api}/log",
+        "run_page": run_url(project, pipeline_code, run_id),
+        "pipeline_page": pipeline_url(project, pipeline_code),
     }
 
 
