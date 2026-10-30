@@ -37,6 +37,7 @@ from etl_craft.engine.repository.tasks import fetch_admitted_parameters
 from etl_craft.engine.schema import InitResult
 from etl_craft.services.catalog.gaps import GapSnapshot
 from etl_craft.services.config_files import ConfigExport, ConfigSync
+from etl_craft.services.insights import Insights
 from etl_craft.services.operations import (
     about,
     access,
@@ -57,6 +58,7 @@ from etl_craft.services.operations import (
     diagnostics,
     documents,
     groups,
+    insights,
     inspect,
     items,
     maintenance,
@@ -257,6 +259,8 @@ _ROWS = (
            f"{API}/run-log", streams=True, scope=ActionScope.PIPELINE),
     Action(ActionName.RUN_ZIP, run_zip.run_zip, RunSelection, None, VIEWER, GET,
            f"{API}/run-zip", streams=True, scope=ActionScope.PIPELINE),
+    Action(ActionName.INSIGHTS, insights.insights, insights.InsightsInput, Insights, VIEWER, GET,
+           f"{API}/insights", scope=ActionScope.PIPELINE),
     Action(ActionName.CATALOG_GAPS, catalog.get_gaps, catalog.GapsInput, GapSnapshot, VIEWER, GET,
            f"{API}/catalog/gaps",
            scope=ActionScope.PIPELINE),

@@ -318,3 +318,25 @@ def test_run_log_view_shows_the_run_log_read_and_links_its_download(monitor):
     assert f'href="{link}" download="run-{active}.log"' in page.text
     selected = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "log", "task": "EXTRACT"})
     assert f'href="{BASE}/OPS/runs/{active}?view=log&amp;task=LOAD"' in selected.text
+
+
+def test_insights_page_renders_the_insights_read_with_its_filters(monitor):
+    ctx, client, active = monitor
+    ran_extract(ctx, active)
+    login(client)
+    home = client.get(BASE)
+    assert 'href="/ui/projects/default/insights"' in home.text
+    page = client.get("/ui/projects/default/insights")
+    assert page.status_code == 200
+    document = api(client, "/insights")
+    totals = re.search(r'aria-label="Totals">(.*?)</dl>', page.text, re.S).group(1)
+    assert f"<dt>Runs</dt><dd>{document['total']['runs']}</dd>" in totals
+    rows = re.findall(r'<th scope="row"><a href="[^"]+">([A-Z]+)</a></th><td>(\d+)</td>', page.text)
+    assert rows == [(p["pipeline_code"], str(p["runs"])) for p in document["per_pipeline"]]
+    assert f'href="{BASE}/OPS/runs/{active}"' in page.text
+    assert "Not measured" in page.text
+    only = client.get("/ui/projects/default/insights", params={"pipeline": "OPS"})
+    assert only.status_code == 200 and '<option value="OPS" selected>' in only.text
+    assert f'href="{BASE}/SALES"' not in only.text.split('id="insights-pipelines-table"')[1]
+    bad = client.get("/ui/projects/default/insights", params={"from": "yesterday"})
+    assert bad.status_code == 400 and "expected a date as YYYY-MM-DD" in bad.text

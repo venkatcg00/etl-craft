@@ -255,6 +255,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Pipeline Insights: `etl-craft insights [--from DAY] [--to DAY] [--pipeline-code CODE] [--tag
+  TAG]`, `GET /api/v1/projects/{project}/insights`, the **Insights** page and a catalog
+  **Insights** tab share one calculation over a bounded window of UTC days: runs and success
+  rate, duration and SLA, retries and failures, wait versus execution time and throughput, rows
+  by task, data quality rules with observed values, schema and lineage check states, and the
+  latest runs. Unreported counts are "not measured", never 0.
+
 - Run zips: `etl-craft logs --pipeline-code CODE [--run-id | --run-key] --zip PATH`,
   `GET /api/v1/projects/{project}/run-zip` and the run page's **Download run zip** stream one zip
   with the run log, each attempt's log by task, the status, history and explain documents, and a

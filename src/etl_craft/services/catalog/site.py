@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from importlib import resources
 from pathlib import Path
@@ -47,6 +47,7 @@ from etl_craft.services.catalog.incremental import (
     reuse_pages,
     write_manifest,
 )
+from etl_craft.services.catalog.insights_html import insights_page
 from etl_craft.services.catalog.metrics import facts as _facts
 from etl_craft.services.catalog.metrics import kpi_values
 from etl_craft.services.catalog.metrics import status as _status
@@ -55,6 +56,7 @@ from etl_craft.services.catalog.pages import Pages, anchor
 from etl_craft.services.catalog.storage import MARKER as MARKER
 from etl_craft.services.catalog.storage import check_folder, swap_site
 from etl_craft.services.catalog.trigger_html import trigger_edges
+from etl_craft.services.insights import gap_counts
 from etl_craft.services.operations.serialization import to_json
 
 ASSETS = ("catalog.css", "catalog.js", "theme.js", "favicon.svg")
@@ -64,6 +66,7 @@ TABS = (
     ("dags", "dags.html", "DAGs"),
     ("warehouse", "warehouse.html", "Warehouse"),
     ("gaps", "gaps.html", "Schema and lineage gaps"),
+    ("insights", "insights.html", "Insights"),
 )
 """The tabs at the top of every page: key, page, label."""
 ON = ' class="on"'
@@ -153,6 +156,27 @@ class _Writer(Pages):
             )
         self._run_pages()
         self._supporting_pages()
+        self._insights_page()
+
+    def _insights_page(self) -> None:
+        c = self.catalog
+        if c.insights is None:
+            return
+        insights = replace(
+            c.insights, gaps=gap_counts((g.attribute, g.state) for g in gap_snapshot(c).records)
+        )
+        (self.folder / "insights.json").write_text(json.dumps(to_json(insights)), encoding="utf-8")
+        shown = {run.pipeline_run_id for p in c.pipelines.values() for run in p.runs}
+        self._page(
+            "insights.html",
+            "Insights",
+            "",
+            lambda: insights_page(
+                insights, insights.gaps, lambda run: run_url(run) if run in shown else None
+            ),
+            "insights",
+            [],
+        )
 
     def _run_pages(self) -> None:
         c = self.catalog

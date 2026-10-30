@@ -235,6 +235,7 @@ def test_the_site_has_a_page_per_asset_and_a_search_index(project, tmp_path):
             "dags.html",
             "warehouse.html",
             "index.html",
+            "insights.html",
             "pipelines/INGEST.html",
             "pipelines/MART.html",
             "pipelines/SALES.html",

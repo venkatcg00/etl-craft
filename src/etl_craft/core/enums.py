@@ -296,6 +296,7 @@ class ActionName(StrEnum):
     LOGS = "logs"
     RUN_LOG = "run log"
     RUN_ZIP = "run zip"
+    INSIGHTS = "insights"
     CATALOG_GAPS = "catalog gaps"
     VALIDATE = "validate"
     DOCTOR = "doctor"

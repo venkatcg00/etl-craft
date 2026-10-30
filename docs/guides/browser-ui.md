@@ -136,6 +136,27 @@ cannot be read here (removed by retention, not uploaded yet, or moved) is listed
 reason instead of being left out. `etl-craft logs --pipeline-code CODE --run-id ID --zip PATH`
 writes the same zip, and `GET /api/v1/projects/{project}/run-zip` serves it.
 
+## Pipeline Insights
+
+**Insights** in the sidebar shows the operational panels for the pipelines you can view, over a
+window of UTC days (the last 7 by default, at most 92), optionally for selected pipelines:
+
+- totals: runs, success rate (of finished runs), average duration, SLA breaches, retries, the
+  average wait to start and the average execution time, and rows written;
+- runs per day, succeeded and failed, as a chart and a table;
+- per pipeline: runs, success rate, average and longest duration, SLA breaches, attempts,
+  retries, lost attempts, rows written and rows per second of measured execution;
+- rows by task: source, target, inserted, updated, deleted and rejected counts of successful
+  task runs as each handler reported them (stages are never added together);
+- failures by task and failure class; data quality rules with their failed runs, passed and not
+  passed table checks, flagged rows and newest observed values; schema and lineage checks by
+  attribute and state; and the latest runs, each linking to its run.
+
+A count a task did not report is shown as **Not measured**, never 0, and rates are computed
+from summed counts. `etl-craft insights [--from DAY] [--to DAY] [--pipeline-code CODE]
+[--tag TAG] --format json` and `GET /api/v1/projects/{project}/insights` return the same
+document, and the generated catalog has an **Insights** tab with the last 7 days at generation.
+
 ## Search
 
 The search box in the top bar (press `/` or Ctrl+K) finds pipelines and tasks by any part of
