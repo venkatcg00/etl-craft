@@ -236,6 +236,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Business calendars: `calendars.csv` (`CALENDAR_CODE`, `CALENDAR_NAME`, `WEEKEND_DAYS`) and
+  `calendar_holidays.csv` hold a project's calendars; `pipelines.csv` gains `CALENDAR_CODE` and
+  `NON_BUSINESS_DAY` (`SKIP`, the default, or `NEXT_BUSINESS_DAY`). A tick on a closed day is
+  recorded `SKIPPED` naming the calendar and date, or moves to the next business day.
+  `RUN_SCHEDULE` accepts `3BD` and `LBD` (Nth and last business day of the month) in its
+  day-of-month field. Catch-up, resume and `--backfill` follow the calendar. `validate` fails an
+  unknown or inactive calendar, a schedule with no run in the next year and a holiday list ending
+  within 30 days; `doctor` warns at 60 days. Engine DB migration 0074 adds `CFG_CALENDARS`,
+  `CFG_CALENDAR_HOLIDAYS`, their histories and the two pipeline columns; existing pipelines get
+  no calendar, so their schedules are unchanged.
+
 - `ALLOW_EMPTY` task parameter for `CREATE_TABLE` and `OVERWRITE_TABLE`. With `false`, a SELECT
   that returns no rows fails the task before the target changes, naming the task, the target
   and the remedy. Absent or `true` keeps today's behaviour: the target is replaced with no rows.

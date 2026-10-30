@@ -103,11 +103,12 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
 def _validate(pipeline_id: int, status: str, trigger_kind: str) -> None:
     """Refuse invalid initial identities before taking admission locks."""
     if status not in {RunStatus.IN_PROGRESS, RunStatus.QUEUED, RunStatus.SKIPPED} or (
-        status == RunStatus.SKIPPED and trigger_kind != TriggerKind.SCHEDULE
+        status == RunStatus.SKIPPED
+        and trigger_kind not in (TriggerKind.SCHEDULE, TriggerKind.BACKFILL)
     ):
         raise RunStateError(
             f"pipeline_id={pipeline_id}: initial status={status!r}; "
-            "only schedules may start SKIPPED"
+            "only schedules and backfills may start SKIPPED"
         )
     if trigger_kind not in set(TriggerKind):
         raise RunStateError(

@@ -146,7 +146,9 @@ and require any remaining mandatory values.
 
 | File | Columns (required in bold) | Defaults |
 |---|---|---|
-| `pipelines.csv` | **`PIPELINE_CODE`**, **`PIPELINE_NAME`**, `DESCRIPTION`, **`REFRESH_TYPE`**, `RUN_SCHEDULE`, `SCHEDULE_TIMEZONE`, `SCHEDULE_START_DATE`, `CATCHUP`, `MAX_CATCHUP_RUNS`, `OVERLAP_POLICY`, `SLA_IN_HOURS`, `PIPELINE_PARAMETERS`, `ACTIVE_FLAG` | `CATCHUP` `N`, `MAX_CATCHUP_RUNS` `1`, `OVERLAP_POLICY` `SKIP` |
+| `calendars.csv` | **`CALENDAR_CODE`**, `CALENDAR_NAME`, `WEEKEND_DAYS`, `ACTIVE_FLAG` | Empty `WEEKEND_DAYS` means no weekend |
+| `calendar_holidays.csv` | **`CALENDAR_CODE`**, **`HOLIDAY_DATE`**, `HOLIDAY_NAME`, `ACTIVE_FLAG` | |
+| `pipelines.csv` | **`PIPELINE_CODE`**, **`PIPELINE_NAME`**, `DESCRIPTION`, **`REFRESH_TYPE`**, `RUN_SCHEDULE`, `SCHEDULE_TIMEZONE`, `SCHEDULE_START_DATE`, `CATCHUP`, `MAX_CATCHUP_RUNS`, `OVERLAP_POLICY`, `SLA_IN_HOURS`, `PIPELINE_PARAMETERS`, `CALENDAR_CODE`, `NON_BUSINESS_DAY`, `ACTIVE_FLAG` | `CATCHUP` `N`, `MAX_CATCHUP_RUNS` `1`, `OVERLAP_POLICY` `SKIP`, `NON_BUSINESS_DAY` `SKIP`; empty `CALENDAR_CODE` means no calendar |
 | `tasks.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`TASK_TYPE`**, **`HANDLER`**, `RUN_CONDITION`, `RUN_CONDITION_COUNT`, `TARGET_CATALOG_NAME`, `TARGET_SCHEMA_NAME`, `TARGET_TABLE_NAME`, `TARGET_ACTIVE_FLAG`, `ACTIVE_FLAG` | `TARGET_ACTIVE_FLAG` `Y` |
 | `task_parameters.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`PARAMETER_NAME`**, `PARAMETER_VALUE`, `ACTIVE_FLAG` | |
 | `task_dependencies.csv` | **`PIPELINE_CODE`**, **`TASK_CODE`**, **`DEPENDS_ON_PIPELINE_CODE`**, **`DEPENDS_ON_TASK_CODE`**, **`DEPENDENCY_TYPE`**, `CONSUME_REPAIRS`, `ACTIVE_FLAG` | `CONSUME_REPAIRS` `Y` |
@@ -164,7 +166,10 @@ Each handler's guide lists its task parameters. Values are written as follows:
 - codes start with an ASCII letter, then letters, digits or `_`, at most 128 characters;
 - `Y` and `N`, and every other fixed choice, are upper case;
 - `PIPELINE_PARAMETERS` is a JSON object, such as `{"TAGS": ["sales"]}`;
-- `SCHEDULE_START_DATE` is a date written `YYYY-MM-DD`;
+- `SCHEDULE_START_DATE` and `HOLIDAY_DATE` are dates written `YYYY-MM-DD`;
+- `WEEKEND_DAYS` lists distinct day names `MON`–`SUN` separated by `|`, such as `SAT|SUN`;
+- `NON_BUSINESS_DAY` is `SKIP` or `NEXT_BUSINESS_DAY` (see
+  [Business calendars](../deploying/controller.md#business-calendars));
 - `SLA_IN_HOURS` is a number; `MAX_CATCHUP_RUNS`, `RUN_CONDITION_COUNT` and `SEQUENCE_NUMBER`
   are whole numbers;
 - a task parameter's value is text, stored as written, JSON included.

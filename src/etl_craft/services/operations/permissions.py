@@ -5,7 +5,8 @@ from dataclasses import dataclass, field, replace
 
 from sqlalchemy.engine import Connection, Row
 
-from etl_craft.core.enums import ApiRole, Permission, YesNo
+from etl_craft.core.enums import ApiRole, YesNo
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import current_project_id, read_tags

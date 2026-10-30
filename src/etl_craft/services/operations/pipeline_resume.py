@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.cron import next_after
 from etl_craft.core.enums import InterventionAction, ResumeChoice, RunStatus, TriggerKind, YesNo
 from etl_craft.core.errors import RunStateError, UsageError
 from etl_craft.engine import runlog, standing_pauses
@@ -15,7 +14,7 @@ from etl_craft.engine.repository import pauses
 from etl_craft.engine.repository.intervention_rows import record_intervention
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.run_creation import RunCreation, create
-from etl_craft.engine.schedule_ticks import cursor
+from etl_craft.engine.schedule_ticks import cursor, schedule
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.requests import ControlRequest
 
@@ -103,13 +102,15 @@ def _plan(
     zone = None
     if row is not None and row.run_schedule is not None:
         zone, start = cursor(row._mapping, row.project_timezone, now)
+        plan = schedule(conn, row._mapping, zone)
         retained: deque[datetime] = deque(
             maxlen=row.max_catchup_runs if row.catchup == YesNo.YES else 1
         )
-        tick = next_after(row.run_schedule, start, zone)
-        while tick <= now:
-            retained.append(tick)
-            tick = next_after(row.run_schedule, tick, zone)
+        tick = plan.next_tick(start)
+        while tick.instant <= now:
+            if tick.skipped is None:
+                retained.append(tick.instant)
+            tick = plan.next_tick(tick.instant)
         ticks = list(retained)
         if request.then is None:
             raise UsageError(

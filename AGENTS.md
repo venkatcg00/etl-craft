@@ -190,7 +190,7 @@ Each package imports only the packages below it; `lint-imports` enforces the ord
 - `core.text.parse_jdbc_url` for JDBC URLs;
 - `handlers.sql.spec.parse_flag` for Y/N task parameters;
 - `cli.output.Output.result` for a command's JSON or text output;
-- `core.enums` for every closed value set;
+- `core.enums` (and its `core.enums_<concern>` splits) for every closed value set;
 - `core.errors` for every error.
 
 If a helper you need exists privately in another module, move it to the right layer and share
@@ -206,7 +206,9 @@ it. Never copy it, and never import another module's `_private` name.
 - **No "reserved for later".** No fields, parameters or tables kept for later.
 - **Enums, not strings.** Statuses, actions, handlers, roles and modes come from `core.enums`.
   Never compare against or return string literals such as `"SUCCESS"`. A new closed set of
-  values gets an enum in `core/enums.py`.
+  values gets an enum in `core/enums.py`, or in the `core/enums_<concern>.py` module split from it
+  for that concern (`enums_access`: environments, governance, access). When `core/enums.py`
+  reaches the module size limit, split a cohesive group into such a module.
 - **Errors.** Raise from the `core.errors` hierarchy, never `ValueError` or `RuntimeError` for
   a condition a user can cause. Every error class has its own `ExitCode`: a new class takes the
   next free code, and a test enforces uniqueness.

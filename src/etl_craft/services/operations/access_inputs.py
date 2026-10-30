@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import AccessIntent, ApiRole, Permission, YesNo
+from etl_craft.core.enums import ApiRole, YesNo
+from etl_craft.core.enums_access import AccessIntent, Permission
 from etl_craft.core.errors import UsageError
 from etl_craft.core.tags import valid_tag
 from etl_craft.engine.queries import statement

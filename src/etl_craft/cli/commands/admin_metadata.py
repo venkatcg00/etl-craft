@@ -4,7 +4,8 @@ import argparse
 
 from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import ActionName, EnvironmentType, Governance
+from etl_craft.core.enums import ActionName
+from etl_craft.core.enums_access import EnvironmentType, Governance
 from etl_craft.core.errors import UsageError
 from etl_craft.services.operations import admin_metadata as operations
 

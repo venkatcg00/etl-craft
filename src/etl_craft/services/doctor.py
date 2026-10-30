@@ -33,11 +33,11 @@ from etl_craft.core.enums import (
     DeploymentProfile,
     EmailTransport,
     GatePolicy,
-    Governance,
     IcebergMaintenance,
     ProcessRole,
     YesNo,
 )
+from etl_craft.core.enums_access import Governance
 from etl_craft.core.errors import EtlCraftError
 from etl_craft.core.resources import (
     MIB,
@@ -59,6 +59,7 @@ from etl_craft.engine.queries import statement
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.execution.connections import probe_email_relay, probe_warehouse
 from etl_craft.handlers.mail import email_tls_problem
+from etl_craft.services.calendar_checks import DOCTOR_DAYS, holiday_lists_ending
 from etl_craft.services.cloning import cloning_problem
 from etl_craft.services.operations.accounts import has_admin
 from etl_craft.warehouse.connection import (
@@ -753,6 +754,9 @@ def _guard_checks(conn: Connection, config: ConnectorConfig) -> list[Check]:
         )
     if project is not None and dialect.has_table(conn, "AUD_PIPELINE_REFRESHES"):
         checks.extend(_refresh_checks(conn, int(project.project_id)))
+    if project is not None and dialect.has_table(conn, "CFG_CALENDARS"):
+        ending = holiday_lists_ending(conn, datetime.now(UTC), DOCTOR_DAYS)
+        checks.extend(warn(f"Holiday list ({where})", problem) for where, problem in ending)
 
     return checks
 

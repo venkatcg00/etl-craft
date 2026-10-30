@@ -95,6 +95,36 @@ preserves the tick for later admission. Only one run per pipeline can be `IN-PRO
 You can inspect or cancel a queued run by its exact `--run-id` or `--run-key`.
 These columns govern the controller's catch-up.
 
+### Business calendars
+
+A pipeline may name a business calendar of its project (`CALENDAR_CODE` in `pipelines.csv`). A
+calendar closes its `WEEKEND_DAYS`, such as `SAT|SUN`, and its listed holidays
+([`calendars.csv` and `calendar_holidays.csv`](../guides/configuration-files.md#the-files)).
+Without a calendar, schedules behave as described above.
+
+The pipeline's `NON_BUSINESS_DAY` decides what happens to a tick on a closed day:
+
+- `SKIP` (default) records the tick `SKIPPED`, with a reason naming the calendar and the date,
+  such as `calendar UK: 2026-12-25 is a holiday (Christmas Day)`.
+- `NEXT_BUSINESS_DAY` moves the tick to the same wall time on the next business day, which is
+  then its `RUN_DATE`. A moved tick that meets one already scheduled there is the same run, so a
+  daily schedule runs once on the day after a long weekend.
+
+`RUN_SCHEDULE` can also name business days in its day-of-month field: `3BD` is the third
+business day of the month and `LBD` the last; combine them with commas, such as `0 6 1BD,LBD * *`.
+The weekday field must then be `*`, and the pipeline must name a calendar.
+
+Catch-up, `pipeline resume` and `--backfill` follow the same calendar. A backfill under `SKIP`
+records each closed date as a `SKIPPED` backfill run; under `NEXT_BUSINESS_DAY` a closed date runs
+once as the next business day, even when that day is after the range, and the result says so.
+Manual runs keep the date they are given.
+
+`etl-craft validate` fails a business-day rule without a calendar, a pipeline whose calendar is
+missing or inactive, a schedule that would run on no date in the next year, and a holiday list
+whose last holiday is within 30 days. `etl-craft doctor` warns 60 days ahead, so next year's
+holidays can be added in time. Holidays apply as soon as they are applied: the scheduler reads
+the calendar's current rows.
+
 ## Gate waits and dispatch
 
 Migration `0016_gate_waits` adds `AUD_GATE_WAITS`. Each run and task has at most one current

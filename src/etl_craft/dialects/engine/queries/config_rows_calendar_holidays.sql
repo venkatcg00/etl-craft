@@ -1,0 +1,1 @@
+SELECT h.HOLIDAY_ID AS row_id, h.ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, h.CALENDAR_ID AS calendar_id, c.CALENDAR_CODE AS calendar_code, h.HOLIDAY_DATE AS holiday_date, h.HOLIDAY_NAME AS holiday_name FROM CFG_CALENDAR_HOLIDAYS h JOIN CFG_CALENDARS c ON c.CALENDAR_ID=h.CALENDAR_ID WHERE c.PROJECT_ID=:project_id ORDER BY 1

@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import ActionName, ApiRole, Permission
+from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.permissions import pipeline_access

@@ -4,15 +4,8 @@ from dataclasses import replace
 
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import (
-    AccessChange,
-    AccessIntent,
-    ActionName,
-    ActionOutcome,
-    ApiRole,
-    Permission,
-    YesNo,
-)
+from etl_craft.core.enums import ActionName, ActionOutcome, ApiRole, YesNo
+from etl_craft.core.enums_access import AccessChange, AccessIntent, Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.engine import locks
 from etl_craft.engine.audit import command_request

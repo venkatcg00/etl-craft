@@ -5,6 +5,7 @@ SELECT p.PIPELINE_ID AS pipeline_id, p.PIPELINE_CODE AS pipeline_code,
        CASE WHEN :refresh_required THEN json_extract(old.value,'$.catchup') ELSE p.CATCHUP END AS catchup, CASE WHEN :refresh_required THEN json_extract(old.value,'$.max_catchup_runs') ELSE p.MAX_CATCHUP_RUNS END AS max_catchup_runs,
        CASE WHEN :refresh_required THEN json_extract(old.value,'$.overlap_policy') ELSE p.OVERLAP_POLICY END AS overlap_policy, CASE WHEN :refresh_required THEN json_extract(old.value,'$.schedule_start_date') ELSE p.SCHEDULE_START_DATE END AS schedule_start_date,
        CASE WHEN :refresh_required THEN json_extract(old.value,'$.create_date') ELSE p.CREATE_DATE END AS create_date,
+       CASE WHEN :refresh_required THEN json_extract(old.value,'$.calendar_id') ELSE p.CALENDAR_ID END AS calendar_id, CASE WHEN :refresh_required THEN json_extract(old.value,'$.non_business_day') ELSE p.NON_BUSINESS_DAY END AS non_business_day,
        (SELECT MAX(r.RUN_KEY) FROM AUD_PIPELINES_RUN_LOG r
         WHERE r.PIPELINE_ID=p.PIPELINE_ID AND r.TRIGGER_KIND='SCHEDULE') AS last_run_key,
        EXISTS (SELECT 1 FROM AUD_PIPELINES_RUN_LOG a WHERE a.PIPELINE_ID=p.PIPELINE_ID

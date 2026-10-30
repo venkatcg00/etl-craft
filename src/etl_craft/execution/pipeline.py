@@ -29,12 +29,13 @@ import threading
 from collections.abc import Generator
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from typing import TypedDict, TypeVar, Unpack
 
 from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
+from etl_craft.core.actor import current_actor
 from etl_craft.core.enums import (
     RunStatus,
 )
@@ -47,6 +48,7 @@ from etl_craft.engine.repository.pipelines import (
 )
 from etl_craft.engine.repository.tasks import fetch_task_codes
 from etl_craft.engine.run_definitions import for_run
+from etl_craft.engine.schedule_ticks import backfill_dates, record_skipped_backfill
 from etl_craft.execution import leases
 from etl_craft.execution.attempt_records import run_cancelled
 from etl_craft.execution.attempt_types import ChildOptions
@@ -312,6 +314,63 @@ class BackfillOutcome:
         return RunStatus.SUCCESS if self.stopped is None else self.stopped.status
 
 
+def _skip_closed_date(
+    engine: Engine, pipeline_code: str, day: date, reason: str
+) -> PipelineOutcome:
+    """Record a backfill date the calendar closes, under ``SKIP``, as a skipped run."""
+    with engine.begin() as conn:
+        run_id = record_skipped_backfill(
+            conn, resolve_pipeline_id(conn, pipeline_code), day, reason, current_actor()
+        )
+    logger.info("%s: backfill skipped %s: %s", pipeline_code, day, reason)
+    return PipelineOutcome(RunStatus.SKIPPED, reason, run_id)
+
+
+def _backfill_plan(
+    engine: Engine,
+    config: ConnectorConfig,
+    pipeline_code: str,
+    dates: tuple[date, date],
+    reason: str,
+) -> list[tuple[date, str | None]]:
+    """Refuse a backfill without a reason or with a bad range; return its calendar's dates."""
+    first, last = dates
+    check_override(config, "a backfill", reason)
+    if last < first:
+        raise UsageError(
+            f"a backfill runs from `backfill_from` to `backfill_to`: {first.isoformat()} is after "
+            f"{last.isoformat()}"
+        )
+    days = (last - first).days + 1
+    if days > MAX_BACKFILL_DAYS:
+        raise UsageError(
+            f"the backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
+            f"runs at most {MAX_BACKFILL_DAYS}, so split it"
+        )
+    with engine.begin() as conn:
+        pipeline_id = resolve_pipeline_id(conn, pipeline_code)
+        return backfill_dates(conn, pipeline_id, pipeline_code, first, last)
+
+
+def _backfill_done(
+    pipeline_code: str,
+    plan: list[tuple[date, str | None]],
+    dates: tuple[date, date],
+    runs: list[PipelineOutcome],
+) -> str:
+    """Summarize a finished backfill, naming dates the calendar moved past its range."""
+    first, last = dates
+    moved = [day.isoformat() for day, _ in plan if day > last]
+    return (
+        f"{pipeline_code}: backfill of {len(plan)} date(s) from {first.isoformat()} to "
+        f"{last.isoformat()} done: " + ", ".join(f"{o.pipeline_run_id} {o.status}" for o in runs)
+    ) + (
+        f"; {', '.join(moved)} after the range ran for dates NON_BUSINESS_DAY moved there"
+        if moved
+        else ""
+    )
+
+
 def backfill(
     engine: Engine,
     config: ConnectorConfig,
@@ -333,21 +392,13 @@ def backfill(
     ``SKIPPED``; a later backfill from that date takes up again. With a reason,
     at most ``MAX_BACKFILL_DAYS`` dates, and not while the pipeline has a run in progress.
     """
-    check_override(config, "a backfill", reason)
-    if last < first:
-        raise UsageError(
-            f"a backfill runs from `backfill_from` to `backfill_to`: {first.isoformat()} is after "
-            f"{last.isoformat()}"
-        )
-    days = (last - first).days + 1
-    if days > MAX_BACKFILL_DAYS:
-        raise UsageError(
-            f"the backfill {first.isoformat()}:{last.isoformat()} is {days} dates; one backfill "
-            f"runs at most {MAX_BACKFILL_DAYS}, so split it"
-        )
+    plan = _backfill_plan(engine, config, pipeline_code, (first, last), reason)
+    days = len(plan)
     runs: list[PipelineOutcome] = []
-    for offset in range(days):
-        day = first + timedelta(days=offset)
+    for offset, (day, closed) in enumerate(plan):
+        if closed is not None:
+            runs.append(_skip_closed_date(engine, pipeline_code, day, closed))
+            continue
         try:
             # Checked before every date: another run may have started since the last one.
             with engine.connect() as conn:
@@ -399,9 +450,6 @@ def backfill(
                 )
             logger.error("%s", message)
             return BackfillOutcome(runs, outcome, message)
-    message = (
-        f"{pipeline_code}: backfill of {days} date(s) from {first.isoformat()} to "
-        f"{last.isoformat()} done: " + ", ".join(f"{o.pipeline_run_id} {o.status}" for o in runs)
-    )
+    message = _backfill_done(pipeline_code, plan, (first, last), runs)
     logger.info("%s", message)
     return BackfillOutcome(runs, None, message)

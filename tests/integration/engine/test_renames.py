@@ -346,7 +346,7 @@ def test_rename_racing_run_start_is_serialized(rename_project, referencing_paren
 
 
 def test_grants_follow_identity_without_widening_project_access(rename_project):
-    from etl_craft.core.enums import Permission
+    from etl_craft.core.enums_access import Permission
     from etl_craft.core.errors import PermissionDeniedError
     from etl_craft.services.operations.permissions import pipeline_access
 
@@ -423,7 +423,7 @@ def test_grants_follow_identity_without_widening_project_access(rename_project):
 
 
 def test_rename_requires_management_in_the_selected_project(rename_project):
-    from etl_craft.core.enums import Permission
+    from etl_craft.core.enums_access import Permission
     from etl_craft.core.errors import ResourceNotFoundError
 
     ctx, pipeline, _, _ = rename_project

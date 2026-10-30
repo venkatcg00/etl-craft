@@ -2,7 +2,8 @@
 
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.enums import Permission, YesNo
+from etl_craft.core.enums import YesNo
+from etl_craft.core.enums_access import Permission
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import read_tags
 from etl_craft.services.config_models import ConfigFiles, TagAccessChange, TagGrantMatch

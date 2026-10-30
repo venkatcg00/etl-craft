@@ -733,3 +733,37 @@ def test_config_apply_requires_a_preexisting_project(exported):
             )
         for part in ("unprovisioned", "active", "etl-craft project add"):
             assert part in str(caught.value)
+
+
+def test_a_pipeline_names_a_calendar_from_the_config_files(exported):
+    folder = exported.config_dir
+
+    def use(code):
+        return lambda rows: [
+            {**row, "CALENDAR_CODE": code} if row["PIPELINE_CODE"] == "SALES_MART" else row
+            for row in rows
+        ]
+
+    edit(folder / "pipelines.csv", use("US"))
+    with pytest.raises(MetadataFileError, match=r"pipelines.csv line \d+: calendar US is missing"):
+        sync(exported, apply=False)
+
+    edit(folder / "calendars.csv", lambda rows: [*rows, {**rows[0], "CALENDAR_CODE": "US"}])
+    edit(
+        folder / "calendar_holidays.csv",
+        lambda rows: [*rows, {**rows[-1], "CALENDAR_CODE": "US", "HOLIDAY_NAME": "Year end"}],
+    )
+    done = sync(exported)
+    assert (done.applied, done.failed) == (True, False)
+    assert exported.rows(
+        "SELECT c.CALENDAR_CODE AS code, p.NON_BUSINESS_DAY AS policy FROM CFG_PIPELINES p "
+        "JOIN CFG_CALENDARS c ON c.CALENDAR_ID = p.CALENDAR_ID ORDER BY p.PIPELINE_CODE"
+    ) == [("UK", "SKIP"), ("US", "SKIP")]
+    assert active(exported, "CFG_CALENDAR_HOLIDAYS") == 17
+    assert sync(exported).changes == ()
+
+    edit(folder / "pipelines.csv", use(""))
+    sync(exported)
+    assert exported.rows(
+        "SELECT CALENDAR_ID AS calendar FROM CFG_PIPELINES WHERE PIPELINE_CODE = 'SALES_MART'"
+    ) == [(None,)]

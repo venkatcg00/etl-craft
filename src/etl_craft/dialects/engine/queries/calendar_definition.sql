@@ -1,0 +1,1 @@
+SELECT CALENDAR_CODE AS calendar_code, WEEKEND_DAYS AS weekend_days, ACTIVE_FLAG AS active_flag FROM CFG_CALENDARS WHERE CALENDAR_ID=:calendar_id

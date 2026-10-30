@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from etl_craft.core.enums import AccessChange, Permission
+from etl_craft.core.enums_access import AccessChange, Permission
 from etl_craft.services.operations.requests import Request
 
 FIELDS = ("PROJECT", "GROUP_NAME", "ROLE", "PIPELINE_CODE", "TAG", "PERMISSION", "ACTION")

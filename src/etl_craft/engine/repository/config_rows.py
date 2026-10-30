@@ -30,6 +30,7 @@ from etl_craft.core.enums import (
     BusinessRuleLevel,
     DependencyType,
     Handler,
+    NonBusinessDay,
     RefreshType,
     RunCondition,
     YesNo,
@@ -106,6 +107,8 @@ class ConfigTable:
                     if self is BUSINESS_RULES
                     else tuple("TARGET_" + name for name in OBJECT_TABLES.key)
                     if self is TASKS
+                    else ("CALENDAR_CODE",)
+                    if self is PIPELINES
                     else ()
                 ),
             )
@@ -140,6 +143,42 @@ class StoredRow:
     values: dict[str, Value]
 
 
+CALENDARS = ConfigTable(
+    file="calendars.csv",
+    table="CFG_CALENDARS",
+    id_column="CALENDAR_ID",
+    key=("CALENDAR_CODE",),
+    columns=(
+        Column("CALENDAR_CODE", "code", required=True),
+        Column("CALENDAR_NAME"),
+        Column("WEEKEND_DAYS"),
+        ACTIVE_FLAG,
+    ),
+    stored=("CALENDAR_CODE", "CALENDAR_NAME", "WEEKEND_DAYS"),
+    parents=(),
+    links=("PROJECT_ID",),
+    label_format="calendar {CALENDAR_CODE}",
+    read_query="config_rows_calendars",
+)
+
+CALENDAR_HOLIDAYS = ConfigTable(
+    file="calendar_holidays.csv",
+    table="CFG_CALENDAR_HOLIDAYS",
+    id_column="HOLIDAY_ID",
+    key=("CALENDAR_CODE", "HOLIDAY_DATE"),
+    columns=(
+        Column("CALENDAR_CODE", "code", required=True),
+        Column("HOLIDAY_DATE", "date", required=True),
+        Column("HOLIDAY_NAME"),
+        ACTIVE_FLAG,
+    ),
+    stored=("HOLIDAY_DATE", "HOLIDAY_NAME"),
+    parents=(("calendar_id", "calendars.csv"),),
+    links=("CALENDAR_ID",),
+    label_format="calendar {CALENDAR_CODE} holiday {HOLIDAY_DATE}",
+    read_query="config_rows_calendar_holidays",
+)
+
 PIPELINES = ConfigTable(
     file="pipelines.csv",
     table="CFG_PIPELINES",
@@ -166,6 +205,13 @@ PIPELINES = ConfigTable(
         Column("BLOCK_ON_REFRESH_ERROR", "choice", default="N", choices=YES_NO),
         Column("SLA_IN_HOURS", "float"),
         Column("PIPELINE_PARAMETERS", "json"),
+        Column("CALENDAR_CODE", "code"),
+        Column(
+            "NON_BUSINESS_DAY",
+            "choice",
+            default=NonBusinessDay.SKIP,
+            choices=tuple(NonBusinessDay),
+        ),
         ACTIVE_FLAG,
     ),
     stored=(
@@ -184,9 +230,10 @@ PIPELINES = ConfigTable(
         "BLOCK_ON_REFRESH_ERROR",
         "SLA_IN_HOURS",
         "PIPELINE_PARAMETERS",
+        "NON_BUSINESS_DAY",
     ),
-    parents=(),
-    links=("PROJECT_ID",),
+    parents=(("calendar_id", "calendars.csv"),),
+    links=("PROJECT_ID", "CALENDAR_ID"),
     label_format="{PIPELINE_CODE}",
     read_query="config_rows_pipelines",
 )
@@ -391,6 +438,8 @@ SOURCE_COLUMNS = ConfigTable(
 
 
 TABLES = (
+    CALENDARS,
+    CALENDAR_HOLIDAYS,
     PIPELINES,
     OBJECT_TABLES,
     TASKS,
@@ -510,6 +559,7 @@ def update_row(
     names = (
         *tuple(name for name in table.stored if name not in table.key),
         *(("TARGET_TABLE_ID",) if table in (BUSINESS_RULES, TASKS) else ()),
+        *(("CALENDAR_ID",) if table is PIPELINES else ()),
     )
     assignments = ", ".join([*(f"{name} = :{name}" for name in names), "ACTIVE_FLAG = 'Y'"])
     statement = _bound(
@@ -518,7 +568,8 @@ def update_row(
         (*names, "row_id"),
     )
     params = {
-        name: (links or {})[name] if name == "TARGET_TABLE_ID" else values[name] for name in names
+        name: (links or {})[name] if name in ("TARGET_TABLE_ID", "CALENDAR_ID") else values[name]
+        for name in names
     } | {"row_id": row_id}
     _write(conn, statement, params, f"updating {table.label(values)} in {table.table}")
 

@@ -1334,3 +1334,57 @@ def test_a_run_cancelled_while_it_is_ended_is_left_cancelled(config, pipeline, m
     with engine.connect() as conn:
         consumed = conn.execute(text("SELECT COUNT(*) FROM AUD_DEPENDENCY_CONSUMPTION"))
         assert consumed.scalar_one() == 0
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected", "note"),
+    [
+        (
+            "SKIP",
+            [
+                ("P", "SUCCESS", "2026-12-24", "Y"),
+                ("P", "SKIPPED", "2026-12-25", "Y"),
+                ("P", "SKIPPED", "2026-12-26", "Y"),
+            ],
+            None,
+        ),
+        (
+            "NEXT_BUSINESS_DAY",
+            [("P", "SUCCESS", "2026-12-24", "Y"), ("P", "SUCCESS", "2026-12-28", "Y")],
+            "2026-12-28 after the range ran for dates NON_BUSINESS_DAY moved there",
+        ),
+    ],
+)
+def test_a_backfill_follows_the_pipelines_calendar(config, pipeline, policy, expected, note):
+    engine, ids = pipeline
+    without_broken(engine, ids)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO CFG_CALENDARS (PROJECT_ID, CALENDAR_CODE, WEEKEND_DAYS) "
+                "VALUES (1, 'UK', 'SAT|SUN')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO CFG_CALENDAR_HOLIDAYS (CALENDAR_ID, HOLIDAY_DATE, HOLIDAY_NAME) "
+                "SELECT CALENDAR_ID, '2026-12-25', 'Christmas Day' FROM CFG_CALENDARS"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE CFG_PIPELINES SET NON_BUSINESS_DAY = :policy, CALENDAR_ID = "
+                "(SELECT CALENDAR_ID FROM CFG_CALENDARS) WHERE PIPELINE_CODE = 'P'"
+            ),
+            {"policy": policy},
+        )
+    days = (date(2026, 12, 24), date(2026, 12, 26))
+    done = backfill(engine, config, "P", *days, "holiday reload", child=CHILD)
+    assert done.status == RunStatus.SUCCESS
+    assert runs(engine) == expected
+    if note is None:
+        reasons = {row[7] for row in interventions(engine)}
+        assert "calendar UK: 2026-12-25 is a holiday (Christmas Day)" in reasons
+        assert "calendar UK: 2026-12-26 is a weekend day (SAT)" in reasons
+    else:
+        assert done.message.endswith(note)

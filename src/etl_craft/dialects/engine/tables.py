@@ -17,6 +17,8 @@ CONFIG_TABLES = frozenset(
         "CFG_API_TOKENS",
         "CFG_TABLES",
         "CFG_COLUMNS",
+        "CFG_CALENDARS",
+        "CFG_CALENDAR_HOLIDAYS",
     }
 )
 
@@ -80,6 +82,8 @@ AUDIT_TABLES = frozenset(
         "AUD_CONTROL_REQUESTS",
         "AUD_METADATA_CHANGES",
         "AUD_TEAM_TABLES",
+        "AUD_CFG_CALENDARS_HISTORY",
+        "AUD_CFG_CALENDAR_HOLIDAYS_HISTORY",
     }
 )
 

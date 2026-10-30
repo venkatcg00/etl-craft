@@ -180,7 +180,7 @@ item's text, or work done early under another item.
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
-| S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
+| S7.T Business calendars | Done | #276 | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
 | S7.U Personal-data erasure | Planned | | A standing erasure register and ERASURE tasks remove subjects after loads, outside managed writes |
 | S7.V Empty replacements | Done | #275 | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
 | S7.W Docs toolchain after MkDocs 1.x | Planned | | Evaluate Zensical against the API pages, navigation and published versions; migrate only when every requirement works |
@@ -958,6 +958,18 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   repeated races remain local. Existing per-action warehouse/Engine DB round-trip budgets
   remain unchanged; one real attempt adds three Engine DB clock/fence statements. Indexed
   clock maxima and pending-owner probes retain bounded query plans as history grows.
+
+- S7.T owner decisions, 2026-10-30: business days are cron day-of-month tokens (`3BD`, `LBD`,
+  weekday `*`); calendars are per-project config files (`calendars.csv`,
+  `calendar_holidays.csv`); a holiday list ends at its last listed holiday; backfill treats
+  closed dates like ticks (SKIP records a SKIPPED backfill run, NEXT_BUSINESS_DAY runs the next
+  business day once, even after the range). A moved tick takes the same wall time on the next
+  business day, so it merges with that day's own tick; the scheduler always returns the earliest
+  effective tick, keeping the persisted cursor ordered. Choices that differ from the item text:
+  `core/enums.py` reached the 800-line module limit, so (owner decision) the access and
+  governance enums moved to `core/enums_access.py` and AGENTS.md names such splits; manual runs
+  keep their given date; holidays are read live rather than from the
+  pinned refresh snapshot, which pins only the pipeline's CALENDAR_ID and NON_BUSINESS_DAY.
 
 - S7.V, 2026-10-30: `ALLOW_EMPTY` takes `true`/`false` like every other SQL flag, since
   `parse_flag` refuses `Y`/`N`; absent means `true`. Choices that differ from the item text:
