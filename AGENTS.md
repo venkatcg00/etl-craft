@@ -298,8 +298,16 @@ make services-up          # local PostgreSQL, MinIO, Iceberg REST, Trino, Mailpi
   Python/Linux combination and the newest Python on macOS, and the installed-wheel demos
   on every pull request, in under ten minutes, and is the authority for them. `make test` and `make check` run in parallel;
   service suites default to four workers.
-  The release gate retains every Python × OS combination. Use `make test-changed` locally
-  before a PR; CI always runs the complete suite and is the authority.
+  The release gate retains every Python × OS combination. CI always runs the complete suite
+  and is the authority.
+- **Before a PR, run the touched suites** (owner, 2026-10-30): `tests/unit` (it holds the
+  enum, action-table and dialect checks), the test modules of the code the change touches,
+  `tests/integration/api` and `tests/browser` when `api/` or a template changes,
+  `test_query_plans.py` when Engine DB SQL changes, `test_upgrade.py` when a migration or
+  `schema.sql` changes, and `test_catalog.py` when catalog output changes. That set takes
+  minutes. `make test-changed` reruns nearly the whole suite after a change to a widely
+  imported module (`core/enums.py`, `services/operations/models.py`); use it only when its
+  selection is small.
 - **Concurrency:** a change to run creation, leases, locks, ROW_ID allocation or gates runs its
   tests 20 times locally, because CI runs each test once.
 - **CI time:** required pull-request CI stays under ten minutes of execution time (the longest

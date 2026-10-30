@@ -1,7 +1,11 @@
 # Security policy
 
-etl-craft is pre-release software. Security fixes are assessed against the current
-development version until a versioned support policy is published.
+## Supported versions
+
+Until 0.9.0, the first public release, security fixes go into the current development version
+only. From 0.9.0, the newest minor release line receives security fixes as patch releases, and
+fixes that need an Engine DB change ship with a migration that upgrades from every released
+version.
 
 ## Reporting a vulnerability
 
