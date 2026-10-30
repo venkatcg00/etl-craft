@@ -8783,6 +8783,29 @@ The source-error cases below are a minimum, not the full feature-coverage matrix
 | sends timestamps without zones, or across a DST change | typed `CAST` to the declared type; UTC audit times | run dates and event times match the generator's truth |
 | resends corrected history | backfills/reopened runs with fresh engine UPDATE_DATE and S7.X windows | next SI_DM window reflects the correction once, regardless of old source run ID |
 
+**Bad data that fails a run** (owner, 2026-10-30). The table above is data etl-craft absorbs.
+The generators also emit data that must stop a run, on a schedule the scenario script controls,
+so the demo always holds failed, retried and blocked runs for the UI, alerts and audit to show.
+Each case fails the named task with the object, the value found, what was expected and the
+remedy; downstream tasks report "blocked by failure"; nothing is half-written.
+
+| The source | The run must | The check |
+|---|---|---|
+| sends more bad rows than `REJECT_LIMIT` allows | fail the task before its target changes, naming the limit and the count | target unchanged; `__rejects` and the attempt log name the first rejected rows |
+| sends a file that cannot be parsed: truncated JSON, malformed XML, CSV with the wrong delimiter or a short row | fail the ingestion task, naming the file, the line or offset and what was expected | no rows from that file loaded; the offset is not advanced; the next good file loads after a rerun |
+| retypes or drops a column without `SCHEMA_EVOLUTION` | fail before writing, naming the column, the declared and the found type | target unchanged; `validate` reports the same drift |
+| sends the same business key twice in one batch with no `MERGE_DEDUPE_ORDER` | fail the merge, naming the key and the count | target unchanged |
+| sends NULL or empty values for a key or a NOT NULL target column | fail, naming the column and the first offending rows | target unchanged |
+| sends a value the warehouse type cannot hold (numeric overflow, out-of-range date) | fail, naming the column, the value and the declared type | target unchanged |
+| sends an empty batch where `ALLOW_EMPTY` is false | refuse before replacing the target | the previous target rows remain |
+| fails a TABLE business rule of type `REJECT` (for example a row count far below the norm) | fail the rule's task with the rule, the observed value and its detail | Insights shows the observed value and the failed run |
+| becomes unreachable or refuses credentials (Kafka broker, MongoDB, MinIO) | retry by its `RETRY_ON` policy, then fail naming the source and the last error | attempts and their failure classes in the audit; the alert sent once |
+| is slow enough to pass the SLA | mark the run's SLA `BREACHED` at the deadline while it keeps running | `SLA_BREACHED_AT` set; the run log and Insights show the breach |
+
+After each failing case the scenario repairs the data and reruns or recovers, so the demo also
+shows the recovery path: the failed run's history stays, the repaired run succeeds, and SI_DM
+takes the corrected rows once.
+
 **Tests.** For every client, generate each quality class and a mixed batch with known keys;
 assert exact membership, counts, reasons and downstream inclusion, including multi-flag rows.
 Load a second batch, replay it, correct bad records and verify flags clear without losing their
