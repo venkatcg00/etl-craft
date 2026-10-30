@@ -41,6 +41,7 @@ SHIPPED = (
     "etl_craft/api/static/monitor.css",
     "etl_craft/api/static/attempt.js",
     "etl_craft/api/templates/monitor/attempt.html",
+    "etl_craft/api/templates/insights.html",
     "etl_craft/api/static/htmx.min.js",
     "etl_craft/api/static/htmx.LICENSE",
 )

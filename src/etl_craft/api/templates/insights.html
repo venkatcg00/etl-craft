@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status %}
+{% macro secs(value) %}{% if value is none %}<span class="note">None</span>{% else %}{{ '%.1f'|format(value) }} s{% endif %}{% endmacro %}
+{% macro measured(value) %}{% if value is none %}<span class="note">Not measured</span>{% else %}{{ value }}{% endif %}{% endmacro %}
+{% macro rate(value) %}{% if value is none %}<span class="note">No finished runs</span>{% else %}{{ '%.0f'|format(value * 100) }}%{% endif %}{% endmacro %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <span aria-current="page">Insights</span></nav>
+<h1>Pipeline Insights</h1>
+<form method="get" class="filters" aria-label="Insights filters">
+  <label for="insights-from">From (UTC day)</label><input id="insights-from" name="from" type="date" value="{{ start.isoformat() }}">
+  <label for="insights-to">To (UTC day)</label><input id="insights-to" name="to" type="date" value="{{ end.isoformat() }}">
+  <label for="insights-pipelines">Pipelines (none selected: all you can view)</label>
+  <select id="insights-pipelines" name="pipeline" multiple size="{{ [choices|length, 6]|min or 1 }}">{% for code in choices %}<option value="{{ code }}" {% if code in chosen %}selected{% endif %}>{{ code }}</option>{% endfor %}</select>
+  <button type="submit">Refresh</button>
+</form>
+<p class="note">Runs started from {{ found.window_start|zoned(settings.timezone) }} up to {{ found.window_end|zoned(settings.timezone) }}. Rates use finished runs; counts a task did not report are shown as Not measured, never 0. The same numbers: <code>etl-craft insights --from {{ start.isoformat() }} --to {{ end.isoformat() }} --format json</code>.</p>
+{% set t = found.total %}
+<dl class="counts panel" aria-label="Totals">
+  <div><dt>Runs</dt><dd>{{ t.runs }}</dd></div>
+  <div><dt>Success rate</dt><dd>{{ rate(t.success_rate) }}</dd></div>
+  <div><dt>Average duration</dt><dd>{{ secs(t.average_seconds) }}</dd></div>
+  <div><dt>SLA breached</dt><dd>{{ t.sla_breached }}</dd></div>
+  <div><dt>Retries</dt><dd>{{ t.retries }}</dd></div>
+  <div><dt>Average wait to start</dt><dd>{{ secs(t.average_wait_seconds) }}</dd></div>
+  <div><dt>Average execution</dt><dd>{{ secs(t.average_run_seconds) }}</dd></div>
+  <div><dt>Rows written</dt><dd>{{ measured(t.rows_written) }}</dd></div>
+</dl>
+<section class="panel" aria-labelledby="trend-title">
+  <h2 id="trend-title">Runs per day</h2>
+  {% if bars %}
+  <div class="scroll"><svg class="trend" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{ chart_width }} {{ chart_height + 4 }}" width="{{ chart_width }}" height="{{ chart_height + 4 }}" role="img" aria-labelledby="trend-title trend-table-note">
+    {% for bar in bars %}<g><title>{{ bar.day.day }}: {{ bar.day.runs }} runs, {{ bar.day.succeeded }} succeeded, {{ bar.day.failed }} failed</title>
+      <rect class="segment SUCCESS" x="{{ bar.x }}" y="{{ chart_height - bar.succeeded }}" width="{{ bar_width }}" height="{{ bar.succeeded }}"/>
+      <rect class="segment FAILED" x="{{ bar.x }}" y="{{ chart_height - bar.succeeded - bar.failed }}" width="{{ bar_width }}" height="{{ bar.failed }}"/>
+      <rect class="segment queued" x="{{ bar.x }}" y="{{ chart_height - bar.succeeded - bar.failed - bar.other }}" width="{{ bar_width }}" height="{{ bar.other }}"/></g>{% endfor %}
+  </svg></div>
+  <p class="legend" id="trend-table-note"><span><span class="swatch" aria-hidden="true"></span> Succeeded</span> <span><span class="swatch failed" aria-hidden="true"></span> Failed</span> <span><span class="swatch queued" aria-hidden="true"></span> Running, skipped or cancelled</span>; the table below lists each day.</p>
+  <table class="list" id="insights-days"><thead><tr><th scope="col">Day (UTC)</th><th scope="col">Runs</th><th scope="col">Succeeded</th><th scope="col">Failed</th><th scope="col">Average duration</th></tr></thead>
+  <tbody>{% for d in found.days %}<tr><td>{{ d.day }}</td><td>{{ d.runs }}</td><td>{{ d.succeeded }}</td><td>{{ d.failed }}</td><td>{{ secs(d.average_seconds) }}</td></tr>{% endfor %}</tbody></table>
+  {% else %}<p>No runs started in this window. Widen the window or check the pipelines' schedules.</p>{% endif %}
+</section>
+<section class="panel" aria-labelledby="pipelines-title">
+  <h2 id="pipelines-title">Pipelines</h2>
+  <button type="button" data-csv="insights-pipelines-table" data-csv-name="insights-pipelines.csv">Export CSV</button>
+  <div class="scroll"><table class="list" id="insights-pipelines-table"><thead><tr><th scope="col">Pipeline</th><th scope="col">Runs</th><th scope="col">Success rate</th><th scope="col">Average</th><th scope="col">Longest</th><th scope="col">SLA breached</th><th scope="col">Attempts</th><th scope="col">Retries</th><th scope="col">Lost</th><th scope="col">Rows written</th><th scope="col">Rows per second</th></tr></thead>
+  <tbody>{% for p in found.per_pipeline %}<tr><th scope="row"><a href="{{ pipeline_url(p.pipeline_code) }}">{{ p.pipeline_code }}</a></th><td>{{ p.runs }}</td><td>{{ rate(p.success_rate) }}</td><td>{{ secs(p.average_seconds) }}</td><td>{{ secs(p.longest_seconds) }}</td><td>{{ p.sla_breached }}</td><td>{{ p.attempts }}</td><td>{{ p.retries }}</td><td>{{ p.lost_attempts }}</td><td>{{ measured(p.rows_written) }}</td><td>{% if p.rows_per_second is none %}<span class="note">Not measured</span>{% else %}{{ '%.1f'|format(p.rows_per_second) }}{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="panel" aria-labelledby="tasks-title">
+  <h2 id="tasks-title">Rows by task</h2>
+  <p class="note">Counts of successful task runs as each handler reported them; stages are not added together.</p>
+  <button type="button" data-csv="insights-tasks-table" data-csv-name="insights-tasks.csv">Export CSV</button>
+  <div class="scroll"><table class="list" id="insights-tasks-table"><thead><tr><th scope="col">Pipeline</th><th scope="col">Task</th><th scope="col">Runs</th><th scope="col">Source rows</th><th scope="col">Target rows</th><th scope="col">Inserted</th><th scope="col">Updated</th><th scope="col">Deleted</th><th scope="col">Rejected</th></tr></thead>
+  <tbody>{% for k in found.tasks %}<tr><td>{{ k.pipeline_code }}</td><th scope="row">{{ k.task_code }}</th><td>{{ k.runs }}</td><td>{{ measured(k.source_rows) }}</td><td>{{ measured(k.target_rows) }}</td><td>{{ measured(k.inserted) }}</td><td>{{ measured(k.updated) }}</td><td>{{ measured(k.deleted) }}</td><td>{{ measured(k.rejected) }}</td></tr>{% else %}<tr><td colspan="9">No successful task runs in this window.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="panel" aria-labelledby="failures-title">
+  <h2 id="failures-title">Failures</h2>
+  <div class="scroll"><table class="list"><thead><tr><th scope="col">Pipeline</th><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Failure class</th><th scope="col">Attempts</th></tr></thead>
+  <tbody>{% for f in found.failures %}<tr><td><a href="{{ pipeline_url(f.pipeline_code) }}">{{ f.pipeline_code }}</a></td><td>{{ f.task_code }}</td><td>{{ status(f.status) }}</td><td>{{ f.failure_class or "Unknown" }}</td><td>{{ f.attempts }}</td></tr>{% else %}<tr><td colspan="5">No failed or lost attempts in this window.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+<section class="panel" aria-labelledby="rules-title">
+  <h2 id="rules-title">Data quality rules</h2>
+  <div class="scroll"><table class="list"><thead><tr><th scope="col">Pipeline</th><th scope="col">Rule</th><th scope="col">Runs</th><th scope="col">Failed runs</th><th scope="col">Passed / not passed</th><th scope="col">Rows flagged</th><th scope="col">Newest observed values</th></tr></thead>
+  <tbody>{% for r in found.rules %}<tr><td>{{ r.pipeline_code }}</td><th scope="row">{{ r.rule_name }}</th><td>{{ r.runs }}</td><td>{{ r.failed }}</td><td>{{ r.passed }} / {{ r.not_passed }}</td><td>{{ r.flagged_rows }}</td><td>{% for o in r.observations %}<a href="{{ run_url(r.pipeline_code, o.pipeline_run_id) }}">{{ o.observed }}{% if o.passed == 'N' %} ✕{% endif %}</a>{% if not loop.last %}, {% endif %}{% else %}<span class="note">None</span>{% endfor %}</td></tr>{% else %}<tr><td colspan="7">No business rules ran in this window.</td></tr>{% endfor %}</tbody></table></div>
+  <p class="note">Valid and eligible row counts are not recorded, so no quality percentage is shown.</p>
+</section>
+<section class="panel" aria-labelledby="gaps-title">
+  <h2 id="gaps-title">Schema and lineage checks</h2>
+  <div class="scroll"><table class="list"><thead><tr><th scope="col">Attribute</th><th scope="col">State</th><th scope="col">Checks</th></tr></thead>
+  <tbody>{% for g in found.gaps %}<tr><td>{{ g.attribute }}</td><td>{{ g.state }}</td><td>{{ g.checks }}</td></tr>{% else %}<tr><td colspan="3">No declared tables to check.</td></tr>{% endfor %}</tbody></table></div>
+  <p class="note">Unchecked and unavailable comparisons are never counted as matched. <a href="/ui/projects/{{ project.project|urlencode }}/catalog">Open the catalog</a> for each gap.</p>
+</section>
+<section class="panel" aria-labelledby="latest-title">
+  <h2 id="latest-title">Latest runs</h2>
+  <div class="scroll"><table class="list"><thead><tr><th scope="col">Run</th><th scope="col">Pipeline</th><th scope="col">Status</th><th scope="col">SLA</th><th scope="col">Started</th><th scope="col">Trigger</th></tr></thead>
+  <tbody>{% for run in found.latest %}<tr><th scope="row"><a href="{{ run_url(run.pipeline_code, run.pipeline_run_id) }}">{{ run.pipeline_run_id }}</a></th><td>{{ run.pipeline_code }}</td><td>{{ status(run.status) }}</td><td>{{ status(run.sla_status) if run.sla_status else "" }}</td><td>{{ run.start_date|zoned(settings.timezone) }}</td><td>{{ run.trigger_kind }}</td></tr>{% else %}<tr><td colspan="6">No runs in this window.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

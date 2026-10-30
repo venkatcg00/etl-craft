@@ -83,6 +83,7 @@ from etl_craft.handlers.sql.tables import AUDIT_COLUMNS
 from etl_craft.services.catalog.gaps import infers_output_columns, table_records
 from etl_craft.services.catalog.metrics import RunKpis as RunKpis
 from etl_craft.services.catalog.metrics import run_kpis as run_kpis
+from etl_craft.services.insights import Insights, measure, window
 from etl_craft.services.lineage import Edge, TaskLineage, collect, stored_edge, table_name
 from etl_craft.services.source_columns import nullable, warehouse_kind
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_dialect
@@ -257,6 +258,7 @@ class Catalog:
     contract_version: str = ""
     sql_dialect: str | None = None
     trigger_links: list[TriggerLink] = field(default_factory=list)
+    insights: Insights | None = None
 
     def where(self, table: str) -> tuple[str, str, str]:
         """Return a table's ``(database, schema, table)``; the active database when unnamed."""
@@ -386,10 +388,19 @@ def collect_catalog(
             continue
         waiting.upstream.append((upstream.label, dependency.dependency_type))
         upstream.downstream.append((waiting.label, dependency.dependency_type))
-    with engine.connect() as conn:
-        _rules(catalog, rule_rows, fetch_rule_observations(conn), name_of)
+    _finish(catalog, engine, rule_rows, name_of)
     _compare_catalog(catalog, engine, config, with_warehouse)
     return catalog
+
+
+def _finish(
+    catalog: Catalog, engine: Engine, rule_rows: Sequence[RuleRow], name_of: Callable[[str], str]
+) -> None:
+    """Attach the rules with their observations and the default-window Insights snapshot."""
+    pipelines = {asset.row.pipeline_id: code for code, asset in catalog.pipelines.items()}
+    with engine.connect() as conn:
+        _rules(catalog, rule_rows, fetch_rule_observations(conn), name_of)
+        catalog.insights = measure(conn, pipelines, *window())
 
 
 def _compare_catalog(

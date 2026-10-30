@@ -112,6 +112,7 @@ committed work; inspect its exact run before retrying.
 |---|---|---|
 | GET | `/pipelines`, `/pipelines/{pipeline_code}` | Active definitions and pause state |
 | GET | `/search` | `q` (1 to 200 characters), optional `limit` (1 to 50): visible pipelines, tasks, runs by exact id or key, and tables for whole-project viewers |
+| GET | `/insights` | Optional `start` and `end` (UTC days, default the last 7, at most 92), `pipelines` and `tag` (repeatable): every Pipeline Insights panel |
 | GET | `/graph`, `/steps`, `/status`, `/explanations` | `pipeline_code`; `run_id` or `run_key`; `task_code` for `/explanations` |
 | GET | `/history` | `pipeline_code`; optional `task_code`, `all`, `limit` (1 to 100), `before` (an exclusive run-id cursor) |
 | GET | `/capabilities` | `pipeline_code`, the selected run, optional `task_code`: each control's availability and reason |

@@ -15,6 +15,7 @@ from etl_craft.api.login import SIGN_IN, add_login_routes
 from etl_craft.api.routes import add_action_routes
 from etl_craft.api.ui_errors import browser_error, http_error
 from etl_craft.api.ui_headers import BrowserHeaders, protect
+from etl_craft.api.ui_insights import add_insights_page
 from etl_craft.api.ui_live import add_live_route
 from etl_craft.api.ui_monitor import add_monitor_pages
 from etl_craft.api.ui_pages import add_pages
@@ -75,6 +76,7 @@ def create_app(ctx: OperationContext, *, gateway: Gateway | None = None) -> Fast
     add_pages(app, ctx)
     add_monitor_pages(app, ctx)
     add_live_route(app, ctx)
+    add_insights_page(app, ctx)
     add_login_routes(app, ctx)
     routed = frozenset(name for name, action in ACTIONS.items() if action.path is not None)
     add_action_routes(app, ctx, routed - SIGN_IN)

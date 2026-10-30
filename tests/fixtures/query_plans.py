@@ -385,6 +385,10 @@ FULL_READS = {
         "cfg_pipelines",
     ): "Reads the project's pipelines; each one's run key is one unique-index probe.",
     (
+        "insights_latest",
+        "cfg_pipelines",
+    ): "Reads the project's pipelines; each one's newest runs are one bounded start-date range.",
+    (
         "catalog_pipeline_edges",
         "cfg_pipelines",
     ): "Enumerates pipeline definitions on both ends of the selected project's catalog edges.",

@@ -67,3 +67,4 @@ table.list tbody th { font-size: inherit; color: var(--text); }
 .matrix caption { text-align: left; }
 .live-state{color:var(--muted);font-size:.85rem;min-height:1.5rem}.live-state #live-notice{color:var(--text);font-weight:600}
 pre.log{max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--border);padding:.75rem;font-size:.85rem}a.button{display:inline-block;border:1px solid var(--muted);border-radius:.25rem;padding:.4rem .7rem}
+.filters{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:end}.filters label{margin:0}.filters input,.filters select{width:auto!important;display:inline-block!important;margin:0!important}.trend .segment.SUCCESS{fill:var(--ok)}.trend .segment.FAILED{fill:var(--bad)}.trend .segment.queued{fill:var(--border)}.legend .swatch.failed{background:var(--bad)}.counts>div{min-width:9rem}

@@ -86,7 +86,7 @@
       "src/etl_craft/execution/interventions.py": 7,
       "src/etl_craft/execution/pipeline.py": 2,
       "src/etl_craft/execution/scheduler.py": 37,
-      "src/etl_craft/services/catalog/collect.py": 26,
+      "src/etl_craft/services/catalog/collect.py": 25,
       "src/etl_craft/services/lineage.py": 35,
       "src/etl_craft/services/operations/status.py": 8
     },
@@ -111,7 +111,7 @@
     },
     "statements": {
       "src/etl_craft/execution/scheduler.py": 11,
-      "src/etl_craft/services/catalog/collect.py": 4
+      "src/etl_craft/services/catalog/collect.py": 3
     },
     "type-ignore": {
       "src/etl_craft/execution/run_types.py": 1,
