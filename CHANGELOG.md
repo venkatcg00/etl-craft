@@ -255,6 +255,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Browser Workflow Monitor pages: a pipeline list with a tag navigator, a pipeline page with
+  run-duration bars, paged runs, tasks and details, and a run page with a status graph, a task
+  panel and capability-driven controls (hold, release, stop, abort, recover, restart, run paused,
+  pause and resume) that confirm the exact scope before posting the same `/api/v1` control as
+  the CLI.
+
 - Business calendars: `calendars.csv` (`CALENDAR_CODE`, `CALENDAR_NAME`, `WEEKEND_DAYS`) and
   `calendar_holidays.csv` hold a project's calendars; `pipelines.csv` gains `CALENDAR_CODE` and
   `NON_BUSINESS_DAY` (`SKIP`, the default, or `NEXT_BUSINESS_DAY`). A tick on a closed day is

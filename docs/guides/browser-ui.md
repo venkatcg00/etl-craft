@@ -76,6 +76,28 @@ The corresponding API reads are `GET /api/v1/project-health`, `GET /api/v1/about
 relative generated HTML, CSS, JavaScript or SVG files, without traversal, encodings or symlinks.
 CLI and API stream the same bytes.
 
+## Pipelines, runs and controls
+
+**Pipelines** in the sidebar lists the project's pipelines you may view: tags, schedule,
+whether automatic runs are paused, and paused tasks. The tag list on the left filters by tag;
+the filter is the same `tag` parameter as `etl-craft pipelines --tag` and
+`GET /api/v1/projects/{project}/pipelines?tag=…`, so the page, the CLI and the API return the
+same pipelines.
+
+A pipeline's page has a **Runs** tab (run durations as bars, then one page of runs, newest
+first, with **Older runs** to page back) and a **Tasks** tab (each task, its wave and what it
+waits for). The details panel shows the schedule, refresh type, SLA, tags, upstream pipelines
+and paused tasks. **Pause** and **Resume** act on automatic runs of this pipeline only.
+
+A run's page draws its tasks as a graph coloured by status, with the same tasks in a table.
+Select a task in the graph or the table to open its panel (status, rows, rejects, attempts and
+what it waits for); the page address keeps the selection, so a link or Back returns to it.
+Actions act on the selection only: the whole run, or the selected task in it. Each action comes
+from the `capabilities` read: an unavailable one is disabled and says why. Choosing one opens a
+confirmation with the exact scope, its data effect and whether successful work is kept; the
+request goes to `POST /api/v1/projects/{project}/controls`, as `etl-craft control` does, and the
+page shows the recorded status. A request is not completion: reload to see the run's state.
+
 ## Upgrade
 
 Run `etl-craft migrate` before starting the new server. Normal login and UI startup refuse

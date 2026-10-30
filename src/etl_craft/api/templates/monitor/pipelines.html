@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css">{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <span aria-current="page">Pipelines</span></nav>
+<h1>Pipelines</h1>
+<div class="monitor">
+  <nav class="navigator panel" aria-label="Tags">
+    <h2>Tags</h2>
+    <ul>
+      <li><a href="?" {% if not selected_tags %}aria-current="true"{% endif %}>All pipelines</a></li>
+      {% for tag in navigator %}
+      <li><a href="?tag={{ tag|urlencode }}" {% if tag in selected_tags %}aria-current="true"{% endif %}>{{ tag }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+  <section class="listing" aria-labelledby="list-title">
+    <h2 id="list-title">{% if selected_tags %}Tagged {{ selected_tags|join(' and ') }}{% else %}All pipelines{% endif %} · {{ pipelines|length }}</h2>
+    {% if pipelines %}
+    <div class="scroll"><table class="list">
+      <thead><tr><th scope="col">Pipeline</th><th scope="col">Name</th><th scope="col">Tags</th><th scope="col">Schedule</th><th scope="col">Automatic runs</th><th scope="col">Paused tasks</th></tr></thead>
+      <tbody>
+      {% for p in pipelines %}
+      <tr>
+        <th scope="row"><a href="{{ pipeline_url(p.pipeline_code) }}">{{ p.pipeline_code }}</a></th>
+        <td>{{ p.pipeline_name }}</td>
+        <td>{% for tag in p.tags %}<a class="badge" href="?tag={{ tag|urlencode }}">{{ tag }}</a> {% else %}<span class="note">None</span>{% endfor %}</td>
+        <td>{% if p.run_schedule %}<code>{{ p.run_schedule }}</code>{% else %}<span class="note">Not scheduled</span>{% endif %}</td>
+        <td>{% if p.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Paused</span> <span class="note">by {{ p.paused.paused_by }}: {{ p.paused.reason }}</span>{% else %}Active{% endif %}</td>
+        <td>{{ p.task_pauses|length or "None" }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <p class="panel">No pipelines {% if selected_tags %}carry {{ selected_tags|join(' and ') }}{% else %}are visible to you in this project{% endif %}. {% if selected_tags %}<a href="?">Show all pipelines</a>{% else %}Ask your administrator for pipeline access.{% endif %}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

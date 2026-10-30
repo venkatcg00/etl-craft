@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 1 of 6 | #277 | Shell, browser sessions, personal settings, About and session-hosted catalog |
+| S7.A Web UI pages | In progress, slice 2a of 6 | #277, slice 2a PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
@@ -915,6 +915,15 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.A slice 2 is split in two pull requests. 2a: pipeline list with tag navigator, pipeline
+  page (run-duration bars, paged runs, tasks, details, pause/resume) and run page (status graph,
+  task list, task panel, capability-driven controls with scope preview). 2b: run matrix,
+  timeline, global search, recently viewed, server-sent live updates and the stale-state
+  warning, bulk selection, CSV export and copy buttons, run-now with parameters, and the list's
+  next tick, recent-run dots and SLA state, which need fields the `PIPELINES` read does not
+  return yet (a design note for 2b). The run graph is laid out from the `GRAPH` read's waves in
+  the UI layer, reusing the catalog's DAG styles; interfaces may not import the catalog's
+  renderer.
 - S7.A slice 1 (owner-approved slice plan, 2026-10-30): one PR for shell and sessions
   (S7.A.7), profile, settings, screen states, About and API-hosted catalog. Then (2)
   navigation/Workflow Monitor, lists, search, SSE, bulk actions and exports; (3) logs and
