@@ -35,6 +35,7 @@ from etl_craft.dialects.engine.tables import team_config
 
 if TYPE_CHECKING:
     from etl_craft.config import ConnectionProfile, ConnectorConfig
+    from etl_craft.dialects.engine.project_scope import Touch
 
 SHARED_QUERIES = Path(__file__).parent / "queries"
 
@@ -96,6 +97,25 @@ class EngineDialect(ABC):
     def standing_pause_lock(self, conn: Connection, key: int) -> None:
         """Serialize pause changes and admission until the transaction ends."""
         conn.execute(text(self.query("standing_pause_lock")), {"lock_key": key})
+
+    def project_view(self, conn: Connection, project_id: int | None) -> None:
+        """Create the temporary ``ETL_CRAFT_PROJECT`` view of the migrating project, or drop it."""
+        if project_id is None:
+            conn.exec_driver_sql("DROP VIEW ETL_CRAFT_PROJECT")
+        else:
+            conn.exec_driver_sql(
+                f"CREATE TEMP VIEW ETL_CRAFT_PROJECT AS SELECT {int(project_id)} AS PROJECT_ID"
+            )
+
+    def statement_touches(self, sql: str) -> list[Touch]:
+        """Return the tables a project migration statement writes or changes."""
+        from etl_craft.dialects.engine.project_scope import statement_touches
+
+        return statement_touches(sql, self.name)
+
+    def scope_migration_statement(self, conn: Connection, project_id: int | None) -> None:
+        """Tell the Engine DB's guards which project the next statements migrate, or none."""
+        return None
 
     @abstractmethod
     def refresh_metadata_triggers(self, conn: Connection) -> None:

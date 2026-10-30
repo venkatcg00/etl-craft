@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 
-from etl_craft.core.actor import migration, purpose, scoped_actor
+from etl_craft.core.actor import migration, migration_project, purpose, scoped_actor
 
 
 def mark_connections(engine: Engine) -> None:
@@ -43,6 +43,9 @@ def mark_connections(engine: Engine) -> None:
             )
             driver.create_function("etl_craft_purpose", 0, purpose.get, deterministic=True)
             driver.create_function("etl_craft_migration", 0, migration.get, deterministic=True)
+            driver.create_function(
+                "etl_craft_migration_project", 0, migration_project.get, deterministic=True
+            )
 
             from etl_craft.dialects.engine.guards import sqlite_authorizer
 
@@ -57,7 +60,7 @@ def mark_connections(engine: Engine) -> None:
             executemany: bool,
         ) -> None:
             conn.info["etl_craft_inserting"].clear()
-            trusted = scoped_actor() is not None
+            trusted = (scoped_actor() is not None, migration_project.get())
             if conn.info.get("etl_craft_ddl_actor") != trusted:
                 from etl_craft.dialects.engine.guards import sqlite_authorizer
 

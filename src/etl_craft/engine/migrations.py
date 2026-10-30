@@ -233,14 +233,20 @@ def _apply(engine: Engine, migration: MigrationFile, target: Target = NO_TARGET)
 
 
 def _run_project(conn: Connection, migration: MigrationFile, target: Target) -> None:
-    """Run a team migration, refreshing guards after each table it creates or alters."""
+    """Run a team migration inside its project, refreshing guards after each table change."""
+    from etl_craft.engine.project_migrations import ProjectScope
+    from etl_craft.engine.repository.pipelines import current_project_id
     from etl_craft.engine.repository.source_contracts import resolve_project_sources
 
     dialect = for_engine(conn)
-    for sql in dialect.split_statements(migration.sql):
-        run_script(conn, [sql])
+    scope = ProjectScope(conn, current_project_id(), migration.version)
+    dialect.project_view(conn, scope.project_id)
+    for number, sql in enumerate(dialect.split_statements(migration.sql), start=1):
+        scope.check(number, sql)
+        scope.run(number, sql)
         if re.search(r"\b(?:ALTER|CREATE)\s+TABLE\b", sql, re.IGNORECASE):
             dialect.refresh_metadata_triggers(conn)
+    dialect.project_view(conn, None)
     resolve_project_sources(conn, target.catalog, target.warehouse_dialect)
 
 
@@ -272,12 +278,28 @@ def pending_migrations(
     Raises ``MigrationError`` as ``migrate`` would, for an applied file that is missing or was
     edited.
     """
+    return [
+        f"{migration.source.lower()}/{migration.version}"
+        for migration in pending_files(
+            engine, project_dir, project_default=project_default, connection=connection
+        )
+    ]
+
+
+def pending_files(
+    engine: Engine,
+    project_dir: Path | str | None = None,
+    *,
+    project_default: Path | None = None,
+    connection: Connection | None = None,
+) -> list[MigrationFile]:
+    """Return the files ``migrate`` would apply, in order, after verifying the applied ones."""
     streams = migration_streams(engine, project_dir, project_default)
     with nullcontext(connection) if connection is not None else engine.connect() as conn:
         ledger = _load_ledger(conn)
     verify_ledger(ledger, streams)
     return [
-        f"{migration.source.lower()}/{migration.version}"
+        migration
         for stream in streams
         for migration in stream.files
         if (migration.source, migration.version) not in ledger

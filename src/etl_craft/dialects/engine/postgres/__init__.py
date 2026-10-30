@@ -73,6 +73,13 @@ class PostgresEngineDialect(EngineDialect):
         """Read at REPEATABLE READ, so concurrent writes stay out of the snapshot."""
         return conn.execution_options(isolation_level="REPEATABLE READ")
 
+    def scope_migration_statement(self, conn: Connection, project_id: int | None) -> None:
+        """Set the transaction's migrating project, which the guard function reads."""
+        conn.exec_driver_sql(
+            "SELECT set_config('etl_craft.migration_project', %s, true) AS project",
+            ("" if project_id is None else str(project_id),),
+        )
+
     def drop_trigger(self, conn: Connection, trigger: str, table: str) -> None:
         """Drop ``trigger`` from ``table``."""
         quoted = conn.dialect.identifier_preparer.quote(trigger)

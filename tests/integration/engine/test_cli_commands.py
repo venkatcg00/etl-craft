@@ -54,7 +54,7 @@ def test_init_db_then_migrate(project, capsys):
     migrations = project / "migrations"
     migrations.mkdir()
     (migrations / "0001_owner.sql").write_text(
-        "ALTER TABLE CFG_PIPELINES ADD COLUMN OWNER VARCHAR;", encoding="utf-8"
+        "CREATE TABLE CFG_OWNERS (OWNER VARCHAR);", encoding="utf-8"
     )
     assert main(["migrate"]) == 0
     assert capsys.readouterr().out == "applied 0001_owner.sql\n"

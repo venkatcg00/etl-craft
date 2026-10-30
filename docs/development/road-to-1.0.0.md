@@ -175,7 +175,7 @@ item's text, or work done early under another item.
 | S7.AD Python script kinds | Done | #270 | Explicit ingestion/utility contracts, nullable utility counts and safe unmanaged retry defaults |
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
-| S7.AG Project migrations stay in their project | Planned | | Guard project rows, admin/audit data and owned team-table DDL |
+| S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
@@ -958,6 +958,24 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   repeated races remain local. Existing per-action warehouse/Engine DB round-trip budgets
   remain unchanged; one real attempt adds three Engine DB clock/fence statements. Indexed
   clock maxima and pending-owner probes retain bounded query plans as history grows.
+
+- S7.AG owner decisions, 2026-10-29: ownership is recorded per team table; the first project
+  migration that changes an unowned table claims it; DDL is checked by a sqlglot preflight on
+  both Engine DBs because PostgreSQL event triggers need superuser. Statements the preflight
+  cannot classify (DO, functions, triggers, SET, PRAGMA, transaction control) are refused.
+  Project migrations no longer add columns to package tables (owner chose the item text over
+  the earlier documented extension). Choices that differ from the item text: the claims table
+  is the append-only AUD_TEAM_TABLES rather than a CFG_ admin table, because claims never
+  change and need no typed history; a team table is any non-etl-craft table, not only CFG_
+  names, because existing projects create others. Row scope is enforced in the Engine DB only
+  while a migration's own statement runs (PostgreSQL setting etl_craft.migration_project at
+  trigger depth 1; SQLite triggers plus the authorizer for top-level admin/audit writes), so
+  package history and claims written around it keep working. Examples scope lookups through
+  the temporary ETL_CRAFT_PROJECT view; CFG_PIPELINES/CFG_TABLES still default PROJECT_ID to 1,
+  which the guard now refuses for other projects. S7.Z direct edits already share
+  etl_craft_config_project; direct SQL on team tables stays unguarded by design. Projects in
+  one instance still trust each other's code: a team trigger or function can reach past the
+  preflight, which is accident prevention, not a security boundary.
 
 - S7.AC reuses the existing per-rule/task-run binding, sequence waves, renewable rule lock,
   retry skip and force path. The previous run log had no bounded measurement text columns;
@@ -7736,8 +7754,8 @@ release candidate.
      | A port already in use, or a second server on one host | The server refuses to start, naming the port or the running server | S7.P |
      | Truncated or partial config retires unrelated rows | Absent rows/files are untouched; test_partial_files_preserve_all_metadata | S7.AF |
      | Unknown config CSV silently ignored | Refuse with filename/suggestion; test_unknown_csv_names_the_suggestion | S7.AF |
-     | Project migration writes another project or admin/audit data | Guard rows/admin/DDL; planned test_project_migrations_are_scoped | S7.AG |
-     | Team CFG_ table collision or cross-project write/DDL | Record ownership, refuse access and doctor collisions; planned test_team_table_project_ownership | S7.AG |
+     | Project migration writes another project or admin/audit data | Guard rows/admin/DDL; test_project_migrations_are_scoped | S7.AG |
+     | Team CFG_ table collision or cross-project write/DDL | Record ownership, refuse access and doctor collisions; test_team_table_project_ownership | S7.AG |
      | Task/pipeline rename replays offsets or consumed events | Preserve IDs and refuse active runs; test_rename_preserves_offsets_and_events | S7.AH |
      | Pipeline manager reaches project editing or hidden upstreams | Project access gates all grants; restricted pipelines retain matching-grant rules, project CAN_MANAGE administers its project, upstream CAN_VIEW is required; test_project_edit_and_dependency_permissions | S7.Y B |
      | Local log names collide across projects | Project-ID log directory, readable legacy locations; test_project_log_paths | S7.Y B |

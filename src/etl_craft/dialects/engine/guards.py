@@ -7,7 +7,7 @@ from functools import cache
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection
 
-from etl_craft.core.actor import scoped_actor
+from etl_craft.core.actor import migration_project, scoped_actor
 from etl_craft.core.errors import MigrationError
 from etl_craft.dialects.engine.tables import AUDIT_TABLES, CONFIG_TABLES, retired_history
 
@@ -94,7 +94,11 @@ def sqlite_authorizer(
     database: str | None,
     source: str | None,
 ) -> int:
-    """Refuse unattributed schema changes on package objects in initialized connections."""
+    """Refuse unattributed schema changes on package objects in initialized connections.
+
+    While a project migration's statement runs, its top-level SQL may also neither change package
+    tables nor write admin or audit rows.
+    """
     ddl = {
         sqlite3.SQLITE_ALTER_TABLE,
         sqlite3.SQLITE_DROP_TABLE,
@@ -115,8 +119,15 @@ def sqlite_authorizer(
         }
         else first
     )
-    if action in ddl and (table or "").upper() in PACKAGE_TABLES and scoped_actor() is None:
+    name = (table or "").upper()
+    if action in ddl and name in PACKAGE_TABLES and scoped_actor() is None:
         return sqlite3.SQLITE_DENY
+    if migration_project.get() is not None and source is None and name in PACKAGE_TABLES:
+        # A project migration's own statements reach only project config rows; the package's
+        # triggers still write audit and history rows on its behalf.
+        writes = {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}
+        if action in ddl or (action in writes and name not in PROJECT_CONFIG_TABLES):
+            return sqlite3.SQLITE_DENY
     return sqlite3.SQLITE_OK
 
 

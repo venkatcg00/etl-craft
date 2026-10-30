@@ -99,8 +99,6 @@ def test_project_changes_record_before_after_actor_and_migration(engine_db, tmp_
     (project / "0001_edit.sql").write_text(
         f"UPDATE CFG_TASK_PARAMETERS SET PARAMETER_VALUE='after' WHERE TASK_ID={task};\n"
         f"UPDATE CFG_PIPELINES SET ACTIVE_FLAG='N' WHERE PIPELINE_ID={pipeline};\n"
-        "ALTER TABLE CFG_PIPELINES ADD COLUMN PROJECT_OWNER VARCHAR;\n"
-        f"UPDATE CFG_PIPELINES SET PROJECT_OWNER='team' WHERE PIPELINE_ID={pipeline};\n"
     )
     # Fixture initialization applies the schema without the migration ledger.
     from etl_craft.engine.migrations import mark_packaged_migrations_applied
@@ -117,7 +115,7 @@ def test_project_changes_record_before_after_actor_and_migration(engine_db, tmp_
                 "ORDER BY CHANGE_ID"
             )
         ).all()
-        assert len(rows) == 3
+        assert len(rows) == 2
         assert all(tuple(row)[:2] == ("alice", "USER") for row in rows)
         objects = [
             (
@@ -130,9 +128,7 @@ def test_project_changes_record_before_after_actor_and_migration(engine_db, tmp_
         assert objects[0][1]["parameter_value"] == "after"
         assert objects[1][0]["active_flag"] == "Y"
         assert objects[1][1]["active_flag"] == "N"
-        assert objects[2][0]["project_owner"] is None
-        assert objects[2][1]["project_owner"] == "team"
-        assert objects[2][1]["updated_by"] == "alice"
+        assert objects[1][1]["updated_by"] == "alice"
     with (
         pytest.raises(DBAPIError, match=r"immutable|append-only"),
         engine_db.engine.begin() as conn,
@@ -628,16 +624,9 @@ def test_terminal_attempts_and_append_only_rows_are_immutable(engine_db):
                 conn.exec_driver_sql(sql)
 
 
-def test_actor_stamps_survive_failed_insert_and_project_column_refresh(engine_db, tmp_path):
-    project = tmp_path / "migrations"
-    project.mkdir()
-    (project / "0001_column.sql").write_text(
-        "ALTER TABLE CFG_PIPELINES ADD COLUMN PROJECT_NOTE VARCHAR;"
-    )
+def test_actor_stamps_survive_failed_insert(engine_db):
     with acting_as(ALICE), engine_db.engine.begin() as conn:
         pipeline = add_pipeline(conn, "P")
-        migrations.mark_packaged_migrations_applied(conn)
-    migrations.apply_pending_migrations(engine_db.engine, project)
     bob = Actor("bob", ActorKind.USER)
     with acting_as(bob):
         with pytest.raises(DBAPIError), engine_db.engine.begin() as conn:
