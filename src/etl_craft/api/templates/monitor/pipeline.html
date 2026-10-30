@@ -3,7 +3,9 @@
 {% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <span aria-current="page">{{ pipeline.pipeline_code }}</span></nav>
-<header class="object-header">
+{% include 'monitor/_live_state.html' %}
+<div id="live" data-live-url="/ui/projects/{{ project.project|urlencode }}/live?pipeline={{ pipeline.pipeline_code|urlencode }}">
+<header class="object-header" data-recent="Pipeline {{ pipeline.pipeline_code }}">
   <h1>{{ pipeline.pipeline_code }} <span class="note">{{ pipeline.pipeline_name }}</span></h1>
   <p>{% if pipeline.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Automatic runs paused</span> {{ pipeline.paused.describe() }}{% else %}Automatic runs active{% endif %}</p>
   <div class="header-actions">
@@ -101,6 +103,7 @@
       <dt>Paused tasks</dt><dd>{{ pipeline.task_pauses|length or "None" }}</dd>
     </dl>
   </aside>
+</div>
 </div>
 {% with pipeline_code=pipeline.pipeline_code, run_id=None, task_code=None, runs_url=runs_api %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
 {% endblock %}

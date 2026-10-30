@@ -31,13 +31,42 @@ document.querySelectorAll("[data-shortcuts]").forEach(el => el.addEventListener(
 shortcuts?.addEventListener("close", () => trigger?.focus());
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") document.querySelectorAll("details[open]").forEach(el => {el.open=false;el.querySelector("summary").focus();});
-  if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.closest("input,textarea,select,[contenteditable]")) { event.preventDefault();openShortcuts(document.activeElement); }
+  const typing=event.target.closest("input,textarea,select,[contenteditable]");
+  if (event.key === "?" && !event.ctrlKey && !event.metaKey && !event.altKey && !typing) { event.preventDefault();openShortcuts(document.activeElement); }
+  const search=document.querySelector("#global-search");
+  if (search && ((event.key === "/" && !typing && !event.ctrlKey && !event.metaKey) || (event.key.toLowerCase() === "k" && (event.ctrlKey || event.metaKey)))) { event.preventDefault();search.focus();search.select(); }
 });
-document.querySelectorAll("[data-copy]").forEach(button => button.addEventListener("click", async () => {
+// Recently viewed pipelines and runs: a per-browser convenience, so storage failures only hide it.
+const RECENT_LIMIT=8;
+const recentKey=project=>"etl-craft:recent:"+project;
+function readRecent(project) {
+  try { const items=JSON.parse(localStorage.getItem(recentKey(project)) || "[]");return Array.isArray(items)?items:[]; }
+  catch (_) { return []; }
+}
+const viewed=document.querySelector("[data-recent]");
+const viewedProject=location.pathname.match(/^\/ui\/projects\/([^/]+)\//)?.[1];
+if (viewed && viewedProject) {
+  const href=location.pathname;
+  const items=[{label:viewed.dataset.recent,href},...readRecent(viewedProject).filter(item=>item.href!==href)].slice(0,RECENT_LIMIT);
+  try { localStorage.setItem(recentKey(viewedProject),JSON.stringify(items)); } catch (_) { /* storage unavailable: nothing to remember */ }
+}
+const recentList=document.querySelector("#recent-list");
+if (recentList) {
+  const prefix="/ui/projects/"+encodeURIComponent(recentList.dataset.project)+"/";
+  const items=readRecent(encodeURIComponent(recentList.dataset.project)).filter(item=>typeof item?.href==="string" && item.href.startsWith(prefix));
+  for (const item of items) {
+    const entry=document.createElement("li");const link=document.createElement("a");
+    link.href=item.href;link.textContent=String(item.label);entry.append(link);recentList.append(entry);
+  }
+  document.querySelector("#recent-empty").hidden=items.length>0;
+}
+document.addEventListener("click", async event => {
+  const button=event.target.closest("[data-copy]");
+  if (!button) return;
   const source=document.getElementById(button.dataset.copy);
   try { await navigator.clipboard.writeText(source.value || source.textContent);button.textContent="Copied"; }
   catch (_) { source.focus();if(source.select)source.select();button.textContent="Select and copy the details"; }
-}));
+});
 const warning=document.querySelector("#session-warning");
 const expiry=Date.parse(document.body.dataset.expires || "");
 if (Number.isFinite(expiry)) {

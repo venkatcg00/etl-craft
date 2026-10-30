@@ -65,3 +65,4 @@ table.list tbody th { font-size: inherit; color: var(--text); }
 .legend .swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: middle; background: var(--ok); }
 .legend .swatch.queued { background: var(--border); }
 .matrix caption { text-align: left; }
+.live-state{color:var(--muted);font-size:.85rem;min-height:1.5rem}.live-state #live-notice{color:var(--text);font-weight:600}

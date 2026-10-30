@@ -255,6 +255,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `etl-craft search TEXT [--limit N]` and `GET /api/v1/projects/{project}/search?q=…` find
+  visible pipelines and tasks by any part of their code or name, runs by exact run id or run
+  key, and (with whole-project view) tables. The browser adds a search box (`/` or Ctrl+K), a
+  results page, and recently viewed pipelines and runs kept in that browser. Monitor pages update
+  live through server-sent events: content refreshes when the shown reads change, a notice
+  offers the refresh while a dialog is open, and a lost connection says it is reconnecting.
+
 - `pipelines` and `pipeline` JSON (CLI and API) add `next_run` (the controller's next running
   tick, business calendars applied), `schedule_problem` (why a scheduled, unpaused pipeline has
   none) and `recent_runs` (the five newest runs with status and SLA result). Browser pages add a

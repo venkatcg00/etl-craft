@@ -180,14 +180,19 @@ def _catalog_pages(app: FastAPI, ctx: OperationContext) -> None:
     @app.get("/ui/projects/{project}/catalog", include_in_schema=False)
     def catalog(request: Request) -> Response:
         caller, values = page_values(ctx, request)
-        page = invoke(caller, ActionName.CATALOG_PAGE, CatalogInput())
+        shown = CatalogInput(path=request.query_params.get("page", "index.html"))
+        page = invoke(caller, ActionName.CATALOG_PAGE, shown)
         assert isinstance(page, CatalogPage)
         page.close()
         return render(
             request,
             "catalog.html",
             values
-            | {"title": request.path_params["project"] + " catalog · etl-craft", "view": "catalog"},
+            | {
+                "title": request.path_params["project"] + " catalog · etl-craft",
+                "view": "catalog",
+                "frame_path": shown.path,
+            },
         )
 
     @app.get("/ui/projects/{project}/catalog/files/{path:path}", include_in_schema=False)
