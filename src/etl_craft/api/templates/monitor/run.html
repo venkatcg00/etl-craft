@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status, control_buttons %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <a href="{{ pipeline_page }}">{{ run.pipeline_code }}</a> › {% if task_code %}<a href="{{ run_page }}">Run {{ run.pipeline_run_id }}</a> › <span aria-current="page">{{ task_code }}</span>{% else %}<span aria-current="page">Run {{ run.pipeline_run_id }}</span>{% endif %}</nav>
+<header class="object-header">
+  <h1>Run {{ run.pipeline_run_id }} <span class="note">{{ run.run_key }}</span></h1>
+  <p>{{ status(run.status) }} · {{ run.trigger_kind }}{% if run.backfill %} backfill{% endif %} · run date {{ run.run_date or "none" }}{% if run.sla_status %} · SLA {{ run.sla_status }}{% endif %}</p>
+  <dl class="facts inline">
+    <dt>Started</dt><dd>{{ run.start_date|zoned(settings.timezone) }}{% if run.started_by %} by {{ run.started_by }}{% endif %}</dd>
+    <dt>Ended</dt><dd>{% if run.end_date %}{{ run.end_date|zoned(settings.timezone) }}{% if run.ended_by %} by {{ run.ended_by }}{% endif %}{% else %}Still running{% endif %}</dd>
+  </dl>
+</header>
+<p class="selection" role="status">Selected: {% if task_code %}task <strong>{{ task_code }}</strong> in run {{ run.pipeline_run_id }} · <a href="{{ run_page }}">Select the whole run</a>{% else %}the whole run {{ run.pipeline_run_id }}. Select a task in the graph or the list to act on that task only.{% endif %}</p>
+{{ control_buttons(capabilities, ("task " ~ task_code ~ " in run " ~ run.pipeline_run_id) if task_code else ("run " ~ run.pipeline_run_id)) }}
+<div class="monitor with-panel">
+  <section class="listing" aria-labelledby="graph-title">
+    <h2 id="graph-title">Graph</h2>
+    <div class="graph scroll">
+      <svg class="dag run-graph" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{ layout.width }} {{ layout.height }}" width="{{ layout.width }}" height="{{ layout.height }}" role="group" aria-label="Tasks of run {{ run.pipeline_run_id }}; select a task">
+        <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+        <g class="edges">{% for edge in layout.edges %}<path class="edge dep {{ edge.kind }}" d="{{ edge.path }}" marker-end="url(#arrow)"><title>{{ edge.title }}</title></path>{% endfor %}</g>
+        {% for node in layout.nodes %}
+        <a href="{{ node.href }}" class="node{% if node.selected %} selected{% endif %}" aria-label="{{ node.task_code }}, {{ node.status or 'not started' }}{% if node.selected %}, selected{% endif %}" {% if node.selected %}aria-current="true"{% endif %}>
+          <g transform="translate({{ node.x }},{{ node.y }})">
+            <rect class="box state-{{ node.status or 'NONE' }}" width="{{ layout.node_width }}" height="{{ layout.node_height }}" rx="6"/>
+            <text class="title" x="10" y="19">{{ node.task_code|truncate(26, True, '…') }}</text>
+            <text class="handler" x="10" y="37">{{ node.status or "Not started" }}</text>
+          </g>
+        </a>
+        {% endfor %}
+      </svg>
+    </div>
+    <h2>Tasks</h2>
+    <div class="scroll"><table class="list">
+      <thead><tr><th scope="col">Task</th><th scope="col">Handler</th><th scope="col">Status</th><th scope="col">Runs when</th></tr></thead>
+      <tbody>
+      {% for step in steps %}
+      <tr {% if step.task_code == task_code %}class="selected"{% endif %}>
+        <th scope="row"><a href="{{ run_page }}?task={{ step.task_code|urlencode }}" {% if step.task_code == task_code %}aria-current="true"{% endif %}>{{ step.task_code }}</a></th>
+        <td>{{ step.handler }}</td>
+        <td>{{ status(step.status) }}</td>
+        <td>{{ step.run_condition or "All upstream tasks succeed" }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+  {% if panel %}
+  <aside class="panel side" aria-labelledby="panel-title">
+    <h2 id="panel-title">{{ task_code }}</h2>
+    {% set task_run = panel.task_run %}
+    {% set explanation = panel.explanation %}
+    <p>{{ status(task_run.status if task_run else None) }}</p>
+    <p><strong>{{ explanation.state }}.</strong> {{ explanation.next_action }}</p>
+    {% if task_run %}
+    {% if task_run.error_message %}<p class="error-text">{{ task_run.error_message }}</p>{% endif %}
+    <dl class="facts">
+      <dt>Rows read</dt><dd>{{ task_run.source_count if task_run.source_count is not none else "Not recorded" }}</dd>
+      <dt>Rows written</dt><dd>{{ task_run.rows_written if task_run.rows_written is not none else "Not recorded" }}</dd>
+      <dt>Rejects</dt><dd>{{ task_run.reject_count if task_run.reject_count is not none else "Not recorded" }}</dd>
+      {% if task_run.watermark_from or task_run.watermark_to %}<dt>Window</dt><dd>{{ task_run.watermark_from or "start" }} to {{ task_run.watermark_to or "now" }}</dd>{% endif %}
+    </dl>
+    <h3>Attempts</h3>
+    {% if task_run.attempts %}
+    <div class="scroll"><table class="list">
+      <thead><tr><th scope="col">#</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Host</th><th scope="col">Exit</th></tr></thead>
+      <tbody>{% for a in task_run.attempts %}<tr><td>{{ a.attempt_number }}</td><td>{{ status(a.status) }}</td><td>{{ a.started_at|zoned(settings.timezone) }}</td><td>{{ a.host or "Not recorded" }}</td><td>{{ a.exit_code if a.exit_code is not none else "None" }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="note">No attempts yet.</p>{% endif %}
+    {% else %}<p class="note">This task has not started in this run.</p>{% endif %}
+    {% if explanation.dependencies %}
+    <h3>Waits for</h3>
+    <ul class="dependencies">{% for d in explanation.dependencies %}<li><span class="{{ 'met' if d.met else 'unmet' }}"><span aria-hidden="true">{{ '✓' if d.met else '◷' }}</span> {{ d.upstream }}</span> <span class="note">({{ d.dependency_type }}{% if d.status %}, {{ d.status }}{% endif %}) {{ d.reason }}</span></li>{% endfor %}</ul>
+    {% endif %}
+  </aside>
+  {% endif %}
+</div>
+{% with pipeline_code=run.pipeline_code, run_id=run.pipeline_run_id %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}

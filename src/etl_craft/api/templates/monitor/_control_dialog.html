@@ -1,0 +1,27 @@
+<dialog id="control-dialog" aria-labelledby="control-title" data-url="{{ controls_url }}"
+  data-pipeline="{{ pipeline_code }}" {% if run_id %}data-run="{{ run_id }}"{% endif %}
+  {% if task_code %}data-task="{{ task_code }}"{% endif %}>
+  <form id="control-form" method="dialog">
+    <h2 id="control-title">Confirm <span data-field="action"></span></h2>
+    <dl class="facts">
+      <dt>Scope</dt><dd data-field="scope"></dd>
+      <dt>Effect</dt><dd data-field="effect"></dd>
+      <dt>Successful work</dt><dd data-field="preserves"></dd>
+    </dl>
+    <p class="resume-only" hidden>
+      <label for="control-then">After resuming</label>
+      <select id="control-then" name="then">
+        <option value="wait">Wait for the next scheduled run</option>
+        <option value="run-now">Run now</option>
+        <option value="catch-up">Catch up missed runs</option>
+      </select>
+    </p>
+    <label for="control-reason">Reason (recorded with the request)</label>
+    <textarea id="control-reason" name="reason" rows="3" maxlength="4096"></textarea>
+    <p id="control-error" class="notice" role="alert" hidden></p>
+    <div class="dialog-buttons">
+      <button type="submit" value="confirm" id="control-confirm">Request</button>
+      <button type="button" id="control-cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>

@@ -1,0 +1,33 @@
+{% macro status(value) -%}
+{%- set marks = {"SUCCESS": "✓", "FAILED": "✕", "LOST": "✕", "IN-PROGRESS": "▶", "QUEUED": "○", "WAITING": "◷", "SKIPPED": "■", "CANCELLED": "■", "REQUESTED": "◷", "ACKNOWLEDGED": "✓"} -%}
+{%- if value -%}
+<span class="status {{ value }}"><span aria-hidden="true">{{ marks.get(value, "•") }}</span> {{ value }}</span>
+{%- else -%}
+<span class="status none"><span aria-hidden="true">○</span> Not started</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro duration(seconds) -%}
+{%- if seconds >= 3600 -%}{{ seconds // 3600 }} h {{ (seconds % 3600) // 60 }} min
+{%- elif seconds >= 60 -%}{{ seconds // 60 }} min {{ seconds % 60 }} s
+{%- else -%}{{ seconds }} s{%- endif -%}
+{%- endmacro %}
+
+{% macro control_buttons(capabilities, scope) -%}
+<section class="panel controls-panel" aria-labelledby="actions-title">
+  <h2 id="actions-title">Actions on {{ scope }}</h2>
+  <ul class="actions">
+  {% for capability in capabilities.actions %}
+    <li>
+      <button type="button" data-control="{{ capability.action }}" data-scope="{{ scope }}"
+        data-effect="{{ capability.reason }}"
+        data-preserves="{{ 'yes' if capability.preserves_successful_work else 'no' }}"
+        {% if not capability.available %}disabled aria-describedby="why-{{ capability.action }}"{% endif %}>
+        {{ capability.action|replace("_", " ")|title }}
+      </button>
+      {% if not capability.available %}<span class="why" id="why-{{ capability.action }}">{{ capability.reason }}</span>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{%- endmacro %}

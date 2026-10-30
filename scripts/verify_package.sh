@@ -45,6 +45,9 @@ required = [
     "etl_craft/api/templates/base.html",
     "etl_craft/api/templates/signin.html",
     "etl_craft/api/static/shell.js",
+    "etl_craft/api/templates/monitor/run.html",
+    "etl_craft/api/static/monitor.js",
+    "etl_craft/api/static/monitor.css",
     "etl_craft/api/static/htmx.min.js",
     "etl_craft/api/static/htmx.LICENSE",
 ]

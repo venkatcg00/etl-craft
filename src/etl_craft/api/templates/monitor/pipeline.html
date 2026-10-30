@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status, duration %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <span aria-current="page">{{ pipeline.pipeline_code }}</span></nav>
+<header class="object-header">
+  <h1>{{ pipeline.pipeline_code }} <span class="note">{{ pipeline.pipeline_name }}</span></h1>
+  <p>{% if pipeline.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Automatic runs paused</span> {{ pipeline.paused.describe() }}{% else %}Automatic runs active{% endif %}</p>
+  <div class="header-actions">
+    {% if pipeline.paused %}
+    <button type="button" data-control="RESUME" data-scope="pipeline {{ pipeline.pipeline_code }}" data-preserves="yes" data-scheduled="{{ 'yes' if pipeline.run_schedule else 'no' }}" data-effect="Resume automatic runs of this pipeline; running work is unaffected.">Resume</button>
+    {% else %}
+    <button type="button" data-control="PAUSE" data-scope="pipeline {{ pipeline.pipeline_code }}" data-preserves="yes" data-effect="Stop admitting new automatic runs; running work finishes, and exact manual runs remain possible.">Pause</button>
+    {% endif %}
+  </div>
+</header>
+<nav class="tabs" aria-label="Pipeline views">
+  <a href="{{ base_url }}" {% if tab == 'runs' %}aria-current="page"{% endif %}>Runs</a>
+  <a href="{{ base_url }}?tab=tasks" {% if tab == 'tasks' %}aria-current="page"{% endif %}>Tasks</a>
+</nav>
+<div class="monitor with-panel">
+  <section class="listing">
+  {% if tab == 'runs' %}
+    {% if runs %}
+    <figure class="bars">
+      <svg viewBox="0 0 {{ runs|length * 14 + 4 }} 64" width="{{ runs|length * 14 + 4 }}" height="64" role="img" aria-label="Durations of the runs listed below, newest on the right">
+        {% for r in runs|reverse %}
+        {% set h = (60 * seconds(r) / longest)|round(0, 'ceil')|int or 2 %}
+        <a href="{{ run_url(r.pipeline_run_id) }}"><rect class="bar {{ r.status }}" x="{{ loop.index0 * 14 + 2 }}" y="{{ 62 - h }}" width="10" height="{{ h }}"><title>Run {{ r.pipeline_run_id }} · {{ r.status }} · {{ duration(seconds(r)) }}</title></rect></a>
+        {% endfor %}
+      </svg>
+      <figcaption>Run durations; select a bar to open its run.</figcaption>
+    </figure>
+    <div class="scroll"><table class="list">
+      <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Trigger</th><th scope="col">Run date</th><th scope="col">Started</th><th scope="col">Duration</th><th scope="col">Started by</th></tr></thead>
+      <tbody>
+      {% for r in runs %}
+      <tr>
+        <th scope="row"><a href="{{ run_url(r.pipeline_run_id) }}">{{ r.pipeline_run_id }}</a> <span class="note">{{ r.run_key }}</span></th>
+        <td>{{ status(r.status) }}</td>
+        <td>{{ r.trigger_kind }}{% if r.backfill %} · backfill{% endif %}</td>
+        <td>{{ r.run_date or "None" }}</td>
+        <td>{{ r.start_date|zoned(settings.timezone) }}</td>
+        <td>{% if r.end_date %}{{ duration(seconds(r)) }}{% else %}Running{% endif %}</td>
+        <td>{{ r.started_by or "Engine" }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% if before %}<p><a href="{{ base_url }}?before={{ before }}">Older runs</a></p>{% endif %}
+    {% else %}
+    <p class="panel">This pipeline has no runs yet. It runs on its schedule, or an operator can start it with <code>etl-craft run --pipeline-code {{ pipeline.pipeline_code }}</code>.</p>
+    {% endif %}
+  {% else %}
+    <div class="scroll"><table class="list">
+      <thead><tr><th scope="col">Wave</th><th scope="col">Task</th><th scope="col">Waits for</th></tr></thead>
+      <tbody>
+      {% for wave in graph.waves %}{% set wave_number = loop.index %}
+        {% for code in wave %}
+        <tr>
+          <td>{{ wave_number }}</td>
+          <th scope="row">{{ code }}{% if code in graph.conditional %} <span class="badge">conditional</span>{% endif %}</th>
+          <td>{% for upstream, kind in graph.depends_on.get(code, ()) %}{{ upstream }} <span class="note">({{ kind }})</span>{% if not loop.last %}, {% endif %}{% else %}<span class="note">Nothing</span>{% endfor %}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table></div>
+  {% endif %}
+  </section>
+  <aside class="panel side" aria-labelledby="details-title">
+    <h2 id="details-title">Details</h2>
+    <dl class="facts">
+      <dt>Schedule</dt><dd>{% if pipeline.run_schedule %}<code>{{ pipeline.run_schedule }}</code>{% else %}Not scheduled{% endif %}</dd>
+      <dt>Refresh</dt><dd>{{ pipeline.refresh_type }}</dd>
+      <dt>SLA</dt><dd>{% if pipeline.sla_in_hours %}{{ pipeline.sla_in_hours }} h{% else %}None{% endif %}</dd>
+      <dt>Tags</dt><dd>{{ pipeline.tags|join(', ') or "None" }}</dd>
+      <dt>Waits for pipelines</dt><dd>{% for upstream, kind in graph.pipeline_dependencies %}{{ upstream }} ({{ kind }}){% if not loop.last %}, {% endif %}{% else %}None{% endfor %}</dd>
+      <dt>Paused tasks</dt><dd>{{ pipeline.task_pauses|length or "None" }}</dd>
+    </dl>
+  </aside>
+</div>
+{% with pipeline_code=pipeline.pipeline_code, run_id=None, task_code=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}

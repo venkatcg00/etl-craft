@@ -1,0 +1,47 @@
+/* Workflow Monitor: pipeline list, pipeline and run pages. Colours come from catalog.css. */
+.breadcrumbs { color: var(--muted); font-size: .9rem; margin-bottom: .5rem; }
+.object-header h1 { margin: 0 0 .25rem; }
+.object-header .note { font-size: 1rem; font-weight: 400; }
+.header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.facts.inline { grid-template-columns: max-content 1fr max-content 1fr; }
+.tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin: 1rem 0; }
+.tabs a { padding: .5rem .9rem; border-bottom: 2px solid transparent; }
+.tabs a[aria-current=page] { border-bottom-color: var(--accent); font-weight: 600; text-decoration: none; }
+.monitor { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 1rem; align-items: start; }
+.monitor.with-panel { grid-template-columns: minmax(0, 1fr) 22rem; }
+.monitor:not(.with-panel) .listing:only-child { grid-column: 1 / -1; }
+.navigator ul, .actions, .dependencies { list-style: none; margin: 0; padding: 0; }
+.navigator a { display: block; padding: .3rem .4rem; border-radius: .3rem; }
+.navigator a[aria-current=true] { background: var(--accent-soft); font-weight: 600; }
+.side { position: sticky; top: 1rem; }
+.selection { margin: .5rem 0; }
+.controls-panel h2 { font-size: 1rem; margin: 0 0 .5rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem 1rem; }
+.actions li { display: flex; flex-direction: column; max-width: 16rem; }
+.actions button[disabled] { cursor: not-allowed; opacity: .6; }
+.why { color: var(--muted); font-size: .8rem; }
+.status.none, .status.QUEUED { color: var(--muted); }
+.status.PAUSED, .status.WAITING, .status.REQUESTED { color: var(--warn); }
+.status.LOST { color: var(--bad); }
+.status.ACKNOWLEDGED { color: var(--ok); }
+tr.selected { background: var(--accent-soft); }
+.run-graph a:focus-visible .box, .run-graph a.selected .box { stroke: var(--accent); stroke-width: 3; }
+.run-graph .box.state-SUCCESS { stroke: var(--ok); }
+.run-graph .box.state-FAILED, .run-graph .box.state-LOST { stroke: var(--bad); }
+.run-graph .box.state-IN-PROGRESS, .run-graph .box.state-WAITING { stroke: var(--warn); }
+.run-graph .box { stroke-width: 2; }
+.met { color: var(--ok); } .unmet { color: var(--warn); }
+.error-text { color: var(--bad); overflow-wrap: anywhere; }
+#control-dialog .facts dd { overflow-wrap: anywhere; }
+#control-reason { margin-bottom: .75rem; }
+.dialog-buttons { display: flex; gap: .5rem; justify-content: flex-end; }
+@media (max-width: 900px) {
+  .monitor, .monitor.with-panel { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; }
+  .facts.inline { grid-template-columns: max-content 1fr; }
+}
+.status { white-space: nowrap; }
+.side h2, .controls-panel h2 { margin-top: 0; }
+.actions button { align-self: flex-start; }
+table.list tbody th { font-size: inherit; color: var(--text); }
+.navigator h2 { margin-top: 0; font-size: 1rem; }
