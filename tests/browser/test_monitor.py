@@ -21,6 +21,7 @@ def run_site(site):
         add_dependency(conn, pipeline, load, extract)
         finish_run(conn, start_run(conn, pipeline))
         active = start_run(conn, pipeline)
+        add_pipeline(conn, "SALES")
     return ctx, url, active
 
 
@@ -41,6 +42,7 @@ def test_select_a_task_in_the_graph_and_hold_it_from_the_dialog(run_site, browse
             page.get_by_role("link", name="LOAD, not started")
         ).first.click()
         expect(page.get_by_role("status").filter(has_text="task LOAD")).to_be_visible()
+        page.wait_for_load_state("load")
         page.get_by_role("button", name="Hold", exact=True).click()
         dialog = page.get_by_role("dialog")
         expect(dialog.get_by_text(f"task LOAD in run {active}")).to_be_visible()
@@ -71,6 +73,7 @@ def test_a_refused_control_keeps_the_dialog_open_with_the_servers_reason(run_sit
         page.get_by_label("Account name", exact=True).fill("owner")
         page.get_by_label("Password", exact=True).fill(PASSWORD)
         page.get_by_role("button", name="Sign in", exact=True).click()
+        page.wait_for_load_state("load")
         page.get_by_role("button", name="Pause", exact=True).click()
         dialog = page.get_by_role("dialog")
         dialog.get_by_role("button", name="Request", exact=True).click()
@@ -80,6 +83,7 @@ def test_a_refused_control_keeps_the_dialog_open_with_the_servers_reason(run_sit
         expect(page.locator("#result")).to_contain_text("PAUSE")
         page.goto(url + f"/ui/projects/default/pipelines/OPS/runs/{active}?task=LOAD")
         page.evaluate("document.querySelector('#control-dialog').dataset.run = '999999'")
+        page.wait_for_load_state("load")
         page.get_by_role("button", name="Hold", exact=True).click()
         dialog.get_by_label("Reason (recorded with the request)").fill("stale page")
         dialog.get_by_role("button", name="Request", exact=True).click()
@@ -87,3 +91,63 @@ def test_a_refused_control_keeps_the_dialog_open_with_the_servers_reason(run_sit
         expect(error).to_be_visible()
         expect(page.get_by_role("dialog")).to_be_visible()
         browser.close()
+
+
+def sign_in_to(page, url, destination):
+    page.goto(url + "/signin?return_to=" + destination.replace("/", "%2F"))
+    page.get_by_label("Account name", exact=True).fill("owner")
+    page.get_by_label("Password", exact=True).fill(PASSWORD)
+    page.get_by_role("button", name="Sign in", exact=True).click()
+
+
+def test_bulk_pause_run_now_and_csv_export(run_site, tmp_path):
+    ctx, url, _ = run_site
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_context(ignore_https_errors=True, accept_downloads=True).new_page()
+        sign_in_to(page, url, "/ui/projects/default/pipelines/SALES")
+        dialog = page.get_by_role("dialog")
+        page.wait_for_load_state("load")
+        page.get_by_role("button", name="Run now", exact=True).click()
+        dialog.get_by_label("Reason (recorded with the request)").fill("manual check")
+        dialog.get_by_role("button", name="Request", exact=True).click()
+        expect(page.locator("#result")).to_contain_text("SALES: pipeline_run_id=")
+        page.goto(url + "/ui/projects/default/pipelines")
+        page.wait_for_load_state("load")
+        pause = page.get_by_role("button", name="Pause selected")
+        expect(pause).to_be_disabled()
+        page.get_by_label("Select OPS").check()
+        page.get_by_label("Select SALES").check()
+        expect(page.get_by_text("2 pipelines selected")).to_be_visible()
+        page.wait_for_load_state("load")
+        pause.click()
+        expect(dialog.get_by_text("2 selected pipelines: OPS, SALES")).to_be_visible()
+        dialog.get_by_label("Reason (recorded with the request)").fill("maintenance")
+        dialog.get_by_role("button", name="Request", exact=True).click()
+        expect(page.locator("#result")).to_contain_text("OPS: requested")
+        expect(page.locator("#result")).to_contain_text("SALES: requested")
+        with page.expect_download() as download:
+            page.get_by_role("button", name="Export CSV").click()
+        saved = tmp_path / "pipelines.csv"
+        download.value.save_as(saved)
+        lines = saved.read_text().splitlines()
+        assert lines[0].startswith("Pipeline,Name,Tags,Schedule,Next run")
+        assert {line.split(",")[0] for line in lines[1:]} == {"OPS", "SALES"}
+        browser.close()
+    with ctx.engine.connect() as conn:
+        paused = set(
+            conn.execute(
+                text(
+                    "SELECT p.PIPELINE_CODE FROM CFG_PIPELINES p WHERE EXISTS (SELECT 1 FROM "
+                    "AUD_PIPELINE_PAUSES a WHERE a.PIPELINE_ID=p.PIPELINE_ID "
+                    "AND a.TASK_ID IS NULL AND a.RESUMED_AT IS NULL)"
+                )
+            ).scalars()
+        )
+        runs = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM AUD_PIPELINES_RUN_LOG r JOIN CFG_PIPELINES p "
+                "ON p.PIPELINE_ID=r.PIPELINE_ID WHERE p.PIPELINE_CODE='SALES'"
+            )
+        ).scalar_one()
+    assert paused == {"OPS", "SALES"} and runs == 1

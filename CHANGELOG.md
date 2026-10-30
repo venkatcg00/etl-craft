@@ -255,6 +255,11 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `pipelines` and `pipeline` JSON (CLI and API) add `next_run` (the controller's next running
+  tick, business calendars applied), `schedule_problem` (why a scheduled, unpaused pipeline has
+  none) and `recent_runs` (the five newest runs with status and SLA result). Browser pages add a
+  run matrix, an attempt timeline, run now, bulk pause and resume, and CSV export of lists.
+
 - Browser Workflow Monitor pages: a pipeline list with a tag navigator, a pipeline page with
   run-duration bars, paged runs, tasks and details, and a run page with a status graph, a task
   panel and capability-driven controls (hold, release, stop, abort, recover, restart, run paused,

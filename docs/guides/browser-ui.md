@@ -78,18 +78,25 @@ CLI and API stream the same bytes.
 
 ## Pipelines, runs and controls
 
-**Pipelines** in the sidebar lists the project's pipelines you may view: tags, schedule,
-whether automatic runs are paused, and paused tasks. The tag list on the left filters by tag;
+**Pipelines** in the sidebar lists the project's pipelines you may view: tags, schedule, the
+next scheduled run (as the controller computes it, business calendars included; a schedule that
+cannot run, such as one naming an inactive calendar, shows why), the five newest runs as status
+marks, the latest run's SLA result, whether automatic runs are paused, and paused tasks. Select
+pipelines with their check boxes to pause or resume them together; each succeeds or fails on its
+own and the result lists each one. **Export CSV** saves the listed rows. The tag list on the left filters by tag;
 the filter is the same `tag` parameter as `etl-craft pipelines --tag` and
 `GET /api/v1/projects/{project}/pipelines?tag=…`, so the page, the CLI and the API return the
-same pipelines.
+same pipelines, with the same `next_run`, `schedule_problem` and `recent_runs` fields in JSON.
 
 A pipeline's page has a **Runs** tab (run durations as bars, then one page of runs, newest
-first, with **Older runs** to page back) and a **Tasks** tab (each task, its wave and what it
-waits for). The details panel shows the schedule, refresh type, SLA, tags, upstream pipelines
+first, with **Older runs** to page back), a **Matrix** tab (tasks as rows and the same runs as
+columns, each cell a task run's status and duration that opens that task in its run) and a
+**Tasks** tab (each task, its wave and what it waits for). **Run now** admits one manual run of
+the whole pipeline for the controller, optionally for a run date. The details panel shows the schedule, refresh type, SLA, tags, upstream pipelines
 and paused tasks. **Pause** and **Resume** act on automatic runs of this pipeline only.
 
-A run's page draws its tasks as a graph coloured by status, with the same tasks in a table.
+A run's page draws its tasks as a graph coloured by status, with the same tasks in a table;
+the **Timeline** view puts each attempt on one time axis, its wait to start apart from its run.
 Select a task in the graph or the table to open its panel (status, rows, rejects, attempts and
 what it waits for); the page address keeps the selection, so a link or Back returns to it.
 Actions act on the selection only: the whole run, or the selected task in it. Each action comes

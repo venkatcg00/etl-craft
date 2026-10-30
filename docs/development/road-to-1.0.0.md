@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 2a of 6 | #277, slice 2a PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a) |
+| S7.A Web UI pages | In progress, slice 2b of 6 | #277, #281, slice 2b PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
@@ -915,6 +915,14 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.A slice 2b (owner, 2026-10-30: "you need to bring them"): `PIPELINES` and `PIPELINE` add
+  `next_run`, `schedule_problem` and `recent_runs`; one schedule row read and one bounded recent-run
+  query (PostgreSQL uses a LATERAL index range) serve every listed pipeline. A schedule that cannot
+  produce a tick is reported on its row instead of failing the list. Global search, recently
+  viewed, server-sent live updates with the stale-state warning, and run-now parameter overrides
+  move to slice 2c: each needs a route or a request field the action table does not have, so 2c
+  starts with a design note. The timeline shows queue wait and execution per attempt; gate and
+  event waits need their rows in a read first.
 - S7.A slice 2 is split in two pull requests. 2a: pipeline list with tag navigator, pipeline
   page (run-duration bars, paged runs, tasks, details, pause/resume) and run page (status graph,
   task list, task panel, capability-driven controls with scope preview). 2b: run matrix,

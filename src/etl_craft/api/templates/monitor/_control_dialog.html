@@ -1,4 +1,5 @@
 <dialog id="control-dialog" aria-labelledby="control-title" data-url="{{ controls_url }}"
+  {% if runs_url %}data-runs-url="{{ runs_url }}"{% endif %}
   data-pipeline="{{ pipeline_code }}" {% if run_id %}data-run="{{ run_id }}"{% endif %}
   {% if task_code %}data-task="{{ task_code }}"{% endif %}>
   <form id="control-form" method="dialog">
@@ -8,6 +9,10 @@
       <dt>Effect</dt><dd data-field="effect"></dd>
       <dt>Successful work</dt><dd data-field="preserves"></dd>
     </dl>
+    <p class="run-only" hidden>
+      <label for="control-run-date">Run date (optional, YYYY-MM-DD)</label>
+      <input id="control-run-date" name="run_date" type="date">
+    </p>
     <p class="resume-only" hidden>
       <label for="control-then">After resuming</label>
       <select id="control-then" name="then">

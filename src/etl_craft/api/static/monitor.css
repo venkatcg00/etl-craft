@@ -45,3 +45,23 @@ tr.selected { background: var(--accent-soft); }
 .actions button { align-self: flex-start; }
 table.list tbody th { font-size: inherit; color: var(--text); }
 .navigator h2 { margin-top: 0; font-size: 1rem; }
+.toolbar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .5rem 0; }
+.dots { display: inline-flex; gap: 4px; }
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: var(--muted); }
+.dot.SUCCESS { background: var(--ok); }
+.dot.FAILED, .dot.LOST, .dot.CANCELLED { background: var(--bad); }
+.dot.IN-PROGRESS, .dot.WAITING, .dot.QUEUED { background: var(--warn); }
+.dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.matrix td, .matrix th { text-align: center; white-space: nowrap; }
+.matrix tbody th { text-align: left; }
+.matrix a.cell { display: block; }
+.timeline .lane-label { fill: var(--text); font-size: 12px; }
+.timeline .segment { fill: var(--muted); }
+.timeline .segment.queued { fill: var(--border); }
+.timeline .segment.SUCCESS { fill: var(--ok); }
+.timeline .segment.FAILED, .timeline .segment.LOST { fill: var(--bad); }
+.timeline .segment.RUNNING, .timeline .segment.IN-PROGRESS { fill: var(--warn); }
+.timeline a.selected .lane-label, .timeline a:focus-visible .lane-label { font-weight: 700; fill: var(--accent); }
+.legend .swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: middle; background: var(--ok); }
+.legend .swatch.queued { background: var(--border); }
+.matrix caption { text-align: left; }

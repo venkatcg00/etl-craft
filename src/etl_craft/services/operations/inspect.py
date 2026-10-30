@@ -58,6 +58,7 @@ from etl_craft.services.operations.models import (
     TaskRunView,
 )
 from etl_craft.services.operations.permissions import pipeline_access, visible_codes
+from etl_craft.services.operations.pipeline_summaries import summarize
 from etl_craft.services.operations.requests import (
     AttemptId,
     AuditInput,
@@ -106,7 +107,7 @@ def list_pipelines(ctx: OperationContext, request: TagFilter) -> PipelineListVie
                     tuple(p for p in task_pauses if p.pipeline_id == row.pipeline_id),
                 )
             )
-        return PipelineListView(tuple(views))
+        return PipelineListView(summarize(conn, views, datetime.now(UTC), _pinned(ctx)))
 
 
 def pipeline_graph(ctx: OperationContext, request: PipelineInput) -> GraphView:
@@ -309,7 +310,13 @@ def audit(ctx: OperationContext, request: AuditInput) -> AuditView:
 def get_pipeline(ctx: OperationContext, request: PipelineInput) -> PipelineView:
     """Read one active definition without duplicating pipeline assembly."""
     with read_snapshot(ctx.engine) as conn:
-        return pipeline_view(conn, resolve_pipeline_id(conn, request.pipeline_code))
+        view = pipeline_view(conn, resolve_pipeline_id(conn, request.pipeline_code))
+        return summarize(conn, (view,), datetime.now(UTC), _pinned(ctx))[0]
+
+
+def _pinned(ctx: OperationContext) -> bool:
+    """Whether schedules read the refreshed pipeline definitions, as the controller does."""
+    return bool(ctx.engine.get_execution_options().get("refresh_required"))
 
 
 def get_run(ctx: OperationContext, request: RunId) -> RunView:

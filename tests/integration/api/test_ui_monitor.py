@@ -88,7 +88,7 @@ def test_pipeline_page_lists_the_history_read_and_its_tasks(monitor):
     tasks = client.get(f"{BASE}/OPS", params={"tab": "tasks"})
     assert "EXTRACT" in tasks.text and "LOAD" in tasks.text and "(SUCCESS)" in tasks.text
     bad = client.get(f"{BASE}/OPS", params={"tab": "edit"})
-    assert bad.status_code == 400 and "expected runs or tasks" in bad.text
+    assert bad.status_code == 400 and "expected runs, matrix or tasks" in bad.text
 
 
 def test_run_page_selects_a_task_and_shows_its_scope_capabilities(monitor):
@@ -155,3 +155,71 @@ def test_a_hold_from_the_run_page_posts_the_api_control_and_a_viewer_is_refused(
             {"run": active},
         ).all()
     assert [(row.action, row.reason) for row in rows] == [("HOLD", "check the load")]
+
+
+def ran_extract(ctx, active):
+    from datetime import UTC, datetime, timedelta
+
+    from etl_craft.core.enums import AttemptStatus
+    from etl_craft.engine import transitions
+
+    with acting_as(OWNER), ctx.engine.begin() as conn:
+        task_id = conn.execute(
+            text(
+                "SELECT t.TASK_ID FROM CFG_TASKS t JOIN CFG_PIPELINES p "
+                "ON p.PIPELINE_ID=t.PIPELINE_ID WHERE p.PIPELINE_CODE='OPS' "
+                "AND t.TASK_CODE='EXTRACT'"
+            )
+        ).scalar_one()
+        task_run = transitions.find_or_create_task_run(conn, task_id, active).task_run_id
+        attempt = transitions.queue_attempt(conn, task_run, OWNER)
+        lease = datetime.now(UTC) + timedelta(minutes=1)
+        transitions.claim_attempt(conn, attempt, OWNER, owner="w1", lease_expires_at=lease)
+        transitions.start_attempt(conn, attempt, OWNER, owner="w1", host="worker-1")
+        transitions.finish_attempt(conn, attempt, AttemptStatus.SUCCESS, OWNER, owner="w1")
+
+
+def test_matrix_cells_match_each_tasks_history_and_link_to_the_task(monitor):
+    ctx, client, active = monitor
+    ran_extract(ctx, active)
+    login(client)
+    page = client.get(f"{BASE}/OPS", params={"tab": "matrix"})
+    assert page.status_code == 200
+    cells = re.findall(r'href="[^"]+/runs/(\d+)\?task=([A-Z]+)"', page.text)
+    for task in ("EXTRACT", "LOAD"):
+        history = api(client, "/history", pipeline_code="OPS", task_code=task, all="true")
+        assert sorted(int(r) for r, t in cells if t == task) == sorted(
+            e["pipeline_run_id"] for e in history["entries"]
+        )
+
+
+def test_timeline_draws_each_attempt_and_keeps_the_view_when_selecting(monitor):
+    ctx, client, active = monitor
+    ran_extract(ctx, active)
+    login(client)
+    page = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "timeline"})
+    assert page.status_code == 200
+    assert re.findall(r'class="segment ([A-Za-z_-]+)"', page.text) == ["queued", "SUCCESS"]
+    assert f'href="{BASE}/OPS/runs/{active}?view=timeline&amp;task=EXTRACT"' in page.text
+    bad = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "gantt"})
+    assert bad.status_code == 400 and "expected graph or timeline" in bad.text
+
+
+def test_list_shows_next_run_recent_runs_and_sla_from_the_read(monitor):
+    ctx, client, _ = monitor
+    with ctx.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE CFG_PIPELINES SET RUN_SCHEDULE='0 6 * * *', SCHEDULE_TIMEZONE='UTC' "
+                "WHERE PIPELINE_CODE='SALES'"
+            )
+        )
+    login(client)
+    page = client.get(BASE)
+    listed = {p["pipeline_code"]: p for p in api(client, "/pipelines")["pipelines"]}
+    assert listed["SALES"]["next_run"] is not None
+    assert listed["SALES"]["next_run"][:10] in page.text
+    for code, pipeline in listed.items():
+        for run in pipeline["recent_runs"]:
+            assert f'/{code}/runs/{run["pipeline_run_id"]}" title="Run' in page.text
+    assert 'data-bulk="PAUSE" disabled' in page.text and 'data-csv="pipeline-table"' in page.text
