@@ -54,6 +54,7 @@ required = [
     "etl_craft/api/templates/monitor/attempt.html",
     "etl_craft/api/templates/insights.html",
     "etl_craft/api/templates/console.html",
+    "etl_craft/api/templates/monitor/items.html",
     "etl_craft/api/static/console.js",
     "etl_craft/api/static/htmx.min.js",
     "etl_craft/api/static/htmx.LICENSE",

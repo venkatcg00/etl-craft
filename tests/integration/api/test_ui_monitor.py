@@ -361,3 +361,76 @@ def test_insights_check_now_is_disabled_when_on_demand_checks_are_off(monitor):
         '<button type="submit" disabled aria-describedby="check-off">Check now</button>' in off.text
     )
     assert "<code>0 2 * * *</code>" in off.text
+
+
+def post_buttons(page_text):
+    """Return each post button's label, URL and request body, as the dialog will send them."""
+    import html
+
+    return {
+        label: (url, json.loads(html.unescape(body)))
+        for url, label, body in re.findall(
+            r'data-post="([^"]+)" data-label="([^"]+)" data-body=\'([^\']+)\'', page_text
+        )
+    }
+
+
+def test_task_panel_offers_task_actions_with_their_exact_requests(monitor):
+    _, client, active = monitor
+    login(client)
+    page = client.get(f"{BASE}/OPS/runs/{active}", params={"task": "LOAD"})
+    buttons = post_buttons(page.text)
+    api_base = "/api/v1/projects/default"
+    at = {"pipeline_code": "OPS", "run_id": active, "task_code": "LOAD"}
+    assert buttons["Rerun task"] == (f"{api_base}/runs", at | {"rerun": True})
+    assert buttons["Rerun from here"] == (
+        f"{api_base}/runs",
+        at | {"rerun": True, "with_downstream": True},
+    )
+    assert buttons["Run task only"] == (
+        f"{api_base}/runs",
+        {"pipeline_code": "OPS", "task_code": "LOAD", "standalone": True},
+    )
+    assert buttons["Mark as"] == (f"{api_base}/marks", at)
+    assert buttons["Pause task"][1] == {
+        "pipeline_code": "OPS",
+        "task_code": "LOAD",
+        "action": "PAUSE",
+    }
+    assert "Resume task" not in buttons
+    assert buttons["Reconcile"] == (f"{api_base}/reconciliations", {"pipeline_code": "OPS"})
+    pipeline = post_buttons(client.get(f"{BASE}/OPS").text)
+    assert pipeline["Refresh"] == (f"{api_base}/pipelines/refresh", {"pipeline_code": "OPS"})
+    ended = client.get(f"{BASE}/OPS/runs/{active - 1}")
+    assert "Reconcile" not in post_buttons(ended.text)
+
+
+def test_items_page_lists_items_with_their_controls(monitor):
+    from uuid import uuid4
+
+    from etl_craft.core.enums import ItemStatus
+    from etl_craft.core.items import ItemRecord
+    from etl_craft.engine import items
+
+    ctx, client, active = monitor
+    attempt = ran_extract(ctx, active, finish=False)
+    with ctx.engine.begin() as conn:
+        task_run = conn.execute(
+            text("SELECT TASK_RUN_ID FROM AUD_TASK_ATTEMPTS WHERE ATTEMPT_ID=:a"), {"a": attempt}
+        ).scalar_one()
+        items.prepare(conn, task_run, attempt, ["2026-01", "2026-02"])
+        for key, status in (("2026-01", ItemStatus.SUCCESS), ("2026-02", ItemStatus.FAILED)):
+            for step in (ItemStatus.RUNNING, status):
+                event = ItemRecord(key, 1, step, report_id=str(uuid4()))
+                items.record(conn, task_run, attempt, event)
+    login(client)
+    panel = client.get(f"{BASE}/OPS/runs/{active}", params={"task": "EXTRACT"})
+    page_url = f"{BASE}/OPS/runs/{active}/tasks/EXTRACT/items"
+    assert f'href="{page_url}"' in panel.text
+    page = client.get(page_url)
+    assert page.status_code == 200
+    assert re.findall(r'<th scope="row">([0-9-]+)</th>', page.text) == ["2026-01", "2026-02"]
+    controls = f"/api/v1/projects/default/pipelines/OPS/runs/{active}/tasks/EXTRACT/items/controls"
+    buttons = post_buttons(page.text)
+    assert buttons["Rerun failed items"] == (controls, {"action": "RERUN", "all_failed": True})
+    assert client.get(f"{BASE}/SALES/runs/{active}/tasks/EXTRACT/items").status_code == 404

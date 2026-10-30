@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'monitor/_status.html' import status, duration, recent_runs, next_run %}
+{% from 'monitor/_status.html' import status, duration, recent_runs, next_run, post_button %}
 {% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <span aria-current="page">{{ pipeline.pipeline_code }}</span></nav>
@@ -15,6 +15,7 @@
     {% else %}
     <button type="button" data-control="PAUSE" data-scope="pipeline {{ pipeline.pipeline_code }}" data-preserves="yes" data-effect="Stop admitting new automatic runs; running work finishes, and exact manual runs remain possible.">Pause</button>
     {% endif %}
+    {{ post_button("Refresh", project_api ~ "/pipelines/refresh", {"pipeline_code": pipeline.pipeline_code}, "pipeline " ~ pipeline.pipeline_code ~ " definition", "Validate the current definition and pin it for the next runs; findings are listed, and nothing runs.") }}
   </div>
 </header>
 <nav class="tabs" aria-label="Pipeline views">

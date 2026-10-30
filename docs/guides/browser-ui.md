@@ -106,6 +106,17 @@ request goes to `POST /api/v1/projects/{project}/controls`, as `etl-craft contro
 page shows the recorded status. A request is not completion: the page shows the run's state
 when it changes.
 
+A selected task's panel also has **Task actions**, each with the same confirmation: **Rerun
+task** and **Rerun from here** (with the tasks that depend on it) in this run, **Run task only**
+(a standalone execution outside any pipeline run), **Mark as** SUCCESS, FAILED or SKIPPED,
+**Pause task** in every run (optionally giving downstream tasks a standing outcome and an end
+time) and **Resume task**, and, for a fan-out task, **Items**: each item's status, rows and error,
+with Rerun, Cancel and Mark as per item and **Rerun failed items**. A run that is still going has
+**Reconcile**, which records attempts whose owner stopped renewing their lease as LOST so their
+tasks can be retried. The pipeline header has **Refresh**, which validates and pins the current
+definition. Each posts the same `/api/v1` request as the CLI (`run`, `mark`, `pause`, `items`,
+`reconcile`, `pipelines refresh`).
+
 The list, pipeline and run pages update live. Every 10 seconds the server re-reads what the
 page shows, as you, and the page fetches itself again when that changed; "Updated N s ago" says
 when it last checked. While a dialog is open or you are working inside the page, a notice says

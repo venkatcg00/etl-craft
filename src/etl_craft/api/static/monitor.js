@@ -17,9 +17,9 @@ function selected() {
 
 function open(button, kind) {
   opener = button;
-  const action = kind === "run" ? "RUN" : button.dataset.control || button.dataset.bulk;
+  const action = kind === "run" ? "RUN" : kind === "post" ? button.dataset.label : button.dataset.control || button.dataset.bulk;
   const codes = kind === "bulk" ? selected() : [];
-  pending = { action, kind, codes, key: crypto.randomUUID() };
+  pending = { action, kind, codes, key: crypto.randomUUID(), button };
   field("action", action.replaceAll("_", " ").toLowerCase());
   field("scope", kind === "bulk" ? `${codes.length} selected pipelines: ${codes.join(", ")}` : button.dataset.scope);
   field("effect", button.dataset.effect);
@@ -27,6 +27,9 @@ function open(button, kind) {
   form.reset();
   dialog.querySelector(".resume-only").hidden = !(action === "RESUME" && button.dataset.scheduled === "yes");
   dialog.querySelector(".run-only").hidden = kind !== "run";
+  const asked = (button.dataset.ask || "").split(",");
+  dialog.querySelector(".ask-status").hidden = !asked.includes("status");
+  dialog.querySelector(".ask-outcome").hidden = !asked.includes("outcome");
   dialog.querySelector("#control-error").hidden = true;
   dialog.showModal();
 }
@@ -41,6 +44,16 @@ function control(pipeline, suffix = "") {
 }
 
 function request() {
+  if (pending.kind === "post") {
+    const button = pending.button;
+    const body = { ...JSON.parse(button.dataset.body), reason: form.reason.value };
+    if (!dialog.querySelector(".ask-status").hidden) body.status = form.status.value;
+    if (!dialog.querySelector(".ask-outcome").hidden) {
+      if (form.outcome.value) body.outcome = form.outcome.value;
+      if (form.expires_at.value) body.expires_at = new Date(form.expires_at.value).toISOString();
+    }
+    return { url: button.dataset.post, body };
+  }
   if (pending.kind === "run") {
     const body = { pipeline_code: dialog.dataset.pipeline, reason: form.reason.value || null };
     if (form.run_date.value) body.run_date = form.run_date.value;
@@ -146,6 +159,7 @@ document.addEventListener("click", (event) => {
   if (button.matches("[data-control]")) open(button, "control");
   else if (button.matches("[data-bulk]")) open(button, "bulk");
   else if (button.matches("[data-run-now]")) open(button, "run");
+  else if (button.matches("[data-post]")) open(button, "post");
 });
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-csv]");
