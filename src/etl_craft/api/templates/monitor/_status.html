@@ -44,3 +44,7 @@
 {%- elif p.next_run -%}{{ p.next_run|zoned(settings.timezone) }}
 {%- else -%}<span class="note">Not scheduled</span>{%- endif -%}
 {%- endmacro %}
+
+{% macro post_button(label, url, body, scope, effect, preserves='yes', ask='') -%}
+<button type="button" data-post="{{ url }}" data-label="{{ label }}" data-body='{{ body|tojson }}' data-scope="{{ scope }}" data-effect="{{ effect }}" data-preserves="{{ preserves }}" {% if ask %}data-ask="{{ ask }}"{% endif %}>{{ label }}</button>
+{%- endmacro %}

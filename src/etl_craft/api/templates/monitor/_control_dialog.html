@@ -21,6 +21,25 @@
         <option value="catch-up">Catch up missed runs</option>
       </select>
     </p>
+    <p class="ask-status" hidden>
+      <label for="control-status">Mark as</label>
+      <select id="control-status" name="status">
+        <option value="SUCCESS">SUCCESS</option>
+        <option value="FAILED">FAILED</option>
+        <option value="SKIPPED">SKIPPED</option>
+      </select>
+    </p>
+    <p class="ask-outcome" hidden>
+      <label for="control-outcome">While paused, downstream tasks treat this task as</label>
+      <select id="control-outcome" name="outcome">
+        <option value="">Waiting (no standing outcome)</option>
+        <option value="SUCCESS">SUCCESS</option>
+        <option value="FAILED">FAILED</option>
+        <option value="SKIPPED">SKIPPED</option>
+      </select>
+      <label for="control-expires">Pause ends (optional, your timezone)</label>
+      <input id="control-expires" name="expires_at" type="datetime-local">
+    </p>
     <label for="control-reason">Reason (recorded with the request)</label>
     <textarea id="control-reason" name="reason" rows="3" maxlength="4096"></textarea>
     <p id="control-error" class="notice" role="alert" hidden></p>

@@ -41,7 +41,12 @@ def time_text(value: datetime | None, settings: Settings) -> str:
     )
 
 
-ENVIRONMENT.filters.update(zoned=zoned, time_text=time_text)
+def combine(values: dict[str, object], **more: object) -> dict[str, object]:
+    """Return ``values`` with ``more`` added, for building request bodies in templates."""
+    return {**values, **more}
+
+
+ENVIRONMENT.filters.update(zoned=zoned, time_text=time_text, combine=combine)
 
 
 def render(

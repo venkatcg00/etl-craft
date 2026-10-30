@@ -255,6 +255,12 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Browser run and task actions: a task's panel offers Rerun task, Rerun from here, Run task
+  only, Mark as, Pause task (with a standing outcome and end time) and Resume task; fan-out tasks
+  have an Items page with per-item Rerun, Cancel and Mark as and Rerun failed items; active runs
+  have Reconcile and pipelines have Refresh. Each confirms its scope and effect and posts the
+  CLI's API request.
+
 - The browser **Console** runs `etl-craft` command lines as the signed-in person with the CLI's
   own parser and output, listing the commands their role and grants allow, with Tab completion,
   recall and help; host, config-file, sign-in, server-file and password commands are refused

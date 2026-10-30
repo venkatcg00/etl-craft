@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 5 of 6 | #277, #281, #282, #283, #284, #285, #286, #287, slice 5 PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4); command console (5) |
+| S7.A Web UI pages | In progress, slice 6a of 6 | #277, #281, #282, #283, #284, #285, #286, #287, #290, slice 6a PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4); command console (5); task and run actions, items page, Reconcile, Refresh (6a) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.AK Schema checker | Done | S7.AK PR | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
@@ -916,6 +916,13 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.A slice 6 (owner, 2026-10-30: 6a/6b/6c; announcements as planned). 6a puts the task and run
+  actions on the pages through one generic confirmation (body, URL and extra fields per button).
+  "Run task only" is the standalone execution; over HTTP it runs synchronously in the server, as
+  the API already does; `force`, `skip` and `ignore_dependencies` stay host-only and are not
+  offered. Held and paused work and run filters by agent, pool and failure class move to 6c: no
+  read lists active holds or filters runs by attempt fields yet. The offsets panel is also 6c,
+  with the task page that shows the stored offset.
 - S7.A slice 5: the console runner lives in the CLI (`cli/console.py`) and is handed to the
   server by `etl-craft ui` and `etl-craft controller` (`api/console.py` holds only its types),
   so the API never imports the CLI. It runs each line in-process as the signed-in caller through

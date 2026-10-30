@@ -20,6 +20,7 @@ from etl_craft.engine.logs import LIVE_ATTEMPTS
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.capabilities import CapabilitiesView
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.items import ItemInput, ItemView
 from etl_craft.services.operations.models import (
     AttemptView,
     GraphView,
@@ -110,6 +111,20 @@ def add_monitor_pages(app: FastAPI, ctx: OperationContext) -> None:
             values | _attempt_values(caller, project, pipeline_code, run_id, attempt_id),
         )
 
+    @app.get(
+        "/ui/projects/{project}/pipelines/{pipeline_code}/runs/{run_id}/tasks/{task_code}/items",
+        include_in_schema=False,
+    )
+    def items(
+        request: Request, project: str, pipeline_code: str, run_id: int, task_code: str
+    ) -> Response:
+        caller, values = page_values(ctx, request)
+        return render(
+            request,
+            "monitor/items.html",
+            values | _items_values(caller, project, pipeline_code, run_id, task_code),
+        )
+
     @app.get("/ui/projects/{project}/search", include_in_schema=False)
     def search(request: Request, project: str) -> Response:
         caller, values = page_values(ctx, request)
@@ -195,6 +210,7 @@ def _pipeline_values(
         "base_url": pipeline_url(project, code),
         "controls_url": controls_url(project),
         "runs_api": f"/api/v1/projects/{quote(project, safe='')}/runs",
+        "project_api": f"/api/v1/projects/{quote(project, safe='')}",
         "run_url": lambda run_id: run_url(project, code, run_id),
     }
 
@@ -329,6 +345,32 @@ def _run_log(caller: OperationContext, selection: RunSelection) -> str:
     chunks = invoke(caller, ActionName.RUN_LOG, selection)
     assert isinstance(chunks, Iterator)
     return b"".join(chunks).decode()
+
+
+def _items_values(
+    caller: OperationContext, project: str, pipeline_code: str, run_id: int, task_code: str
+) -> dict[str, object]:
+    """Read one task run's items under the named run; any other pairing is not found."""
+    run = invoke(caller, ActionName.RUN_DETAIL, RunId(run_id=run_id))
+    assert isinstance(run, RunView)
+    if run.pipeline_code != pipeline_code:
+        raise ResourceNotFoundError("Not found or no access")
+    selected = ItemInput(pipeline_code=pipeline_code, run_id=run_id, task_code=task_code)
+    found = invoke(caller, ActionName.ITEMS, selected)
+    assert isinstance(found, ItemView)
+    base = f"/api/v1/projects/{quote(project, safe='')}"
+    return {
+        "title": f"Items · {task_code} · Run {run_id} · etl-craft",
+        "view": "pipelines",
+        "found": found,
+        "run": run,
+        "task_code": task_code,
+        "run_page": run_url(project, pipeline_code, run_id),
+        "pipeline_page": pipeline_url(project, pipeline_code),
+        "controls": f"{base}/pipelines/{quote(pipeline_code, safe='')}/runs/{run_id}"
+        f"/tasks/{quote(task_code, safe='')}/items/controls",
+        "controls_url": controls_url(project),
+    }
 
 
 def _task_panel(

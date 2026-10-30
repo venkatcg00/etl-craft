@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status, post_button %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <a href="{{ pipeline_page }}">{{ run.pipeline_code }}</a> › <a href="{{ run_page }}">Run {{ run.pipeline_run_id }}</a> › <a href="{{ run_page }}?task={{ task_code|urlencode }}">{{ task_code }}</a> › <span aria-current="page">Items</span></nav>
+<header class="object-header">
+  <h1>Items of {{ task_code }} <span class="note">run {{ run.pipeline_run_id }}</span></h1>
+  <p>{{ found.progress }}</p>
+  {% set scope = "task " ~ task_code ~ " in run " ~ run.pipeline_run_id %}
+  {% if found.progress.failed %}<div class="header-actions">{{ post_button("Rerun failed items", controls, {"action": "RERUN", "all_failed": true}, "the " ~ found.progress.failed ~ " failed items of " ~ scope, "Run every failed item again; items that succeeded are kept.") }}</div>{% endif %}
+</header>
+<div class="scroll"><table class="list" id="items-table">
+  <thead><tr><th scope="col">Item</th><th scope="col">Status</th><th scope="col">Rows</th><th scope="col">Started</th><th scope="col">Ended</th><th scope="col">Error</th><th scope="col">Actions</th></tr></thead>
+  <tbody>{% for item in found.records %}{% set one = "item " ~ item.key ~ " of " ~ scope %}<tr>
+    <th scope="row">{{ item.key }}</th><td>{{ status(item.status) }}</td><td>{{ item.row_count if item.row_count is not none else "Not measured" }}</td><td>{{ item.started or "" }}</td><td>{{ item.ended or "" }}</td><td>{{ item.error or "" }}</td>
+    <td class="row-actions">{{ post_button("Rerun", controls, {"action": "RERUN", "item_key": item.key}, one, "Run this item again.") }} {{ post_button("Cancel", controls, {"action": "CANCEL", "item_key": item.key}, one, "Ask the running attempt to stop this item; it is acknowledged when execution ends.") }} {{ post_button("Mark as", controls, {"action": "MARK", "item_key": item.key}, one, "Record the chosen status for this item.", "no", "status") }}</td>
+  </tr>{% else %}<tr><td colspan="7">This task run has no items.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% with pipeline_code=run.pipeline_code, run_id=run.pipeline_run_id, task_code=task_code %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}

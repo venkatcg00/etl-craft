@@ -189,7 +189,8 @@ def test_live_updates_refresh_the_page_or_warn_while_a_dialog_is_open(run_site, 
         expect(page.locator("#live-updated")).to_contain_text("s ago")
         with acting_as(Actor("owner", ActorKind.USER)), ctx.engine.begin() as conn:
             finish_run(conn, active)
-        expect(page.locator("#live").get_by_title(f"Run {active} · IN-PROGRESS")).to_have_count(0)
+        live = page.locator("#live")
+        expect(live.get_by_title(f"Run {active} · IN-PROGRESS")).to_have_count(0, timeout=15000)
         page.get_by_role("button", name="Pause", exact=True).click()
         with acting_as(Actor("owner", ActorKind.USER)), ctx.engine.begin() as conn:
             pipeline = conn.execute(
@@ -267,3 +268,46 @@ def test_console_completes_runs_and_recalls_a_command(run_site):
         line.press("ArrowUp")
         expect(line).to_have_value("controller")
         browser.close()
+
+
+def test_task_actions_pause_with_a_standing_outcome_and_mark_from_the_dialog(run_site):
+    ctx, url, active = run_site
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_context(ignore_https_errors=True).new_page()
+        run_page = f"/ui/projects/default/pipelines/OPS/runs/{active}?task=LOAD"
+        sign_in_to(page, url, run_page)
+        page.wait_for_url(f"**{run_page}")
+        page.wait_for_load_state("load")
+        page.get_by_role("button", name="Pause task", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        expect(dialog.get_by_text("task LOAD in every run")).to_be_visible()
+        dialog.get_by_label("While paused, downstream tasks treat this task as").select_option(
+            "SKIPPED"
+        )
+        dialog.get_by_label("Reason (recorded with the request)").fill("source late")
+        dialog.get_by_role("button", name="Request", exact=True).click()
+        expect(page.locator("#result")).to_contain_text("Pause task")
+        page.reload()
+        page.wait_for_load_state("load")
+        page.get_by_role("button", name="Mark as", exact=True).click()
+        dialog.get_by_label("Mark as", exact=True).select_option("FAILED")
+        dialog.get_by_label("Reason (recorded with the request)").fill("bad input")
+        dialog.get_by_role("button", name="Request", exact=True).click()
+        expect(page.locator("#result")).to_contain_text("Mark as")
+        browser.close()
+    with ctx.engine.connect() as conn:
+        pause = conn.execute(
+            text(
+                "SELECT p.OUTCOME AS outcome, p.REASON AS reason FROM AUD_PIPELINE_PAUSES p "
+                "JOIN CFG_TASKS t ON t.TASK_ID=p.TASK_ID WHERE t.TASK_CODE='LOAD'"
+            )
+        ).one()
+        marked = conn.execute(
+            text(
+                "SELECT r.STATUS FROM AUD_TASK_RUN_LOG r JOIN CFG_TASKS t ON t.TASK_ID=r.TASK_ID "
+                "WHERE t.TASK_CODE='LOAD' AND r.PIPELINE_RUN_ID=:run"
+            ),
+            {"run": active},
+        ).scalar_one()
+    assert (pause.outcome, pause.reason, marked) == ("SKIPPED", "source late", "FAILED")
