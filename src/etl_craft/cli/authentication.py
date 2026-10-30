@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from etl_craft.cli.prompts import interactive, password
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.actor import SYSTEM_ACTOR, ActorKind, acting_as
 from etl_craft.core.errors import ConfigurationError, UsageError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
@@ -18,7 +18,11 @@ from etl_craft.services.operations.accounts import PROVISIONING_COMMANDS, local_
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.schema_status import require_current_schema
 from etl_craft.services.operations.tokens import TokenView, authenticate
-from etl_craft.services.operations.upgrade_signin import UpgradeAdmin, sign_in_for_upgrade
+from etl_craft.services.operations.upgrade_signin import (
+    UpgradeAdmin,
+    pending_engine_upgrade,
+    sign_in_for_upgrade,
+)
 
 
 @dataclass(frozen=True)
@@ -74,7 +78,10 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
                     token = read_session(database_key(engine, config.engine.schema))
                 ctx = OperationContext(engine, config, SYSTEM_ACTOR)
                 identity = authenticate(ctx, token) if token is not None else None
-                if identity is None and args.command == "migrate":
+                if args.command == "migrate" and (
+                    identity is None
+                    or (identity.actor.kind == ActorKind.USER and pending_engine_upgrade(ctx))
+                ):
                     interactive()
                     identity = sign_in_for_upgrade(ctx, input("Admin account name: "), password())
                 if identity is None:

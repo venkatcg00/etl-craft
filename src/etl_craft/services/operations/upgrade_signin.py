@@ -20,16 +20,21 @@ class UpgradeAdmin:
     role: ApiRole = ApiRole.ADMIN
 
 
+def pending_engine_upgrade(ctx: OperationContext) -> bool:
+    """Whether the local upgrade needs the original-column authentication path."""
+    return any(
+        name.startswith("engine/")
+        for name in pending_migrations(ctx.engine, project_default=ctx.config.migrations_dir)
+    )
+
+
 def sign_in_for_upgrade(ctx: OperationContext, name: str, password: str) -> UpgradeAdmin:
     """Read only original account columns; never add later account columns to this query.
 
     Only the local migrate command calls this proof. It grants no reusable session and never
     reads lockout counters or other account fields added after CFG_ACCOUNTS first shipped.
     """
-    if not any(
-        name.startswith("engine/")
-        for name in pending_migrations(ctx.engine, project_default=ctx.config.migrations_dir)
-    ):
+    if not pending_engine_upgrade(ctx):
         raise PermissionDeniedError(
             "upgrade sign-in requires pending Engine migrations; run `etl-craft login` normally"
         )

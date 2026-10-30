@@ -211,6 +211,7 @@ def test_browser_account_migration_retains_real_users_and_sessions(
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     assert main(["login"]) == 13
     assert main(["ui"]) == 13
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", session.token)
     for name, password in (("owner", "wrong"), ("alice", "local password")):
         monkeypatch.setattr("builtins.input", lambda _, name=name: name)
         monkeypatch.setattr("getpass.getpass", lambda _, password=password: password)
