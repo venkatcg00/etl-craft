@@ -72,7 +72,7 @@ etl-craft = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "httpx2==2.13.1",
+    "httpx2==2.16.0",
     "etl-craft[aws,databricks,ui,snowflake,trino]",
     "import-linter>=2.1",
     "mypy>=1.11",
