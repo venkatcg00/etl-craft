@@ -377,6 +377,10 @@ FULL_READS = {
     ): "Enumerates parameters across active pipelines.",
     ("active_pipelines", "cfg_pipelines"): "Loads every active pipeline definition.",
     (
+        "pipeline_recent_runs",
+        "cfg_pipelines",
+    ): "Lists every active pipeline; each one's newest runs use its newest-first index range.",
+    (
         "catalog_pipeline_edges",
         "cfg_pipelines",
     ): "Enumerates pipeline definitions on both ends of the selected project's catalog edges.",

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% from 'monitor/_status.html' import status, duration %}
+{% from 'monitor/_status.html' import status, duration, recent_runs, next_run %}
 {% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <span aria-current="page">{{ pipeline.pipeline_code }}</span></nav>
@@ -7,6 +7,7 @@
   <h1>{{ pipeline.pipeline_code }} <span class="note">{{ pipeline.pipeline_name }}</span></h1>
   <p>{% if pipeline.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Automatic runs paused</span> {{ pipeline.paused.describe() }}{% else %}Automatic runs active{% endif %}</p>
   <div class="header-actions">
+    <button type="button" data-run-now data-scope="pipeline {{ pipeline.pipeline_code }}" data-effect="Admit one manual run of the whole pipeline for the controller; scheduled runs are unaffected." data-preserves="yes">Run now</button>
     {% if pipeline.paused %}
     <button type="button" data-control="RESUME" data-scope="pipeline {{ pipeline.pipeline_code }}" data-preserves="yes" data-scheduled="{{ 'yes' if pipeline.run_schedule else 'no' }}" data-effect="Resume automatic runs of this pipeline; running work is unaffected.">Resume</button>
     {% else %}
@@ -16,6 +17,7 @@
 </header>
 <nav class="tabs" aria-label="Pipeline views">
   <a href="{{ base_url }}" {% if tab == 'runs' %}aria-current="page"{% endif %}>Runs</a>
+  <a href="{{ base_url }}?tab=matrix" {% if tab == 'matrix' %}aria-current="page"{% endif %}>Matrix</a>
   <a href="{{ base_url }}?tab=tasks" {% if tab == 'tasks' %}aria-current="page"{% endif %}>Tasks</a>
 </nav>
 <div class="monitor with-panel">
@@ -31,7 +33,8 @@
       </svg>
       <figcaption>Run durations; select a bar to open its run.</figcaption>
     </figure>
-    <div class="scroll"><table class="list">
+    <div class="toolbar"><button type="button" data-csv="run-table" data-csv-name="{{ pipeline.pipeline_code }}-runs.csv">Export CSV</button></div>
+    <div class="scroll"><table class="list" id="run-table">
       <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Trigger</th><th scope="col">Run date</th><th scope="col">Started</th><th scope="col">Duration</th><th scope="col">Started by</th></tr></thead>
       <tbody>
       {% for r in runs %}
@@ -51,6 +54,23 @@
     {% else %}
     <p class="panel">This pipeline has no runs yet. It runs on its schedule, or an operator can start it with <code>etl-craft run --pipeline-code {{ pipeline.pipeline_code }}</code>.</p>
     {% endif %}
+  {% elif tab == 'matrix' %}
+    {% if runs %}
+    <div class="scroll"><table class="list matrix" id="matrix-table">
+      <caption class="note">Tasks as rows, runs as columns (newest first); select a cell to open that task in its run.</caption>
+      <thead><tr><th scope="col">Task</th>{% for r in runs %}<th scope="col"><a href="{{ run_url(r.pipeline_run_id) }}">{{ r.pipeline_run_id }}</a><br>{{ status(r.status) }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for wave in graph.waves %}{% for code in wave %}
+      <tr><th scope="row">{{ code }}</th>
+        {% for r in runs %}{% set cell = matrix.get(code, {}).get(r.pipeline_run_id) %}
+        <td>{% if cell %}<a class="cell" href="{{ run_url(r.pipeline_run_id) }}?task={{ code|urlencode }}">{{ status(cell.status) }}{% if cell.start_date and cell.end_date %}<br><span class="note">{{ duration(((cell.end_date - cell.start_date).total_seconds())|int) }}</span>{% endif %}</a>{% else %}<span class="note">Not run</span>{% endif %}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}{% endfor %}
+      </tbody>
+    </table></div>
+    {% if before %}<p><a href="{{ base_url }}?tab=matrix&before={{ before }}">Older runs</a></p>{% endif %}
+    {% else %}<p class="panel">This pipeline has no runs yet.</p>{% endif %}
   {% else %}
     <div class="scroll"><table class="list">
       <thead><tr><th scope="col">Wave</th><th scope="col">Task</th><th scope="col">Waits for</th></tr></thead>
@@ -72,6 +92,8 @@
     <h2 id="details-title">Details</h2>
     <dl class="facts">
       <dt>Schedule</dt><dd>{% if pipeline.run_schedule %}<code>{{ pipeline.run_schedule }}</code>{% else %}Not scheduled{% endif %}</dd>
+      <dt>Next run</dt><dd>{{ next_run(pipeline, settings) }}</dd>
+      <dt>Recent runs</dt><dd>{{ recent_runs(pipeline.recent_runs, base_url) }}</dd>
       <dt>Refresh</dt><dd>{{ pipeline.refresh_type }}</dd>
       <dt>SLA</dt><dd>{% if pipeline.sla_in_hours %}{{ pipeline.sla_in_hours }} h{% else %}None{% endif %}</dd>
       <dt>Tags</dt><dd>{{ pipeline.tags|join(', ') or "None" }}</dd>
@@ -80,5 +102,5 @@
     </dl>
   </aside>
 </div>
-{% with pipeline_code=pipeline.pipeline_code, run_id=None, task_code=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% with pipeline_code=pipeline.pipeline_code, run_id=None, task_code=None, runs_url=runs_api %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
 {% endblock %}

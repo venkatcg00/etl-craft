@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
-{% from 'monitor/_status.html' import status %}
-{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css">{% endblock %}
+{% from 'monitor/_status.html' import status, recent_runs, next_run %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% with pipeline_code=None, run_id=None, task_code=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <span aria-current="page">Pipelines</span></nav>
 <h1>Pipelines</h1>
@@ -17,15 +18,25 @@
   <section class="listing" aria-labelledby="list-title">
     <h2 id="list-title">{% if selected_tags %}Tagged {{ selected_tags|join(' and ') }}{% else %}All pipelines{% endif %} · {{ pipelines|length }}</h2>
     {% if pipelines %}
-    <div class="scroll"><table class="list">
-      <thead><tr><th scope="col">Pipeline</th><th scope="col">Name</th><th scope="col">Tags</th><th scope="col">Schedule</th><th scope="col">Automatic runs</th><th scope="col">Paused tasks</th></tr></thead>
+    <div class="toolbar" role="toolbar" aria-label="Selected pipelines">
+      <span id="selected-count" role="status">No pipelines selected</span>
+      <button type="button" data-bulk="PAUSE" disabled data-effect="Stop admitting new automatic runs of each selected pipeline; running work finishes.">Pause selected</button>
+      <button type="button" data-bulk="RESUME" disabled data-scheduled="yes" data-effect="Resume automatic runs of each selected pipeline; each succeeds or fails on its own.">Resume selected</button>
+      <button type="button" data-csv="pipeline-table" data-csv-name="pipelines.csv">Export CSV</button>
+    </div>
+    <div class="scroll"><table class="list" id="pipeline-table">
+      <thead><tr><th scope="col"><input type="checkbox" id="select-all" aria-label="Select every listed pipeline"></th><th scope="col">Pipeline</th><th scope="col">Name</th><th scope="col">Tags</th><th scope="col">Schedule</th><th scope="col">Next run</th><th scope="col">Recent runs</th><th scope="col">SLA</th><th scope="col">Automatic runs</th><th scope="col">Paused tasks</th></tr></thead>
       <tbody>
       {% for p in pipelines %}
       <tr>
+        <td><input type="checkbox" data-select="{{ p.pipeline_code }}" aria-label="Select {{ p.pipeline_code }}"></td>
         <th scope="row"><a href="{{ pipeline_url(p.pipeline_code) }}">{{ p.pipeline_code }}</a></th>
         <td>{{ p.pipeline_name }}</td>
         <td>{% for tag in p.tags %}<a class="badge" href="?tag={{ tag|urlencode }}">{{ tag }}</a> {% else %}<span class="note">None</span>{% endfor %}</td>
         <td>{% if p.run_schedule %}<code>{{ p.run_schedule }}</code>{% else %}<span class="note">Not scheduled</span>{% endif %}</td>
+        <td>{{ next_run(p, settings) }}</td>
+        <td>{{ recent_runs(p.recent_runs, pipeline_url(p.pipeline_code)) }}</td>
+        <td>{% if p.recent_runs and p.recent_runs[0].sla_status %}{{ status(p.recent_runs[0].sla_status) }}{% elif p.sla_in_hours %}<span class="note">No run yet</span>{% else %}<span class="note">None</span>{% endif %}</td>
         <td>{% if p.paused %}<span class="status PAUSED"><span aria-hidden="true">⏸</span> Paused</span> <span class="note">by {{ p.paused.paused_by }}: {{ p.paused.reason }}</span>{% else %}Active{% endif %}</td>
         <td>{{ p.task_pauses|length or "None" }}</td>
       </tr>
@@ -37,4 +48,5 @@
     {% endif %}
   </section>
 </div>
+{% with pipeline_code=None, run_id=None, task_code=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
 {% endblock %}

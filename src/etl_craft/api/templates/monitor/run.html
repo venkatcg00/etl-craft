@@ -4,7 +4,8 @@
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <a href="/ui/projects/{{ project.project|urlencode }}/pipelines">Pipelines</a> › <a href="{{ pipeline_page }}">{{ run.pipeline_code }}</a> › {% if task_code %}<a href="{{ run_page }}">Run {{ run.pipeline_run_id }}</a> › <span aria-current="page">{{ task_code }}</span>{% else %}<span aria-current="page">Run {{ run.pipeline_run_id }}</span>{% endif %}</nav>
 <header class="object-header">
-  <h1>Run {{ run.pipeline_run_id }} <span class="note">{{ run.run_key }}</span></h1>
+  <h1>Run {{ run.pipeline_run_id }} <span class="note" id="run-key">{{ run.run_key }}</span></h1>
+  <button type="button" data-copy="run-key">Copy run key</button>
   <p>{{ status(run.status) }} · {{ run.trigger_kind }}{% if run.backfill %} backfill{% endif %} · run date {{ run.run_date or "none" }}{% if run.sla_status %} · SLA {{ run.sla_status }}{% endif %}</p>
   <dl class="facts inline">
     <dt>Started</dt><dd>{{ run.start_date|zoned(settings.timezone) }}{% if run.started_by %} by {{ run.started_by }}{% endif %}</dd>
@@ -14,8 +15,27 @@
 <p class="selection" role="status">Selected: {% if task_code %}task <strong>{{ task_code }}</strong> in run {{ run.pipeline_run_id }} · <a href="{{ run_page }}">Select the whole run</a>{% else %}the whole run {{ run.pipeline_run_id }}. Select a task in the graph or the list to act on that task only.{% endif %}</p>
 {{ control_buttons(capabilities, ("task " ~ task_code ~ " in run " ~ run.pipeline_run_id) if task_code else ("run " ~ run.pipeline_run_id)) }}
 <div class="monitor with-panel">
-  <section class="listing" aria-labelledby="graph-title">
-    <h2 id="graph-title">Graph</h2>
+  <section class="listing" aria-labelledby="view-title">
+    <h2 id="view-title" class="sr-only">Run views</h2>
+    <nav class="tabs" aria-label="Run views">
+      <a href="{{ run_page }}{% if task_code %}?task={{ task_code|urlencode }}{% endif %}" {% if shown == 'graph' %}aria-current="page"{% endif %}>Graph</a>
+      <a href="{{ run_page }}?view=timeline{% if task_code %}&task={{ task_code|urlencode }}{% endif %}" {% if shown == 'timeline' %}aria-current="page"{% endif %}>Timeline</a>
+    </nav>
+    {% if shown == 'timeline' %}
+    {% if timeline.lanes %}
+    <div class="graph scroll">
+      <svg class="timeline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{ timeline.label_width + timeline.width + 10 }} {{ timeline.height }}" width="{{ timeline.label_width + timeline.width + 10 }}" height="{{ timeline.height }}" role="group" aria-label="Attempts of run {{ run.pipeline_run_id }} from {{ timeline.start|zoned(settings.timezone) }} to {{ timeline.end|zoned(settings.timezone) }}">
+        {% for lane in timeline.lanes %}
+        <a href="{{ lane.href }}" class="lane{% if lane.selected %} selected{% endif %}" aria-label="{{ lane.task_code }}: {{ lane.bars|map(attribute='title')|join('; ') }}" {% if lane.selected %}aria-current="true"{% endif %}>
+          <text class="lane-label" x="4" y="{{ lane.y + 14 }}">{{ lane.task_code|truncate(22, True, '…') }}</text>
+          {% for bar in lane.bars %}<rect class="segment {{ bar.kind }}" x="{{ bar.x }}" y="{{ lane.y + 2 }}" width="{{ bar.width }}" height="18" rx="3"><title>{{ bar.title }}</title></rect>{% endfor %}
+        </a>
+        {% endfor %}
+      </svg>
+    </div>
+    <p class="legend"><span><span class="swatch queued" aria-hidden="true"></span> Waiting to start</span> <span><span class="swatch running" aria-hidden="true"></span> Running or ended (coloured by status)</span> <span>{{ timeline.start|zoned(settings.timezone) }} → {{ timeline.end|zoned(settings.timezone) }}</span></p>
+    {% else %}<p class="panel">No attempt has been queued in this run yet.</p>{% endif %}
+    {% else %}
     <div class="graph scroll">
       <svg class="dag run-graph" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{ layout.width }} {{ layout.height }}" width="{{ layout.width }}" height="{{ layout.height }}" role="group" aria-label="Tasks of run {{ run.pipeline_run_id }}; select a task">
         <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="arrowhead" d="M0,0 L10,5 L0,10 z"/></marker></defs>
@@ -31,13 +51,14 @@
         {% endfor %}
       </svg>
     </div>
+    {% endif %}
     <h2>Tasks</h2>
     <div class="scroll"><table class="list">
       <thead><tr><th scope="col">Task</th><th scope="col">Handler</th><th scope="col">Status</th><th scope="col">Runs when</th></tr></thead>
       <tbody>
       {% for step in steps %}
       <tr {% if step.task_code == task_code %}class="selected"{% endif %}>
-        <th scope="row"><a href="{{ run_page }}?task={{ step.task_code|urlencode }}" {% if step.task_code == task_code %}aria-current="true"{% endif %}>{{ step.task_code }}</a></th>
+        <th scope="row"><a href="{{ select(step.task_code) }}" {% if step.task_code == task_code %}aria-current="true"{% endif %}>{{ step.task_code }}</a></th>
         <td>{{ step.handler }}</td>
         <td>{{ status(step.status) }}</td>
         <td>{{ step.run_condition or "All upstream tasks succeed" }}</td>

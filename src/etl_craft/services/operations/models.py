@@ -126,8 +126,21 @@ class TaskRunView:
 
 
 @dataclass(frozen=True)
+class RecentRun:
+    """One of a pipeline's newest runs, as a status mark in lists."""
+
+    pipeline_run_id: int
+    status: RunStatus
+    sla_status: SlaStatus | None
+
+
+@dataclass(frozen=True)
 class PipelineView:
-    """An active pipeline definition and its open pause."""
+    """An active pipeline definition, its open pause, next scheduled run and newest runs.
+
+    ``next_run`` is the controller's next running tick after now, with calendars applied;
+    ``schedule_problem`` names why there is none for a scheduled pipeline that is not paused.
+    """
 
     SCHEMA: ClassVar[str] = "etl-craft/pipeline/1"
     pipeline_id: int
@@ -140,6 +153,9 @@ class PipelineView:
     tags: tuple[str, ...] = ()
     task_pauses: tuple[TaskPause, ...] = ()
     resumes: tuple[Resume, ...] = ()
+    next_run: datetime | None = None
+    schedule_problem: str | None = None
+    recent_runs: tuple[RecentRun, ...] = ()
 
 
 @dataclass(frozen=True)
