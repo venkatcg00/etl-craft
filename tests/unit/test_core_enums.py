@@ -10,6 +10,7 @@ pytestmark = pytest.mark.unit
 EXPECTED = {
     enums.Theme: {"system", "light", "dark"},
     enums.TimeDisplay: {"relative", "absolute"},
+    enums.SearchKind: {"PIPELINE", "TASK", "TABLE", "RUN"},
     enums.BusinessRuleLevel: {"ROW", "TABLE"},
     enums.ScriptKind: {"INGESTION", "UTILITY"},
     enums_access.EnvironmentType: {"DEV", "SIT", "UAT", "PROD", "SANDBOX", "CUSTOM"},

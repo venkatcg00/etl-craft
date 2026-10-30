@@ -19,7 +19,12 @@ from starlette.concurrency import run_in_threadpool
 
 from etl_craft.api import browser_sessions as browser
 from etl_craft.core.enums import ActionName
-from etl_craft.core.errors import EtlCraftError, UsageError
+from etl_craft.core.errors import (
+    EtlCraftError,
+    PermissionDeniedError,
+    ResourceNotFoundError,
+    UsageError,
+)
 from etl_craft.services.operations.actions import invoke
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.requests import (
@@ -104,11 +109,20 @@ async def _events(
         try:
             current = await run_in_threadpool(_fingerprint, ctx, request, scope)
         except (HTTPException, EtlCraftError) as error:
-            # The stream is the boundary: the page shows why live updates stopped.
+            # The stream is the boundary: the log keeps the error; the page gets a fixed reason
+            # and reloading shows the full message through the normal error page.
             logger.info("live updates ended for %s: %s", scope, error)
-            detail = error.detail if isinstance(error, HTTPException) else str(error)
-            yield f"event: ended\ndata: {' '.join(str(detail).split())}; reload the page\n\n"
+            yield f"event: ended\ndata: {_reason(error)}; reload the page\n\n"
             return
         event = "checked" if current == last else "changed"
         last = current
         yield f"event: {event}\ndata: {datetime.now(UTC).isoformat()}\n\n"
+
+
+def _reason(error: HTTPException | EtlCraftError) -> str:
+    """Name why the stream stopped without echoing the error's text."""
+    if isinstance(error, HTTPException) and error.status_code == 401:
+        return "your session ended"
+    if isinstance(error, (PermissionDeniedError, ResourceNotFoundError)):
+        return "your access changed or the object no longer exists"
+    return "the server could not read this page"
