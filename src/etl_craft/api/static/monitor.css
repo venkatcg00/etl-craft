@@ -111,7 +111,11 @@ table.list td.wrap, table.list td:has(.error-text) { white-space: normal; min-wi
 .dot { width: 20px; height: 20px; font-size: 11px; }
 .matrix a.cell { min-height: 24px; padding: 2px 0; }
 table.list td > a, table.list th > a { display: inline-block; min-height: 24px; line-height: 24px; }
-.bars .hit { fill: transparent; }
+.bars .track { fill: var(--node); stroke: var(--border); }
+.bars a { cursor: pointer; }
+.bars a:hover .track { fill: var(--accent-soft); stroke: var(--accent); }
+.bars a:focus-visible { outline: none; }
+.bars a:focus-visible .track { stroke: var(--accent); stroke-width: 3; }
 main p a, .selection a, .note a, .why-list a { text-decoration: underline; text-underline-offset: 2px; }
 .navigator a[aria-current=true] { color: var(--text); }
 #recent-list a, #console-history li, .command-list code { display: inline-block; min-height: 24px; line-height: 24px; }
