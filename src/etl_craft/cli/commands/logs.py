@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import codecs
 from collections.abc import Iterable
 
 from etl_craft.cli.commands.common import Command, call, request_from
@@ -23,16 +22,8 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 def _run(args: argparse.Namespace, out: Output) -> int:
     chunks = call(args, ActionName.LOGS, request_from(args, LogInput))
     assert isinstance(chunks, Iterable)
-    _write(out, chunks)
+    out.chunks(chunks)
     return ExitCode.SUCCESS
-
-
-def _write(out: Output, chunks: Iterable[bytes]) -> None:
-    """Decode across chunk boundaries, so a character split between two chunks stays whole."""
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    for chunk in chunks:
-        out.stdout.write(decoder.decode(chunk))
-    out.stdout.write(decoder.decode(b"", final=True))
 
 
 COMMAND = Command(

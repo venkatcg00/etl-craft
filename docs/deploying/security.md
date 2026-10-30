@@ -363,3 +363,19 @@ Whoever can write the SQLite database file can bypass every Engine DB protection
 file with permissions, and use PostgreSQL wherever people other than the operator have database
 access. Startup and doctor refuse missing package guard triggers; re-run `etl-craft setup` or
 restore the database before starting work.
+
+## Browser account policy
+
+See the [browser UI guide](../guides/browser-ui.md) for secure cookies, CSRF, fixed session
+expiry, forced password replacement and account settings. New `Auth` settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Lockout_after` | `5` | Consecutive failed local password sign-ins; `0` disables lockout. |
+| `Admin_contact` | `your administrator` | Contact text shown on sign-in and recovery. |
+| `Signin_notice` | absent | Optional sign-in notice, rendered as text. |
+
+`Auth.Session_hours` also bounds the browser cookie's fixed lifetime. SSO and service tokens
+are never locked by password failures. `etl-craft account unlock --name ACCOUNT` requires an
+admin. Password resets require the local user to choose a replacement at next sign-in;
+`etl-craft account change-password` prompts for current and new passwords and revokes sessions.

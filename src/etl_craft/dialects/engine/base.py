@@ -208,6 +208,10 @@ class EngineDialect(ABC):
                 "{{pipeline_metadata_capture}}",
                 self.query("metadata_capture").replace(":pipeline_id", "p.PIPELINE_ID"),
             )
+        for fragment in ("permission_eligible", "permission_projects", "permission_effective"):
+            marker = "{{" + fragment + "}}"
+            if marker in sql:
+                sql = sql.replace(marker, self.query(fragment))
         return sql
 
     def admitted_query(self, sql: str, definition: Definition, *, name: str = "") -> str:

@@ -111,6 +111,29 @@ jobs:
         if: always() && matrix.profile == 'coverage-3.11-ubuntu-latest'
         run: make services-down
 
+  browser:
+    name: browser sessions and accessibility
+    needs: [prepare, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: ${{ inputs.cache != 'cold' }}
+      - run: uv sync --locked --all-groups --python 3.11
+      - run: uv run playwright install --with-deps chromium firefox
+      - name: Execute browser tests and record complete collection
+        env:
+          ETL_CRAFT_REQUIRE_SERVICES: "1"
+        run: uv run python scripts/ci_shards.py run browser 0 1 "$RUNNER_TEMP/result"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: ci-browser-0
+          path: ${{ runner.temp }}/result
+          if-no-files-found: error
+
   service:
     name: local services (${{ matrix.profile }}, shard ${{ matrix.index }})
     needs: prepare
@@ -254,7 +277,7 @@ jobs:
   complete:
     name: every test and matrix accounted for
     if: always()
-    needs: [prepare, static, test, service, e2e, package]
+    needs: [prepare, static, test, service, e2e, package, browser]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

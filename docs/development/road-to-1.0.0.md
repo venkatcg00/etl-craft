@@ -176,6 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
+| S7.A Web UI pages | In progress, slice 1 of 6 | #277 | Shell, browser sessions, personal settings, About and session-hosted catalog |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
@@ -913,6 +914,38 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.A slice 1 (owner-approved slice plan, 2026-10-30): one PR for shell and sessions
+  (S7.A.7), profile, settings, screen states, About and API-hosted catalog. Then (2)
+  navigation/Workflow Monitor, lists, search, SSE, bulk actions and exports; (3) logs and
+  downloads; (4) Pipeline Insights; (5) command center; (6) coverage/admin, accounts,
+  announcements, agents/pools, backfills, interventions, held/paused work and system health.
+  S7.M uploads follow slice 6. S7.A.6 usability and environment badges apply throughout.
+  Existing opaque sessions, Session_hours, OIDC/login actions, catalog generation and the
+  unchanged publish-docs server are reused; Jinja2 was already in the ui extra. Browser
+  sessions use one fixed-lifetime access token, with no browser refresh credential.
+  Owner-approved PROJECT_HEALTH, ABOUT and CATALOG_PAGE reads share CLI/API/page operations.
+  About links to the package release line (X.Y), matching the existing docs publisher.
+  Health failures/SLA misses use last 24 h (not calendar today); counts have no links until
+  slice 2 builds their filtered lists. Static catalogs require whole-project view, including
+  pipeline restrictions; filtering for pipeline-limited accounts remains later work.
+  Published and offline catalogs retain the shared renderer; the console wraps it and shares
+  CSS, theme controls and the four-path plane/arrow-layer mark rather than forking components.
+  The mark uses the owner-selected paths with the later requested larger gap below the plane; original angles are retained and geometry stays identical at 16 px. Shared favicon assets
+  live beside the partial in core/static. Pins/filters and live-update banners belong to their
+  later list/SSE slices; account administration pages and action-request links belong to
+  slice 6. Migration 0075 follows S7.T's 0074 on both Engine DBs, preserving its calendars.
+  Owner-approved exception to AGENTS.md → Migrations: only local migrate may
+  verify an admin password against the fixed original account columns; this lasting upgrade
+  sign-in never reads later account columns, issues no session and skips lockout counters.
+  Normal login and UI startup refuse pending Engine migrations with applied/required versions
+  and the admin-migrate remedy; no column-existence fallback remains in normal authentication.
+  The old test permitting the last admin's disable now asserts refusal; the values API role
+  fixture creates a recovery admin before demotion. Recovery still covers
+  legacy installations whose admins are already unavailable.
+  Acceptance availability: migration, role, page, browser, upgrade and security checks are
+  recorded in #277; cloud SQL is unchanged. Remaining full-page capabilities follow the slices.
+
 
 - S7.AH follows the owner's one-PR preference, including the shared notifier rule. Project
   CAN_MANAGE and the intervention reason policy govern the generated rename action/route.

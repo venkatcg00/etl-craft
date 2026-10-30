@@ -31,6 +31,8 @@ def test_account_proof_selects_user_or_service_kind(engine_db):
         role=ApiRole.ADMIN,
         password="correct horse battery",
     )
+    with db.engine.begin() as conn:
+        migrations.mark_packaged_migrations_applied(conn)
     person = act(ctx, ActionName.LOGIN, name="person", password="correct horse battery")
     service = act(ctx, ActionName.TOKEN_CREATE, name="scheduler", role=ApiRole.ADMIN)
     for credential, kind in (

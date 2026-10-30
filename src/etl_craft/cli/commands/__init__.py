@@ -6,6 +6,7 @@ from etl_craft.cli.commands import (
     admin_metadata,
     agent,
     audit,
+    browser_reads,
     bundle,
     capabilities,
     clone,
@@ -29,6 +30,7 @@ from etl_craft.cli.commands import (
     migrate,
     pause,
     pipelines,
+    project_health,
     publish_docs,
     purge,
     reconcile,
@@ -50,6 +52,8 @@ CONTROL_VERBS = (ControlAction.STOP, ControlAction.ABORT, ControlAction.HOLD, Co
 
 COMMANDS: tuple[Command, ...] = (
     *login.COMMANDS,
+    browser_reads.ABOUT,
+    browser_reads.CATALOG,
     account.COMMAND,
     group.COMMAND,
     access.COMMAND,
@@ -73,6 +77,7 @@ COMMANDS: tuple[Command, ...] = (
     pause.command(ControlAction.PAUSE),
     pause.command(ControlAction.RESUME),
     pipelines.COMMAND,
+    project_health.COMMAND,
     graph.COMMAND,
     steps.COMMAND,
     status.COMMAND,

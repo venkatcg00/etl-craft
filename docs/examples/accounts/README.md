@@ -64,3 +64,18 @@ to correct business values, inspect their writers and explicitly unlock them. An
 integration may write through the same endpoint but cannot create or release human locks.
 Operator/developer accounts cannot edit or unlock business values. Starting an ETL pipeline as
 an admin still uses the engine writer and creates no human locks.
+
+## Browser and personal preferences
+
+Open `/ui` through HTTPS. The profile offers settings and password replacement.
+`etl-craft account unlock --name alice` unlocks a local user; admin password resets are
+temporary until `etl-craft account change-password` replaces them.
+
+```sh
+etl-craft account settings --theme dark --timezone UTC --page-size 25
+etl-craft project-health --json
+etl-craft about --json
+etl-craft catalog page --path index.html --output catalog-page.html
+```
+
+See the [browser UI guide](../../guides/browser-ui.md).

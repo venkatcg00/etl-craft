@@ -8,6 +8,13 @@ All notable changes are recorded here. The format follows
 
 ### Security
 
+- Pending Engine migrations now refuse normal login and UI startup with applied/required
+  migration identities. Only local `migrate` may verify an admin password against the original
+  account columns for that upgrade; it issues no session and audits refused proofs.
+- Browser sessions use host-only HTTP-only Secure SameSite cookies, CSRF checks, CSP, fixed
+  Auth.Session_hours expiry and cross-tab sign-out. Local account lockout, admin unlock,
+  mandatory replacement of temporary passwords, and last-admin protection share the CLI/API policy.
+
 - Agent tokens are pool-bound; tasks receive only attempt-scoped credentials and an explicit
   environment allowlist. Service/agent tokens default to 365 days and list hourly last use.
 - SSO refreshes retain the original Session_hours limit. Sign-in verification runs outside the
@@ -29,6 +36,18 @@ All notable changes are recorded here. The format follows
   lookups by code should filter on `ETL_CRAFT_PROJECT`, as the updated examples do.
 
 ### Changed
+
+- S7.A slice 1 adds the Jinja browser shell at `/ui`, profile, settings, About and authenticated
+  project catalog, with shaded light/dark themes and a shared data-flow mark. `publish-docs`
+  remains the interim one-project server.
+- New reads: `project-health --json`, `about --json`, and `catalog page --path PATH
+  [--output PATH]`, also exposed through the API. Health counts respect pipeline grants and use
+  a rolling last 24 h window for failures and SLA misses. Catalog reads stream existing output
+  only to whole-project viewers and refuse encoded paths, traversal and symlinks.
+- `account unlock`, `account change-password` and `account settings` share their actions with
+  the browser. Auth.Lockout_after defaults to 5 (0 disables); Auth.Admin_contact and optional
+  Auth.Signin_notice configure the sign-in page. Migration 0075 adds CFG_ACCOUNTS.FAILED_SIGNINS,
+  LOCKED_DATE, MUST_CHANGE_PASSWORD and validated UI_SETTINGS on both Engine DBs; run migrate.
 
 - `etl-craft rename --project P --pipeline OLD [--task OLD] --to NEW` and its API action retain
   execution identity, offsets, consumed events and direct grants. Project CAN_MANAGE is required;

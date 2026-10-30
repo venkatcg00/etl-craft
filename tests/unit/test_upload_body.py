@@ -50,5 +50,5 @@ def test_empty_and_bounded_json_bodies_remain_json_objects(content, expected):
     async def receive():
         return {"type": "http.request", "body": content, "more_body": False}
 
-    incoming = Request({"type": "http", "path": "/upload"}, receive)
+    incoming = Request({"type": "http", "path": "/upload", "headers": []}, receive)
     assert asyncio.run(read_body(incoming, 9)) == expected

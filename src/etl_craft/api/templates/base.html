@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-theme="{{ settings.theme }}" data-theme-server="true">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false}'>
+<meta name="csrf-token" content="{{ csrf }}"><title>{{ title }}</title>
+<link rel="icon" href="/static/shared/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/shared/catalog.css"><link rel="stylesheet" href="/static/ui/shell.css">
+<script src="/static/ui/htmx.min.js" defer></script><script src="/static/shared/theme.js" defer></script>
+<script type="module" src="/static/ui/shell.js"></script>{% block scripts %}{% endblock %}</head>
+<body hx-indicator="#loading" data-view="{{ view }}" {% if identity and identity.session_expires_at %}data-expires="{{ identity.session_expires_at.isoformat() }}"{% endif %}>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar"><a class="brand product-lockup" href="/ui" aria-label="etl-craft home">{% include 'shared/mark.html' %}<span>etl-craft</span></a>
+{% if identity %}<form action="/ui" method="get" class="project-switch"><label for="project-switch">Project</label><select id="project-switch" name="project"><option value="">All visible projects</option>{% for p in projects %}<option value="{{ p.project }}" {% if project and p.project == project.project %}selected{% endif %}>{{ p.project_name }} ({{ p.project }})</option>{% endfor %}</select><button type="submit">Open</button></form>{% endif %}
+<span class="environment {% if project and project.environment_type == 'PROD' %}production{% endif %}">{% if project %}{% if project.environment_type == 'PROD' %}PRODUCTION{% else %}{{ project.environment_type }}{% endif %}{% if project.environment_name %} · {{ project.environment_name }}{% endif %} · {{ project.governance }}{% else %}No project selected{% endif %}</span>
+{% include 'shared/theme_button.html' %}
+{% if identity %}<details class="profile"><summary>{{ identity.name }} · Profile</summary><div>
+<strong>{{ identity.name }}</strong><p>Account {{ identity.account_id }} · {{ identity.role }}</p><p>Project role: {% if project %}{{ identity.project_permission or 'No access' }}{% else %}No project selected{% endif %}</p><p>Groups: {{ identity.groups|join(', ') or 'None' }}</p>
+<p>Theme: {{ settings.theme }} · Timezone: {{ settings.timezone }}<br>Default project: {{ settings.default_project or 'None' }}</p>
+<a href="/ui/profile/settings">Personal settings</a>{% if identity.local_password %}<a href="/ui/profile/password">Change password</a>{% endif %}
+<label for="cli-login">CLI sign-in for this server</label><input id="cli-login" readonly value="{{ cli_login }}"><button type="button" data-copy="cli-login">Copy CLI sign-in</button>
+<button type="button" data-shortcuts>Keyboard shortcuts</button><a href="/ui/about">Help and About</a>
+<form method="post" action="/api/v1/login/revoke" hx-post="/api/v1/login/revoke" hx-ext="json-enc" hx-target="#result"><input type="hidden" name="_csrf" value="{{ csrf }}"><button type="submit">Sign out</button></form></div></details>{% endif %}</header>
+<div id="session-warning" class="notice" role="status" hidden>Session expires soon. <a id="signin-again" href="/signin">Sign in again and keep this page</a></div>
+<div class="layout">{% if identity %}<nav class="sidebar" aria-label="Main"><a href="/ui" {% if view == 'home' %}aria-current="page"{% endif %}>Home</a>{% if project %}<a href="/ui/projects/{{ project.project|urlencode }}/catalog" {% if view == 'catalog' %}aria-current="page"{% endif %}>Catalog</a>{% endif %}<a href="/ui/profile/settings" {% if view == 'settings' %}aria-current="page"{% endif %}>Personal settings</a><a href="/ui/about" {% if view == 'about' %}aria-current="page"{% endif %}>About</a></nav>{% endif %}
+<main id="main" tabindex="-1"><div id="result" aria-live="polite"></div><div id="loading" class="htmx-indicator" role="status">Loading…</div>{% block content %}{% endblock %}</main></div>
+<dialog id="shortcuts" aria-labelledby="shortcuts-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><p><kbd>?</kbd> opens this list. <kbd>Escape</kbd> closes dialogs and the profile menu.</p><p>Use Tab and Shift+Tab to move; Enter or Space activates a control.</p><form method="dialog"><button>Close shortcuts</button></form></dialog>
+<footer>Minimum width: 320 CSS px. Desktop layout: 960 px or wider. All times name their timezone.</footer></body></html>

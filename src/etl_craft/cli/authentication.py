@@ -7,15 +7,22 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+from etl_craft.cli.prompts import interactive, password
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
+from etl_craft.core.actor import SYSTEM_ACTOR, ActorKind, acting_as
 from etl_craft.core.errors import ConfigurationError, UsageError
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine.connection import check_reachable, engine_db
 from etl_craft.services.credentials import database_key, read_session
 from etl_craft.services.operations.accounts import PROVISIONING_COMMANDS, local_provisioning
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.schema_status import require_current_schema
 from etl_craft.services.operations.tokens import TokenView, authenticate
+from etl_craft.services.operations.upgrade_signin import (
+    UpgradeAdmin,
+    pending_engine_upgrade,
+    sign_in_for_upgrade,
+)
 
 
 @dataclass(frozen=True)
@@ -23,7 +30,7 @@ class CommandIdentity:
     """The exact configuration and verified identity used throughout one dispatch."""
 
     config: ConnectorConfig
-    identity: TokenView | None
+    identity: TokenView | UpgradeAdmin | None
     provisioning: bool = False
     """Local Engine DB setup before any admin exists, as ``local_provisioning`` decides."""
 
@@ -52,7 +59,9 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
                 "run `etl-craft setup` locally before signing in"
             )
         with acting_as(SYSTEM_ACTOR):
-            identity = None
+            identity: TokenView | UpgradeAdmin | None = None
+            if args.command in {"login", "ui", "controller"}:
+                require_current_schema(OperationContext(engine, config, SYSTEM_ACTOR))
             provisioning = local_provisioning(engine, args.command)
             if (
                 args.command == "setup"
@@ -69,6 +78,12 @@ def access_context(args: argparse.Namespace) -> Iterator[None]:
                     token = read_session(database_key(engine, config.engine.schema))
                 ctx = OperationContext(engine, config, SYSTEM_ACTOR)
                 identity = authenticate(ctx, token) if token is not None else None
+                if args.command == "migrate" and (
+                    identity is None
+                    or (identity.actor.kind == ActorKind.USER and pending_engine_upgrade(ctx))
+                ):
+                    interactive()
+                    identity = sign_in_for_upgrade(ctx, input("Admin account name: "), password())
                 if identity is None:
                     raise ConfigurationError(
                         f"no signed-in account for {database_key(engine, config.engine.schema)}; "

@@ -11,7 +11,9 @@ from etl_craft.core.errors import ConfigurationError
 
 
 @contextmanager
-def parent_directory(root: Path, relative: str, *, create: bool = False) -> Iterator[int]:
+def parent_directory(
+    root: Path, relative: str, *, create: bool = False, root_descriptor: int | None = None
+) -> Iterator[int]:
     """Hold each parent descriptor so concurrent path changes cannot redirect file operations."""
     parts = PurePosixPath(relative).parts
     if not parts or PurePosixPath(relative).is_absolute() or ".." in parts:
@@ -22,7 +24,11 @@ def parent_directory(root: Path, relative: str, *, create: bool = False) -> Iter
     with ExitStack() as stack:
         if create:
             root.mkdir(parents=True, exist_ok=True)
-        current = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        current = (
+            os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            if root_descriptor is None
+            else os.dup(root_descriptor)
+        )
         stack.callback(os.close, current)
         for part in parts[:-1]:
             if create:
@@ -34,10 +40,12 @@ def parent_directory(root: Path, relative: str, *, create: bool = False) -> Iter
 
 
 @contextmanager
-def open_regular(root: Path, relative: str) -> Iterator[BinaryIO]:
+def open_regular(
+    root: Path, relative: str, *, root_descriptor: int | None = None
+) -> Iterator[BinaryIO]:
     """Reject links and special files before yielding a seekable byte stream."""
     try:
-        with parent_directory(root, relative) as parent:
+        with parent_directory(root, relative, root_descriptor=root_descriptor) as parent:
             descriptor = os.open(
                 PurePosixPath(relative).name,
                 os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,

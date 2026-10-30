@@ -114,7 +114,6 @@ def seed_project_isolation(db):
 
     from etl_craft.core.enums import TokenKind
     from etl_craft.core.text import sha256_hex
-    from etl_craft.engine.queries import statement
 
     expected = {
         "legacy-member": (ApiRole.VIEWER, ("CAN_VIEW", "CAN_RUN", None, "CAN_RUN", "CAN_VIEW")),
@@ -167,7 +166,10 @@ def seed_project_isolation(db):
         )
         for name in expected:
             token = "preservation-" + name
-            account = conn.execute(statement(conn, "account_find"), {"name": name}).one()
+            account = conn.execute(
+                text("SELECT ACCOUNT_ID AS account_id FROM CFG_ACCOUNTS WHERE ACCOUNT_NAME=:name"),
+                {"name": name},
+            ).one()
             conn.execute(
                 text(
                     "INSERT INTO CFG_API_TOKENS (NAME,TOKEN_SHA256,ACCOUNT_ID,CREATED_"

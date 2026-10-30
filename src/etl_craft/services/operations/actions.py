@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from sqlalchemy.engine import Connection
 
@@ -38,6 +38,7 @@ from etl_craft.engine.schema import InitResult
 from etl_craft.services.catalog.gaps import GapSnapshot
 from etl_craft.services.config_files import ConfigExport, ConfigSync
 from etl_craft.services.operations import (
+    about,
     access,
     accounts,
     admin_metadata,
@@ -50,6 +51,7 @@ from etl_craft.services.operations import (
     bundles,
     capabilities,
     catalog,
+    catalog_pages,
     config_files,
     controls,
     diagnostics,
@@ -59,8 +61,10 @@ from etl_craft.services.operations import (
     items,
     maintenance,
     models,
+    personal,
     pipeline_refresh,
     processes,
+    project_health,
     renames,
     retention,
     runs,
@@ -70,6 +74,7 @@ from etl_craft.services.operations import (
     triggers,
     values,
 )
+from etl_craft.services.operations.action_types import Action as Action
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.permissions import (
     pipeline_access,
@@ -93,7 +98,6 @@ from etl_craft.services.operations.requests import (
     NoInput,
     PipelineInput,
     ReconcileInput,
-    Request,
     RunFilter,
     RunId,
     RunRequest,
@@ -119,38 +123,6 @@ MIGRATION_ON_HOST = (
     "there, by CI or an admin"
 )
 STARTED_ON_HOST = "start it on the host that serves it"
-
-
-@dataclass(frozen=True)
-class Action:
-    """One action and every rule an interface needs about it.
-
-    ``call`` performs the operation or validates a process startup. It is ``None`` when an
-    interface owns the complete process inside ``admitted``. ``result`` is the document type,
-    or ``None`` for no content; ``streams`` marks
-    an action that returns bytes. ``escalate`` raises the role from what the request would
-    change, as ``migrate`` does for packaged migrations. ``remedy`` says how to run a
-    ``CONTROLLER_HOST`` action, for an interface that refuses it elsewhere.
-    """
-
-    name: ActionName
-    call: Callable[..., object] | None
-    request: type[Request]
-    result: object
-    role: ApiRole | None
-    method: HttpMethod | None = None
-    path: str | None = None
-    audit: Audit = Audit.NONE
-    placement: Placement = Placement.ANYWHERE
-    remedy: str | None = None
-    provisioning: bool = False
-    streams: bool = False
-    scope: ActionScope = ActionScope.DEPLOYMENT
-    escalate: Callable[[OperationContext, object], ApiRole] | None = None
-
-    def required_role(self, ctx: OperationContext, request: object) -> ApiRole | None:
-        """Return the role this request needs."""
-        return self.role if self.escalate is None else self.escalate(ctx, request)
 
 
 def action_path(action: Action) -> str:
@@ -215,6 +187,17 @@ _ROWS = (
            f"{API}/login/revoke", BY_ACTION),
     Action(ActionName.WHOAMI, sessions.whoami, NoInput, sessions.Identity, VIEWER, GET,
            f"{API}/whoami"),
+    Action(ActionName.ABOUT, about.read_about, NoInput, about.About, VIEWER, GET, f"{API}/about"),
+    Action(ActionName.CATALOG_PAGE, catalog_pages.read_catalog, catalog_pages.CatalogInput,
+           None, VIEWER, GET, f"{API}/catalog/page", scope=ActionScope.PROJECT, streams=True),
+    Action(ActionName.PROJECT_HEALTH, project_health.read_health, project_health.HealthInput,
+           project_health.ProjectHealth, VIEWER, GET, f"{API}/project-health"),
+    Action(ActionName.ACCOUNT_SETTINGS, personal.save_settings, personal.SettingsPatch,
+           personal.Settings, VIEWER, POST, f"{API}/account/settings", REQUEST),
+    Action(ActionName.PASSWORD_CHANGE, personal.change_password, personal.ChangePassword,
+           personal.PasswordChanged, VIEWER, POST, f"{API}/account/password", REQUEST),
+    Action(ActionName.ACCOUNT_UNLOCK, accounts.unlock, accounts.AccountName,
+           accounts.Accounts, ADMIN, POST, f"{API}/accounts/unlock", REQUEST),
     Action(ActionName.HEALTH, lambda ctx, request: models.Health(), NoInput, models.Health, VIEWER,
            GET, f"{API}/health"),
     Action(ActionName.RENAME, renames.rename, renames.RenameInput, renames.RenameResult,
@@ -472,6 +455,7 @@ def admitted(ctx: OperationContext, name: ActionName, request: object) -> Iterat
 def _authorize(
     ctx: OperationContext, action: Action, request: object, required: ApiRole | None
 ) -> None:
+    personal.require_password_change(ctx, action.name)
     if ApiRole.AGENT in {ctx.role, required}:
         _require_role(ctx, action, required)
         return

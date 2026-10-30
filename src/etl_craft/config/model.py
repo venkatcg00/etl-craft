@@ -224,6 +224,9 @@ class AuthConfig:
     oidc_client_id: str | None = None
     refresh_days: int = 30
     oidc_groups_claim: str | None = None
+    lockout_after: int = 5
+    admin_contact: str = "your administrator"
+    signin_notice: str | None = None
 
 
 @dataclass(frozen=True)

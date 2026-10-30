@@ -40,6 +40,12 @@ INTEGER_NAMES = frozenset(
 )
 MOMENT = datetime(2026, 1, 1, tzinfo=UTC)
 VALUES = {
+    "window_start": MOMENT,
+    "locked": MOMENT,
+    "window_end": MOMENT,
+    "after_project": "",
+    "project_limit": 25,
+    "settings": "{}",
     "lock_key": 8241012,
     "batch_id": "batch",
     "body": "{}",
@@ -291,6 +297,18 @@ def full_scans(plan, partial_indexes=frozenset(), limited=False):
 
 REGISTRY = "Reads the agent registry: one row per agent token, bounded by the tokens issued."
 FULL_READS = {
+    (
+        "permission_effective",
+        "cfg_pipelines",
+    ): "Resolve applicable grants for every pipeline in the bounded selected project page.",
+    (
+        "permission_invalid",
+        "cfg_pipelines",
+    ): "Validate tag metadata before deciding visibility for the selected projects.",
+    (
+        "project_health",
+        "cfg_pipelines",
+    ): "Count visible pipelines in a bounded project page; run reads use status/end-date indexes.",
     (
         "refresh_direct_projects",
         "cfg_pipelines",

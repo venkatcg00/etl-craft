@@ -26,6 +26,7 @@ SERVICE_MARKERS = {
 }
 SHARDS = {
     "coverage": 1,
+    "browser": 1,
     "measured-coverage": 3,
     "engine": 5,
     "warehouse-local": 1,
@@ -48,6 +49,7 @@ def combinations() -> dict[str, list[dict[str, str]]]:
     ]
     return {
         "coverage": coverage,
+        "browser": [{"profile": "browser"}],
         "macos": [
             {"profile": "coverage-3.13-macos-latest", "python": "3.13", "os": "macos-latest"}
         ],
@@ -86,6 +88,8 @@ PRIMARY = "coverage-3.11-ubuntu-latest"
 
 def selection(profile: str) -> str:
     """Select complete ordinary suites once, plus explicit platform compatibility checks."""
+    if profile == "browser":
+        return "browser"
     if profile == PRIMARY:
         return f"(unit or engine_sqlite or docs) and not ({WAREHOUSE_TESTS})"
     if profile.startswith("coverage-"):
@@ -98,6 +102,8 @@ def selection(profile: str) -> str:
 def assigned_profile(node: str, markers: list[str]) -> str:
     """Give each collected ordinary case one authoritative owner; cloud stays release-only."""
     present = set(markers)
+    if "browser" in present:
+        return "browser"
     if present & {"cloud_databricks", "cloud_snowflake"}:
         return "release"
     if "package" in present:
@@ -428,7 +434,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         (args.output / "validation.json").write_text(json.dumps(report), encoding="utf-8")
         return 0
     jobs = json.loads(os.environ.get("ETL_CRAFT_CI_JOBS", "{}"))
-    required_jobs = {"prepare", "static", "test", "service", "e2e", "package"}
+    required_jobs = {"prepare", "static", "test", "service", "e2e", "package", "browser"}
     if set(jobs) != required_jobs or any(job.get("result") != "success" for job in jobs.values()):
         print("CI jobs are missing, failed, cancelled or skipped", file=sys.stderr)
         return 1

@@ -209,7 +209,7 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
             report["wheel_sha256"] = ci.sha256_of(wheel)
             report["marker"] = ci.selection(profile)
         elif not profile.startswith("coverage-"):
-            report["marker"] = ci.SERVICE_MARKERS[profile]
+            report["marker"] = ci.selection(profile)
         folder = tmp_path / f"{profile}-{row['index']}"
         folder.mkdir()
         path = folder / "results.json"
@@ -238,6 +238,7 @@ def test_complete_matrix_verifies_and_a_missing_shard_or_wrong_wheel_fails(tmp_p
                 else [
                     {
                         "engine": "engine_postgres",
+                        "browser": "browser",
                         "warehouse-local": "harness",
                         "warehouse-iceberg": "warehouse_trino_iceberg",
                     }.get(profile, "e2e_pip")
@@ -422,8 +423,9 @@ def test_only_one_linux_python_combination_measures_project_coverage(tmp_path, m
 
 def test_pull_request_matrix_fits_runner_concurrency_limits():
     plan = ci.matrix()
-    # Package jobs wait for static, so static and package cannot overlap.
-    peak = sum(len(rows) for rows in plan.values()) + max(len(ci.VALIDATIONS), 1)
+    # Browser follows package, which follows static: these phases cannot overlap.
+    ordinary = sum(len(rows) for family, rows in plan.items() if family != "browser")
+    peak = ordinary + max(len(ci.VALIDATIONS), len(plan["browser"]), 1)
     assert peak <= 20
     mac = sum(row.get("os") == "macos-latest" for rows in plan.values() for row in rows)
     assert mac + 1 <= 5

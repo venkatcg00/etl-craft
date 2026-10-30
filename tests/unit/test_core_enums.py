@@ -8,6 +8,8 @@ from etl_craft.core.enums import RunStatus
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
+    enums.Theme: {"system", "light", "dark"},
+    enums.TimeDisplay: {"relative", "absolute"},
     enums.BusinessRuleLevel: {"ROW", "TABLE"},
     enums.ScriptKind: {"INGESTION", "UTILITY"},
     enums_access.EnvironmentType: {"DEV", "SIT", "UAT", "PROD", "SANDBOX", "CUSTOM"},

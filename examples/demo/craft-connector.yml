@@ -42,6 +42,8 @@ Docs_site:
     Schedule: "0 2 * * *"              # value — the controller rebuilds the catalog nightly
 
 Auth:
+  Lockout_after: 5
+  Admin_contact: "demo administrator"
   Session_hours: 12                     # value — run setup and login before operating the demo
 
 # SSO deployments may set Auth.Oidc_groups_claim: groups beside Oidc_issuer and Oidc_client_id.

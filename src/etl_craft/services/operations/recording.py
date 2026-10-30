@@ -17,16 +17,23 @@ from etl_craft.services.operations.context import OperationContext
 
 @contextmanager
 def recorded(
-    ctx: OperationContext, name: ActionName, arguments: Mapping[str, Any]
+    ctx: OperationContext,
+    name: ActionName,
+    arguments: Mapping[str, Any],
+    *,
+    on_completion: bool = False,
 ) -> Iterator[ActionRequest]:
-    """Record the request once, before the action changes anything, whatever its outcome."""
+    """Record once under the actor, immediately or in the action outcome transaction."""
     with (
         acting_as(ctx.actor),
         command_request(
             name, _http_arguments(ctx, arguments), project_id=ctx.project_id
         ) as request,
     ):
-        register_engine(ctx.engine)
+        if on_completion:
+            request.engine = ctx.engine
+        else:
+            register_engine(ctx.engine)
         yield request
 
 

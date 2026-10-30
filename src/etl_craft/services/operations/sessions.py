@@ -1,22 +1,38 @@
 """User sign-in, renewal and sign-out, whatever starts them: the CLI, the API or the UI."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 from sqlalchemy.engine import Row
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import AccountKind, ActionName, AuthMode, TokenKind, Transport, YesNo
+from etl_craft.core.enums import (
+    AccountKind,
+    ActionName,
+    ActionOutcome,
+    ApiRole,
+    AuthMode,
+    TokenKind,
+    Transport,
+    YesNo,
+)
+from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import EtlCraftError, UsageError
 from etl_craft.core.text import sha256_hex
+from etl_craft.core.time import as_utc
 from etl_craft.engine import locks
+from etl_craft.engine.audit import current_request
 from etl_craft.engine.queries import statement
+from etl_craft.engine.repository.accounts import find_account, unlocked_admins
 from etl_craft.engine.repository.group_claims import token_groups
 from etl_craft.services import oidc
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.permissions import project_permission
+from etl_craft.services.operations.personal import Settings, settings_from
 from etl_craft.services.operations.recording import recorded
 from etl_craft.services.operations.requests import NoInput, Request
+from etl_craft.services.operations.schema_status import require_current_schema
 from etl_craft.services.operations.tokens import TokenGrant, TokenView, find_token, issue_token
 from etl_craft.services.passwords import DECOY, verify_password
 
@@ -56,6 +72,7 @@ class Session:
     metadata: TokenView
     refresh_token: str | None = None
     refresh_expires_at: datetime | None = None
+    must_change_password: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,6 +81,7 @@ class SignInMethods:
 
     SCHEMA: ClassVar[str] = "etl-craft/sign-in-methods/1"
     sso: bool
+    local: bool = True
 
 
 @dataclass(frozen=True)
@@ -73,6 +91,15 @@ class Identity:
     SCHEMA: ClassVar[str] = "etl-craft/identity/1"
     name: str
     role: str
+    account_id: int | None = None
+    account_kind: AccountKind | None = None
+    local_password: bool = False
+    must_change_password: bool = False
+    groups: tuple[str, ...] = ()
+    project_permission: Permission | None = None
+    settings: Settings = field(default_factory=Settings)
+    last_signin: datetime | None = None
+    session_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -115,72 +142,152 @@ def _sign_in(
     that lasts ``Auth.Refresh_days``. A local sign-in is one access token that lasts
     ``Auth.Session_hours``.
     """
-    refreshable = ctx.transport == Transport.HTTP
+    require_current_schema(ctx)
+    refreshable = ctx.transport == Transport.HTTP and not ctx.browser_session
     with ctx.engine.connect() as conn:
-        row = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
+        row = find_account(conn, name)
     proven = _proven(row, password, None if claims is None else claims.subject)
     with locks.ACCOUNTS.hold(ctx.engine, wait_seconds=30):
         with ctx.engine.connect() as conn:
-            current = conn.execute(statement(conn, "account_find"), {"name": name}).one_or_none()
-        proven = proven and row is not None and current is not None and row == current
-        if row is None or not proven:
-            with recorded(ctx, ActionName.LOGIN, {"name": name}):
-                raise UsageError(
-                    f"account {name!r}: sign-in refused; expected an active registered USER "
-                    "with matching credentials; ask an administrator to check the account"
+            current = find_account(conn, name)
+        unchanged = (
+            row is not None
+            and current is not None
+            and all(
+                getattr(row, field) == getattr(current, field)
+                for field in (
+                    "account_id",
+                    "kind",
+                    "role",
+                    "password_hash",
+                    "oidc_subject",
+                    "active_flag",
                 )
+            )
+        )
+        if not proven or not unchanged:
+            if unchanged and claims is None:
+                _failed_password(ctx, current)
+            _refuse(ctx, name, "sign-in refused; account name or password is incorrect.")
+        assert current is not None
+        if claims is None and current.locked_date is not None:
+            _refuse(ctx, name, "Account locked, contact your administrator")
         caller = replace(ctx, actor=Actor(name, ActorKind.USER))
-        now = datetime.now(UTC)
-        with ctx.engine.connect() as conn:
-            active_groups = {
-                r.name: r.group_id
-                for r in conn.execute(statement(conn, "group_list"))
-                if r.active_flag == YesNo.YES
-            }
-        named = () if claims is None else claims.groups
-        matched = tuple(sorted({active_groups[n] for n in named if n in active_groups}))
-        unmatched = tuple(sorted({n for n in named if n not in active_groups}))
-        with (
-            recorded(caller, ActionName.LOGIN, {"name": name, "unmatched_groups": unmatched}),
-            ctx.engine.begin() as conn,
+        matched, unmatched = _sign_in_groups(ctx, claims)
+        with recorded(
+            caller,
+            ActionName.LOGIN,
+            {"name": name, "unmatched_groups": unmatched},
+            on_completion=True,
         ):
-            if not refreshable:
-                session_end = now + timedelta(hours=ctx.config.auth.session_hours)
-                created = issue_token(
-                    conn,
-                    name,
-                    TokenGrant(
-                        row.account_id, name, TokenKind.ACCESS, session_end, sso_group_ids=matched
-                    ),
-                )
-                return Session(created.token, created.metadata)
-            refresh_end = now + (
-                timedelta(hours=ctx.config.auth.session_hours)
-                if claims is not None
-                else timedelta(days=ctx.config.auth.refresh_days)
+            return _issue_session(caller, current, claims, refreshable, matched)
+
+
+def _refuse(ctx: OperationContext, name: str, message: str) -> None:
+    """Record an authentication refusal without returning account existence."""
+    with recorded(ctx, ActionName.LOGIN, {"name": name}, on_completion=True) as audit:
+        error = UsageError(message)
+        audit.outcome, audit.exit_code = ActionOutcome.REFUSED, error.exit_code
+        raise error
+
+
+def _failed_password(ctx: OperationContext, row: Row[tuple[object, ...]] | None) -> None:
+    """Count local USER failures under the same lock as successful session writes."""
+    if row is None or row.kind != AccountKind.USER or row.oidc_subject or row.locked_date:
+        return
+    if row.active_flag != YesNo.YES:
+        return
+    limit = ctx.config.auth.lockout_after
+    count = row.failed_signins + 1
+    locked = datetime.now(UTC) if limit and count >= limit else None
+    with ctx.engine.begin() as conn:
+        if locked is not None and row.role == ApiRole.ADMIN and unlocked_admins(conn) <= 1:
+            # Recovery must retain one interactive administrator.
+            locked = None
+        conn.execute(
+            statement(conn, "account_failed_signin"),
+            {"account_id": row.account_id, "count": count, "locked": locked},
+        )
+
+
+def _sign_in_groups(
+    ctx: OperationContext,
+    claims: oidc.IdentityClaims | None,
+) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    with ctx.engine.connect() as conn:
+        active = {
+            r.name: r.group_id
+            for r in conn.execute(statement(conn, "group_list"))
+            if r.active_flag == YesNo.YES
+        }
+    named = () if claims is None else claims.groups
+    return tuple(sorted({active[n] for n in named if n in active})), tuple(
+        sorted(set(named) - active.keys())
+    )
+
+
+def _issue_session(
+    ctx: OperationContext,
+    row: Row[tuple[object, ...]],
+    claims: oidc.IdentityClaims | None,
+    refreshable: bool,
+    matched: tuple[int, ...],
+) -> Session:
+    """Commit successful proof, retained groups and session credentials together."""
+    now = datetime.now(UTC)
+    with ctx.engine.begin() as conn:
+        conn.execute(statement(conn, "account_signin_success"), {"account_id": row.account_id})
+        session_end = now + timedelta(hours=ctx.config.auth.session_hours)
+        if not refreshable:
+            created = issue_token(
+                conn,
+                row.name,
+                TokenGrant(
+                    row.account_id, row.name, TokenKind.ACCESS, session_end, sso_group_ids=matched
+                ),
+            )
+            session = Session(
+                created.token,
+                created.metadata,
+                must_change_password=row.must_change_password == YesNo.YES,
+            )
+        else:
+            refresh_end = (
+                session_end
+                if claims is not None or ctx.browser_session
+                else now + timedelta(days=ctx.config.auth.refresh_days)
             )
             refresh = issue_token(
                 conn,
-                name,
+                row.name,
                 TokenGrant(
-                    row.account_id, name, TokenKind.REFRESH, refresh_end, sso_group_ids=matched
+                    row.account_id, row.name, TokenKind.REFRESH, refresh_end, sso_group_ids=matched
                 ),
             )
             access = issue_token(
                 conn,
-                name,
+                row.name,
                 TokenGrant(
                     row.account_id,
-                    name,
+                    row.name,
                     TokenKind.ACCESS,
                     min(now + ACCESS_LIFETIME, refresh_end),
                     refresh.metadata.token_id,
                     matched,
                 ),
             )
-            return Session(
-                access.token, access.metadata, refresh.token, refresh.metadata.expires_at
+            session = Session(
+                access.token,
+                access.metadata,
+                refresh.token,
+                refresh.metadata.expires_at,
+                row.must_change_password == YesNo.YES,
             )
+        audit = current_request()
+        assert audit is not None
+        audit.outcome = ActionOutcome.SUCCESS
+        audit.write(conn)
+    return session
 
 
 def _proven(row: Row[tuple[object, ...]] | None, password: str | None, subject: str | None) -> bool:
@@ -195,6 +302,7 @@ def _proven(row: Row[tuple[object, ...]] | None, password: str | None, subject: 
 
 def sign_in_subject(ctx: OperationContext, claims: oidc.IdentityClaims) -> Session:
     """Map a verified issuer subject to exactly one pre-registered account."""
+    require_current_schema(ctx)
     with ctx.engine.connect() as conn:
         name = conn.execute(
             statement(conn, "account_subject"), {"subject": claims.subject}
@@ -209,6 +317,7 @@ def sign_in_subject(ctx: OperationContext, claims: oidc.IdentityClaims) -> Sessi
 
 def start_sso(ctx: OperationContext, request: NoInput) -> SsoStart:
     """Begin the issuer's device authorization; the caller shows the code and polls."""
+    require_current_schema(ctx)
     try:
         grant = oidc.start_device(ctx.config.auth)
     except EtlCraftError:
@@ -226,6 +335,7 @@ def start_sso(ctx: OperationContext, request: NoInput) -> SsoStart:
 
 def poll_sso(ctx: OperationContext, request: SsoPollInput) -> SsoPoll:
     """Poll the issuer once; sign in the account its verified subject belongs to."""
+    require_current_schema(ctx)
     try:
         found = oidc.poll_device(ctx.config.auth, request.device_code, request.nonce)
     except EtlCraftError:
@@ -238,6 +348,7 @@ def poll_sso(ctx: OperationContext, request: SsoPollInput) -> SsoPoll:
 
 def refresh(ctx: OperationContext, request: TokenInput) -> Session:
     """Issue a new access token from a live refresh token of an active user."""
+    require_current_schema(ctx)
     found = find_token(ctx, request.token)
     if found is None or found.token_kind != TokenKind.REFRESH or found.expires_at is None:
         raise UsageError(
@@ -303,4 +414,50 @@ def sign_in_methods(ctx: OperationContext, request: NoInput) -> SignInMethods:
 
 def whoami(ctx: OperationContext, request: NoInput) -> Identity:
     """Return the caller's account and its current role."""
-    return Identity(ctx.actor.name, str(ctx.role))
+    with ctx.engine.connect() as conn:
+        row = find_account(conn, ctx.actor.name)
+        if row is None:
+            return Identity(ctx.actor.name, str(ctx.role))
+        groups = tuple(
+            group.name
+            for group in conn.execute(
+                statement(conn, "permission_groups"),
+                {"account": ctx.actor.name},
+            )
+            if group.explicit_member == YesNo.YES or group.group_id in ctx.sso_group_ids
+        )
+        project = conn.execute(
+            statement(conn, "project_by_code"), {"code": ctx.project or ctx.config.project}
+        ).one_or_none()
+        level = (
+            None
+            if project is None
+            else project_permission(
+                conn,
+                replace(ctx, project=project.project_code, project_id=project.project_id),
+            )
+        )
+        signin = conn.execute(
+            statement(conn, "account_last_signin"), {"name": ctx.actor.name}
+        ).scalar_one_or_none()
+        expiry = (
+            None
+            if ctx.credential_token_id is None
+            else conn.execute(
+                statement(conn, "account_session_expiry"),
+                {"token_id": ctx.credential_token_id},
+            ).scalar_one_or_none()
+        )
+    return Identity(
+        ctx.actor.name,
+        str(ctx.role),
+        row.account_id,
+        AccountKind(row.kind),
+        row.kind == AccountKind.USER and row.oidc_subject is None,
+        row.must_change_password == YesNo.YES,
+        groups,
+        level,
+        settings_from(row.ui_settings),
+        None if signin is None else as_utc(signin),
+        None if expiry is None else as_utc(expiry),
+    )

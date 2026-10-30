@@ -29,6 +29,8 @@ class OperationContext:
     child: ChildOptions = field(default_factory=ChildOptions)
     role: ApiRole | None = None
     transport: Transport = Transport.LOCAL
+    browser_session: bool = False
+    upgrade_signin: bool = False
     provisioning: bool = False
     sso_group_ids: tuple[int, ...] = ()
     credential_token_id: int | None = None
