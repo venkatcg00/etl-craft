@@ -1,14 +1,15 @@
 """Deployment administrator project and pool identities."""
 
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import ClassVar
 
 from sqlalchemy.engine import Connection, Row
 
-from etl_craft.core.cron import timezone
+from etl_craft.core.cron import next_after, timezone
 from etl_craft.core.enums import ApiRole, YesNo
 from etl_craft.core.enums_access import EnvironmentType, Governance
-from etl_craft.core.errors import MetadataError, UsageError
+from etl_craft.core.errors import EtlCraftError, MetadataError, UsageError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
@@ -36,12 +37,24 @@ class ProjectFields(ProjectIdentity):
     environment_type: EnvironmentType | None = None
     environment_name: str | None = None
     governance: Governance | None = None
+    schema_check_schedule: str | None = None
+    schema_check_on_demand: YesNo | None = None
 
     def __post_init__(self) -> None:
-        """Validate supplied enums even for direct Python callers."""
+        """Validate supplied enums and the check schedule even for direct Python callers."""
+        schedule = self.schema_check_schedule
+        if schedule is not None and schedule != "none":
+            try:
+                next_after(schedule, datetime.now(UTC), "UTC")
+            except EtlCraftError as error:
+                raise UsageError(
+                    f"--schema-check-schedule={schedule!r}: {error}; give a five-field cron "
+                    "expression, or none to stop scheduled checks"
+                ) from error
         for flag, value, allowed in (
             ("--environment-type", self.environment_type, tuple(EnvironmentType)),
             ("--governance", self.governance, tuple(Governance)),
+            ("--schema-check-on-demand", self.schema_check_on_demand, tuple(YesNo)),
         ):
             if value is not None and value not in allowed:
                 raise UsageError(
@@ -78,6 +91,8 @@ class Project:
     environment_name: str | None
     governance: str
     shared_warehouse: bool = False
+    schema_check_schedule: str | None = None
+    schema_check_on_demand: str = YesNo.YES
 
 
 @dataclass(frozen=True)
@@ -152,6 +167,8 @@ def list_projects(ctx: OperationContext, request: ProjectIdentity) -> Projects:
                     r.environment_name,
                     r.governance,
                     r.project_code in shared,
+                    r.schema_check_schedule,
+                    r.schema_check_on_demand,
                 )
                 for r in rows
                 if (request.project is None or r.project_code == request.project)
@@ -221,12 +238,14 @@ def change_project(ctx: OperationContext, request: ProjectFields, *, adding: boo
         request.environment_type,
         request.environment_name,
         request.governance,
+        request.schema_check_schedule,
+        request.schema_check_on_demand,
     )
     if not adding and all(value is None for value in fields):
         raise UsageError(
-            "project set: no field given; supply --name, --timezone, "
-            "--default-pool, --max-running-tasks, --environment-type, "
-            "--environment-name or --governance"
+            "project set: no field given; supply --name, --timezone, --default-pool, "
+            "--max-running-tasks, --environment-type, --environment-name, --governance, "
+            "--schema-check-schedule or --schema-check-on-demand"
         )
     with locks.MIGRATE.hold(ctx.engine, wait_seconds=30), ctx.engine.begin() as conn:
         old = conn.execute(
@@ -269,6 +288,10 @@ def change_project(ctx: OperationContext, request: ProjectFields, *, adding: boo
             "environment_type": effective.environment_type,
             "environment_name": effective.environment_name,
             "governance": effective.governance,
+            "schema_check_schedule": None
+            if adding and request.schema_check_schedule == "none"
+            else request.schema_check_schedule,
+            "schema_check_on_demand": request.schema_check_on_demand,
         }
         conn.execute(
             statement(conn, "admin_project_add" if adding else "admin_project_set"), values

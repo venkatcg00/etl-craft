@@ -156,6 +156,9 @@ class Insights:
     rules: tuple[RuleInsight, ...]
     latest: tuple[LatestRun, ...]
     gaps: tuple[GapCount, ...] = ()
+    gaps_compared_at: datetime | None = None
+    schema_check_schedule: str | None = None
+    schema_check_on_demand: bool = True
 
 
 @dataclass

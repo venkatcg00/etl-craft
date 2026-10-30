@@ -340,3 +340,24 @@ def test_insights_page_renders_the_insights_read_with_its_filters(monitor):
     assert f'href="{BASE}/SALES"' not in only.text.split('id="insights-pipelines-table"')[1]
     bad = client.get("/ui/projects/default/insights", params={"from": "yesterday"})
     assert bad.status_code == 400 and "expected a date as YYYY-MM-DD" in bad.text
+
+
+def test_insights_check_now_is_disabled_when_on_demand_checks_are_off(monitor):
+    ctx, client, _ = monitor
+    login(client)
+    page = client.get("/ui/projects/default/insights")
+    assert "Not checked against the warehouse yet" in page.text and "not scheduled" in page.text
+    assert re.search(r'<button type="submit" >Check now</button>', page.text)
+    act(
+        ctx,
+        ActionName.PROJECT_SET,
+        project="default",
+        reason="checks",
+        schema_check_schedule="0 2 * * *",
+        schema_check_on_demand="N",
+    )
+    off = client.get("/ui/projects/default/insights")
+    assert (
+        '<button type="submit" disabled aria-describedby="check-off">Check now</button>' in off.text
+    )
+    assert "<code>0 2 * * *</code>" in off.text

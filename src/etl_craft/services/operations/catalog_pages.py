@@ -27,6 +27,7 @@ CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json",
 }
 
 
@@ -49,8 +50,8 @@ class CatalogInput(Request):
             or PurePosixPath(self.path).suffix not in CONTENT_TYPES
         ):
             raise UsageError(
-                f"catalog path={self.path!r}; expected a relative generated HTML, CSS, JS or SVG "
-                "file, without traversal, drive letters or encoding; use a catalog link"
+                f"catalog path={self.path!r}; expected a relative generated HTML, CSS, JS, JSON or "
+                "SVG file, without traversal, drive letters or encoding; use a catalog link"
             )
 
 

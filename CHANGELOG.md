@@ -255,6 +255,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Schema checks: `project add|set --schema-check-schedule CRON|none` has the controller compare
+  the project's declared tables with the warehouse on a schedule, and
+  `--schema-check-on-demand Y|N` allows or refuses `generate-docs --with-warehouse` and the
+  Insights page's **Check now**. Insights shows the newest stored check and its time, the
+  schedule, and whether on-demand checks are allowed. Migration 0077 adds
+  `CFG_PROJECTS.SCHEMA_CHECK_SCHEDULE` and `SCHEMA_CHECK_ON_DEMAND` (default `Y`); run
+  `etl-craft migrate`.
+
 - Pipeline Insights: `etl-craft insights [--from DAY] [--to DAY] [--pipeline-code CODE] [--tag
   TAG]`, `GET /api/v1/projects/{project}/insights`, the **Insights** page and a catalog
   **Insights** tab share one calculation over a bounded window of UTC days: runs and success
