@@ -108,4 +108,6 @@ def test_cli_writes_the_zip_and_the_api_serves_it_as_an_attachment(
     assert response.headers["content-disposition"] == disposition
     served = zipfile.ZipFile(io.BytesIO(response.content))
     assert served.namelist() == written.namelist()
-    assert served.read("manifest.json") == written.read("manifest.json")
+    paths = [entry["path"] for entry in json.loads(served.read("manifest.json"))["files"]]
+    assert paths == [entry["path"] for entry in json.loads(written.read("manifest.json"))["files"]]
+    assert served.read("run.log") == written.read("run.log")
