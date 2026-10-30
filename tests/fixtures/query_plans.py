@@ -109,6 +109,8 @@ VALUES = {
     "grantee_role": ApiRole.VIEWER,
     "permission": Permission.CAN_VIEW,
     "max_running_tasks": 8,
+    "schema_check_on_demand": "Y",
+    "schema_check_schedule": "0 2 * * *",
     "retryable": True,
     "stopped": False,
     "overwrite": False,

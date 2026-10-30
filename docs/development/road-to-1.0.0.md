@@ -179,7 +179,7 @@ item's text, or work done early under another item.
 | S7.A Web UI pages | In progress, slice 4 of 6 | #277, #281, #282, #283, #284, #285, #286, slice 4 PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
-| S7.AK Schema checker | Planned | | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
+| S7.AK Schema checker | Done | S7.AK PR | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Done | #276 | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
@@ -916,6 +916,14 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.AK: the check is `generate-docs --with-warehouse`; the controller runs it as the system
+  actor on the project's schedule, so the dated result is the catalog's `gaps.json`, which
+  Insights reads through the catalog reader (whole-project viewers; others see the
+  metadata-only states). Projects have no calendar, so the schedule uses the project's timezone
+  only. **Check now** posts the existing docs action, which needs the developer role rather
+  than operator. A comparison that cannot reach the warehouse is stored as Unavailable with its
+  time and replaces the earlier result instead of keeping it; it is never counted as Matched.
+  Missed ticks after a controller restart are not replayed.
 - S7.A slice 4 (owner, 2026-10-30: CLI JSON as well, one PR): one `insights` read serves the
   CLI, the API, the page and the generated catalog (a 7-day snapshot at generation). Windows are
   UTC days by run start, at most 92. Valid/eligible row counts are not recorded, so the quality

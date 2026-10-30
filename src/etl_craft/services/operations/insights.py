@@ -1,9 +1,13 @@
 """The Pipeline Insights read: visible pipelines, a bounded UTC day window, every built-in panel."""
 
+import json
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
-from etl_craft.core.errors import UsageError
+from etl_craft.core.enums import GapAttribute, GapState, YesNo
+from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
+from etl_craft.core.time import as_utc
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import read_tags
@@ -11,6 +15,7 @@ from etl_craft.services.insights import DayInsight as DayInsight
 from etl_craft.services.insights import Insights as Insights
 from etl_craft.services.insights import gap_counts, measure, window
 from etl_craft.services.operations.catalog import GapsInput, get_gaps
+from etl_craft.services.operations.catalog_pages import CatalogInput, read_catalog
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.permissions import pipeline_access
 from etl_craft.services.operations.requests import TagFilter
@@ -64,11 +69,47 @@ def insights(ctx: OperationContext, request: InsightsInput) -> Insights:
                 "choose pipelines from `etl-craft pipelines`"
             )
         measured = measure(conn, selected, window_start, window_end)
-    snapshot = get_gaps(ctx, GapsInput(tag=request.tag))
+        settings = conn.execute(statement(conn, "project_schema_checks")).one()
     codes = set(selected.values())
-    checks = (
-        (record.attribute, record.state)
-        for record in snapshot.records
-        if not request.pipelines or any(task.partition(".")[0] in codes for task in record.tasks)
+
+    def chosen(tasks: Iterable[str]) -> bool:
+        return not request.pipelines or any(task.partition(".")[0] in codes for task in tasks)
+
+    stored = _stored_comparison(ctx)
+    if stored is not None:
+        compared_at, records = stored
+        checks = [(attribute, state) for attribute, state, tasks in records if chosen(tasks)]
+    else:
+        compared_at = None
+        snapshot = get_gaps(ctx, GapsInput(tag=request.tag))
+        checks = [(r.attribute, r.state) for r in snapshot.records if chosen(r.tasks)]
+    return replace(
+        measured,
+        gaps=gap_counts(checks),
+        gaps_compared_at=compared_at,
+        schema_check_schedule=settings.schema_check_schedule,
+        schema_check_on_demand=settings.schema_check_on_demand == YesNo.YES,
     )
-    return replace(measured, gaps=gap_counts(checks))
+
+
+Check = tuple[GapAttribute, GapState, tuple[str, ...]]
+
+
+def _stored_comparison(ctx: OperationContext) -> tuple[datetime, list[Check]] | None:
+    """Return the newest catalog's warehouse comparison, or None when there is none to show.
+
+    The catalog is read with its own checks (whole-project view, path rules); a catalog built
+    without the warehouse comparison has no ``compared_at`` and the live metadata check is used.
+    """
+    try:
+        page = read_catalog(ctx, CatalogInput(path="gaps.json"))
+    except (PermissionDeniedError, ResourceNotFoundError):
+        return None
+    snapshot = json.loads(b"".join(page))
+    if snapshot.get("compared_at") is None:
+        return None
+    records = [
+        (GapAttribute(r["attribute"]), GapState(r["state"]), tuple(r["tasks"]))
+        for r in snapshot["records"]
+    ]
+    return as_utc(datetime.fromisoformat(snapshot["compared_at"])), records

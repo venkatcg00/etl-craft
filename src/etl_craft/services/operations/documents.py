@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import ClassVar
 
 from etl_craft.config import ConnectorConfig
-from etl_craft.core.enums import ActionOutcome
-from etl_craft.core.errors import EtlCraftError, ExitCode
+from etl_craft.core.actor import SYSTEM_ACTOR
+from etl_craft.core.enums import ActionOutcome, YesNo
+from etl_craft.core.errors import EtlCraftError, ExitCode, PermissionDeniedError
 from etl_craft.engine.audit import ActionRequest, current_request
+from etl_craft.engine.queries import statement
 from etl_craft.services.catalog.collect import build_catalog
 from etl_craft.services.catalog.site import write_site
 from etl_craft.services.documentation import DocumentationVersion, refresh_versions
@@ -77,11 +79,28 @@ def docs_folder(config: ConnectorConfig, output: Path | None = None) -> Path:
     return output or config.docs_site.output or config.host_dir / DEFAULT_FOLDER
 
 
+def refuse_off_schedule(ctx: OperationContext) -> None:
+    """Refuse an on-demand warehouse comparison where the project turns them off."""
+    with ctx.engine.connect() as conn:
+        settings = conn.execute(statement(conn, "project_schema_checks")).one()
+    if settings.schema_check_on_demand != YesNo.YES:
+        raise PermissionDeniedError(
+            f"project {ctx.project!r}: on-demand schema checks are off "
+            "(SCHEMA_CHECK_ON_DEMAND=N), so the warehouse is compared only on the project's "
+            "schedule; an administrator can allow them with "
+            "`etl-craft project set --schema-check-on-demand Y`"
+        )
+
+
 def generate_docs(ctx: OperationContext, request: DocsInput) -> DocsBuild:
     """Build the catalog and write its site; ``strict`` writes nothing while a task is untraced.
 
     Beside its request, the build records one completion row with its outcome and exit code.
+    A warehouse comparison someone asks for is refused while the project turns on-demand
+    checks off; the controller's scheduled check runs as the system actor.
     """
+    if request.with_warehouse and ctx.actor != SYSTEM_ACTOR:
+        refuse_off_schedule(ctx)
     requested = current_request()
     assert requested is not None
     completion = ActionRequest(

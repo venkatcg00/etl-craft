@@ -1,4 +1,4 @@
-"""Log publication retries and daily project purges off the controller's lease-renewal loop."""
+"""Log publication retries, daily purges, clones and schema checks off the lease-renewal loop."""
 
 import contextvars
 import logging
@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from etl_craft.controller.cloning import clone_due
 from etl_craft.controller.refresh import refresh_due
+from etl_craft.controller.schema_checks import schema_checks_due
 from etl_craft.core.actor import SYSTEM_ACTOR, acting_as
 from etl_craft.core.enums import ActionName
 from etl_craft.engine.queries import statement
@@ -30,6 +31,7 @@ class RetentionSchedule:
         self.work: Future[None] | None = None
         self.next_check: datetime | None = None
         self.clone_deadlines: dict[int, datetime] = {}
+        self.schema_checks: dict[int, datetime] = {}
 
     def refresh(self, ctx: OperationContext, now: datetime, stop: threading.Event) -> None:
         """Retry log publication and failed purge days without blocking supervision."""
@@ -47,7 +49,12 @@ class RetentionSchedule:
             return
         self.next_check = now + timedelta(minutes=1)
         self.work = self.executor.submit(
-            contextvars.copy_context().run, maintain, ctx, now, stop, self.clone_deadlines
+            contextvars.copy_context().run,
+            maintain,
+            ctx,
+            now,
+            stop,
+            (self.clone_deadlines, self.schema_checks),
         )
 
     def close(self) -> None:
@@ -56,14 +63,20 @@ class RetentionSchedule:
 
 
 def maintain(
-    ctx: OperationContext, now: datetime, stop: threading.Event, deadlines: dict[int, datetime]
+    ctx: OperationContext,
+    now: datetime,
+    stop: threading.Event,
+    deadlines: tuple[dict[int, datetime], dict[int, datetime]],
 ) -> None:
-    """Share the maintenance worker; coalesce elapsed clone ticks rather than queueing them."""
+    """Share the maintenance worker; coalesce elapsed clone and check ticks, never queue them."""
     refresh_due(ctx, stop)
     try:
         purge_due(ctx, now, stop)
     finally:
-        clone_due(ctx, now, stop, deadlines)
+        try:
+            clone_due(ctx, now, stop, deadlines[0])
+        finally:
+            schema_checks_due(ctx, now, stop, deadlines[1])
 
 
 def purge_due(ctx: OperationContext, now: datetime, stop: threading.Event) -> None:

@@ -66,6 +66,11 @@
 </section>
 <section class="panel" aria-labelledby="gaps-title">
   <h2 id="gaps-title">Schema and lineage checks</h2>
+  <p>{% if found.gaps_compared_at %}Last warehouse check: {{ found.gaps_compared_at|zoned(settings.timezone) }}.{% else %}<strong>Not checked against the warehouse yet</strong>: these states come from the declared metadata only, so most read Unchecked.{% endif %}
+  Scheduled checks: {% if found.schema_check_schedule %}<code>{{ found.schema_check_schedule }}</code> ({{ project.project }} timezone){% else %}not scheduled; an administrator sets one with <code>etl-craft project set --schema-check-schedule</code>{% endif %}.</p>
+  <form method="post" action="/api/v1/projects/{{ project.project|urlencode }}/docs" hx-post="/api/v1/projects/{{ project.project|urlencode }}/docs" hx-ext="json-enc" hx-target="#result"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="with_warehouse" value="true">
+  <button type="submit" {% if not found.schema_check_on_demand %}disabled aria-describedby="check-off"{% endif %}>Check now</button>
+  {% if not found.schema_check_on_demand %}<span id="check-off" class="note">On-demand checks are off for this project; it is checked only on its schedule.</span>{% else %}<span class="note">Compares the declared tables with the warehouse and rebuilds the catalog; needs the developer role. Reload when it finishes.</span>{% endif %}</form>
   <div class="scroll"><table class="list"><thead><tr><th scope="col">Attribute</th><th scope="col">State</th><th scope="col">Checks</th></tr></thead>
   <tbody>{% for g in found.gaps %}<tr><td>{{ g.attribute }}</td><td>{{ g.state }}</td><td>{{ g.checks }}</td></tr>{% else %}<tr><td colspan="3">No declared tables to check.</td></tr>{% endfor %}</tbody></table></div>
   <p class="note">Unchecked and unavailable comparisons are never counted as matched. <a href="/ui/projects/{{ project.project|urlencode }}/catalog">Open the catalog</a> for each gap.</p>

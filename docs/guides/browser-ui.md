@@ -157,6 +157,11 @@ from summed counts. `etl-craft insights [--from DAY] [--to DAY] [--pipeline-code
 [--tag TAG] --format json` and `GET /api/v1/projects/{project}/insights` return the same
 document, and the generated catalog has an **Insights** tab with the last 7 days at generation.
 
+The schema and lineage panel says when the warehouse was last compared with the declared tables
+and on what schedule. **Check now** runs the comparison and rebuilds the catalog (it needs the
+developer role, and is disabled when the project turns on-demand checks off). Until a check
+has run, the states come from the declared metadata only and most read Unchecked.
+
 ## Search
 
 The search box in the top bar (press `/` or Ctrl+K) finds pipelines and tasks by any part of

@@ -4,7 +4,7 @@ import argparse
 
 from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, YesNo
 from etl_craft.core.enums_access import EnvironmentType, Governance
 from etl_craft.core.errors import UsageError
 from etl_craft.services.operations import admin_metadata as operations
@@ -40,6 +40,16 @@ def configure_project(parser: argparse.ArgumentParser) -> None:
             )
             sub.add_argument("--environment-name")
             sub.add_argument("--governance", type=Governance, choices=tuple(Governance))
+            sub.add_argument(
+                "--schema-check-schedule",
+                help="Cron expression (project timezone) for warehouse schema checks, or none.",
+            )
+            sub.add_argument(
+                "--schema-check-on-demand",
+                type=YesNo,
+                choices=tuple(YesNo),
+                help="Whether Check now and generate-docs --with-warehouse may run (default Y).",
+            )
         configure_output(sub)
 
 
@@ -81,6 +91,8 @@ def run_project(args: argparse.Namespace, out: Output) -> int:
                 p.environment_name,
                 p.governance,
                 "shared warehouse" if p.shared_warehouse else "",
+                f"schema checks: {p.schema_check_schedule or 'not scheduled'}, "
+                f"on demand {p.schema_check_on_demand}",
             )
             for p in done.projects
         ),

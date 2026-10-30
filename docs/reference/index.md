@@ -30,3 +30,10 @@ Project administration also supports `--environment-type DEV|SIT|UAT|PROD|SANDBO
 Only deployment admins set them, with a non-empty `--reason`; `PROD` requires `STRICT`.
 Intervention `--reason` is checked by the selected project's governance policy, equally through
 CLI and API. See [environments and governance](../deploying/project-layout.md#environments-and-governance).
+
+Schema checks compare a project's declared tables with its warehouse.
+`--schema-check-schedule CRON` on `project add|set` has the controller run the comparison (and
+rebuild the catalog) at each tick in the project's timezone; `none` stops it. Missed ticks are
+not replayed. `--schema-check-on-demand N` refuses `generate-docs --with-warehouse` and the
+Insights page's **Check now** for that project, so its warehouse is compared only on schedule;
+the default is `Y`. Insights shows the newest stored check and its time to whole-project viewers.
