@@ -117,6 +117,21 @@ def test_browser_return_to_refuses_external_or_encoded_authority(browser_scene, 
     assert "same-site" in response.text
 
 
+def test_signin_keeps_a_valid_challenge_and_never_echoes_a_malformed_one(browser_scene):
+    _, client = browser_scene
+    kept = "A" * 43
+    client.cookies.set(CSRF, kept, domain="testserver.local")
+    page = client.get("/signin")
+    assert f'content="{kept}"' in page.text
+    assert CSRF not in page.headers.get("set-cookie", "")
+    client.cookies.clear()
+    client.cookies.set(CSRF, "x; Domain=evil.example", domain="testserver.local")
+    page = client.get("/signin")
+    issued = re.search(CSRF + r"=([^;]+);", page.headers["set-cookie"]).group(1)
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", issued)
+    assert "evil.example" not in page.headers["set-cookie"]
+
+
 def test_lockout_generic_message_unlock_temporary_password_and_settings(browser_scene):
     ctx, client = browser_scene
     generic = login(client, password="wrong").text
