@@ -53,7 +53,7 @@ def test_identity_candidate_is_populated_before_rename_or_clone(key, publication
     session.rename.side_effect = lambda before, after: events.append(f"rename {before} to {after}")
     session.drop.side_effect = lambda name: events.append(f"drop {name}")
     action = Mock(spec=ActionContext)
-    action.task = SimpleNamespace(watermark=None)
+    action.task = SimpleNamespace(watermark=None, allow_empty=True)
     action.staged = None
     action.build_stage.return_value = "stage"
     action.context = SimpleNamespace(pipeline_run_id=11, pipeline_id=12, task_run_id=13)

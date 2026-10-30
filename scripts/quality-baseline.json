@@ -48,8 +48,7 @@
     "branches": {
       "src/etl_craft/core/text.py": 2,
       "src/etl_craft/engine/repository/source_contracts.py": 2,
-      "src/etl_craft/execution/scheduler.py": 7,
-      "src/etl_craft/handlers/sql/spec.py": 1
+      "src/etl_craft/execution/scheduler.py": 7
     },
     "broad-except": {
       "src/etl_craft/api/serve.py": 1,

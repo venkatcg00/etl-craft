@@ -182,7 +182,7 @@ item's text, or work done early under another item.
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Planned | | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
 | S7.U Personal-data erasure | Planned | | A standing erasure register and ERASURE tasks remove subjects after loads, outside managed writes |
-| S7.V Empty replacements | Planned | | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
+| S7.V Empty replacements | Done | | ALLOW_EMPTY can refuse an empty CREATE_TABLE or OVERWRITE_TABLE before changing its target |
 | S7.W Docs toolchain after MkDocs 1.x | Planned | | Evaluate Zensical against the API pages, navigation and published versions; migrate only when every requirement works |
 | S7.O Package and demo repositories | Planned | | A very small demo stays in package CI; Support Insights holds its project and supplies release evidence the package gate validates |
 | S7.P Obvious failures do not stop 1.0.0 | In progress | #173, #178 | Audit done (#173); the log-folder and port checks close their catalog rows (#178); item 4 keeps the catalog current |
@@ -958,6 +958,13 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   repeated races remain local. Existing per-action warehouse/Engine DB round-trip budgets
   remain unchanged; one real attempt adds three Engine DB clock/fence statements. Indexed
   clock maxima and pending-owner probes retain bounded query plans as history grows.
+
+- S7.V, 2026-10-30: `ALLOW_EMPTY` takes `true`/`false` like every other SQL flag, since
+  `parse_flag` refuses `Y`/`N`; absent means `true`. Choices that differ from the item text:
+  the values are `true`/`false`, not `Y`/`N`. `false` counts the staged SELECT once (default
+  tasks keep their round-trip budgets) and, for `CREATE_TABLE` of a missing target, skips the
+  direct-create path so nothing is created from an empty SELECT. The handler's existing failure
+  path records the refusal in the attempt log and the audit tables.
 
 - S7.AG owner decisions, 2026-10-29: ownership is recorded per team table; the first project
   migration that changes an unowned table claims it; DDL is checked by a sqlglot preflight on

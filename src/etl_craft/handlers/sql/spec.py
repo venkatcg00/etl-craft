@@ -17,6 +17,8 @@ remedy, so no action ever starts on a half-valid definition.
 - ``MERGE_COMPARE_COLUMNS`` (the merges): ordered ``|``-separated scalar columns hashed into
   version-2 ``HASH_KEY``; floating point is refused, and decimals require a declared scale.
 - ``MERGE_DEDUPE_ORDER`` (the merges): ``ORDER BY`` terms choosing the row kept per key.
+- ``ALLOW_EMPTY`` (``CREATE_TABLE``, ``OVERWRITE_TABLE``): ``false`` fails the task when the
+  SELECT returns no rows, before the target changes; absent or ``true`` replaces it with none.
 - ``SCHEMA_EVOLUTION`` (``OVERWRITE_TABLE`` and the merges): ``true`` adds new SELECT columns
   to the target.
 - ``PRESERVE_TARGET`` (``SCD1_MERGE``): ``true`` keeps a target value where the source is NULL.
@@ -83,12 +85,16 @@ SCREENED = MERGES | {SqlAction.APPEND_TABLE, SqlAction.OVERWRITE_TABLE}
 
 # Each yes/no parameter, and the actions it applies to.
 FLAGS: dict[str, frozenset[SqlAction]] = {
+    "ALLOW_EMPTY": frozenset({SqlAction.CREATE_TABLE, SqlAction.OVERWRITE_TABLE}),
     "SCHEMA_EVOLUTION": frozenset({SqlAction.OVERWRITE_TABLE, *MERGES}),
     "PRESERVE_TARGET": frozenset({SqlAction.SCD1_MERGE}),
     "HARD_DELETE": frozenset({SqlAction.DELETE_ROWS}),
     "SECURE_VIEW": frozenset({SqlAction.CREATE_VIEW}),
     "SKIP_REJECTS_OVER_LIMIT": SCREENED,
 }
+
+DEFAULT_TRUE = frozenset({"ALLOW_EMPTY"})
+"""The yes/no parameters that mean true when absent."""
 
 PARAMETERS = frozenset(
     {
@@ -150,6 +156,7 @@ class SqlTask:
     merge_compare_columns: tuple[str, ...] = ()
     dedupe_order: str | None = None
     schema_evolution: bool = False
+    allow_empty: bool = True
     preserve_target: bool = False
     hard_delete: bool = False
     setup_for: SqlAction | None = None
@@ -176,12 +183,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
         )
     flags = {name: _flag(params, name, action, applies) for name, applies in FLAGS.items()}
     if action == SqlAction.CREATE_VIEW:
-        storage = [name for name in ("TABLE_FORMAT", *STORAGE_PARAMETERS) if params.get(name)]
-        if storage:
-            raise SqlGuardError(
-                f"SQL_ACTION=CREATE_VIEW takes no {storage[0]}: a view stores no data; "
-                "remove the parameter"
-            )
+        _refuse_view_storage(params)
 
     select_sql, source = None, "none"
     if action == SqlAction.DROP_TABLE:
@@ -231,6 +233,7 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
         merge_compare_columns=compare,
         dedupe_order=dedupe_order,
         schema_evolution=flags["SCHEMA_EVOLUTION"],
+        allow_empty=flags["ALLOW_EMPTY"],
         preserve_target=flags["PRESERVE_TARGET"],
         hard_delete=flags["HARD_DELETE"],
         setup_for=setup_for,
@@ -275,7 +278,18 @@ def _flag(
     if name in params and action not in applies:
         names = ", ".join(sorted(applies))
         raise SqlGuardError(f"{name} applies only to {names}, not SQL_ACTION={action}")
+    if name in DEFAULT_TRUE and not (params.get(name) or "").strip():
+        return True
     return enabled
+
+
+def _refuse_view_storage(params: Mapping[str, str]) -> None:
+    storage = [name for name in ("TABLE_FORMAT", *STORAGE_PARAMETERS) if params.get(name)]
+    if storage:
+        raise SqlGuardError(
+            f"SQL_ACTION=CREATE_VIEW takes no {storage[0]}: a view stores no data; "
+            "remove the parameter"
+        )
 
 
 def resolve_select(

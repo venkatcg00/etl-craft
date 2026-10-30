@@ -53,6 +53,7 @@ from etl_craft.handlers.sql.tables import (
     check_target_audit,
     check_update_precision,
     dedupe,
+    refuse_empty,
     refuse_null_keys,
     require_target,
 )
@@ -63,14 +64,21 @@ logger = logging.getLogger(__name__)
 Action = Callable[[Session, ActionContext], HandlerResult]
 
 
+def _overwrite_source_rows(session: Session, action: ActionContext, stage: str) -> int | None:
+    """Count the staged rows when a limit, the dialect or ``ALLOW_EMPTY=false`` needs them."""
+    task = action.task
+    if task.reject_limit is None and session.dialect.dml_rowcounts and task.allow_empty:
+        return None
+    source = session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
+    if not task.allow_empty:
+        refuse_empty(session, source, action.context.task_code)
+    return source
+
+
 def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     """Empty the target and insert the SELECT's rows."""
     stage = action.build_stage(session)
-    source = (
-        session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
-        if action.task.reject_limit is not None or not session.dialect.dml_rowcounts
-        else None
-    )
+    source = _overwrite_source_rows(session, action, stage)
     stage, rejected = (
         screen(session, stage, action.task, source, action.stamp)
         if source is not None
