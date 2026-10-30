@@ -5,7 +5,8 @@ description: Review etl-craft's browser UI (Jinja templates, htmx, plain CSS and
 
 # web-design-guidelines
 
-Vendored from `vercel-labs/web-interface-guidelines` at `434b7f9` (MIT, see `LICENSE`); the rules
+Vendored from [vercel-labs/web-interface-guidelines](https://github.com/vercel-labs/web-interface-guidelines)
+at `434b7f9` (MIT, see `LICENSE`); the rules
 are in `rules.md` and are read from there, never fetched at run time.
 
 ## How to use
