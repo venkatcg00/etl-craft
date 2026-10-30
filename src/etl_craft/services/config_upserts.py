@@ -12,6 +12,8 @@ from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.config_rows import (
     ACTIVE_FLAG,
     BUSINESS_RULES,
+    CALENDAR_HOLIDAYS,
+    CALENDARS,
     OBJECT_TABLES,
     PIPELINE_DEPENDENCIES,
     PIPELINES,
@@ -34,10 +36,21 @@ from etl_craft.services.config_models import Change, ColumnChange, ConfigFiles, 
 from etl_craft.services.config_validation import row_problem
 from etl_craft.services.validate import Finding
 
+FILES = {
+    "pipeline": PIPELINES.file,
+    "task": TASKS.file,
+    "table": OBJECT_TABLES.file,
+    "calendar": CALENDARS.file,
+}
+"""The file holding each kind of row a config row names."""
+
 
 def _ends(table: ConfigTable, values: Mapping[str, Value]) -> list[tuple[str, Key]]:
-    """Return the pipelines and tasks a row names, by code."""
-    if table in (PIPELINES, OBJECT_TABLES):
+    """Return the pipelines, tasks, tables and calendars a row names, by code."""
+    if table in (PIPELINES, CALENDAR_HOLIDAYS):
+        code = values["CALENDAR_CODE"]
+        return [] if code is None else [("calendar", (code,))]
+    if table in (OBJECT_TABLES, CALENDARS):
         return []
     if table is SOURCE_COLUMNS:
         return [("table", tuple(values[name] for name in OBJECT_TABLES.key))]
@@ -103,8 +116,7 @@ def _links(
     """Return the ids an insert of ``file_row`` sets, from the current pipelines and tasks."""
     found: list[StoredRow] = []
     for kind, end in _ends(table, file_row.values):
-        file = {"pipeline": PIPELINES.file, "task": TASKS.file, "table": OBJECT_TABLES.file}[kind]
-        parent = current[file].get(end)
+        parent = current[FILES[kind]].get(end)
         if parent is None or not parent.active:
             named = ".".join(str(code) for code in end if code is not None)
             raise MetadataFileError(
@@ -119,10 +131,13 @@ def _links(
         and file_row.values["DEPENDS_ON_PROJECT_CODE"]
     ):
         found.append(external_dependency(conn, table, file_row))
-    if table in (PIPELINES, OBJECT_TABLES):
-        from etl_craft.engine.repository.pipelines import current_project_id
-
+    if table is PIPELINES:
+        calendar = int(found[0].row_id) if found else None
+        return {"PROJECT_ID": current_project_id(), "CALENDAR_ID": calendar}
+    if table in (OBJECT_TABLES, CALENDARS):
         return {"PROJECT_ID": current_project_id()}
+    if table is CALENDAR_HOLIDAYS:
+        return {"CALENDAR_ID": int(found[0].row_id)}
     if table is SOURCE_COLUMNS:
         return {"TABLE_ID": int(found[0].row_id)}
     if table is TASKS:
@@ -404,12 +419,7 @@ def check_references(
             ):
                 continue
             for kind, key in _ends(table, row.values):
-                file = {
-                    "pipeline": PIPELINES.file,
-                    "task": TASKS.file,
-                    "table": OBJECT_TABLES.file,
-                }[kind]
-                parent = final[file].get(key)
+                parent = final[FILES[kind]].get(key)
                 if parent is None or not parent.active:
                     name = ".".join(str(v) for v in key if v is not None)
                     raise MetadataFileError(

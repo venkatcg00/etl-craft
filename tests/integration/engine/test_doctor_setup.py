@@ -3,13 +3,16 @@
 import logging
 import sys
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import text
 
 from etl_craft.cli import main
 from etl_craft.config import ConnectionProfile, EmailProfile
 from etl_craft.config.model import SettingSource
 from etl_craft.config.object_models import Artifacts
+from etl_craft.core.actor import Actor, ActorKind, acting_as
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.schema import existing_engine_tables
 from etl_craft.services.doctor import Status, run_checks
@@ -327,3 +330,22 @@ def test_doctor_probes_the_configured_log_store_before_any_attempt(config, tmp_p
     assert str(root) in message and "expected" in message
     root.unlink()
     assert found(run_checks(configured, engine_state=False))["Log store"][0] is Status.OK
+
+
+def test_doctor_reports_a_holiday_list_that_ends_within_sixty_days(config, empty_engine_db):
+    setup(config)
+    last = (datetime.now(UTC) + timedelta(days=45)).date()
+    with acting_as(Actor("owner", ActorKind.USER)), empty_engine_db.engine.begin() as conn:
+        conn.execute(text("INSERT INTO CFG_CALENDARS (PROJECT_ID, CALENDAR_CODE) VALUES (1, 'UK')"))
+        conn.execute(
+            text(
+                "INSERT INTO CFG_CALENDAR_HOLIDAYS (CALENDAR_ID, HOLIDAY_DATE) "
+                "SELECT CALENDAR_ID, :day FROM CFG_CALENDARS"
+            ),
+            {"day": last},
+        )
+    assert found(run_checks(config))["Holiday list (calendar UK)"] == (
+        Status.WARN,
+        f"the holiday list ends on {last.isoformat()}, within 60 days; add the next year's "
+        "holidays to calendar_holidays.csv",
+    )

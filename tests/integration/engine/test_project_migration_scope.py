@@ -214,7 +214,8 @@ def test_the_documented_examples_apply_in_two_projects_of_one_engine_db(
         for example in sorted(EXAMPLES.glob("*.sql")):
             (folder / example.name).write_text(example.read_text())
         with acting_as(OWNER), selected_project(project_id):
-            assert len(migrations.apply_pending_migrations(engine_db.engine, folder)) == 6
+            applied = migrations.apply_pending_migrations(engine_db.engine, folder)
+            assert len(applied) == len(list(EXAMPLES.glob("*.sql")))
     with engine_db.engine.connect() as conn:
         counts = dict(
             conn.execute(

@@ -84,7 +84,7 @@
       "src/etl_craft/engine/repository/source_contracts.py": 7,
       "src/etl_craft/execution/gates.py": 11,
       "src/etl_craft/execution/interventions.py": 7,
-      "src/etl_craft/execution/pipeline.py": 13,
+      "src/etl_craft/execution/pipeline.py": 2,
       "src/etl_craft/execution/scheduler.py": 37,
       "src/etl_craft/services/catalog/collect.py": 26,
       "src/etl_craft/services/lineage.py": 35,

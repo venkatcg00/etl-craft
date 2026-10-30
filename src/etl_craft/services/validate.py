@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import ClassVar
 
 from sqlalchemy.engine import Connection, Engine
@@ -70,6 +70,11 @@ from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
 from etl_craft.handlers.sql.spec import WRITERS, SqlTask, read_sql_task
 from etl_craft.handlers.sql.tables import ENGINE_COLUMNS
 from etl_craft.handlers.sql.watermarks import source_pipelines
+from etl_craft.services.calendar_checks import (
+    VALIDATE_DAYS,
+    holiday_lists_ending,
+    schedule_problems,
+)
 from etl_craft.services.doctor import Status
 from etl_craft.services.lineage import (
     dialect_and_catalog,
@@ -215,7 +220,33 @@ def validate_on(
         problem = definition_problem(definition, dialect)
         if problem:
             report.fail(f"source {definition.table_name}.{definition.column_name}", problem)
-    for schedule in conn.execute(project_statement(conn, "active_schedule_definitions")):
+    _schedules(conn, config, report)
+    _pipelines(conn, config, data, report)
+    _dependencies(data, report)
+    _target_formats(config, data, report)
+    for task in data.tasks:
+        _task(conn, config, data, task, report)
+
+    def mine(where: str) -> bool:
+        return pipeline_code is None or where.split(".", 1)[0] == pipeline_code
+
+    report.findings = [f for f in report.findings if mine(f.where) or f.where.startswith("source ")]
+    report.pipelines = sum(1 for code in data.pipeline_codes if mine(code))
+    report.tasks = sum(1 for task in data.tasks if mine(task.label))
+    return report
+
+
+def _schedules(conn: Connection, config: ConnectorConfig, report: Report) -> None:
+    """Check each active schedule's settings, and the calendars schedules use."""
+    schedules = conn.execute(project_statement(conn, "active_schedule_definitions")).all()
+    if for_engine(conn).has_table(conn, "CFG_CALENDARS"):
+        now = datetime.now(UTC)
+        for where, problem in [
+            *holiday_lists_ending(conn, now, VALIDATE_DAYS),
+            *schedule_problems(conn, schedules, config.timezone, now),
+        ]:
+            report.fail(where, problem)
+    for schedule in schedules:
         zone = (
             schedule.schedule_timezone
             if schedule.schedule_timezone is not None
@@ -235,19 +266,6 @@ def validate_on(
                     schedule.pipeline_code,
                     f"{column}={value!r}: {error}; correct this pipeline's schedule settings",
                 )
-    _pipelines(conn, config, data, report)
-    _dependencies(data, report)
-    _target_formats(config, data, report)
-    for task in data.tasks:
-        _task(conn, config, data, task, report)
-
-    def mine(where: str) -> bool:
-        return pipeline_code is None or where.split(".", 1)[0] == pipeline_code
-
-    report.findings = [f for f in report.findings if mine(f.where) or f.where.startswith("source ")]
-    report.pipelines = sum(1 for code in data.pipeline_codes if mine(code))
-    report.tasks = sum(1 for task in data.tasks if mine(task.label))
-    return report
 
 
 def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, report: Report) -> None:

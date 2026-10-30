@@ -1,9 +1,15 @@
-"""Five-field cron ticks, with one firing through timezone gaps and overlaps."""
+"""Five-field cron ticks, with one firing through timezone gaps and overlaps.
+
+The day-of-month field may instead hold business-day rules, ``3BD`` (the third business day
+of the month) or ``LBD`` (the last), comma-separated, with day-of-week ``*``. Those need the
+pipeline's business calendar (``core.calendars``); ``next_after`` refuses them.
+"""
 
 from __future__ import annotations
 
 import calendar
-from datetime import UTC, datetime, timedelta
+import re
+from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -17,6 +23,7 @@ MACROS = {
     "@yearly": "0 0 1 1 *",
     "@annually": "0 0 1 1 *",
 }
+BUSINESS_DAY_TOKEN = re.compile(r"(?:[1-9]|1[0-9]|2[0-3])BD|LBD")
 
 
 def timezone(name: str) -> ZoneInfo:
@@ -29,13 +36,45 @@ def timezone(name: str) -> ZoneInfo:
         ) from error
 
 
+def _fields(expr: str) -> list[str]:
+    return MACROS.get(expr.strip().lower(), expr).upper().split()
+
+
+@lru_cache(maxsize=256)
+def business_rule(expr: str) -> tuple[frozenset[int], bool] | None:
+    """Return a business-day schedule's ordinals and whether ``LBD`` is set, or ``None``."""
+    fields = _fields(expr)
+    if len(fields) != 5:
+        return None
+    tokens = fields[2].split(",")
+    if not any(token.endswith("BD") for token in tokens):
+        return None
+    if not all(BUSINESS_DAY_TOKEN.fullmatch(token) for token in tokens):
+        raise MetadataError(
+            f"RUN_SCHEDULE={expr!r}: business-day rules are 1BD to 23BD or LBD, comma-separated; "
+            "correct the day-of-month field"
+        )
+    if fields[4] != "*":
+        raise MetadataError(
+            f"RUN_SCHEDULE={expr!r}: a business-day rule needs day-of-week '*'; the calendar "
+            "decides which days are business days"
+        )
+    ordinals = frozenset(int(token[:-2]) for token in tokens if token != "LBD")
+    return ordinals, "LBD" in tokens
+
+
 @lru_cache(maxsize=256)
 def parse(expr: str) -> tuple[tuple[tuple[int, ...], ...], bool]:
-    """Validate fields and return their sorted values and the day-field OR rule."""
-    fields = MACROS.get(expr.strip().lower(), expr).upper().split()
+    """Validate fields and return their sorted values and the day-field OR rule.
+
+    A business-day rule parses as every day of the month; ``business_rule`` narrows it.
+    """
+    fields = _fields(expr)
     try:
         if len(fields) != 5:
             raise ValueError("expected five fields")
+        if business_rule(expr) is not None:
+            fields[2] = "*"
         values = []
         for field, (low, high), names in zip(
             fields,
@@ -112,24 +151,45 @@ def next_after(expr: str, instant: datetime, tz: str | ZoneInfo) -> datetime:
     """
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise MetadataError("cron instant must include a timezone; supply an aware UTC datetime")
+    if business_rule(expr) is not None:
+        raise MetadataError(
+            f"RUN_SCHEDULE={expr!r} uses business days; name the pipeline's CALENDAR"
+        )
     zone = timezone(tz) if isinstance(tz, str) else tz
-    (minutes, hours, days, months, weekdays), day_or = parse(expr)
     day = instant.astimezone(zone).date()
     for _ in range(366 * 8 + 1):
-        dom, dow = day.day in days, (day.weekday() + 1) % 7 in weekdays
-        if day.month in months and ((dom or dow) if day_or else (dom and dow)):
-            for hour in hours:
-                for minute in minutes:
-                    wall = datetime(day.year, day.month, day.day, hour, minute)
-                    candidate = wall.replace(tzinfo=zone, fold=0).astimezone(UTC)
-                    while candidate.astimezone(zone).replace(tzinfo=None) != wall:
-                        wall += timedelta(minutes=1)
-                        candidate = wall.replace(tzinfo=zone, fold=0).astimezone(UTC)
-                    if candidate > instant.astimezone(UTC):
-                        return candidate
-        if day.year == 9999 and day.month == 12 and day.day == 31:
+        if matches_day(expr, day):
+            for candidate in day_ticks(expr, day, zone):
+                if candidate > instant.astimezone(UTC):
+                    return candidate
+        if day == date.max:
             break
         day += timedelta(days=1)
     raise MetadataError(
         f"RUN_SCHEDULE={expr!r}: no future tick in the Gregorian leap-day cycle; correct it"
     )
+
+
+def matches_day(expr: str, day: date) -> bool:
+    """Whether the schedule's month and day fields select ``day``."""
+    (_, _, days, months, weekdays), day_or = parse(expr)
+    dom, dow = day.day in days, (day.weekday() + 1) % 7 in weekdays
+    return day.month in months and ((dom or dow) if day_or else (dom and dow))
+
+
+def day_ticks(expr: str, day: date, zone: ZoneInfo) -> list[datetime]:
+    """Return the schedule's UTC instants on the wall-clock ``day``, in order.
+
+    A wall minute missing in a timezone gap fires at the next valid minute.
+    """
+    (minutes, hours, _, _, _), _ = parse(expr)
+    ticks = []
+    for hour in hours:
+        for minute in minutes:
+            wall = datetime(day.year, day.month, day.day, hour, minute)
+            candidate = wall.replace(tzinfo=zone, fold=0).astimezone(UTC)
+            while candidate.astimezone(zone).replace(tzinfo=None) != wall:
+                wall += timedelta(minutes=1)
+                candidate = wall.replace(tzinfo=zone, fold=0).astimezone(UTC)
+            ticks.append(candidate)
+    return ticks

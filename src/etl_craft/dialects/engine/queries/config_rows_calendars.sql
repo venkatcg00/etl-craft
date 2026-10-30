@@ -1,0 +1,1 @@
+SELECT CALENDAR_ID AS row_id, ACTIVE_FLAG AS active_flag, 'Y' AS well_formed, CALENDAR_CODE AS calendar_code, CALENDAR_NAME AS calendar_name, WEEKEND_DAYS AS weekend_days FROM CFG_CALENDARS WHERE PROJECT_ID=:project_id ORDER BY 1

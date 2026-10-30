@@ -1,0 +1,1 @@
+SELECT CALENDAR_ID AS calendar_id, NON_BUSINESS_DAY AS non_business_day FROM CFG_PIPELINES WHERE PIPELINE_ID=:pipeline_id

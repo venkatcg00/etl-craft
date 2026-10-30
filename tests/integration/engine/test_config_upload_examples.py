@@ -22,7 +22,15 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
         metadata_project.migrations,
     )
     examples = sorted(EXAMPLES.glob("*.sql"))
-    assert [path.name[:4] for path in examples] == ["0001", "0002", "0003", "0004", "0005", "0006"]
+    assert [path.name[:4] for path in examples] == [
+        "0001",
+        "0002",
+        "0003",
+        "0004",
+        "0005",
+        "0006",
+        "0007",
+    ]
     checked = []
     publish_id = None
     for example in examples:
@@ -41,7 +49,11 @@ def test_every_example_applies_in_order_and_validates(metadata_project):
             else:
                 assert current_id == publish_id
         checked.append((report.pipelines, report.tasks))
-    assert checked == [(1, 6), (2, 11), (4, 23), (4, 23), (4, 24), (3, 17)]
+    assert checked == [(1, 6), (2, 11), (4, 23), (4, 23), (4, 24), (3, 17), (3, 17)]
+    assert metadata_project.rows(
+        "SELECT p.PIPELINE_CODE AS code, c.CALENDAR_CODE AS calendar, p.NON_BUSINESS_DAY AS policy "
+        "FROM CFG_PIPELINES p JOIN CFG_CALENDARS c ON c.CALENDAR_ID = p.CALENDAR_ID"
+    ) == [("SALES_DAILY", "UK", "SKIP")]
 
     assert metadata_project.rows(
         "SELECT p.PIPELINE_CODE AS pipeline_code, t.TASK_CODE AS task_code, t.HANDLER AS handler "
