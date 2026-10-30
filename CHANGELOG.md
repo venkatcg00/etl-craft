@@ -255,6 +255,11 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Run zips: `etl-craft logs --pipeline-code CODE [--run-id | --run-key] --zip PATH`,
+  `GET /api/v1/projects/{project}/run-zip` and the run page's **Download run zip** stream one zip
+  with the run log, each attempt's log by task, the status, history and explain documents, and a
+  manifest that lists every file's size or why an attempt log could not be read.
+
 - The pipeline run log: `etl-craft logs --pipeline-code CODE [--run-id ID | --run-key KEY]`,
   `GET /api/v1/projects/{project}/run-log` and the run page's **Run log** view print one line per
   audited event of a run (start, each attempt's queue, retry due time, admission, start, end or

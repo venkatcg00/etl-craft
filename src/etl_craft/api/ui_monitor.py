@@ -284,8 +284,8 @@ def _run_values(
         "layout": layout,
         "timeline": timeline,
         "run_log": _run_log(caller, selection) if shown == "log" else None,
-        "run_log_api": f"/api/v1/projects/{quote(project, safe='')}/run-log?"
-        + urlencode({"pipeline_code": pipeline_code, "run_id": run_id}),
+        "run_query": urlencode({"pipeline_code": pipeline_code, "run_id": run_id}),
+        "project_api": f"/api/v1/projects/{quote(project, safe='')}",
         "task_code": task_code,
         "capabilities": capabilities,
         "panel": None if task_code is None else _task_panel(caller, selection, task_code),

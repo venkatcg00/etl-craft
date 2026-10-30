@@ -129,6 +129,12 @@ task, the actor who caused it where one did, and the event's values. It is rende
 audit tables, not written separately, so it matches `status`, `explain` and the audit, wherever
 the tasks ran. **Download run log** saves the same text as
 `etl-craft logs --pipeline-code CODE --run-id ID` and `GET /api/v1/projects/{project}/run-log`.
+**Download run zip** saves the whole run in one file: `run.log`, `status.json`,
+`history.json` (with the run's interventions), and per task `explain.json` and each attempt's
+log (`TASK/attempt-N.log`). `manifest.json` lists every file with its size; an attempt log that
+cannot be read here (removed by retention, not uploaded yet, or moved) is listed with that
+reason instead of being left out. `etl-craft logs --pipeline-code CODE --run-id ID --zip PATH`
+writes the same zip, and `GET /api/v1/projects/{project}/run-zip` serves it.
 
 ## Search
 

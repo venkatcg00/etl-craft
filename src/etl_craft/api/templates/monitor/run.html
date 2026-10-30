@@ -25,7 +25,7 @@
       <a href="{{ run_page }}?view=log{% if task_code %}&task={{ task_code|urlencode }}{% endif %}" {% if shown == 'log' %}aria-current="page"{% endif %}>Run log</a>
     </nav>
     {% if shown == 'log' %}
-    <div class="toolbar"><a class="button" href="{{ run_log_api }}" download="run-{{ run.pipeline_run_id }}.log">Download run log</a><span class="note">One line per audited event, in time order; the same text as <code>etl-craft logs --pipeline-code {{ run.pipeline_code }} --run-id {{ run.pipeline_run_id }}</code>.</span></div>
+    <div class="toolbar"><a class="button" href="{{ project_api }}/run-log?{{ run_query }}" download="run-{{ run.pipeline_run_id }}.log">Download run log</a> <a class="button" href="{{ project_api }}/run-zip?{{ run_query }}" download>Download run zip</a><span class="note">One line per audited event, in time order; the same text as <code>etl-craft logs --pipeline-code {{ run.pipeline_code }} --run-id {{ run.pipeline_run_id }}</code>.</span></div>
     <pre class="log" tabindex="0" aria-label="Run {{ run.pipeline_run_id }} log">{{ run_log }}</pre>
     {% elif shown == 'timeline' %}
     {% if timeline.lanes %}

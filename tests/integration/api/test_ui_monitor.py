@@ -313,6 +313,8 @@ def test_run_log_view_shows_the_run_log_read_and_links_its_download(monitor):
     shown = re.search(r'<pre class="log"[^>]*>(.*?)</pre>', page.text, re.S).group(1)
     assert html.unescape(shown) == expected
     link = f"/api/v1/projects/default/run-log?pipeline_code=OPS&amp;run_id={active}"
+    zipped = link.replace("run-log", "run-zip")
+    assert f'href="{zipped}" download>Download run zip' in page.text
     assert f'href="{link}" download="run-{active}.log"' in page.text
     selected = client.get(f"{BASE}/OPS/runs/{active}", params={"view": "log", "task": "EXTRACT"})
     assert f'href="{BASE}/OPS/runs/{active}?view=log&amp;task=LOAD"' in selected.text

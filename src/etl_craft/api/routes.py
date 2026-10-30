@@ -28,6 +28,7 @@ from etl_craft.services.operations.action_types import Action
 from etl_craft.services.operations.actions import ACTIONS, action_path, invoke
 from etl_craft.services.operations.catalog_pages import CatalogPage
 from etl_craft.services.operations.identity import authenticated_context
+from etl_craft.services.operations.run_zip import RunZip
 from etl_craft.services.operations.tokens import authenticate
 
 BEARER = HTTPBearer(auto_error=False)
@@ -161,6 +162,12 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
                 media_type=result.content_type,
                 headers={"X-Content-Type-Options": "nosniff"},
                 background=BackgroundTask(result.close),
+            )
+        if isinstance(result, RunZip):
+            return StreamingResponse(
+                result,
+                media_type=RunZip.CONTENT_TYPE,
+                headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
             )
         assert isinstance(result, Iterator)
         return StreamingResponse(result, media_type="text/plain")
