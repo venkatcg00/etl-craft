@@ -322,6 +322,16 @@ def refuse_null_keys(
         )
 
 
+def refuse_empty(session: Session, source: int, task_code: str) -> None:
+    """Fail an ``ALLOW_EMPTY=false`` replacement whose SELECT returned no rows, before writing."""
+    if source == 0:
+        raise SqlGuardError(
+            f"task {task_code}: {session.action} {session.target}: the SELECT returned no rows "
+            "and ALLOW_EMPTY is false, so the target was left unchanged; fix the source, or set "
+            "ALLOW_EMPTY=true to replace the target with no rows"
+        )
+
+
 def dedupe(
     session: Session,
     stage: str,

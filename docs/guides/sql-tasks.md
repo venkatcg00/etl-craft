@@ -224,6 +224,11 @@ an Iceberg catalog cannot create views there, so the task fails; keep the result
 then protects publication using the strategy below. A rejected SELECT or a failed publication
 retains the old rows; successful replacements report the staged row count.
 
+A replacement whose SELECT returns no rows empties the target, which is right for a source
+that can be empty. Where an empty result means the source failed, set `ALLOW_EMPTY = false`:
+the task then fails before the target changes, naming the task and target, and the last good
+rows stay. `CREATE_TABLE` does not create a missing target from an empty SELECT either.
+
 | Warehouse | Publication strategy |
 |---|---|
 | PostgreSQL and native DuckDB | The replacement runs inside one transaction. An exception rolls back the old rows and definition. `CREATE_TABLE` carries the table comment; it refuses partitioned PostgreSQL parents. |
@@ -403,6 +408,7 @@ GROUP BY REJECT_COLUMN, REJECT_REASON;
 | `REJECT_LIMIT` | `APPEND_TABLE`, `OVERWRITE_TABLE` and the merges | the most rows, such as `100`, or the share of the SELECT's rows, such as `0.5%`, set aside in `<target>__rejects` rather than failing the task; see [Rows set aside](#rows-set-aside) |
 | `SKIP_REJECTS_OVER_LIMIT` | with `REJECT_LIMIT` | `true` writes nothing, rejects included, when more rows do not fit than the limit allows; otherwise they are still set aside. The task fails either way |
 | `SETUP_FOR` | `SETUP_TABLE` | the action whose audit columns the table gets: `CREATE_TABLE`, `OVERWRITE_TABLE`, `APPEND_TABLE`, `SCD1_MERGE` or `SCD2_MERGE` |
+| `ALLOW_EMPTY` | `CREATE_TABLE`, `OVERWRITE_TABLE` | `false` fails the task, before the target changes, when the SELECT returns no rows; absent or `true` replaces the target with no rows. See [Replacement failures](#replacement-failures-and-table-properties) |
 | `SCHEMA_EVOLUTION` | `OVERWRITE_TABLE` and the merges | `true` appends nullable columns the SELECT returns but the target lacks, with their complete types |
 | `PRESERVE_TARGET` | `SCD1_MERGE` | `true` keeps the target's value where the SELECT returns NULL |
 | `HARD_DELETE` | `DELETE_ROWS` | `true` deletes rows instead of flagging them |

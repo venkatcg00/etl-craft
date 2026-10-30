@@ -18,6 +18,7 @@ from etl_craft.handlers.sql.tables import (
     check_column_names,
     create_declared_target,
     create_target_shape,
+    refuse_empty,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,11 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
     identity = session.dialect.identity_in_create
     source = (
         None
-        if identity and session.dialect.dml_rowcounts
+        if identity and session.dialect.dml_rowcounts and action.task.allow_empty
         else session.count(f"SELECT COUNT(*) FROM {stage}", step="source rows")
     )
+    if source is not None and not action.task.allow_empty:
+        refuse_empty(session, source, action.context.task_code)
     existing = bool(session.target_columns())
     strategy = session.dialect.replace_strategy
     computed = session.dialect.surrogate_key == "computed"
@@ -142,6 +145,8 @@ def _replace_identity(session: Session, stage: str, select_sql: str, existing: b
 def _create_new_table(session: Session, action: ActionContext) -> HandlerResult | None:
     """Create a new transactional table without a replacement stage or key alterations."""
     if session.target_columns() or action.staged is not None or action.task.watermark is not None:
+        return None
+    if not action.task.allow_empty:
         return None
     if any(session.params.get(key) for key in ("EXTERNAL_LOCATION", "BASE_LOCATION")):
         return None

@@ -236,6 +236,10 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- `ALLOW_EMPTY` task parameter for `CREATE_TABLE` and `OVERWRITE_TABLE`. With `false`, a SELECT
+  that returns no rows fails the task before the target changes, naming the task, the target
+  and the remedy. Absent or `true` keeps today's behaviour: the target is replaced with no rows.
+
 - Table-level business rules: optional `BUSINESS_RULE_LEVEL=TABLE` records one exact `Y`/`N`
   result and optional `OBSERVED`/`DETAIL` text per run, without per-row flags. `REJECT` fails
   the task; `REPORT` continues. Status, explain, run/history reads and catalog table pages

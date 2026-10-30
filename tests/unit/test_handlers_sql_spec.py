@@ -165,6 +165,17 @@ def test_drop_table_takes_no_select(project):
         ),
         (
             {
+                "SQL_ACTION": "APPEND_TABLE",
+                "TARGET_OBJECT": "s.t",
+                "SELECT_QUERY": "SELECT 1",
+                "ALLOW_EMPTY": "false",
+            },
+            "ALLOW_EMPTY applies only to CREATE_TABLE, OVERWRITE_TABLE, not "
+            "SQL_ACTION=APPEND_TABLE",
+        ),
+        ({**BASE, "SELECT_QUERY": "SELECT 1", "ALLOW_EMPTY": "N"}, "must be true or false"),
+        (
+            {
                 "SQL_ACTION": "CREATE_VIEW",
                 "TARGET_OBJECT": "s.v",
                 "SELECT_QUERY": "SELECT 1",
@@ -465,3 +476,13 @@ def test_a_bounded_source_position_is_not_a_business_compare_column(project):
                 WATERMARK_START="2000-01-01T00:00:00+00:00",
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("written", "allowed"), [(None, True), ("", True), ("true", True), ("FALSE", False)]
+)
+def test_allow_empty_defaults_to_true(project, written, allowed):
+    params = {**BASE, "SELECT_QUERY": "SELECT 1"}
+    if written is not None:
+        params["ALLOW_EMPTY"] = written
+    assert read_sql_task(context(project, **params)).allow_empty is allowed
