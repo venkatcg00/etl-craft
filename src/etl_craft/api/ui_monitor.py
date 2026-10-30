@@ -4,8 +4,9 @@ Each view renders S5.AA read actions with the filters as their parameters; contr
 same `/api/v1` routes as the CLI, and the page only shows what the capabilities read allows.
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
@@ -43,7 +44,7 @@ from etl_craft.services.operations.search import SearchHit, SearchInput, SearchV
 from etl_craft.services.operations.sessions import Identity
 
 PIPELINE_TABS = frozenset({"runs", "matrix", "tasks"})
-RUN_VIEWS = frozenset({"graph", "timeline"})
+RUN_VIEWS = frozenset({"graph", "timeline", "log"})
 
 
 def pipeline_url(project: str, pipeline_code: str) -> str:
@@ -234,7 +235,7 @@ def _run_values(
     task_code = request.query_params.get("task") or None
     shown = request.query_params.get("view", "graph")
     if shown not in RUN_VIEWS:
-        raise UsageError(f"view={shown!r}; expected graph or timeline; open the graph")
+        raise UsageError(f"view={shown!r}; expected graph, timeline or log; open the graph")
     run = invoke(caller, ActionName.RUN_DETAIL, RunId(run_id=run_id))
     assert isinstance(run, RunView)
     if run.pipeline_code != pipeline_code:
@@ -252,7 +253,7 @@ def _run_values(
     )
     assert isinstance(capabilities, CapabilitiesView)
     page = run_url(project, pipeline_code, run_id)
-    view_part = "" if shown == "graph" else "view=timeline&"
+    view_part = "" if shown == "graph" else f"view={shown}&"
 
     def select(code: str) -> str:
         return f"{page}?{view_part}task={quote(code, safe='')}"
@@ -282,6 +283,9 @@ def _run_values(
         "select": select,
         "layout": layout,
         "timeline": timeline,
+        "run_log": _run_log(caller, selection) if shown == "log" else None,
+        "run_log_api": f"/api/v1/projects/{quote(project, safe='')}/run-log?"
+        + urlencode({"pipeline_code": pipeline_code, "run_id": run_id}),
         "task_code": task_code,
         "capabilities": capabilities,
         "panel": None if task_code is None else _task_panel(caller, selection, task_code),
@@ -318,6 +322,13 @@ def _attempt_values(
         "run_page": run_url(project, pipeline_code, run_id),
         "pipeline_page": pipeline_url(project, pipeline_code),
     }
+
+
+def _run_log(caller: OperationContext, selection: RunSelection) -> str:
+    """Read the run's log, rendered from the audit tables, for the page."""
+    chunks = invoke(caller, ActionName.RUN_LOG, selection)
+    assert isinstance(chunks, Iterator)
+    return b"".join(chunks).decode()
 
 
 def _task_panel(

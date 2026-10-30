@@ -2,7 +2,7 @@
 
 import pytest
 
-from etl_craft.core import enums, enums_access
+from etl_craft.core import enums, enums_access, enums_logs
 from etl_craft.core.enums import RunStatus
 
 pytestmark = pytest.mark.unit
@@ -11,6 +11,27 @@ EXPECTED = {
     enums.Theme: {"system", "light", "dark"},
     enums.TimeDisplay: {"relative", "absolute"},
     enums.SearchKind: {"PIPELINE", "TASK", "TABLE", "RUN"},
+    enums_logs.RunLogCode: {
+        "RUN_STARTED",
+        "TASK_QUEUED",
+        "TASK_RETRY_DUE",
+        "TASK_ADMITTED",
+        "TASK_STARTED",
+        "TASK_CANCEL_REQUESTED",
+        "TASK_CANCEL_ACKNOWLEDGED",
+        "TASK_ENDED",
+        "TASK_LOST",
+        "TASK_SETTLED",
+        "WAIT_OPENED",
+        "GATE_DECIDED",
+        "CONTROL_REQUESTED",
+        "CONTROL_ACKNOWLEDGED",
+        "CONTROL_COMPLETED",
+        "INTERVENTION",
+        "SLA_BREACHED",
+        "SLA_MET",
+        "RUN_ENDED",
+    },
     enums.BusinessRuleLevel: {"ROW", "TABLE"},
     enums.ScriptKind: {"INGESTION", "UTILITY"},
     enums_access.EnvironmentType: {"DEV", "SIT", "UAT", "PROD", "SANDBOX", "CUSTOM"},
@@ -207,7 +228,7 @@ def test_enum_values_match_the_stored_values(enum):
 def test_every_enum_in_the_module_is_checked():
     defined = {
         obj
-        for module in (enums, enums_access)
+        for module in (enums, enums_access, enums_logs)
         for obj in vars(module).values()
         if isinstance(obj, type) and issubclass(obj, enums.StrEnum) and obj is not enums.StrEnum
     }

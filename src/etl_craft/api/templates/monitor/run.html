@@ -22,8 +22,12 @@
     <nav class="tabs" aria-label="Run views">
       <a href="{{ run_page }}{% if task_code %}?task={{ task_code|urlencode }}{% endif %}" {% if shown == 'graph' %}aria-current="page"{% endif %}>Graph</a>
       <a href="{{ run_page }}?view=timeline{% if task_code %}&task={{ task_code|urlencode }}{% endif %}" {% if shown == 'timeline' %}aria-current="page"{% endif %}>Timeline</a>
+      <a href="{{ run_page }}?view=log{% if task_code %}&task={{ task_code|urlencode }}{% endif %}" {% if shown == 'log' %}aria-current="page"{% endif %}>Run log</a>
     </nav>
-    {% if shown == 'timeline' %}
+    {% if shown == 'log' %}
+    <div class="toolbar"><a class="button" href="{{ run_log_api }}" download="run-{{ run.pipeline_run_id }}.log">Download run log</a><span class="note">One line per audited event, in time order; the same text as <code>etl-craft logs --pipeline-code {{ run.pipeline_code }} --run-id {{ run.pipeline_run_id }}</code>.</span></div>
+    <pre class="log" tabindex="0" aria-label="Run {{ run.pipeline_run_id }} log">{{ run_log }}</pre>
+    {% elif shown == 'timeline' %}
     {% if timeline.lanes %}
     <div class="graph scroll">
       <svg class="timeline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{ timeline.label_width + timeline.width + 10 }} {{ timeline.height }}" width="{{ timeline.label_width + timeline.width + 10 }}" height="{{ timeline.height }}" role="group" aria-label="Attempts of run {{ run.pipeline_run_id }} from {{ timeline.start|zoned(settings.timezone) }} to {{ timeline.end|zoned(settings.timezone) }}">

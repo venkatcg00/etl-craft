@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 3a of 6 | #277, #281, #282, #283, slice 3a PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a) |
+| S7.A Web UI pages | In progress, slice 3b of 6 | #277, #281, #282, #283, #284, slice 3b PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
@@ -915,6 +915,15 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.A slice 3b (owner, 2026-10-30: "Add SLA_BREACHED_AT"): the audit already recorded every run
+  event S7.A.3 lists except when an SLA breach was detected; migration 0076 adds
+  `AUD_PIPELINES_RUN_LOG.SLA_BREACHED_AT`, set by the breach mark and by run endings past the
+  SLA. The run log is one `run log` read action (CLI `logs --pipeline-code` with a run selector,
+  API `/run-log`, the run page's Run log view) reading six run-scoped queries in one snapshot.
+  "Admitted" is the attempt's claim; a task run that ended without attempts (skipped, marked) is
+  `TASK_SETTLED`. Pipeline pauses and fan-out items are not run events in S7.A.3 and stay out.
+  The page's Run log view refreshes with the run page's live stream, which re-reads the run and
+  its steps; a control acknowledgement alone does not refresh it.
 - S7.A slice 3 is split. 3a: the attempt page (facts, live log tail, download) over the existing
   `attempt` and `logs` reads; the tail reads the log once, keeps the last 256 KiB on screen and
   then asks for bytes after its offset. 3b: the pipeline run log rendered from the audit tables,
