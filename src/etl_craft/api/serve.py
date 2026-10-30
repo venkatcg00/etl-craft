@@ -13,6 +13,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from etl_craft.api.app import create_app
+from etl_craft.api.console import Console
 from etl_craft.api.gateway import Gateway
 from etl_craft.config.model import parse_api_address
 from etl_craft.controller.supervisor import serve
@@ -21,7 +22,13 @@ from etl_craft.engine.metrics import install
 from etl_craft.services.operations.context import OperationContext
 
 
-def serve_http(ctx: OperationContext, stop: threading.Event, *, controller: bool = True) -> None:
+def serve_http(
+    ctx: OperationContext,
+    stop: threading.Event,
+    *,
+    controller: bool = True,
+    console: Console | None = None,
+) -> None:
     """Bind HTTP before taking leadership, then share the process shutdown lifecycle."""
     install(ctx.engine)
     host, port = parse_api_address(ctx.config.api_address)
@@ -78,19 +85,9 @@ def serve_http(ctx: OperationContext, stop: threading.Event, *, controller: bool
             if thread is not None:
                 await asyncio.to_thread(thread.join)
 
-    app = create_app(ctx, gateway=gateway)
+    app = create_app(ctx, gateway=gateway, console=console)
     app.router.lifespan_context = lifespan
-    server = StoppableServer(
-        uvicorn.Config(
-            app,
-            host=host,
-            port=port,
-            log_config=None,
-            access_log=False,
-            timeout_graceful_shutdown=ctx.config.limits.shutdown_grace_seconds if controller else 0,
-            proxy_headers=False,
-        )
-    )
+    server = StoppableServer(_server_config(app, (host, port), ctx, controller=controller))
     try:
         server.run(sockets=[listener])
     finally:
@@ -99,3 +96,18 @@ def serve_http(ctx: OperationContext, stop: threading.Event, *, controller: bool
         listener.close()
         if errors:
             raise errors[0]
+
+
+def _server_config(
+    app: FastAPI, address: tuple[str, int], ctx: OperationContext, *, controller: bool
+) -> uvicorn.Config:
+    """Configure uvicorn: no access log or proxy headers; the controller drains on shutdown."""
+    return uvicorn.Config(
+        app,
+        host=address[0],
+        port=address[1],
+        log_config=None,
+        access_log=False,
+        timeout_graceful_shutdown=ctx.config.limits.shutdown_grace_seconds if controller else 0,
+        proxy_headers=False,
+    )

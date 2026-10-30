@@ -27,6 +27,9 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--since", type=datetime.fromisoformat, help="Changes since an ISO date or timestamp."
     )
+    parser.add_argument(
+        "--mine", action="store_true", help="Only your own requests, without metadata changes."
+    )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:

@@ -162,6 +162,23 @@ and on what schedule. **Check now** runs the comparison and rebuilds the catalog
 developer role, and is disabled when the project turns on-demand checks off). Until a check
 has run, the states come from the declared metadata only and most read Unchecked.
 
+## Command console
+
+**Console** in the sidebar is the etl-craft CLI in the browser. Type a command line as you
+would in a terminal (`pipelines`, `status --pipeline-code ORDERS`, `pause --pipeline-code
+ORDERS --reason maintenance`, `--format json` for JSON): it runs in the selected project as
+you, through the same actions and checks as the CLI and the API, and prints the CLI's own text,
+errors and exit code. Tab completes commands and flags, ↑ and ↓ recall earlier lines, and
+`help` or `COMMAND --help` prints the usage.
+
+The console lists the commands your account role or pipeline grants can run; each command is
+still checked when it runs. It never runs host commands (`controller`, `migrate`, `ui`), never
+edits config files (`config`, `rename`), never signs in, never reads or writes a file on the
+server (options such as `--zip` or `--output`), and never prompts for a password: use the CLI
+for those. **Your recent requests** lists your audited requests (`audit --mine`); reads are not
+recorded. The console is available in servers started with `etl-craft ui` or
+`etl-craft controller`.
+
 ## Search
 
 The search box in the top bar (press `/` or Ctrl+K) finds pipelines and tasks by any part of

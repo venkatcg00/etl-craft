@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 4 of 6 | #277, #281, #282, #283, #284, #285, #286, slice 4 PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4) |
+| S7.A Web UI pages | In progress, slice 5 of 6 | #277, #281, #282, #283, #284, #285, #286, #287, slice 5 PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4); command console (5) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.AK Schema checker | Done | S7.AK PR | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
@@ -916,6 +916,15 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
 
 **Choices that differ from the item text.**
 
+- S7.A slice 5: the console runner lives in the CLI (`cli/console.py`) and is handed to the
+  server by `etl-craft ui` and `etl-craft controller` (`api/console.py` holds only its types),
+  so the API never imports the CLI. It runs each line in-process as the signed-in caller through
+  the same `invoke` the API route uses, rather than an HTTP round trip, with identical checks and
+  audit. A command is listed when its role or a pipeline grant allows at least one of its
+  actions; each call is still checked. The CLI has no interactive reason or confirmation prompts
+  (STRICT refuses a missing `--reason` with its message), so neither has the console; password
+  prompts are refused. The history panel is `audit --mine`: audited requests only, because
+  reads are not recorded.
 - S7.AK: the check is `generate-docs --with-warehouse`; the controller runs it as the system
   actor on the project's schedule, so the dated result is the catalog's `gaps.json`, which
   Insights reads through the catalog reader (whole-project viewers; others see the

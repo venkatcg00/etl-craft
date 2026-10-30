@@ -20,8 +20,9 @@ def _run(args: argparse.Namespace, out: Output) -> int:
         ctx = replace(ctx, shutdown=stop, child=replace(ctx.child, cancel=stop))
         with connection_process(ctx, ProcessRole.UI) as ctx:
             from etl_craft.api.serve import serve_http
+            from etl_craft.cli.console import console
 
-            serve_http(ctx, stop, controller=False)
+            serve_http(ctx, stop, controller=False, console=console())
     return ExitCode.SUCCESS
 
 

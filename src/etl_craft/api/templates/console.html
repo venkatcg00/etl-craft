@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/console.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <span aria-current="page">Console</span></nav>
+<h1>Command console</h1>
+{% if available %}
+<p class="note">Type an <code>etl-craft</code> command as you would in a terminal; it runs in project {{ project.project }} as you, through the same actions as the CLI, and prints the CLI's output (<code>--format json</code> for JSON). Tab completes commands and flags; ↑ and ↓ recall lines. Host commands, config files, sign-in and server files stay in the CLI.</p>
+<section class="console panel" aria-labelledby="console-title" data-run-url="/ui/projects/{{ project.project|urlencode }}/console" data-history-url="/api/v1/projects/{{ project.project|urlencode }}/audit?mine=true" data-completions="{{ completions }}">
+  <h2 id="console-title" class="sr-only">Console</h2>
+  <pre id="console-output" class="log" role="log" aria-live="polite" tabindex="0">etl-craft console · project {{ project.project }} · type help for the commands you can run
+</pre>
+  <form id="console-form" class="console-line" autocomplete="off">
+    <label for="console-input"><span aria-hidden="true">$ etl-craft</span><span class="sr-only">Command</span></label>
+    <input id="console-input" name="line" spellcheck="false" autocapitalize="off" maxlength="4096" aria-describedby="console-hint">
+    <button type="submit">Run</button>
+  </form>
+  <p id="console-hint" class="note">Example: <code>status --pipeline-code ORDERS</code></p>
+</section>
+<div class="monitor">
+<section class="panel" aria-labelledby="commands-title">
+  <h2 id="commands-title">Commands you can run here</h2>
+  <ul class="command-list">{% for name in commands|sort %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+</section>
+<section class="panel" aria-labelledby="history-title">
+  <h2 id="history-title">Your recent requests</h2>
+  <p class="note">Your requests that changed something, from the audit (<code>audit --mine</code>); reads are not recorded.</p>
+  <ul id="console-history"><li class="note">Loading…</li></ul>
+</section>
+</div>
+{% else %}
+<p class="panel">The console runs in servers started with <code>etl-craft ui</code> or <code>etl-craft controller</code>.</p>
+{% endif %}
+{% endblock %}

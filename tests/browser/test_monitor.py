@@ -243,3 +243,27 @@ def test_attempt_log_follows_new_lines_until_the_attempt_ends(run_site):
             transitions.finish_attempt(conn, attempt, AttemptStatus.SUCCESS, owner, owner="w1")
         expect(page.locator("#log-state")).to_contain_text("Attempt ended SUCCESS")
         browser.close()
+
+
+def test_console_completes_runs_and_recalls_a_command(run_site):
+    _, url, _ = run_site
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_context(ignore_https_errors=True).new_page()
+        sign_in_to(page, url, "/ui/projects/default/console")
+        page.wait_for_url("**/ui/projects/default/console")
+        page.wait_for_load_state("load")
+        line = page.get_by_role("textbox", name="Command")
+        line.fill("pipel")
+        line.press("Tab")
+        expect(line).to_have_value("pipelines ")
+        line.press("Enter")
+        output = page.get_by_role("log")
+        expect(output).to_contain_text("$ etl-craft pipelines")
+        expect(output).to_contain_text("OPS")
+        line.fill("controller")
+        line.press("Enter")
+        expect(output).to_contain_text("not a command you can run in the console")
+        line.press("ArrowUp")
+        expect(line).to_have_value("controller")
+        browser.close()

@@ -9,6 +9,7 @@ import pytest
 import uvicorn
 
 from etl_craft.api.app import create_app
+from etl_craft.cli.console import console
 from etl_craft.core.actor import SYSTEM_ACTOR, Actor, ActorKind, acting_as
 from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.engine.schema import init_db
@@ -68,7 +69,10 @@ def site(tmp_path, request):
     port = listener.getsockname()[1]
     server = Server(
         uvicorn.Config(
-            create_app(ctx), ssl_keyfile=str(key), ssl_certfile=str(cert), log_level="error"
+            create_app(ctx, console=console()),
+            ssl_keyfile=str(key),
+            ssl_certfile=str(cert),
+            log_level="error",
         )
     )
     thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)

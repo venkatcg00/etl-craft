@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from dataclasses import replace
 from datetime import datetime
 from functools import partial
@@ -17,6 +16,7 @@ from etl_craft.cli.commands.common import (
 )
 from etl_craft.cli.commands.control_requests import render_bulk
 from etl_craft.cli.output import Output
+from etl_craft.cli.prompts import can_prompt
 from etl_craft.core.enums import (
     MARKABLE_STATUSES,
     ActionName,
@@ -98,7 +98,7 @@ def _run(args: argparse.Namespace, out: Output, *, action: ControlAction) -> int
                     outcome.error
                     and "scheduled resume requires" in outcome.error
                     and request.then is None
-                    and sys.stdin.isatty()
+                    and can_prompt()
                 ):
                     outcome = replace(outcome, control=_single(args, out, request), error=None)
                 outcomes.append(outcome)
@@ -126,7 +126,7 @@ def _single(
             request.action == ControlAction.RESUME
             and request.then is None
             and request.task_code is None
-            and sys.stdin.isatty()
+            and can_prompt()
             and "scheduled resume requires" in str(error)
         ):
             raise
