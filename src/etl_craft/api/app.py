@@ -23,6 +23,7 @@ from etl_craft.api.ui_live import add_live_route
 from etl_craft.api.ui_monitor import add_monitor_pages
 from etl_craft.api.ui_operations import add_operations_pages
 from etl_craft.api.ui_pages import add_pages
+from etl_craft.api.ui_tasks import add_task_pages
 from etl_craft.core.errors import (
     EtlCraftError,
     MetadataError,
@@ -86,6 +87,7 @@ def create_app(
     add_console_page(app, ctx, console)
     add_admin_pages(app, ctx)
     add_operations_pages(app, ctx)
+    add_task_pages(app, ctx)
     add_login_routes(app, ctx)
     routed = frozenset(name for name, action in ACTIONS.items() if action.path is not None)
     add_action_routes(app, ctx, routed - SIGN_IN)

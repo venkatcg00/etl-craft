@@ -261,6 +261,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Browser task page (from a pipeline's Tasks tab or search): the task's last runs with rows in,
+  inserted, updated, deleted and rejected, duration and rows per second, and its stored offset
+  or watermark with a Reset for operators (the same request as `mark --offset|--watermark`).
+  `etl-craft offset --pipeline-code P --task-code T` and `GET /api/v1/projects/{project}/offset`
+  read the stored position. The **Uploads** page lists the pipelines you may upload to, uploads
+  one file and shows each file's state, run and reason. The sidebar groups its links under
+  Platform, the selected project and You.
+
 - Stewardship upload service, `etl-craft upload` and `etl-craft uploads`, multipart upload,
   history and eligible-pipeline API reads, durable batching and per-file `AUD_UPLOADS` feedback.
 - Pipeline `STEWARDABLE_FLAG` (default N) lists a pipeline for uploads; it otherwise runs like

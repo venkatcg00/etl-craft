@@ -220,6 +220,21 @@ etl-craft announce list --all
 etl-craft announce end --announcement-id 3 --reason "upgrade finished"
 ```
 
+## Tasks and uploads
+
+Select a task on a pipeline's **Tasks** tab (or find it with search) to open its page: its last
+runs with the rows read, inserted, updated, deleted and rejected, how long each took and rows
+per second, and the success count. An ingestion Python task shows its stored **Offset** and a
+watermarked SQL task its **Watermark**; operators can reset it, and the next run starts from
+the new value (the same request as `etl-craft mark --offset` or `--watermark`). `etl-craft offset
+--pipeline-code P --task-code T` prints the stored value.
+
+**Uploads** lists the pipelines that take files from you (`STEWARDABLE_FLAG=Y` and a
+`CAN_UPLOAD` grant). Choose one, pick a file and select **Upload**; the receipt says which run
+validates and loads it, or which run it waits behind. The table below lists the pipeline's
+recent files with their state, run and the validation reason for a refused file. See
+[Stewardship uploads](stewardship.md).
+
 ## Operations
 
 **System health** in the sidebar shows whether a controller is running (no heartbeat in the

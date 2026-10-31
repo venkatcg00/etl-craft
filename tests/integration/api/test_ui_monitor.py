@@ -249,8 +249,8 @@ def test_search_page_lists_the_search_reads_hits_with_links_to_their_pages(monit
     links = re.findall(r'<td><a href="([^"]+)">([^<]+)</a>', page.text)
     assert [label for _, label in links] == [hit["label"] for hit in hits]
     assert set(links) == {
-        ("/ui/projects/default/pipelines/SALES?tab=tasks", "EXTRACT"),
-        ("/ui/projects/default/pipelines/OPS?tab=tasks", "EXTRACT"),
+        ("/ui/projects/default/pipelines/SALES/tasks/EXTRACT", "EXTRACT"),
+        ("/ui/projects/default/pipelines/OPS/tasks/EXTRACT", "EXTRACT"),
     }
     run = client.get("/ui/projects/default/search", params={"q": str(active)})
     assert f'href="{BASE}/OPS/runs/{active}"' in run.text

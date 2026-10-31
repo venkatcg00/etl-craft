@@ -55,6 +55,8 @@ required = [
     "etl_craft/api/templates/insights.html",
     "etl_craft/api/templates/console.html",
     "etl_craft/api/templates/admin.html",
+    "etl_craft/api/templates/uploads.html",
+    "etl_craft/api/templates/monitor/task.html",
     "etl_craft/api/templates/operations/system.html",
     "etl_craft/api/templates/operations/agents.html",
     "etl_craft/api/templates/operations/scheduled.html",
@@ -62,6 +64,7 @@ required = [
     "etl_craft/api/templates/monitor/items.html",
     "etl_craft/api/static/console.js",
     "etl_craft/api/static/admin.js",
+    "etl_craft/api/static/uploads.js",
     "etl_craft/api/static/htmx.min.js",
     "etl_craft/api/static/htmx.LICENSE",
 ]

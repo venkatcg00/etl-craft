@@ -34,6 +34,7 @@ EXPECTED = {
         "RUN_ENDED",
     },
     enums.BusinessRuleLevel: {"ROW", "TABLE"},
+    enums.PositionKind: {"OFFSET", "WATERMARK"},
     enums.ScriptKind: {"INGESTION", "UTILITY"},
     enums_access.EnvironmentType: {"DEV", "SIT", "UAT", "PROD", "SANDBOX", "CUSTOM"},
     enums_access.Governance: {"STRICT", "RELAXED"},
