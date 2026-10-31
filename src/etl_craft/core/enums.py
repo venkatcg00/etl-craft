@@ -318,6 +318,9 @@ class ActionName(StrEnum):
     ABOUT = "about"
     CATALOG_PAGE = "catalog page"
     ACCOUNT_UNLOCK = "account unlock"
+    ANNOUNCE_ADD = "announce add"
+    ANNOUNCE_LIST = "announce list"
+    ANNOUNCE_END = "announce end"
     PASSWORD_CHANGE = "account change-password"
     ACCOUNT_SETTINGS = "account settings"
     ACCOUNT_LIST = "account list"
@@ -773,27 +776,3 @@ class IcebergMaintenance(StrEnum):
 
     EXPIRE_SNAPSHOTS = "expire_snapshots"
     REMOVE_ORPHAN_FILES = "remove_orphan_files"
-
-
-class Theme(StrEnum):
-    """System-selected appearance or an explicit override."""
-
-    SYSTEM = "system"
-    LIGHT = "light"
-    DARK = "dark"
-
-
-class TimeDisplay(StrEnum):
-    """Display an instant relatively or as an absolute zoned time."""
-
-    RELATIVE = "relative"
-    ABSOLUTE = "absolute"
-
-
-class SearchKind(StrEnum):
-    """The kinds of object one search box finds."""
-
-    PIPELINE = "PIPELINE"
-    TASK = "TASK"
-    TABLE = "TABLE"
-    RUN = "RUN"

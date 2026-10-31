@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy import text
 
 from etl_craft.core.actor import Actor, ActorKind, acting_as
-from etl_craft.core.enums import ActionName, ApiRole, SearchKind
+from etl_craft.core.enums import ActionName, ApiRole
+from etl_craft.core.enums_ui import SearchKind
 from etl_craft.core.errors import UsageError
 from etl_craft.services.operations import OperationContext
 from etl_craft.services.operations.identity import authenticated_context

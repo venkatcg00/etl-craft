@@ -84,6 +84,7 @@ AUDIT_TABLES = frozenset(
         "AUD_TEAM_TABLES",
         "AUD_CFG_CALENDARS_HISTORY",
         "AUD_CFG_CALENDAR_HOLIDAYS_HISTORY",
+        "AUD_ANNOUNCEMENTS",
     }
 )
 

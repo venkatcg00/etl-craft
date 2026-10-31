@@ -1,6 +1,6 @@
 """Registered accounts, administrator controls and local writer-credential recovery."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import ClassVar
 
@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from etl_craft.core.actor import Actor, ActorKind
 from etl_craft.core.enums import AccountKind, ApiRole, YesNo
 from etl_craft.core.errors import UsageError
+from etl_craft.core.time import as_utc
 from etl_craft.dialects.engine import for_engine
 from etl_craft.engine import locks
 from etl_craft.engine.queries import statement
@@ -30,6 +31,9 @@ class Account:
     email: str | None
     oidc_subject: str | None
     active_flag: YesNo
+    failed_signins: int = 0
+    locked_at: datetime | None = None
+    last_signin_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -136,11 +140,37 @@ def has_admin(engine: Engine) -> bool:
 
 
 def list_accounts(ctx: OperationContext, request: NoInput) -> Accounts:
-    """List accounts, including disabled identities retained for audit history."""
+    """List accounts with their sign-in state, including disabled identities kept for audit."""
+    with ctx.engine.connect() as conn:
+        state = {
+            row["account_id"]: row
+            for row in conn.execute(statement(conn, "account_signin_state")).mappings()
+        }
+    return Accounts(
+        tuple(
+            replace(
+                account,
+                failed_signins=int(state[account.account_id]["failed_signins"]),
+                locked_at=_instant(state[account.account_id]["locked_at"]),
+                last_signin_at=_instant(state[account.account_id]["last_signin_at"]),
+            )
+            for account in _accounts(ctx).accounts
+        )
+    )
+
+
+def _accounts(ctx: OperationContext) -> Accounts:
+    """List the identities alone; the result of every account change."""
     with ctx.engine.connect() as conn:
         return Accounts(
             tuple(Account(**row._mapping) for row in conn.execute(statement(conn, "account_list")))
         )
+
+
+def _instant(value: object) -> datetime | None:
+    if value is None:
+        return None
+    return as_utc(value if isinstance(value, datetime) else datetime.fromisoformat(str(value)))
 
 
 def add_account(ctx: OperationContext, request: AccountAdd) -> Accounts:
@@ -168,7 +198,7 @@ def add_account(ctx: OperationContext, request: AccountAdd) -> Accounts:
                 f"account {request.name!r}: name or OIDC subject already exists; "
                 "choose a distinct identity (accounts are never deleted)"
             ) from error
-    return list_accounts(ctx, NoInput())
+    return _accounts(ctx)
 
 
 def set_role(ctx: OperationContext, request: AccountRole) -> Accounts:
@@ -226,4 +256,4 @@ def _update(
                     "now": datetime.now(UTC),
                 },
             )
-    return list_accounts(ctx, NoInput())
+    return _accounts(ctx)

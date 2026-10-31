@@ -16,6 +16,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.enums import ActionName
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError
 from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.announcements import AnnouncementFilter, Announcements
 from etl_craft.services.operations.catalog_pages import CatalogInput, CatalogPage
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.project_health import HealthInput, ProjectHealth
@@ -55,7 +56,14 @@ def page_values(
     )
     assert health is None or isinstance(health, ProjectHealth)
     project = health.projects[0] if selected and health and health.projects else None
+    showing = (
+        None
+        if identity.must_change_password
+        else invoke(caller, ActionName.ANNOUNCE_LIST, AnnouncementFilter())
+    )
+    assert showing is None or isinstance(showing, Announcements)
     return caller, {
+        "announcements": () if showing is None else showing.announcements,
         "identity": identity,
         "settings": identity.settings,
         "project": project,

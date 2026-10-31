@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import post_button %}
+{% set api = "/api/v1" %}
+{% macro select(name, label, options, value=None, blank=None) -%}
+<label>{{ label }}<select name="{{ name }}">{% if blank %}<option value="">{{ blank }}</option>{% endif %}{% for o in options %}<option value="{{ o }}" {% if o == value %}selected{% endif %}>{{ o }}</option>{% endfor %}</select></label>
+{%- endmacro %}
+{% macro text(name, label, required=False, type="text", hint="") -%}
+<label>{{ label }}<input name="{{ name }}" type="{{ type }}" {% if required %}required{% endif %} autocomplete="{{ 'new-password' if type == 'password' else 'off' }}" {% if hint %}placeholder="{{ hint }}"{% endif %}></label>
+{%- endmacro %}
+{% macro reason() -%}{{ text("reason", "Reason (recorded)", True) }}{%- endmacro %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script><script type="module" src="/static/ui/admin.js"></script>{% endblock %}
+{% block content %}
+<h1>Administration</h1>
+<nav class="tabs" aria-label="Administration">{% for t in tabs %}<a href="/ui/admin?tab={{ t }}" {% if t == tab %}aria-current="page"{% endif %}>{{ t|capitalize }}</a>{% endfor %}</nav>
+<div id="admin-result" aria-live="polite"></div>
+
+{% if tab == "accounts" %}
+<section class="panel" aria-labelledby="accounts-title"><h2 id="accounts-title">Accounts</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Account</th><th scope="col">Kind</th><th scope="col">Role</th><th scope="col">State</th><th scope="col">Failed sign-ins</th><th scope="col">Last sign-in</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for a in found.accounts %}<tr><th scope="row">{{ a.name }}</th><td>{{ a.kind }}</td><td>{{ a.role }}</td>
+<td>{% if a.active_flag != 'Y' %}<span class="status CANCELLED"><span aria-hidden="true">■</span> Disabled</span>{% elif a.locked_at %}<span class="status FAILED"><span aria-hidden="true">✕</span> Locked</span> <span class="note">since {{ a.locked_at|zoned(settings.timezone) }}</span>{% else %}Active{% endif %}</td>
+<td>{{ a.failed_signins }}</td><td>{{ a.last_signin_at|zoned(settings.timezone) if a.last_signin_at else "Never" }}</td>
+<td class="row-actions">{% if a.name == identity.name %}<span class="note">You</span>{% elif a.active_flag == 'Y' %}{% if a.locked_at %}{{ post_button("Unlock", api ~ "/accounts/unlock", {"name": a.name}, "account " ~ a.name, "Clear the lock and the failed sign-in count so the account can sign in again.", "yes", "noreason") }} {% endif %}{{ post_button("Disable", api ~ "/accounts/disable", {"name": a.name}, "account " ~ a.name, "Stop this account signing in and revoke its sessions and tokens; its history stays.", "no", "noreason", "danger") }}{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+<div class="admin-forms">
+<form class="panel" method="post" data-api-form data-url="{{ api }}/accounts"><h2>Add an account</h2>{{ text("name", "Account name", True) }}{{ select("role", "Role", roles, "viewer") }}{{ select("kind", "Kind", kinds, "USER") }}{{ text("email", "Email") }}{{ text("password", "Temporary password (users; changed at first sign-in)", False, "password") }}<button type="submit" class="primary">Add account</button></form>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/accounts/role"><h2>Change a role</h2>{{ select("name", "Account", found.accounts|map(attribute="name")|list) }}{{ select("role", "New role", roles) }}<button type="submit">Change role</button></form>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/accounts/password"><h2>Reset a password</h2>{{ select("name", "Account", found.accounts|selectattr("kind", "equalto", "USER")|map(attribute="name")|list) }}{{ text("password", "Temporary password", True, "password") }}<button type="submit">Reset password</button></form>
+</div>
+
+{% elif tab == "groups" %}
+<section class="panel" aria-labelledby="groups-title"><h2 id="groups-title">Groups</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Group</th><th scope="col">Description</th><th scope="col">Members</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for g in found.groups %}<tr><th scope="row">{{ g.name }}</th><td class="wrap">{{ g.description or "" }}</td><td class="wrap">{% for m in g.members %}{{ m }} {{ post_button("Remove", api ~ "/groups/members/remove", {"name": g.name, "account": m}, "member " ~ m ~ " of group " ~ g.name, "Remove this account from the group; access granted through the group ends.", "yes", "noreason") }}{% if not loop.last %}, {% endif %}{% else %}<span class="note">None</span>{% endfor %}</td>
+<td>{{ "Active" if g.active_flag == 'Y' else "Disabled" }}</td><td>{% if g.active_flag == 'Y' %}{{ post_button("Disable", api ~ "/groups/disable", {"name": g.name}, "group " ~ g.name, "Stop this group granting access; its grants and history stay.", "no", "noreason", "danger") }}{% endif %}</td></tr>{% else %}<tr><td colspan="5">No groups yet.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<div class="admin-forms">
+<form class="panel" method="post" data-api-form data-url="{{ api }}/groups"><h2>Add a group</h2>{{ text("name", "Group name", True) }}{{ text("description", "Description") }}<button type="submit" class="primary">Add group</button></form>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/groups/members"><h2>Add a member</h2>{{ select("name", "Group", found.groups|map(attribute="name")|list) }}{{ text("account", "Account name", True) }}<button type="submit">Add member</button></form>
+</div>
+
+{% elif tab == "tokens" %}
+<section class="panel" aria-labelledby="tokens-title"><h2 id="tokens-title">API tokens</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Role</th><th scope="col">Created</th><th scope="col">Expires</th><th scope="col">Last used</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for t in found.tokens %}<tr><th scope="row">{{ t.name }}</th><td>{{ t.token_kind }}</td><td>{{ t.role }}</td><td>{{ t.created_at|zoned(settings.timezone) }} <span class="note">by {{ t.created_by }}</span></td><td>{{ t.expires_at|zoned(settings.timezone) if t.expires_at else "Never" }}</td><td>{{ t.last_used_at|zoned(settings.timezone) if t.last_used_at else "Never" }}</td>
+<td>{% if t.revoked_at %}<span class="status CANCELLED"><span aria-hidden="true">■</span> Revoked</span>{% else %}Active{% endif %}</td><td>{% if not t.revoked_at %}{{ post_button("Revoke", api ~ "/tokens/revoke", {"token_id": t.token_id}, "token " ~ t.name, "Stop this token working at once; clients using it must sign in again.", "no", "noreason", "danger") }}{% endif %}</td></tr>{% else %}<tr><td colspan="8">No tokens.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/tokens"><h2>Create a token</h2>{{ text("name", "Name", True) }}{{ select("role", "Role", roles, "viewer") }}{{ text("expires", "Expires after (days)", False, "text", "365d") }}<button type="submit" class="primary">Create token</button><p class="note">The token is shown once, here; store it in your secret manager.</p></form>
+
+{% elif tab == "access" %}
+<form class="panel filters" method="get" action="/ui/admin"><input type="hidden" name="tab" value="access"><label>Project<select name="project">{% for p in projects %}<option value="{{ p.project }}" {% if project and p.project == project.project %}selected{% endif %}>{{ p.project }}</option>{% endfor %}</select></label><button type="submit">Show access</button></form>
+{% if found %}<section class="panel" aria-labelledby="access-title"><h2 id="access-title">Access to {{ project.project if project else "the project" }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Project</th><th scope="col">Who</th><th scope="col">On</th><th scope="col">Permission</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for g in found.grants|selectattr("active_flag", "equalto", "Y") %}{% set who = g.group and ("group " ~ g.group) or g.account and ("account " ~ g.account) or ("role " ~ g.role) %}{% set on = g.pipeline and ("pipeline " ~ g.pipeline) or g.tag and ("tag " ~ g.tag) or "the whole project" %}
+<tr><td>{{ g.project }}</td><th scope="row">{{ who }}</th><td>{{ on }}</td><td>{{ g.permission }}</td><td>{{ post_button("Revoke", api ~ "/access/revocations", {"project": g.project, "group": g.group, "account": g.account, "role": g.role, "pipeline": g.pipeline, "tag": g.tag, "permission": g.permission}, who ~ " on " ~ on, "Remove this grant; access from other grants stays.", "no", "", "danger") }}</td></tr>{% else %}<tr><td colspan="5">No grants yet.</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+<form class="panel" method="post" data-api-form data-url="{{ api }}/access/grants"><h2>Grant access</h2>{{ select("project", "Project", projects|map(attribute="project")|list, project.project if project else None) }}<fieldset><legend>Who (one)</legend>{{ text("group", "Group") }}{{ text("account", "Account") }}{{ select("role", "Role", roles, None, "None") }}</fieldset><fieldset><legend>On (one, or neither for the whole project)</legend>{{ text("pipeline", "Pipeline") }}{{ text("tag", "Tag") }}</fieldset>{{ select("permission", "Permission", permissions, "CAN_VIEW") }}{{ reason() }}<button type="submit" class="primary">Grant</button></form>
+
+{% elif tab == "projects" %}
+<section class="panel" aria-labelledby="projects-title"><h2 id="projects-title">Projects</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Project</th><th scope="col">Name</th><th scope="col">Environment</th><th scope="col">Governance</th><th scope="col">Default pool</th><th scope="col">Max tasks</th><th scope="col">Schema checks</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for p in found.projects %}<tr><th scope="row">{{ p.project }}</th><td>{{ p.name }}</td><td>{{ p.environment_type }}{% if p.environment_name %} · {{ p.environment_name }}{% endif %}</td><td>{{ p.governance }}</td><td>{{ p.default_pool }}</td><td>{{ p.max_running_tasks }}</td><td>{% if p.schema_check_schedule %}<code>{{ p.schema_check_schedule }}</code>{% else %}Not scheduled{% endif %}{% if p.schema_check_on_demand != 'Y' %}<br><span class="note">On demand off</span>{% endif %}</td><td>{{ "Active" if p.active_flag == 'Y' else "Disabled" }}</td>
+<td>{% if p.active_flag == 'Y' %}{{ post_button("Disable", api ~ "/projects/disable", {"project": p.project}, "project " ~ p.project, "Stop this project's pipelines running; its metadata and history stay.", "no", "", "danger") }}{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/projects"><h2>Add or change a project</h2><p class="note">Fields left empty keep their current value when changing.</p>{{ text("project", "Project code", True) }}{{ text("name", "Name") }}{{ text("timezone", "Timezone", False, "text", "UTC or Europe/London") }}{{ text("default_pool", "Default pool") }}{{ text("max_running_tasks", "Max running tasks", False, "number") }}{{ select("environment_type", "Environment", environments, None, "Keep") }}{{ text("environment_name", "Environment name") }}{{ select("governance", "Governance", governance, None, "Keep") }}{{ text("schema_check_schedule", "Schema check schedule (cron, or none)") }}{{ select("schema_check_on_demand", "On-demand schema checks", ("Y", "N"), None, "Keep") }}{{ reason() }}<div class="dialog-buttons"><button type="submit" class="primary">Add project</button><button type="submit" data-url="{{ api }}/projects/set">Change project</button></div></form>
+
+{% elif tab == "pools" %}
+<section class="panel" aria-labelledby="pools-title"><h2 id="pools-title">Pools</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Pool</th><th scope="col">Description</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for p in found.pools %}<tr><th scope="row">{{ p.name }}</th><td class="wrap">{{ p.description or "" }}</td><td>{{ "Active" if p.active_flag == 'Y' else "Disabled" }}</td><td>{% if p.active_flag == 'Y' %}{{ post_button("Disable", api ~ "/pools/disable", {"name": p.name}, "pool " ~ p.name, "Stop placing work in this pool; refused while a project or task still uses it.", "no", "", "danger") }}{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/pools"><h2>Add or change a pool</h2>{{ text("name", "Pool name", True) }}{{ text("description", "Description") }}{{ reason() }}<div class="dialog-buttons"><button type="submit" class="primary">Add pool</button><button type="submit" data-url="{{ api }}/pools/set">Change description</button></div></form>
+
+{% elif tab == "announcements" %}
+<section class="panel" aria-labelledby="announcements-title"><h2 id="announcements-title">Announcements</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Level</th><th scope="col">Message</th><th scope="col">Shows</th><th scope="col">Posted</th><th scope="col">State</th><th scope="col">Actions</th></tr></thead><tbody>
+{% for a in found.announcements %}<tr><td>{{ a.level|capitalize }}</td><td class="wrap">{{ a.message }}</td><td>{{ a.starts_at|zoned(settings.timezone) }} → {{ a.ends_at|zoned(settings.timezone) if a.ends_at else "until ended" }}</td><td>{{ a.created_by }}</td><td>{% if a.ended_at %}Ended by {{ a.ended_by }}{% else %}Posted{% endif %}</td><td>{% if not a.ended_at %}{{ post_button("End", api ~ "/announcements/end", {"announcement_id": a.announcement_id}, "announcement " ~ a.announcement_id, "Take this announcement down now.", "yes") }}{% endif %}</td></tr>{% else %}<tr><td colspan="6">No announcements yet.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<form class="panel" method="post" data-api-form data-url="{{ api }}/announcements"><h2>Post an announcement</h2><label>Message<textarea name="message" required maxlength="500" rows="2"></textarea></label>{{ select("level", "Level", levels, "INFO") }}{{ text("starts_at", "Starts (browser local time; empty: now)", False, "datetime-local") }}{{ text("ends_at", "Ends (browser local time; empty: until ended)", False, "datetime-local") }}{{ reason() }}<button type="submit" class="primary">Post</button></form>
+{% endif %}
+{% with pipeline_code=None, run_id=None, task_code=None, controls_url=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}

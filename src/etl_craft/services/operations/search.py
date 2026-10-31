@@ -6,7 +6,8 @@ from typing import ClassVar
 from sqlalchemy.engine import Connection
 
 from etl_craft.config.targets import active_catalog
-from etl_craft.core.enums import RunStatus, SearchKind
+from etl_craft.core.enums import RunStatus
+from etl_craft.core.enums_ui import SearchKind
 from etl_craft.core.errors import UsageError
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement

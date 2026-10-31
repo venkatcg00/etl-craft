@@ -6,7 +6,8 @@ from typing import ClassVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from etl_craft.core.actor import ActorKind
-from etl_craft.core.enums import AccountKind, ActionName, Theme, TimeDisplay, YesNo
+from etl_craft.core.enums import AccountKind, ActionName, YesNo
+from etl_craft.core.enums_ui import Theme, TimeDisplay
 from etl_craft.core.errors import MetadataError, PermissionDeniedError, UsageError
 from etl_craft.core.text import is_metadata_code
 from etl_craft.engine import locks
