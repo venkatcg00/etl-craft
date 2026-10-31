@@ -26,6 +26,7 @@ from etl_craft.core.enums import (
     RunStatus,
 )
 from etl_craft.core.enums_access import Permission
+from etl_craft.core.enums_ui import AnnouncementLevel
 from etl_craft.engine import migrations, transitions
 from etl_craft.engine.audit import command_request, register_engine
 from fixtures.metadata import add_pipeline, add_pipeline_dependency, add_task
@@ -218,6 +219,7 @@ def seeded_tables(db):
             "requested_by": "alice",
             "paused_by": "alice",
             "reason": "test",
+            "level": AnnouncementLevel.INFO,
             "business_rule_type": "REPORT",
             "business_rule_sql": "SELECT 1",
             "offset_type": "NUMBER",
