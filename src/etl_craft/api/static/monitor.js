@@ -30,6 +30,7 @@ function open(button, kind) {
   const asked = (button.dataset.ask || "").split(",");
   dialog.querySelector(".ask-status").hidden = !asked.includes("status");
   dialog.querySelector(".ask-outcome").hidden = !asked.includes("outcome");
+  dialog.querySelector(".ask-reason").hidden = asked.includes("noreason");
   dialog.querySelector("#control-error").hidden = true;
   dialog.showModal();
 }
@@ -46,7 +47,8 @@ function control(pipeline, suffix = "") {
 function request() {
   if (pending.kind === "post") {
     const button = pending.button;
-    const body = { ...JSON.parse(button.dataset.body), reason: form.reason.value };
+    const body = JSON.parse(button.dataset.body);
+    if (!dialog.querySelector(".ask-reason").hidden) body.reason = form.reason.value;
     if (!dialog.querySelector(".ask-status").hidden) body.status = form.status.value;
     if (!dialog.querySelector(".ask-outcome").hidden) {
       if (form.outcome.value) body.outcome = form.outcome.value;

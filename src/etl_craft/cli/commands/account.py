@@ -5,7 +5,8 @@ import argparse
 from etl_craft.cli.commands.common import Command, call, configure_output, request_from
 from etl_craft.cli.output import Output
 from etl_craft.cli.prompts import password
-from etl_craft.core.enums import AccountKind, ActionName, ApiRole, Theme, TimeDisplay
+from etl_craft.core.enums import AccountKind, ActionName, ApiRole
+from etl_craft.core.enums_ui import Theme, TimeDisplay
 from etl_craft.services.operations import accounts, personal
 from etl_craft.services.operations.requests import NoInput
 

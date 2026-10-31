@@ -7,7 +7,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from jinja2 import ChoiceLoader, Environment, PackageLoader, PrefixLoader, select_autoescape
 
-from etl_craft.core.enums import TimeDisplay
+from etl_craft.core.enums_ui import TimeDisplay
 from etl_craft.core.time import as_utc
 from etl_craft.services.operations.personal import Settings
 

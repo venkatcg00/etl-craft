@@ -255,6 +255,17 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- **Administration** page for admins (`/ui/admin`): tabs for accounts, groups, tokens, pipeline
+  access, projects, pools and announcements list the existing admin reads and post the same API
+  requests as the CLI. Accounts show locked state, failed sign-ins and last sign-in, with
+  Unlock; a new token's value is shown once. `account list` (and its JSON and API output) gains
+  `failed_signins`, `locked_at` and `last_signin_at`.
+- Announcements: `etl-craft announce add --message TEXT [--level INFO|WARNING|CRITICAL]
+  [--starts-at T] [--ends-at T] --reason R`, `announce list [--all]` and `announce end
+  --announcement-id N --reason R` (admin to post or end, anyone signed in to read) show a banner
+  on every browser page inside its window. Migration 0078 adds the audit table
+  `AUD_ANNOUNCEMENTS`; run `etl-craft migrate`.
+
 - Browser pages read more easily: each scope's actions sit in one bar, with the reasons
   unavailable ones are disabled folded into one line; page actions sit on the title row; the main
   action is highlighted and Stop, Abort and Mark as are marked as destructive; dates, statuses

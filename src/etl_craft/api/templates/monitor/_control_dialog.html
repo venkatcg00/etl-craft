@@ -40,8 +40,10 @@
       <label for="control-expires">Pause ends (optional, your timezone)</label>
       <input id="control-expires" name="expires_at" type="datetime-local">
     </p>
-    <label for="control-reason">Reason (recorded with the request)</label>
-    <textarea id="control-reason" name="reason" rows="3" maxlength="4096"></textarea>
+    <p class="ask-reason">
+      <label for="control-reason">Reason (recorded with the request)</label>
+      <textarea id="control-reason" name="reason" rows="3" maxlength="4096"></textarea>
+    </p>
     <p id="control-error" class="notice" role="alert" hidden></p>
     <div class="dialog-buttons">
       <button type="submit" class="primary" value="confirm" id="control-confirm">Request</button>

@@ -199,6 +199,27 @@ also lists the pipelines and runs you opened recently in this browser; they are 
 browser only. `etl-craft search TEXT` and `GET /api/v1/projects/{project}/search?q=TEXT` return
 the same hits.
 
+## Administration
+
+Administrators see **Administration** in the sidebar. Its tabs list accounts, groups, API
+tokens, pipeline access (per project), projects, pools and announcements, and each form or row
+action posts the same request as the matching CLI command (`account`, `group`, `token`,
+`access`, `project`, `pool`, `announce`), so the same checks and audit records apply. The
+Accounts tab shows whether an account is locked, its failed sign-ins and last sign-in, and
+offers **Unlock**; you cannot disable your own account from the page. A created token's value
+appears once, with **Copy token**: store it then, because it is never shown again.
+
+Announcements post a banner on every page for everyone signed in, from their start until their
+end or until an administrator ends them; critical announcements are read out by screen
+readers. From the CLI:
+
+```bash
+etl-craft announce add --message "Upgrade tonight at 22:00 UTC" --level WARNING \
+  --ends-at 2026-11-01T23:00:00+00:00 --reason "planned upgrade"
+etl-craft announce list --all
+etl-craft announce end --announcement-id 3 --reason "upgrade finished"
+```
+
 ## Upgrade
 
 Run `etl-craft migrate` before starting the new server. Normal login and UI startup refuse
@@ -211,3 +232,6 @@ never applies lockout counters; wrong passwords and non-admins are refused and a
 `UI_SETTINGS` ({}) to existing `CFG_ACCOUNTS` rows. Existing passwords and accounts remain;
 a later admin password reset sets the temporary-password requirement. The migration also
 adds partial indexes for recent health counts and successful sign-in/catalog audit reads.
+
+Migration `0078_announcements.sql` adds the `AUD_ANNOUNCEMENTS` audit table; existing data is
+unchanged.

@@ -2,15 +2,16 @@
 
 import pytest
 
-from etl_craft.core import enums, enums_access, enums_logs
+from etl_craft.core import enums, enums_access, enums_logs, enums_ui
 from etl_craft.core.enums import RunStatus
 
 pytestmark = pytest.mark.unit
 
 EXPECTED = {
-    enums.Theme: {"system", "light", "dark"},
-    enums.TimeDisplay: {"relative", "absolute"},
-    enums.SearchKind: {"PIPELINE", "TASK", "TABLE", "RUN"},
+    enums_ui.Theme: {"system", "light", "dark"},
+    enums_ui.TimeDisplay: {"relative", "absolute"},
+    enums_ui.SearchKind: {"PIPELINE", "TASK", "TABLE", "RUN"},
+    enums_ui.AnnouncementLevel: {"INFO", "WARNING", "CRITICAL"},
     enums_logs.RunLogCode: {
         "RUN_STARTED",
         "TASK_QUEUED",
@@ -228,7 +229,7 @@ def test_enum_values_match_the_stored_values(enum):
 def test_every_enum_in_the_module_is_checked():
     defined = {
         obj
-        for module in (enums, enums_access, enums_logs)
+        for module in (enums, enums_access, enums_logs, enums_ui)
         for obj in vars(module).values()
         if isinstance(obj, type) and issubclass(obj, enums.StrEnum) and obj is not enums.StrEnum
     }

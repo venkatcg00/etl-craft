@@ -4,7 +4,7 @@
 .object-header .note { font-size: 1rem; font-weight: 400; }
 .header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .facts.inline { grid-template-columns: max-content 1fr max-content 1fr; }
-.tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin: 1rem 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: .25rem; border-bottom: 1px solid var(--border); margin: 1rem 0; }
 .tabs a { padding: .5rem .9rem; border-bottom: 2px solid transparent; }
 .tabs a[aria-current=page] { border-bottom-color: var(--accent); font-weight: 600; text-decoration: none; }
 .monitor { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: 1rem; align-items: start; }
