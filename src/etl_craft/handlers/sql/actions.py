@@ -37,7 +37,9 @@ from etl_craft.core.enums import RunStatus, SqlAction
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import sha256_hex
+from etl_craft.core.uploads import UploadWriter
 from etl_craft.dialects.warehouse.metadata import projection_names
+from etl_craft.dialects.warehouse.uploads import actor_parts, writer_expression
 from etl_craft.handlers.registry import HandlerResult
 from etl_craft.handlers.sql.context import ActionContext
 from etl_craft.handlers.sql.creation import create_table, setup_table
@@ -89,40 +91,21 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
         session, stage, SqlAction.OVERWRITE_TABLE, schema_evolution=action.task.schema_evolution
     )
     columns = ", ".join(name for name, _ in session.columns(stage))
+    actor_columns, actor_values = actor_parts(action.uploads, "UPLOAD_ID")
     computed = not session.row_id_generated()
     row_id_columns = ", ROW_ID" if computed else ""
     row_id_values = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT)" if computed else ""
     select_sql = (
-        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, :now{row_id_values} "
+        f"SELECT {columns}, :pipeline_run_id, :pipeline_id, :task_run_id, :now"
+        f"{actor_values}{row_id_values} "
         f"FROM {stage}"
     )
     written_columns = (
-        f"{columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, UPDATE_DATE{row_id_columns}"
+        f"{columns}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, UPDATE_DATE"
+        f"{actor_columns}{row_id_columns}"
     )
     if strategy == "create_or_replace":
-        if session.dialect.overwrite_uses_ctas:
-            names = [name for name, _ in session.target_columns()]
-            types = session.column_types(session.target)
-            managed = {
-                "pipeline_run_id": "CAST(:pipeline_run_id AS BIGINT) AS PIPELINE_RUN_ID",
-                "task_run_id": "CAST(:task_run_id AS BIGINT) AS TASK_RUN_ID",
-                "pipeline_id": "CAST(:pipeline_id AS BIGINT) AS PIPELINE_ID",
-                "update_date": f"CAST(:now AS {types['update_date']}) AS UPDATE_DATE",
-                "row_id": "CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID",
-            }
-            expressions = [
-                managed.get(name.lower(), f"CAST({name} AS {types[name.lower()]}) AS {name}")
-                for name in names
-            ]
-            ddl = session.dialect.replacement_ddl(
-                session.conn,
-                session.target,
-                f"SELECT {', '.join(expressions)} FROM {stage}",
-                {},
-                existing=True,
-            )
-        else:
-            ddl = session.dialect.overwrite_statement(session.target, written_columns, select_sql)
+        ddl = _overwrite_ddl(session, action, stage, written_columns, select_sql)
         fault_point("sql.replace.before_publish")
         result = session.run(ddl, action.stamp, step="atomically overwrite the target")
         if source is None:
@@ -150,6 +133,41 @@ def overwrite_table(session: Session, action: ActionContext) -> HandlerResult:
     return HandlerResult(
         source_count=source, target_count=written, insert_count=written, reject_count=rejected
     )
+
+
+def _overwrite_ddl(
+    session: Session, action: ActionContext, stage: str, written_columns: str, select_sql: str
+) -> str:
+    """Render a replacement against the existing target's exact physical types."""
+    writer = writer_expression(action.uploads, "UPLOAD_ID")
+    if session.dialect.overwrite_uses_ctas:
+        names = [name for name, _ in session.target_columns()]
+        types = session.column_types(session.target)
+        managed = {
+            "pipeline_run_id": "CAST(:pipeline_run_id AS BIGINT) AS PIPELINE_RUN_ID",
+            "task_run_id": "CAST(:task_run_id AS BIGINT) AS TASK_RUN_ID",
+            "pipeline_id": "CAST(:pipeline_id AS BIGINT) AS PIPELINE_ID",
+            "update_date": f"CAST(:now AS {types['update_date']}) AS UPDATE_DATE",
+            "row_id": "CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID",
+        }
+        if action.uploads:
+            managed.update(
+                created_by=f"{writer} AS CREATED_BY", updated_by=f"{writer} AS UPDATED_BY"
+            )
+        expressions = [
+            managed.get(name.lower(), f"CAST({name} AS {types[name.lower()]}) AS {name}")
+            for name in names
+        ]
+        ddl = session.dialect.replacement_ddl(
+            session.conn,
+            session.target,
+            f"SELECT {', '.join(expressions)} FROM {stage}",
+            {},
+            existing=True,
+        )
+    else:
+        ddl = session.dialect.overwrite_statement(session.target, written_columns, select_sql)
+    return ddl
 
 
 def append_table(session: Session, action: ActionContext) -> HandlerResult:
@@ -185,12 +203,15 @@ def append_table(session: Session, action: ActionContext) -> HandlerResult:
     fault_point("sql.append.after_delete")
     columns = ", ".join(name for name, _ in session.columns(stage))
     row_id_columns, row_id_values = session.row_id_insert_parts()
+    actor_columns, actor_values = actor_parts(action.uploads, "UPLOAD_ID")
     pipeline_column = ", PIPELINE_ID" if "pipeline_id" in present else ""
     pipeline_value = ", :pipeline_id" if pipeline_column else ""
     result = session.run(
         f"INSERT INTO {session.target} "
-        f"({columns}, PIPELINE_RUN_ID, CREATE_DATE, TASK_RUN_ID{pipeline_column}{row_id_columns}) "
-        f"SELECT {columns}, :pipeline_run_id, :now, :task_run_id{pipeline_value}{row_id_values} "
+        f"({columns}, PIPELINE_RUN_ID, CREATE_DATE, TASK_RUN_ID"
+        f"{pipeline_column}{actor_columns}{row_id_columns}) "
+        f"SELECT {columns}, :pipeline_run_id, :now, :task_run_id"
+        f"{pipeline_value}{actor_values}{row_id_values} "
         f"FROM {stage}",
         action.stamp,
         step="append the SELECT's rows",
@@ -230,6 +251,7 @@ def _merge_stage(
         or task.watermark is not None
         or task.dedupe_order
         or session.protection is not None
+        or action.uploads
     )
     hashed = (
         hashed
@@ -293,7 +315,10 @@ def scd1_merge(session: Session, action: ActionContext) -> HandlerResult:
                 step="new rows",
             )
         insert = _merge_insert_parts(
-            session, stage_columns, None if generated else (", ROW_ID", ", s.ROW_ID")
+            session,
+            stage_columns,
+            None if generated else (", ROW_ID", ", s.ROW_ID"),
+            uploads=action.uploads,
         )
         result = session.run(
             session.dialect.update_from_stage(
@@ -367,10 +392,12 @@ def _scd1_update(
         TASK_RUN_ID=":task_run_id",
         PIPELINE_ID=":pipeline_id",
         UPDATE_DATE=":now",
-        UPDATED_BY=":updated_by",
+        UPDATED_BY=writer_expression(action.uploads, "s.UPLOAD_ID"),
         DELETE_FLAG="'N'",
         ACTIVE_FLAG="'Y'",
     )
+    if action.uploads:
+        assignments["CREATED_BY"] = writer_expression(action.uploads, "s.UPLOAD_ID")
     return assignments, condition
 
 
@@ -396,7 +423,12 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
             {
                 "ACTIVE_FLAG": "'N'",
                 "UPDATE_DATE": ":now",
-                "UPDATED_BY": ":updated_by",
+                "UPDATED_BY": writer_expression(action.uploads, "s.UPLOAD_ID"),
+                **(
+                    {"CREATED_BY": writer_expression(action.uploads, "s.UPLOAD_ID")}
+                    if action.uploads
+                    else {}
+                ),
                 "PIPELINE_RUN_ID": ":pipeline_run_id",
                 "TASK_RUN_ID": ":task_run_id",
                 "PIPELINE_ID": ":pipeline_id",
@@ -430,7 +462,7 @@ def scd2_merge(session: Session, action: ActionContext) -> HandlerResult:
 def _insert_merge_rows(
     session: Session, action: ActionContext, columns: list[str], body: str, *, step: str
 ) -> int:
-    names, values = _merge_insert_parts(session, columns)
+    names, values = _merge_insert_parts(session, columns, uploads=action.uploads)
     return session.mutate(
         f"INSERT INTO {session.target} ({names}) SELECT {values} {body}",
         action.stamp,
@@ -440,16 +472,21 @@ def _insert_merge_rows(
 
 
 def _merge_insert_parts(
-    session: Session, columns: list[str], row_ids: tuple[str, str] | None = None
+    session: Session,
+    columns: list[str],
+    row_ids: tuple[str, str] | None = None,
+    *,
+    uploads: tuple[UploadWriter, ...] = (),
 ) -> tuple[str, str]:
     """Share inserted business and audit values between INSERT and MERGE."""
     row_id_columns, row_id_values = session.row_id_insert_parts() if row_ids is None else row_ids
+    writer = writer_expression(uploads, "s.UPLOAD_ID")
     return (
         f"{', '.join(columns)}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID, "
         "CREATE_DATE, CREATED_BY, UPDATE_DATE, UPDATED_BY, DELETE_FLAG, "
         f"ACTIVE_FLAG{row_id_columns}",
         f"{', '.join(f's.{column}' for column in columns)}, :pipeline_run_id, :pipeline_id, "
-        f":task_run_id, :now, :updated_by, :now, :updated_by, 'N', 'Y'{row_id_values}",
+        f":task_run_id, :now, {writer}, :now, {writer}, 'N', 'Y'{row_id_values}",
     )
 
 
@@ -538,11 +575,17 @@ def delete_rows(session: Session, action: ActionContext) -> HandlerResult:
             step="delete the rows",
         )
     else:
+        upload_value = f"(SELECT MAX(s.UPLOAD_ID) FROM {stage} s WHERE {match})"
+        writer = writer_expression(action.uploads, upload_value)
+        upload_assignment = (
+            f"UPLOAD_ID = {upload_value}, CREATED_BY = {writer}, " if action.uploads else ""
+        )
         delete_count = session.mutate(
             f"UPDATE {mutation} SET DELETE_FLAG = 'Y', ACTIVE_FLAG = 'N', UPDATE_DATE = :now, "
             f"PIPELINE_RUN_ID = :pipeline_run_id, PIPELINE_ID = :pipeline_id, "
             f"TASK_RUN_ID = :task_run_id, "
-            f"UPDATED_BY = :updated_by WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match}) "
+            f"{upload_assignment}UPDATED_BY = {writer} "
+            f"WHERE EXISTS (SELECT 1 FROM {stage} s WHERE {match}) "
             f"AND {q}.ACTIVE_FLAG = 'Y' AND {q}.DELETE_FLAG = 'N'",
             action.stamp,
             count_sql=count_sql,

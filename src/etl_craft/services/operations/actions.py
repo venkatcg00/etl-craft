@@ -13,7 +13,6 @@ from etl_craft.core.definitions import using
 from etl_craft.core.enums import (
     ActionName,
     ActionScope,
-    AgentStatus,
     ApiRole,
     Audit,
     HttpMethod,
@@ -81,6 +80,7 @@ from etl_craft.services.operations import (
     values,
 )
 from etl_craft.services.operations.action_types import Action as Action
+from etl_craft.services.operations.agent_uploads import attempt_request
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.permissions import (
     pipeline_access,
@@ -113,6 +113,7 @@ from etl_craft.services.operations.requests import (
     ValidateInput,
     arguments,
 )
+from etl_craft.services.operations.upload_actions import UPLOAD_ACTIONS
 from etl_craft.services.operations.visibility import visible_result
 from etl_craft.services.rehash import RehashResult
 from etl_craft.services.setup import SetupResult
@@ -178,6 +179,7 @@ _ROWS = (
            agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/report", BY_ACTION),
     Action(ActionName.AGENT_LOG, agent_logs.upload, agent_models.AgentLog,
            agent_models.AgentReply, ApiRole.AGENT, POST, f"{API}/agent/log"),
+    *UPLOAD_ACTIONS,
     # Sign-in: no role; the sign-in actions record their own row once the account is proven.
     Action(ActionName.LOGIN_METHODS, sessions.sign_in_methods, NoInput, sessions.SignInMethods,
            None, GET, f"{API}/login/methods"),
@@ -575,24 +577,12 @@ def _require_trigger_groups(ctx: OperationContext, action: Action, request: obje
                 require_child_groups(conn, ctx, selected)
 
 
-def _attempt_request(ctx: OperationContext, name: ActionName, request: object) -> bool:
-    if name in (ActionName.AGENT_REPORT, ActionName.AGENT_LOG):
-        return getattr(request, "attempt_id", None) == ctx.credential_attempt_id
-    return (
-        name == ActionName.AGENT_RENEW
-        and isinstance(request, agent_models.AgentRenew)
-        and request.attempts == (ctx.credential_attempt_id,)
-        and not request.acknowledged_commands
-        and request.status == AgentStatus.ACTIVE
-    )
-
-
 def invoke(ctx: OperationContext, name: ActionName, request: object) -> object:
     """Run one action for ``ctx``'s caller: the only way an interface reaches an operation."""
     call = ACTIONS[name].call
     if call is None:
         raise UsageError(f"{name} is a long-running process; its interface starts it")
-    if ctx.credential_attempt_id is not None and not _attempt_request(ctx, name, request):
+    if ctx.credential_attempt_id is not None and not attempt_request(ctx, name, request):
         error = PermissionDeniedError(
             f"attempt {ctx.credential_attempt_id}: credential cannot perform {name}; "
             "use it only to renew, report or log its own live attempt; "
@@ -644,6 +634,7 @@ def project_settings(ctx: OperationContext, name: ActionName, request: object) -
                 return ctx
     if name not in {
         ActionName.PURGE,
+        ActionName.UPLOAD,
         ActionName.RUN,
         ActionName.VALIDATE,
         ActionName.PIPELINE_REFRESH,

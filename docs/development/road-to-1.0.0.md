@@ -180,7 +180,7 @@ item's text, or work done early under another item.
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.AK Schema checker | Done | S7.AK PR | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
-| S7.M Stewardship uploads | Planned | | `STEWARDABLE_FLAG` pipelines run only from uploads; one pipe-delimited CSV/TXT or XLSX file; a mandatory `FILE_VALIDATION` task runs the team's script first; blanket and per-pipeline size limits |
+| S7.M Stewardship uploads | In progress (M1 of M2) | M1 PR | `STEWARDABLE_FLAG` lists a pipeline for uploads; one pipe-delimited CSV/TXT or XLSX file per upload; `FILE_VALIDATION` accepts files before `HAS_DATA` dependents load them; blanket and per-pipeline size limits |
 | S7.S Seed tables | Planned | | Folder-addressed seed files replace their table on change until stewardship takes it over |
 | S7.T Business calendars | Done | #276 | Shared holiday and weekend calendars for schedules, run dates, backfill and catch-up |
 | S7.U Personal-data erasure | Planned | | A standing erasure register and ERASURE tasks remove subjects after loads, outside managed writes |
@@ -915,6 +915,25 @@ passed on Snowflake (two cases) and Databricks (one case); the first Databricks 
 empty-history-page handling defect, which was corrected and verified. No cloud was unavailable.
 
 **Choices that differ from the item text.**
+
+- S7.M stewardable pipelines (owner, 2026-10-31): `STEWARDABLE_FLAG` only lists a pipeline
+  for uploads (and `CAN_UPLOAD` lets accounts send to it); a stewardable pipeline otherwise runs
+  like any other, with schedules, manual runs and no refusals on marks, pauses or single tasks.
+  `FILE_VALIDATION` is an ordinary handler usable in any pipeline that loads files; with no
+  files it succeeds and its `HAS_DATA` dependents skip; event files may be checked when a
+  pipeline opts in (follow-up). Integrity lives in the data: only files a real validation
+  attempt accepted can be read by later tasks. This replaces the item's schedule refusal,
+  upload-only starts, single-root graph and bypass refusals.
+- S7.M M1 (owner-approved split): flags, validation, uploads, durable queueing, attribution and
+  AUD_UPLOADS ship first; M2 adds retention/archive/restore after M1 merges. S7.A owns the
+  browser page. CAN_UPLOAD is a permission, not a deployment role; S7.Y delegation supersedes
+  the item's admin-only grants. SQL writes explicitly retain UPLOAD_ID, use bound per-row
+  account expressions, and reject unknown ids before mutation. Upload ids define merge order.
+  Stewarded SCD uploads are supported only where S5.O.3 protection is supported (native
+  PostgreSQL/DuckDB); ordinary full flows and SCD attribution through the real SQL actions
+  are proven on all four local warehouses. One statement per upload in the same transaction
+  supplies each writer to protection evidence. The approved attempt-only agent content route
+  shares local execution's fenced storage reader and verifies SHA-256 before scripts.
 
 - S7.A slice 6 (owner, 2026-10-30: 6a/6b/6c; announcements as planned). 6a puts the task and run
   actions on the pages through one generic confirmation (body, URL and extra fields per button).

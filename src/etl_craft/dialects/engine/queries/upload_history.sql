@@ -1,0 +1,6 @@
+SELECT u.UPLOAD_ID AS upload_id,u.ACCOUNT AS account,u.FILE_NAME AS file_name,
+ u.SHA256 AS sha256,u.SIZE_BYTES AS size_bytes,u.PIPELINE_RUN_ID AS pipeline_run_id,
+ u.STATUS AS status,u.REASON AS reason,u.UPLOADED_AT AS uploaded_at,
+ u.TAKEN_AT AS taken_at,u.ENDED_AT AS ended_at,r.STATUS AS run_status
+FROM AUD_UPLOADS u LEFT JOIN AUD_PIPELINES_RUN_LOG r ON r.PIPELINE_RUN_ID=u.PIPELINE_RUN_ID
+WHERE u.PIPELINE_ID=:pipeline_id ORDER BY u.UPLOAD_ID DESC LIMIT 100

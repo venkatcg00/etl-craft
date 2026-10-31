@@ -100,9 +100,6 @@
       "src/etl_craft/services/catalog/collect.py": 1,
       "src/etl_craft/services/cloning.py": 2
     },
-    "module-lines": {
-      "src/etl_craft/engine/transitions.py": 2
-    },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1
     },

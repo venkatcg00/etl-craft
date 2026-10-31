@@ -1,7 +1,10 @@
 """Compare-and-set writes and their existing state diagnostics."""
 
+from datetime import UTC, datetime
+
 from sqlalchemy.engine import Connection
 
+from etl_craft.core.actor import Actor
 from etl_craft.core.errors import StaleTransitionError
 from etl_craft.engine.queries import statement
 
@@ -28,3 +31,15 @@ def stale(
         f"{kind} row_id={row_id}: expected status {expected}, owner={owner!r}; found {found}. "
         "Read the run history and refresh the status and owner before retrying."
     )
+
+
+def stale_attempt(
+    conn: Connection, attempt_id: int, expected: str, owner: str | None
+) -> StaleTransitionError:
+    """Describe an attempt row that is not in the ``expected`` state for ``owner``."""
+    return stale(conn, "attempt", attempt_id, expected, owner)
+
+
+def actor_parameters(actor: Actor) -> dict[str, object]:
+    """Bind the initiating actor to an attributed lifecycle write."""
+    return {"actor": actor.name, "actor_kind": actor.kind.value, "now": datetime.now(UTC)}

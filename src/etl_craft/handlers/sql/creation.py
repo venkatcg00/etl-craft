@@ -7,6 +7,7 @@ import logging
 from etl_craft.core.enums import SqlAction
 from etl_craft.core.errors import SqlGuardError
 from etl_craft.core.faults import fault_point
+from etl_craft.dialects.warehouse.uploads import writer_expression
 from etl_craft.engine.repository.tasks import TargetTask
 from etl_craft.handlers.registry import HandlerResult
 from etl_craft.handlers.sql.context import ActionContext
@@ -15,6 +16,7 @@ from etl_craft.handlers.sql.session import Session
 from etl_craft.handlers.sql.tables import (
     AUDIT_COLUMNS,
     add_row_id,
+    audit_columns,
     check_column_names,
     create_declared_target,
     create_target_shape,
@@ -42,11 +44,13 @@ def create_table(session: Session, action: ActionContext) -> HandlerResult:
     strategy = session.dialect.replace_strategy
     computed = session.dialect.surrogate_key == "computed"
     row_id = ", CAST(ROW_NUMBER() OVER (ORDER BY NULL) AS BIGINT) AS ROW_ID" if computed else ""
+    writer = writer_expression(action.uploads, "s.UPLOAD_ID")
+    actors = f", {writer} AS CREATED_BY, {writer} AS UPDATED_BY" if action.uploads else ""
     select_sql = (
         f"SELECT s.*, CAST({int(action.context.pipeline_run_id)} AS BIGINT) AS PIPELINE_RUN_ID"
         f", CAST({int(action.context.pipeline_id)} AS BIGINT) AS PIPELINE_ID"
         f", CAST({int(action.context.task_run_id)} AS BIGINT) AS TASK_RUN_ID"
-        f"{row_id} FROM {stage} s"
+        f"{actors}{row_id} FROM {stage} s"
     )
     if identity:
         inserted = _replace_identity(session, stage, select_sql, existing)
@@ -111,6 +115,9 @@ def _replace_identity(session: Session, stage: str, select_sql: str, existing: b
         [f"{name} {types[name.lower()]}" for name in names]
         + ["PIPELINE_RUN_ID BIGINT", "PIPELINE_ID BIGINT", "TASK_RUN_ID BIGINT"]
     )
+    actor_names = ", CREATED_BY, UPDATED_BY" if session.uploads else ""
+    if session.uploads:
+        columns += ", CREATED_BY VARCHAR(255), UPDATED_BY VARCHAR(255)"
     renamed = not existing and not any(
         session.params.get(key) for key in ("EXTERNAL_LOCATION", "BASE_LOCATION")
     )
@@ -129,7 +136,8 @@ def _replace_identity(session: Session, stage: str, select_sql: str, existing: b
     session.run(create_ddl, step="create the identity replacement")
     result = session.run(
         f"INSERT INTO {candidate} "
-        f"({', '.join(names)}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID) {select_sql}",
+        f"({', '.join(names)}, PIPELINE_RUN_ID, PIPELINE_ID, TASK_RUN_ID{actor_names}) "
+        f"{select_sql}",
         step="populate the identity replacement",
     )
     inserted = session.dialect.affected_rows(result) if session.dialect.dml_rowcounts else None
@@ -144,7 +152,12 @@ def _replace_identity(session: Session, stage: str, select_sql: str, existing: b
 
 def _create_new_table(session: Session, action: ActionContext) -> HandlerResult | None:
     """Create a new transactional table without a replacement stage or key alterations."""
-    if session.target_columns() or action.staged is not None or action.task.watermark is not None:
+    if (
+        session.target_columns()
+        or action.staged is not None
+        or action.task.watermark is not None
+        or action.uploads
+    ):
         return None
     if not action.task.allow_empty:
         return None
@@ -192,10 +205,10 @@ def setup_table(session: Session, action: ActionContext) -> HandlerResult:
     business = None if action.staged is not None else session.describe_select(action.select_sql)
     if business is not None:
         check_column_names(session, [name for name, _ in business])
-        create_declared_target(session, business, AUDIT_COLUMNS[writer])
+        create_declared_target(session, business, audit_columns(session, writer))
     else:
         stage = action.build_stage(session, empty=True)
-        create_target_shape(session, stage, AUDIT_COLUMNS[writer])
+        create_target_shape(session, stage, audit_columns(session, writer))
         session.drop(stage)
     if writer in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
         session.publish_hash_version = 2

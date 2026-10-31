@@ -15,6 +15,7 @@ GUIDE_FILES = {
     "Every task": "pipelines-and-tasks.md",
     "SQL": "sql-tasks.md",
     "PYTHON": "python-scripts.md",
+    "FILE_VALIDATION": "stewardship.md",
     "EMAIL_ALERT": "email-alerts.md",
     "EVENT_WAIT": "event-waits.md",
     "RUN_PIPELINE": "pipeline-triggers.md",

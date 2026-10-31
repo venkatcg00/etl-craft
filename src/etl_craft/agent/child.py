@@ -52,6 +52,9 @@ def _watch(parent: int, birth: str, lease: Path) -> None:
             return
 
 
+SCRIPT_HANDLERS = frozenset({Handler.PYTHON, Handler.FILE_VALIDATION})
+
+
 def main() -> int:
     """Run one handler, leaving the parent to upload final logs before committing its ending."""
     parser = argparse.ArgumentParser()
@@ -75,6 +78,7 @@ def main() -> int:
         args.attempt_id,
         lambda holder_id: confirm_stopped(config, holder_tag(holder_id)),
         work["holder_id"],
+        files_dir=folder,
     )
     started = store.call(
         replace(
@@ -118,7 +122,7 @@ def main() -> int:
         result = replace(result, error_message="task stopped by its agent")
     except Exception as error:
         # The process hook logs the failure after its classified ending has been saved.
-        failure = classify_failure(error, config, script=context.handler == Handler.PYTHON)
+        failure = classify_failure(error, config, script=context.handler in SCRIPT_HANDLERS)
         result = replace(
             result,
             error_message=str(error),

@@ -1,0 +1,2 @@
+UPDATE AUD_UPLOADS SET STATUS=:status,REASON=:reason,ENDED_AT=:ended_at
+WHERE UPLOAD_ID=:upload_id AND PIPELINE_RUN_ID=:run_id

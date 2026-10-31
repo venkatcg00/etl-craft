@@ -56,6 +56,15 @@ def add_action_routes(app: FastAPI, ctx: OperationContext, names: frozenset[Acti
             openapi_extra=_openapi(action),
             response_model=None,
         )
+        if name in {ActionName.UPLOAD, ActionName.UPLOADS, ActionName.UPLOAD_PIPELINES}:
+            app.add_api_route(
+                action.path,
+                _endpoint(ctx, action),
+                methods=[action.method],
+                name=f"{name}-default",
+                include_in_schema=False,
+                response_model=None,
+            )
 
 
 def _summary(action: Action) -> str:
@@ -100,15 +109,44 @@ def _caller(
         return browser.cookie_context(ctx, request)
     identity = None if credentials is None else authenticate(ctx, credentials.credentials)
     if identity is None:
-        raise HTTPException(
-            401, "a valid bearer token is required", headers={"WWW-Authenticate": "Bearer"}
-        )
+        if request.method == "POST" and request.url.path.endswith("/uploads"):
+            from etl_craft.core.errors import PermissionDeniedError
+            from etl_craft.services.operations.recording import record_refusal
+
+            pipeline = request.query_params.get("pipeline_code", "(missing)")
+            record_refusal(
+                replace(ctx, actor=SYSTEM_ACTOR, role=None),
+                ActionName.UPLOAD,
+                {"pipeline_code": pipeline},
+                PermissionDeniedError(
+                    f"pipeline {pipeline}: signed-in identity is missing or invalid; "
+                    "expected a valid account token with CAN_UPLOAD; sign in and upload one file"
+                ),
+            )
+        detail = "a valid bearer token is required"
+        if request.url.path.startswith("/api/v1/agent/uploads/"):
+            upload = request.path_params.get("upload_id")
+            attempt = request.query_params.get("attempt_id")
+            detail = (
+                f"upload {upload}, attempt {attempt}, run unavailable: credential or live "
+                "attempt lease is invalid; expected the owning attempt token with a live lease; "
+                "claim an eligible attempt and use its issued credential"
+            )
+        raise HTTPException(401, detail, headers={"WWW-Authenticate": "Bearer"})
     assert credentials is not None
     return replace(
         authenticated_context(ctx, identity),
         transport=Transport.HTTP,
         credential_digest=sha256_hex(credentials.credentials.encode()),
     )
+
+
+async def _upload_answer(caller: OperationContext, action: Action, request: Request) -> Response:
+    from etl_craft.api.uploads import receive
+
+    if browser.browser_request(request):
+        browser.csrf_check(caller, action.name, request, request.headers.get("X-CSRF-Token", ""))
+    return await receive(caller, request)
 
 
 async def _answer(caller: OperationContext, action: Action, request: Request) -> Response:
@@ -121,6 +159,8 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
     project = given.pop("project", None)
     if project is not None:
         caller = replace(caller, project=str(project), project_id=None)
+    if action.name == ActionName.UPLOAD:
+        return await _upload_answer(caller, action, request)
     destination = "/ui"
     if action.method == HttpMethod.GET:
         properties = _adapter(action.name).json_schema().get("properties", {})
@@ -147,7 +187,7 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
             destination = browser.return_path(str(body.pop("_return_to", "/ui")))
             _browser_fields(body, action.name, request)
         given.update(body)
-    parsed = _parse(action, given)
+    parsed = parse_request(action, given)
     result = await run_in_threadpool(invoke, caller, action.name, parsed)
     if isawaitable(result):
         result = await result
@@ -156,21 +196,7 @@ async def _answer(caller: OperationContext, action: Action, request: Request) ->
         if response is not None:
             return response
     if action.streams:
-        if isinstance(result, CatalogPage):
-            return StreamingResponse(
-                result,
-                media_type=result.content_type,
-                headers={"X-Content-Type-Options": "nosniff"},
-                background=BackgroundTask(result.close),
-            )
-        if isinstance(result, RunZip):
-            return StreamingResponse(
-                result,
-                media_type=RunZip.CONTENT_TYPE,
-                headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
-            )
-        assert isinstance(result, Iterator)
-        return StreamingResponse(result, media_type="text/plain")
+        return _stream_answer(action, result)
     if action.result is None:
         return Response(status_code=204)
     return JSONResponse(to_json(result))
@@ -211,7 +237,7 @@ async def read_body(request: Request, maximum: int | None) -> object:
         ) from error
 
 
-def _parse(action: Action, given: dict[str, object]) -> object:
+def parse_request(action: Action, given: dict[str, object]) -> object:
     """Build the request; an unknown or malformed field is refused by its name."""
     try:
         return _adapter(action.name).validate_python(given)
@@ -237,7 +263,7 @@ def _openapi(action: Action) -> dict[str, object]:
             "schema": spec,
         }
         for field, spec in schema.get("properties", {}).items()
-        if field in in_path or action.method == HttpMethod.GET
+        if field in in_path or action.method == HttpMethod.GET or action.name == ActionName.UPLOAD
     ]
     if "{project}" in path:
         parameters.insert(
@@ -249,4 +275,41 @@ def _openapi(action: Action) -> dict[str, object]:
             "required": bool(required - in_path),
             "content": {"application/json": {"schema": schema}},
         }
+    if action.name == ActionName.UPLOAD:
+        extra["requestBody"] = {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["file"],
+                        "properties": {"file": {"type": "string", "format": "binary"}},
+                    }
+                }
+            },
+        }
     return extra
+
+
+def _stream_answer(action: Action, result: object) -> Response:
+    """Render a service-owned iterator without buffering it."""
+    if isinstance(result, CatalogPage):
+        return StreamingResponse(
+            result,
+            media_type=result.content_type,
+            headers={"X-Content-Type-Options": "nosniff"},
+            background=BackgroundTask(result.close),
+        )
+    if isinstance(result, RunZip):
+        return StreamingResponse(
+            result,
+            media_type=RunZip.CONTENT_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+        )
+    assert isinstance(result, Iterator)
+    return StreamingResponse(
+        result,
+        media_type="application/octet-stream"
+        if action.name == ActionName.AGENT_UPLOAD_CONTENT
+        else "text/plain",
+    )

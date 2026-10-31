@@ -58,6 +58,8 @@ from etl_craft.core.errors import (
 from etl_craft.core.items import ItemStore
 from etl_craft.core.ownership import ResourceLocker
 from etl_craft.core.text import qualify
+from etl_craft.core.upload_reader import UploadReader as UploadReader
+from etl_craft.core.uploads import UploadFile
 from etl_craft.warehouse.connection import open_warehouse
 
 Partitions = Mapping[str, int]
@@ -228,6 +230,7 @@ class ScriptTask:
     event_files: tuple[str, ...] = ()
     event_keys: tuple[str, ...] = ()
     event_rows: tuple[Mapping[str, Any], ...] = ()
+    uploads: tuple[UploadFile, ...] = ()
     _locks: ResourceLocker | None = field(default=None, repr=False)
 
     _items: ItemStore | None = field(default=None, repr=False, compare=False)
@@ -299,3 +302,14 @@ def _partitions(value: object) -> Partitions:
             )
         positions[key] = position
     return MappingProxyType(dict(sorted(positions.items())))
+
+
+@dataclass(frozen=True)
+class ValidationTask:
+    """One file, its declared reader and parameters; no warehouse connection is supplied."""
+
+    upload: UploadFile
+    reader: UploadReader
+    task_params: Mapping[str, str]
+    input_params: Mapping[str, Any]
+    logger: logging.Logger

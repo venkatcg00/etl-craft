@@ -126,7 +126,14 @@ def audit_counts(engine):
 def test_read_routes_record_only_named_admin_access_or_explicit_refusals(api):
     ctx, client, creds, run, attempt = api
     given = {"pipeline_code": "P", "task_code": "T", "run_id": run, "attempt_id": attempt}
-    given |= {"control_id": 1, "target": "staging.t", "project": "default", "reason": "Review"}
+    given |= {
+        "control_id": 1,
+        "target": "staging.t",
+        "project": "default",
+        "reason": "Review",
+        "upload_id": 1,
+        "version": "test",
+    }
     audited = {ActionName.PROJECT_LIST, ActionName.POOL_LIST, ActionName.ACCESS_LIST}
     reads = [action for action in ACTIONS.values() if action.method == "GET"]
     # Hourly token-use history is covered separately; these reads start inside that hour.

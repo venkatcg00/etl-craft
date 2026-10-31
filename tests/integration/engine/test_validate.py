@@ -759,3 +759,53 @@ def test_known_coarse_timestamp_definitions_are_validation_findings(project, col
                 },
             )
         assert all("precision 0" not in f.message for f in validate(engine, config).findings)
+
+
+def _validated_upload_pipeline(conn, root, *, kind="HAS_DATA", validators=1, schedule=None):
+    (root / "validation_scripts").mkdir(exist_ok=True)
+    (root / "validation_scripts" / "check.py").write_text("def validate(task):\n    return None\n")
+    p = add_pipeline(conn, "CORRECTIONS")
+    load = add_task(
+        conn, p, "land", "PYTHON", SCRIPT_FILE="python_scripts/load.py", SCRIPT_KIND="INGESTION"
+    )
+    for number in range(validators):
+        check = add_task(
+            conn,
+            p,
+            f"check{number}",
+            "FILE_VALIDATION",
+            SCRIPT_FILE="validation_scripts/check.py",
+            FILE_FORMAT="CSV",
+        )
+        add_dependency(conn, p, load, check, kind)
+    conn.execute(
+        text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='Y', RUN_SCHEDULE=:cron"),
+        {"cron": schedule},
+    )
+    return p
+
+
+def test_a_scheduled_stewardable_pipeline_with_has_data_after_validation_is_clean(project):
+    engine, config, root = project
+    with engine.begin() as conn:
+        _validated_upload_pipeline(conn, root, schedule="0 6 * * *")
+    assert found(validate(engine, config)) == []
+
+
+def test_a_success_dependency_on_file_validation_is_refused_with_the_remedy(project):
+    engine, config, root = project
+    with engine.begin() as conn:
+        _validated_upload_pipeline(conn, root, kind="SUCCESS")
+    messages = [message for _, _, message in found(validate(engine, config))]
+    assert any(
+        "depends on FILE_VALIDATION task check0 with SUCCESS" in m and "HAS_DATA" in m
+        for m in messages
+    ), messages
+
+
+def test_a_pipeline_that_takes_uploads_needs_one_validation_task(project):
+    engine, config, root = project
+    with engine.begin() as conn:
+        _validated_upload_pipeline(conn, root, validators=0)
+    messages = [message for _, _, message in found(validate(engine, config))]
+    assert any("FILE_VALIDATION tasks=0 on a pipeline that takes uploads" in m for m in messages)

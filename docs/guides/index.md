@@ -35,3 +35,5 @@ How to model and run pipelines with etl-craft.
 
 - [Service operations and JSON](service-operations.md): calling the same operations from Python
   and the CLI, execution identities, actors and schema-versioned documents.
+
+- [Stewardship uploads](stewardship.md): validated business files, queueing and uploader attribution.

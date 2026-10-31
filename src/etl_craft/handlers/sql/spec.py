@@ -200,7 +200,11 @@ def read_sql_task(context: TaskContext, stored: StoredOffset | None = None) -> S
             refresh_type=context.refresh_type,
             run_date=context.run_date,
             stored=stored,
-            event_values={"event_files": context.event_files, "event_keys": context.event_keys},
+            event_values={
+                "event_files": context.event_files,
+                "event_keys": context.event_keys,
+                "upload_ids": tuple(str(upload.upload_id) for upload in context.uploads),
+            },
         )
 
     merge_key = _columns(params, "MERGE_KEY", action, context) if action in KEYED else ()
@@ -310,6 +314,11 @@ def resolve_select(
     the task has no usable single read-only SELECT.
     """
     raw, source = read_select(config, params)
+    from etl_craft.dialects.warehouse.uploads import upload_select
+
+    raw = upload_select(
+        raw, len((event_values or {}).get("upload_ids", ())), validating=pipeline_run_id == 0
+    )
     # Tokens first: a ``$$`` would otherwise read as a dollar-quoted string when splitting.
     watermark = read_watermark(params, stored)
     bounded = bounded_definition(config, params)

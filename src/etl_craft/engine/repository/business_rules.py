@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import bindparam
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.business_rules import RuleObservation
@@ -118,13 +118,13 @@ def clear_rule_keys(
     """Clear active flags in batches of at most 1,000 keys on the caller's transaction."""
     if not keys:
         return
-    query = statement(conn, "clear_rule_results").bindparams(bindparam("keys", expanding=True))
+    query = statement(conn, "clear_rule_results")
     for start in range(0, len(keys), 1000):
         conn.execute(
             query,
             {
                 "business_rule_id": business_rule_id,
-                "keys": list(keys[start : start + 1000]),
+                "keys": json.dumps(list(keys[start : start + 1000])),
                 "now": now,
             },
         )

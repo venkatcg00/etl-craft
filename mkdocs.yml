@@ -108,6 +108,7 @@ nav:
       - Dependencies and run conditions: guides/dependencies.md
       - SQL tasks: guides/sql-tasks.md
       - SQL scripts: guides/sql-scripts.md
+      - Stewardship uploads: guides/stewardship.md
       - Protecting human SCD edits: guides/human-overrides.md
       - Business rules: guides/business-rules.md
       - Python scripts: guides/python-scripts.md

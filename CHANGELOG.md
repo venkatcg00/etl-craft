@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Large business-rule flag clears bind each key batch as one JSON value and use exact
+  PostgreSQL active-key index probes even with fresh statistics and generic prepared plans.
+  Batches retain the same size and atomic rollback.
+
 ### Security
 
 - Pending Engine migrations now refuse normal login and UI startup with applied/required
@@ -254,6 +260,21 @@ All notable changes are recorded here. The format follows
   checks the proposed budget before creating the reservation table.
 
 ### Added
+
+- Stewardship upload service, `etl-craft upload` and `etl-craft uploads`, multipart upload,
+  history and eligible-pipeline API reads, durable batching and per-file `AUD_UPLOADS` feedback.
+- Pipeline `STEWARDABLE_FLAG` (default N) lists a pipeline for uploads; it otherwise runs like
+  any pipeline. `CAN_UPLOAD` permission. The `FILE_VALIDATION` handler runs the team's script on
+  each file with streaming pipe-delimited CSV/TXT and XLSX readers; it reports accepted files as
+  its target count, so `HAS_DATA` dependents skip a run with no files. `validate` refuses a
+  `SUCCESS` dependency on it and an upload pipeline without exactly one.
+- `Uploads.Max_file_mb` (`uploads.max_file_mb`, default 50) and the optional `excel` extra
+  (`openpyxl>=3.1.5,<4`). Upload bytes and workbook expansion are bounded before scripts run.
+- Per-row upload attribution through managed SQL actions, later-upload-wins merge ordering,
+  and human SCD protection on native PostgreSQL/DuckDB. Iceberg/Trino refuse protected SCD
+  upload pipelines during validate and refresh; ordinary upload targets remain supported.
+- Attempt-token-only `GET /api/v1/agent/uploads/{upload_id}/content` for API-only agents,
+  with live-lease/run admission and SHA-256 verification shared with local execution.
 
 - Operations pages: **System health** (live controllers and their last heartbeat, a
   controller-version mismatch warning, the Engine DB schema version, agents and pool capacity

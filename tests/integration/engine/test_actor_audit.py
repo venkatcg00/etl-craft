@@ -297,6 +297,8 @@ def seeded_tables(db):
                     )
                 if table.upper() == "AUD_BUSINESS_RULES_RESULTS" and lower == "status":
                     value = "REPORT"
+                if table.upper() == "AUD_UPLOADS" and lower == "status":
+                    value = "QUEUED"
                 if table.upper() == "AUD_AGENTS" and lower == "status":
                     value = AgentStatus.ACTIVE
                 if table.upper() == "AUD_AGENT_COMMANDS" and lower == "command":

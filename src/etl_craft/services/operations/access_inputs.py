@@ -168,7 +168,7 @@ def row_problems(
     optional_permission = values["ACTION"] == AccessIntent.REVOKE and not values["PERMISSION"]
     if not optional_permission and values["PERMISSION"] not in tuple(Permission):
         bad.append(
-            f"PERMISSION={values['PERMISSION']!r}; expected CAN_VIEW, CAN_RUN "
+            f"PERMISSION={values['PERMISSION']!r}; expected CAN_VIEW, CAN_UPLOAD, CAN_RUN "
             f"or CAN_MANAGE; fix the permission"
         )
     if values["ACTION"] not in tuple(AccessIntent):

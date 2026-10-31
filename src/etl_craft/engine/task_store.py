@@ -20,6 +20,7 @@ from etl_craft.core.errors import HandlerError, StaleTransitionError
 from etl_craft.core.items import ItemRecord, ItemState, ItemStore
 from etl_craft.core.ownership import ResourceLocker, attempt_holder
 from etl_craft.core.time import as_utc
+from etl_craft.core.uploads import UploadFile
 from etl_craft.engine import locks, resource_locks, transitions
 from etl_craft.engine.agent_state import fence
 from etl_craft.engine.alerts import AlertState, read_alert
@@ -120,6 +121,14 @@ class RuleEnding:
 class TaskStore(ResourceLocker, ItemStore, Protocol):
     """The local and HTTP task backends expose the same bounded operations."""
 
+    def upload_files(self) -> tuple[UploadFile, ...]:
+        """Read and verify the admitted files before exposing them to a script."""
+        ...
+
+    def validation_result(self, upload_id: int, reason: str | None) -> None:
+        """Record this validator's decision for one admitted file."""
+        ...
+
     def alert(self, pipelines: str | None) -> AlertState:
         """Read this task's run report and requested pipeline digests."""
         ...
@@ -167,6 +176,40 @@ class LocalTaskStore:
     locks: ResourceLocker
     definition: Definition | None = None
     _contracts: dict[str, TargetState] = field(default_factory=dict, compare=False)
+
+    def upload_files(self) -> tuple[UploadFile, ...]:
+        """Use the same fenced storage stream as API-only agents."""
+        from etl_craft.core.upload_copy import verified_upload
+        from etl_craft.engine.upload_files import stream_upload
+        from etl_craft.engine.uploads import run_uploads
+
+        with self.engine.connect() as conn:
+            from etl_craft.engine.repository.tasks import fetch_task_execution_detail
+
+            with using(self.definition):
+                detail = fetch_task_execution_detail(conn, self.identity.task_id).handler
+            uploads = run_uploads(conn, self.identity.pipeline_run_id, detail)
+        root = self.config.host_dir / ".upload_inputs" / str(self.identity.attempt_id)
+        return tuple(
+            verified_upload(
+                root,
+                upload,
+                stream_upload(self.engine, self.config, self.identity, upload.upload_id),
+            )
+            for upload in uploads
+        )
+
+    def validation_result(self, upload_id: int, reason: str | None) -> None:
+        """Fence each per-file decision against this validator's live attempt."""
+        from etl_craft.engine.uploads import validation_result
+
+        with self.engine.begin() as conn:
+            self._assert(conn)
+            from etl_craft.engine.repository.tasks import fetch_task_execution_detail
+
+            with using(self.definition):
+                handler = fetch_task_execution_detail(conn, self.identity.task_id).handler
+            validation_result(conn, self.identity.pipeline_run_id, handler, upload_id, reason)
 
     @property
     def session_tag(self) -> str:

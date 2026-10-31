@@ -3,7 +3,8 @@
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.definitions import current
-from etl_craft.core.enums import Handler, SlotKind, YesNo
+from etl_craft.core.enums import SlotKind, YesNo
+from etl_craft.core.placement import slot_kind
 from etl_craft.engine.placement import claim_parameters
 from etl_craft.engine.queries import statement
 
@@ -23,7 +24,7 @@ def inherit_dispatch(conn: Connection, attempt_id: int, task_run_id: int) -> Non
         if definition is None
         else definition.row("CFG_TASKS", "task_id", row.task_id)["handler"]
     )
-    kind = SlotKind.PYTHON if handler == Handler.PYTHON else SlotKind.WAREHOUSE
+    kind = slot_kind(str(handler))
     if definition is None and row.previous_kind is not None:
         kind = SlotKind(row.previous_kind)
     conn.execute(
@@ -43,7 +44,7 @@ def dispatch_options(
     conn: Connection, attempt_id: int, handler: str, reason: str | None, options: dict[str, bool]
 ) -> None:
     """Persist the admitted flags with the task's recorded pool and pipeline priority."""
-    kind = SlotKind.PYTHON if handler == Handler.PYTHON else SlotKind.WAREHOUSE
+    kind = slot_kind(str(handler))
 
     conn.execute(
         statement(conn, "agent_queue"),

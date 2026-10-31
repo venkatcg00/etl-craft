@@ -41,7 +41,10 @@ from etl_craft.engine.rule_runs import restart_rule_run as restart_rule_run
 from etl_craft.engine.run_creation import RunCreation
 from etl_craft.engine.run_creation import create as create_new_run
 from etl_craft.engine.timestamp_windows import record_watermark_range as record_watermark_range
+from etl_craft.engine.transition_guards import actor_parameters as actor_parameters
 from etl_craft.engine.transition_guards import stale as _stale
+from etl_craft.engine.transition_guards import stale_attempt as stale_attempt
+from etl_craft.engine.uploads import end_uploads
 
 
 def create_active_run(
@@ -281,38 +284,6 @@ def cancel_pipeline_run(conn: Connection, pipeline_run_id: int) -> None:
 def delete_skipped_task_run(conn: Connection, task_run_id: int) -> None:
     """Remove a ``SKIPPED`` row of a task that never ran, so the resumed run decides again."""
     conn.execute(statement(conn, "delete_task_run"), {"task_run_id": task_run_id})
-
-
-def stale_attempt(
-    conn: Connection, attempt_id: int, expected: str, owner: str | None
-) -> StaleTransitionError:
-    """Describe an attempt row that is not in the ``expected`` state for ``owner``."""
-    return _stale(conn, "attempt", attempt_id, expected, owner)
-
-
-def actor_parameters(actor: Actor) -> dict[str, Any]:
-    """Bind the initiating actor to an attributed lifecycle write."""
-    return {"actor": actor.name, "actor_kind": actor.kind.value, "now": datetime.now(UTC)}
-
-
-def _guard(
-    conn: Connection,
-    query: str,
-    kind: str,
-    row_id: int,
-    expected: str,
-    owner: str | None,
-    params: dict[str, Any],
-) -> None:
-    if query == "admit_run":
-        lifecycle(conn, "admission", row_id)
-    result = conn.execute(
-        statement(conn, f"transition_{query}"), {"row_id": row_id, "owner": owner, **params}
-    )
-    if result.rowcount != 1:
-        raise _stale(conn, kind, row_id, expected, owner)
-    if query in {"finish_run", "cancel_run", "mark_run"}:
-        lifecycle(conn, "run", row_id, str(params["status"]))
 
 
 def admit_run(conn: Connection, pipeline_run_id: int, actor: Actor) -> None:
@@ -800,3 +771,25 @@ def create_run(
     return create_new_run(
         conn, pipeline_id, actor, RunCreation(run_date, trigger_kind, run_key, status)
     )
+
+
+def _guard(
+    conn: Connection,
+    query: str,
+    kind: str,
+    row_id: int,
+    expected: str,
+    owner: str | None,
+    params: dict[str, Any],
+) -> None:
+    """Commit a guarded transition and its run-ending side effects atomically."""
+    if query == "admit_run":
+        lifecycle(conn, "admission", row_id)
+    result = conn.execute(
+        statement(conn, f"transition_{query}"), {"row_id": row_id, "owner": owner, **params}
+    )
+    if result.rowcount != 1:
+        raise _stale(conn, kind, row_id, expected, owner)
+    if query in {"finish_run", "cancel_run", "mark_run"}:
+        end_uploads(conn, row_id, str(params["status"]))
+        lifecycle(conn, "run", row_id, str(params["status"]))

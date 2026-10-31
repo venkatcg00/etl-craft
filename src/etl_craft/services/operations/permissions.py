@@ -145,7 +145,7 @@ def pipeline_access(conn: Connection, ctx: OperationContext) -> PipelineAccess:
             ApiRole.ADMIN
             if ctx.role == ApiRole.ADMIN
             else ApiRole.VIEWER
-            if level == Permission.CAN_VIEW
+            if level in {Permission.CAN_VIEW, Permission.CAN_UPLOAD}
             else ApiRole.OPERATOR
             if level is not None
             else None

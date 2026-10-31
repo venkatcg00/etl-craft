@@ -60,3 +60,7 @@ Auth:
 #   Interventions_days: 365
 #   Config_history_days: 365
 #   Daily_at: "03:00"
+
+# Blanket stewardship upload ceiling; validation tasks may lower it.
+Uploads:
+  Max_file_mb: 50                      # value

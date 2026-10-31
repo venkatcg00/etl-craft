@@ -360,3 +360,96 @@ def test_children_never_receive_agent_token(cluster, monkeypatch):
     finally:
         agent.signal(signal.SIGTERM)
         agent.wait(timeout=40)
+
+
+def test_api_only_agent_runs_upload_validation_and_load(cluster, monkeypatch):
+    from etl_craft.core.actor import Actor, acting_as
+    from etl_craft.core.enums import ActorKind
+    from etl_craft.services.operations.uploads import UploadRequest, receive
+    from fixtures.metadata import add_dependency, add_task
+
+    p, url, token, agent_dir = cluster
+    (agent_dir / "validation_scripts").mkdir()
+    (agent_dir / "validation_scripts/check.py").write_text(
+        "def validate(task):\n"
+        "    rows = list(task.reader.rows())\n"
+        "    assert rows == [('id', 'name'), ('1', 'accepted')]\n"
+    )
+    (agent_dir / "python_scripts/load.py").write_text(
+        "from sqlalchemy import text\n"
+        "from etl_craft.scripting import ScriptResult\n"
+        "def run(task):\n"
+        "    with task.warehouse() as engine, engine.begin() as conn:\n"
+        "        conn.execute(text('CREATE TABLE uploaded "
+        "(id INTEGER,UPLOAD_ID BIGINT,CREATED_BY VARCHAR,UPDATED_BY VARCHAR)'))\n"
+        "        for upload in task.uploads:\n"
+        "            assert upload.path.read_bytes() == b'id|name\\n1|accepted\\n'\n"
+        "            conn.execute(text('INSERT INTO uploaded VALUES "
+        "(1,:id,:account,:account)'), {'id': upload.upload_id,'account': upload.account})\n"
+        "    return ScriptResult(1)\n"
+    )
+    ctx = OperationContext(p.engine, p.config, SYSTEM_ACTOR, role=ApiRole.ADMIN)
+    from fixtures.actions import act
+
+    act(ctx, ActionName.ACCOUNT_ADD, name="steward", role=ApiRole.ADMIN, oidc_subject="steward")
+    with p.engine.begin() as conn:
+        pipeline = conn.execute(text("SELECT PIPELINE_ID AS id FROM CFG_PIPELINES")).scalar_one()
+        load = conn.execute(text("SELECT TASK_ID AS id FROM CFG_TASKS")).scalar_one()
+        validation = add_task(
+            conn,
+            pipeline,
+            "check",
+            "FILE_VALIDATION",
+            SCRIPT_FILE="validation_scripts/check.py",
+            FILE_FORMAT="CSV",
+        )
+        add_dependency(conn, pipeline, load, validation, "HAS_DATA")
+        conn.execute(text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='Y'"))
+    publish_project(p, agent_dir)
+    ctx = OperationContext(
+        p.engine,
+        p.config,
+        Actor("steward", ActorKind.USER),
+        role=ApiRole.ADMIN,
+        project="default",
+        project_id=1,
+    )
+    with receive(ctx, UploadRequest(pipeline_code="P")) as receipt:
+        receipt.begin_file("data.csv", "text/csv")
+        receipt.write(b"id|name\n1|accepted\n")
+    controller = p.start("controller", "--no-ui")
+    monkeypatch.setenv("ETL_CRAFT_TOKEN", token.token)
+    agent = p.start("agent", "--api", url, "--project-dir", str(agent_dir), "--drain-seconds", "0")
+    try:
+        p.wait_for("SELECT STATUS FROM AUD_PIPELINES_RUN_LOG", expected="SUCCESS", timeout=40)
+        with acting_as(SYSTEM_ACTOR), p.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT STATUS AS status,ACCOUNT AS account FROM AUD_UPLOADS")
+            ).one()
+        assert row.status == "LOADED" and row.account == "steward"
+        from etl_craft.warehouse.connection import open_warehouse
+
+        with open_warehouse(p.config) as warehouse, warehouse.connect() as conn:
+            row = conn.execute(
+                text("SELECT CREATED_BY AS creator,UPDATED_BY AS writer FROM uploaded")
+            ).one()
+        assert row.creator == row.writer == "steward"
+    except AssertionError as error:
+        with p.engine.connect() as conn:
+            failures = (
+                conn.execute(text("SELECT ERROR_MESSAGE AS error FROM AUD_TASK_ATTEMPTS"))
+                .scalars()
+                .all()
+            )
+            logs = (
+                conn.execute(text("SELECT CONTENT AS content FROM AUD_ATTEMPT_LOG_CHUNKS"))
+                .scalars()
+                .all()
+            )
+        raise AssertionError(
+            f"{error}\nfailures:{failures}\nlogs:{logs}\nagent:\n{agent.output}"
+            f"\ncontroller:\n{controller.output}"
+        ) from error
+    finally:
+        agent.signal(signal.SIGTERM)
+        agent.wait(timeout=40)

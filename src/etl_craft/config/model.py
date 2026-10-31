@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from etl_craft.config.docs_site import external_url
 from etl_craft.config.object_models import Artifacts, Logs, ObjectStore
+from etl_craft.config.uploads import Uploads
 from etl_craft.core.enums import (
     AuthMode,
     CloningScope,
@@ -313,6 +314,7 @@ class ConnectorConfig:
     logs: Logs = field(default_factory=Logs)
     object_stores: dict[str, ObjectStore] = field(default_factory=dict)
     retention: Retention = field(default_factory=Retention)
+    uploads: Uploads = field(default_factory=Uploads)
     retry_on: RetryOn = RetryOn.TRANSIENT
 
     @property

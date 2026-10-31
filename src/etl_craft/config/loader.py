@@ -55,6 +55,7 @@ from etl_craft.config.resolve import Resolver
 from etl_craft.config.retention import KEYS as RETENTION_KEYS
 from etl_craft.config.retention import parse_retention
 from etl_craft.config.targets import active_catalog
+from etl_craft.config.uploads import parse_uploads
 from etl_craft.core.enums import AuthMode
 from etl_craft.core.errors import ConfigurationError, MetadataError
 
@@ -71,6 +72,7 @@ SECTIONS = (
     "Artifacts",
     "Logs",
     "Retention",
+    "Uploads",
 )
 
 
@@ -100,6 +102,7 @@ def settings_by_section() -> dict[str, frozenset[str]]:
         "Artifacts": ARTIFACT_KEYS,
         "Logs": LOG_KEYS,
         "Retention": RETENTION_KEYS,
+        "Uploads": frozenset({"Max_file_mb"}),
     }
 
 
@@ -242,6 +245,7 @@ def parse_config(raw: object, path: Path, *, agent: bool = False) -> ConnectorCo
         api_address=api_address,
     )
     config = ConnectorConfig(
+        uploads=parse_uploads(raw, path),
         retention=parse_retention(raw, global_profile, path, resolver),
         deployment=deployment,
         api_address=api_address,

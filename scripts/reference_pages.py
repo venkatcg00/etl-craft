@@ -15,7 +15,13 @@ from pathlib import Path
 
 from etl_craft.config.loader import settings_by_section
 from etl_craft.dialects.warehouse.base import STORAGE_PARAMETERS
-from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline
+from etl_craft.handlers import (
+    email_alert,
+    event_wait,
+    file_validation,
+    python_scripts,
+    run_pipeline,
+)
 from etl_craft.handlers.registry import COMMON_PARAMETERS
 from etl_craft.handlers.sql.spec import FLAGS, SCREENED
 from etl_craft.handlers.sql.spec import PARAMETERS as SQL_PARAMETERS
@@ -28,6 +34,7 @@ HANDLER_GUIDES = {
     "Every task": "../guides/pipelines-and-tasks.md#cfg_task_parameters",
     "SQL": "../guides/sql-tasks.md",
     "PYTHON": "../guides/python-scripts.md",
+    "FILE_VALIDATION": "../guides/stewardship.md",
     "SQL_SCRIPT": "../guides/sql-scripts.md",
     "EMAIL_ALERT": "../guides/email-alerts.md",
     "EVENT_WAIT": "../guides/event-waits.md",
@@ -103,6 +110,7 @@ def handler_parameters() -> dict[str, list[tuple[str, str]]]:
         "Every task": [(name, "") for name in sorted(COMMON_PARAMETERS)],
         "SQL": sql,
         "PYTHON": [(name, "") for name in sorted(python_scripts.PARAMETERS)],
+        "FILE_VALIDATION": [(name, "") for name in sorted(file_validation.PARAMETERS)],
         "EMAIL_ALERT": alert,
         "EVENT_WAIT": [(name, "local mode") for name in sorted(event_wait.PARAMETERS)],
         "RUN_PIPELINE": [(name, "") for name in sorted(run_pipeline.PARAMETERS)],

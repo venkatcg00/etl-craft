@@ -3,3 +3,4 @@ INSERT INTO AUD_ACTIONS
  PROJECT_ID, PIPELINE_ID, TASK_ID, OUTCOME, EXIT_CODE)
 VALUES (:started, :ended, :actor, :kind, :host, :command, CAST(:arguments AS jsonb),
         :project, :pipeline, :task, :outcome, :exit_code)
+RETURNING ACTION_ID AS action_id
