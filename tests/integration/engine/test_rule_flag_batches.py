@@ -1,5 +1,6 @@
 """Clearing business-rule flags with bounded statements and one transaction."""
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -117,12 +118,15 @@ def clear_and_record(db, keys, rules):
     rule, run_id = rules[0]
     try:
         with db.engine.begin() as conn, parameter_limit(conn):
+            if db.dialect.name == "postgres":
+                conn.execute(text("SET LOCAL plan_cache_mode = 'force_generic_plan'"))
             clear_rule_keys(conn, rule.business_rule_id, keys, NOW)
             finish_rule_run(conn, run_id, "SUCCESS", NOW)
     finally:
         event.remove(db.engine, "before_cursor_execute", listener)
     assert all(size <= 1002 for size in sizes)
     assert bool(sizes) == bool(keys)
+    assert all(size == 3 for size in sizes)
     assert_cleared(db, keys, rules)
 
 
@@ -135,7 +139,27 @@ def test_clearing_flags_at_the_statement_budget(engine_db, count):
 def test_tens_of_thousands_of_flags_can_be_cleared(engine_db):
     count = 40000 if engine_db.dialect.name == "sqlite" else 70000
     keys, rules = seed_flags(engine_db, count)
+    if engine_db.dialect.name == "postgres":
+        assert_full_key_probe(engine_db, rules[0][0].business_rule_id, keys[:1000])
     clear_and_record(engine_db, keys, rules)
+
+
+def assert_full_key_probe(db, rule_id, keys):
+    with db.engine.connect() as conn:
+        plan = conn.execute(
+            text("EXPLAIN (FORMAT JSON) " + db.dialect.query("clear_rule_results")),
+            {"business_rule_id": rule_id, "keys": json.dumps(keys), "now": NOW},
+        ).scalar_one()
+    pending = [plan[0]["Plan"]]
+    probes = []
+    while pending:
+        node = pending.pop()
+        if node.get("Index Name") == "ux_brresults_active_key":
+            probes.append(node.get("Index Cond", ""))
+        pending.extend(node.get("Plans", ()))
+    assert any("business_rule_id" in probe and "business_rule_key" in probe for probe in probes), (
+        plan
+    )
 
 
 def test_a_later_batch_failure_rolls_back_flags_and_rule_completion(engine_db):

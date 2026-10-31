@@ -6,6 +6,12 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Large business-rule flag clears bind each key batch as one JSON value and use exact
+  PostgreSQL active-key index probes even with fresh statistics and generic prepared plans.
+  Batches retain the same size and atomic rollback.
+
 ### Security
 
 - Pending Engine migrations now refuse normal login and UI startup with applied/required
