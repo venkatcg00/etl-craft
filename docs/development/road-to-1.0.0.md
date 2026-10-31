@@ -176,7 +176,7 @@ item's text, or work done early under another item.
 | S7.AE Pipeline samples | Planned | | Optional whole-pipeline CI sample cases; business rules remain the correctness check on real data |
 | S7.AF Config files are helpers | Done | #262 | Engine DB truth; partial, non-destructive config upserts; owner-approved plan/risk/release text accompanies code |
 | S7.AG Project migrations stay in their project | Done | #274 | Statement preflight, project-scoped row guards, team-table claims and doctor checks on both Engine DBs |
-| S7.A Web UI pages | In progress, slice 6b of 6 | #277, #281, #282, #283, #284, #285, #286, #287, #290, #291, #292, slice 6b PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4); command console (5); task and run actions, items page, Reconcile, Refresh (6a); administration page and announcements (6b) |
+| S7.A Web UI pages | In progress, slice 6c of 6 | #277, #281, #282, #283, #284, #285, #286, #287, #290, #291, #292, #294, slice 6c PR | Shell, sessions, settings, About and catalog (1); pipeline list, pipeline and run pages with capability-driven controls (2a); list schedule/run summaries, matrix, timeline, run now, bulk pause/resume, CSV (2b); search, recently viewed, live updates and stale notice (2c); attempt page with live log tail and download (3a); pipeline run log from the audit, CLI/API/page, SLA_BREACHED_AT (3b); run zip with manifest, CLI --zip, API and page download (3c); Pipeline Insights read, CLI, page and catalog tab (4); command console (5); task and run actions, items page, Reconcile, Refresh (6a); administration page and announcements (6b); system health, agents, scheduled runs and maintenance (6c) |
 | S7.AH Renames keep identity | Done | #273 | Atomic attributed renames retain IDs, offsets, events and grants; stale config inserts refuse |
 | S7.AI Fixes from the 2026-10-27 audit | Done | #264 | Pool/attempt credentials, bounded SSO, publishing, sign-in, dependency bounds, setup and first-ending metrics. |
 | S7.AK Schema checker | Done | S7.AK PR | Optional per-project schedule plus an on-demand check that compare declared tables with the warehouse; Insights and the catalog show the last check |
@@ -923,6 +923,13 @@ empty-history-page handling defect, which was corrected and verified. No cloud w
   offered. Held and paused work and run filters by agent, pool and failure class move to 6c: no
   read lists active holds or filters runs by attempt fields yet. The offsets panel is also 6c,
   with the task page that shows the stored offset.
+- S7.A slice 6c and 6d: the remaining slice-6 work is split in two. 6c is the operations pages
+  (system health, agents, scheduled runs, maintenance), built only on existing reads; 6d is the
+  task page (offsets panel, task-run statistics), held and paused work, run filters by agent,
+  pool and failure class, the catalog Data tab and header actions, project Refresh all, the
+  Uploads page on S7.M's API, and the capability-matrix test. System health does not probe
+  warehouses from the browser: tasks and `doctor` check connections, and Insights shows schema
+  checks. Clone has no dry run; the page states its effect and asks for confirmation.
 - S7.A slice 6b: the administration page is one route with a tab per admin read; every change
   posts the existing `/api/v1` request, so no new admin action exists for the page. Pipeline
   access is listed per selected project, since grants are project-scoped. Announcements are a

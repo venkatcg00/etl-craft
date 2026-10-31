@@ -255,6 +255,14 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- Operations pages: **System health** (live controllers and their last heartbeat, a
+  controller-version mismatch warning, the Engine DB schema version, agents and pool capacity
+  where the deployment uses them, and each project's last 24 hours), **Agents** (with Drain,
+  Resume and Stop for operators), a project's **Scheduled runs** (what runs next, in order, and
+  scheduled pipelines that are paused or have no next run, with the reason) and an admin
+  **Maintenance** page that previews purge, rehash and target upgrades before running them, and
+  clones Engine DB tables. `about --json` and `GET /api/v1/about` give each live controller's
+  `heartbeat_at`.
 - **Administration** page for admins (`/ui/admin`): tabs for accounts, groups, tokens, pipeline
   access, projects, pools and announcements list the existing admin reads and post the same API
   requests as the CLI. Accounts show locked state, failed sign-ins and last sign-in, with

@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css">{% endblock %}
+{% block content %}
+<h1>System health</h1>
+<p class="note">This page reads the Engine DB, so seeing it means the Engine DB answered.</p>
+<div class="health-grid">
+<section class="panel" aria-labelledby="controllers-title"><h2 id="controllers-title">Controllers</h2>
+{% if about.controllers %}
+<p><span class="status SUCCESS"><span aria-hidden="true">✓</span> Running</span> {{ about.controllers|length }} with a heartbeat in the last minute.</p>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Controller</th><th scope="col">Version</th><th scope="col">Last heartbeat</th></tr></thead><tbody>
+{% for c in about.controllers %}<tr><th scope="row">{{ c.controller_id }}</th><td>{{ c.version }}</td><td>{{ ages[c.controller_id] }} s ago</td></tr>{% endfor %}
+</tbody></table></div>
+{% if mixed %}<p class="notice warning"><span aria-hidden="true">⚠</span> Controllers run {{ mixed|join(', ') }} while this server runs {{ about.package_version }}. Finish the upgrade so every process runs one version.</p>{% endif %}
+{% else %}
+<p><span class="status FAILED"><span aria-hidden="true">✕</span> Not running</span> No controller has sent a heartbeat in the last minute, so schedules, retries and queued tasks are not starting. Start one on the host with <code>etl-craft controller</code>.</p>
+{% endif %}
+</section>
+<section class="panel" aria-labelledby="engine-title"><h2 id="engine-title">Engine DB</h2>
+<dl class="facts"><dt>State</dt><dd><span class="status SUCCESS"><span aria-hidden="true">✓</span> Answering</span></dd><dt>Schema version</dt><dd>{{ about.schema_version or "Not recorded" }}</dd><dt>Package version</dt><dd>{{ about.package_version }}</dd></dl>
+</section>
+<section class="panel" aria-labelledby="agents-title"><h2 id="agents-title">Agents</h2>
+{% if agents is none %}<p>Not used: this deployment runs tasks on the controller's host (<code>Deployment.Profile</code> is not <code>CONTROLLER_AGENTS</code>).</p>
+{% else %}{% set active = agents.agents|selectattr("status", "equalto", "ACTIVE")|list %}
+<p>{% if active %}<span class="status SUCCESS"><span aria-hidden="true">✓</span> {{ active|length }} active</span>{% else %}<span class="status FAILED"><span aria-hidden="true">✕</span> None active</span> Tasks wait until an agent registers.{% endif %} · {{ agents.agents|length - active|length }} draining or gone</p>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Pool</th><th scope="col">Agents</th><th scope="col">Free CPU</th><th scope="col">Free memory</th></tr></thead><tbody>
+{% for p in agents.pools %}<tr><th scope="row">{{ p.pool }}</th><td>{{ p.agents }}</td><td>{{ "%.1f"|format(p.free_cpu) }} of {{ "%.1f"|format(p.advertised_cpu) }}</td><td>{{ p.free_memory_mb }} of {{ p.advertised_memory_mb }} MB</td></tr>{% else %}<tr><td colspan="4">No pools have agents.</td></tr>{% endfor %}
+</tbody></table></div><p><a href="/ui/agents">Open Agents</a></p>{% endif %}
+</section>
+<section class="panel" aria-labelledby="projects-title"><h2 id="projects-title">Projects, last 24 hours</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Project</th><th scope="col">Environment</th><th scope="col">Running</th><th scope="col">Queued tasks</th><th scope="col">Failed</th><th scope="col">SLA misses</th></tr></thead><tbody>
+{% for p in projects %}<tr><th scope="row"><a href="/ui/projects/{{ p.project|urlencode }}/pipelines">{{ p.project }}</a></th><td>{{ p.environment_type }}</td><td>{{ p.running }}</td><td>{{ p.queued_tasks }}</td><td>{% if p.failed %}<span class="status FAILED"><span aria-hidden="true">✕</span> {{ p.failed }}</span>{% else %}0{% endif %}</td><td>{{ p.sla_misses }}</td></tr>{% else %}<tr><td colspan="6">No projects you can view.</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="note">Warehouse connections are checked by each task and by <code>etl-craft doctor</code> on the host; schema checks show on each project's Insights page.</p>
+</section>
+</div>
+{% endblock %}

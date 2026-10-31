@@ -1,5 +1,6 @@
 /* Workflow Monitor: pipeline list, pipeline and run pages. Colours come from catalog.css. */
 .breadcrumbs { color: var(--muted); font-size: .9rem; margin-bottom: .5rem; }
+.breadcrumbs a { text-decoration: underline; text-underline-offset: .15em; }
 .object-header h1 { margin: 0 0 .25rem; }
 .object-header .note { font-size: 1rem; font-weight: 400; }
 .header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
