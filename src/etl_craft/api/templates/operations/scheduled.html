@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import recent_runs %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css">{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="{{ pipelines_url }}">{{ project.project_name }}</a> › <span aria-current="page">Scheduled runs</span></nav>
+<h1>Scheduled runs</h1>
+<section class="panel" aria-labelledby="next-title"><h2 id="next-title">What runs next · {{ upcoming|length }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Next run</th><th scope="col">Pipeline</th><th scope="col">Schedule</th><th scope="col">Recent runs</th></tr></thead><tbody>
+{% for p in upcoming %}<tr><td>{{ p.next_run|zoned(settings.timezone) }}</td><th scope="row"><a href="{{ pipelines_url }}/{{ p.pipeline_code|urlencode }}">{{ p.pipeline_code }}</a></th><td><code>{{ p.run_schedule }}</code></td><td>{{ recent_runs(p.recent_runs, pipelines_url ~ "/" ~ p.pipeline_code|urlencode) }}</td></tr>
+{% else %}<tr><td colspan="4">No scheduled pipeline has a next run.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% if not_running %}<section class="panel" aria-labelledby="held-title"><h2 id="held-title">Scheduled but not running · {{ not_running|length }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Pipeline</th><th scope="col">Schedule</th><th scope="col">Why</th></tr></thead><tbody>
+{% for p in not_running %}<tr><th scope="row"><a href="{{ pipelines_url }}/{{ p.pipeline_code|urlencode }}">{{ p.pipeline_code }}</a></th><td><code>{{ p.run_schedule }}</code></td><td class="wrap">{% if p.paused %}Paused by {{ p.paused.paused_by }}{% if p.paused.reason %}: {{ p.paused.reason }}{% endif %}{% elif p.schedule_problem %}<span class="status FAILED"><span aria-hidden="true">⚠</span> No next run</span> {{ p.schedule_problem }}{% else %}No next run found{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
+{% endblock %}

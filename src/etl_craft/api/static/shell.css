@@ -11,3 +11,5 @@ form[data-api-form]>:is(h2,p,fieldset,textarea,.dialog-buttons,button),form[data
 form[data-api-form] fieldset{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:.75rem 1rem;min-width:0;margin:0}
 form[data-api-form]>button{justify-self:start}
 #created-token{display:block;margin:.5rem 0;word-break:break-all}
+.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,28rem),1fr));gap:1rem;align-items:start}
+.result-document{max-height:24rem;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:.5rem 0}

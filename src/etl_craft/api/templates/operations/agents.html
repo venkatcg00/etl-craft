@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import post_button %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
+{% block content %}
+<h1>Agents</h1>
+{% if agents is none %}<p class="panel">Not used: this deployment runs tasks on the controller's host (<code>Deployment.Profile</code> is not <code>CONTROLLER_AGENTS</code>).</p>
+{% else %}
+<section class="panel" aria-labelledby="agents-title"><h2 id="agents-title">Registered agents · {{ agents.agents|length }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Agent</th><th scope="col">Pool</th><th scope="col">Host</th><th scope="col">Version</th><th scope="col">State</th><th scope="col">Last heartbeat</th><th scope="col">Running attempts</th><th scope="col">Free CPU / memory</th><th scope="col">Pending commands</th>{% if may_command %}<th scope="col">Actions</th>{% endif %}</tr></thead><tbody>
+{% for a in agents.agents %}<tr><th scope="row">{{ a.agent_id }}</th><td>{{ a.pool }}</td><td>{{ a.host }}</td><td>{{ a.version }}</td>
+<td>{% if a.status == 'ACTIVE' %}<span class="status SUCCESS"><span aria-hidden="true">✓</span> Active</span>{% elif a.status == 'DRAINING' %}<span class="status PAUSED"><span aria-hidden="true">◐</span> Draining</span>{% else %}<span class="status CANCELLED"><span aria-hidden="true">■</span> Gone</span>{% endif %}</td>
+<td>{{ a.heartbeat_at|zoned(settings.timezone) }}</td><td>{{ a.attempts|length }}</td><td>{{ "%.1f"|format(a.free_cpu) }} / {{ a.free_memory_mb }} MB</td>
+<td>{% for c in a.pending_commands %}{{ c.command }}{% if not loop.last %}, {% endif %}{% else %}None{% endfor %}</td>
+{% if may_command %}<td class="row-actions">{% if a.status == 'ACTIVE' %}{{ post_button("Drain", "/api/v1/agents/commands", {"agent_id": a.agent_id, "command": "DRAIN"}, "agent " ~ a.agent_id ~ " on " ~ a.host, "Stop this agent claiming new tasks; its running tasks finish.", "yes", "noreason") }}{% elif a.status == 'DRAINING' %}{{ post_button("Resume", "/api/v1/agents/commands", {"agent_id": a.agent_id, "command": "RESUME"}, "agent " ~ a.agent_id ~ " on " ~ a.host, "Let this agent claim new tasks again.", "yes", "noreason") }}{% endif %}{% if a.status != 'GONE' %} {{ post_button("Stop", "/api/v1/agents/commands", {"agent_id": a.agent_id, "command": "STOP"}, "agent " ~ a.agent_id ~ " on " ~ a.host, "Stop this agent process; its running attempts are stopped and retried under their retry rules.", "no", "noreason", "danger") }}{% endif %}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="10">No agents have registered. Start one with <code>etl-craft agent</code> and an agent token.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+{% with pipeline_code=None, run_id=None, task_code=None, controls_url=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}

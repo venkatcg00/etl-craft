@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% macro text(name, label, required=False, hint="") -%}
+<label>{{ label }}<input name="{{ name }}" type="text" autocomplete="off" {% if required %}required{% endif %} {% if hint %}placeholder="{{ hint }}"{% endif %}></label>
+{%- endmacro %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/admin.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}/pipelines">{{ project.project_name }}</a> › <span aria-current="page">Maintenance</span></nav>
+<h1>Maintenance</h1>
+<p class="note">Each task shows what it would do first. Preview changes nothing; the second button runs it after you confirm. Every request is recorded with your account.</p>
+<div id="admin-result" aria-live="polite"></div>
+<div class="admin-forms">
+<form class="panel" method="post" data-api-form data-show-result data-url="{{ api }}/purge"><h2>Purge history</h2>
+<p class="note">Removes audit history and log files older than the retention settings in <code>craft-connector.yml</code>. Runs that are still active are never removed.</p>
+{{ text("archive_to", "Archive to (optional)", False, "file:///backups/etl-craft or s3://bucket/prefix") }}
+<div class="dialog-buttons"><button type="submit" data-dry-run>Preview purge</button><button type="submit" class="danger" data-confirm="Purge the history the preview listed? This cannot be undone unless you gave an archive location.">Purge</button></div></form>
+<form class="panel" method="post" data-api-form data-show-result data-url="{{ api }}/rehash"><h2>Rehash a merge target</h2>
+<p class="note">Recomputes the version 2 row hashes of an existing SCD1 or SCD2 target so its merges can run.</p>
+{{ text("target", "Target table", True, "schema.table") }}
+<div class="dialog-buttons"><button type="submit" data-method="get">Preview SQL</button><button type="submit" class="danger" data-confirm="Rehash this target? Merges into it wait until the rehash commits.">Rehash</button></div></form>
+<form class="panel" method="post" data-api-form data-show-result data-url="{{ api }}/targets/upgrade"><h2>Upgrade target audit columns</h2>
+<p class="note">Adds the audit columns the current version writes to existing targets. Leave both fields empty for every configured target.</p>
+<label>SQL action<select name="action"><option value="">Every action</option>{% for a in upgradable %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select></label>
+{{ text("target", "Target table", False, "schema.table") }}
+<div class="dialog-buttons"><button type="submit" data-dry-run>Preview SQL</button><button type="submit" class="danger" data-confirm="Add the previewed audit columns to these targets?">Upgrade</button></div></form>
+<form class="panel" method="post" data-api-form data-show-result data-url="{{ api }}/clones"><h2>Clone Engine DB tables</h2>
+<p class="note">Copies the Engine DB tables chosen by <code>Cloning.Scope</code> into the warehouse, replacing the previous copies. Business tables are not touched.</p>
+{% if cloning %}<button type="submit" data-confirm="Copy the Engine DB tables into the warehouse now, replacing the previous copies?">Clone now</button>
+{% else %}<button type="submit" disabled aria-describedby="clone-off">Clone now</button><p class="note" id="clone-off">Cloning is off: set <code>Cloning.Enabled: true</code> and a <code>Scope</code> in <code>craft-connector.yml</code>.</p>{% endif %}</form>
+</div>
+{% endblock %}

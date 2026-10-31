@@ -220,6 +220,28 @@ etl-craft announce list --all
 etl-craft announce end --announcement-id 3 --reason "upgrade finished"
 ```
 
+## Operations
+
+**System health** in the sidebar shows whether a controller is running (no heartbeat in the
+last minute means schedules, retries and queued tasks are not starting), warns when
+controllers run another version than the server, gives the Engine DB schema version, and, when
+`Deployment.Profile` is `CONTROLLER_AGENTS`, the active agents and each pool's free capacity.
+It also lists each project's running, queued, failed and SLA-missed work for the last 24
+hours. Warehouse connections are checked by each task and by `etl-craft doctor` on the host.
+
+**Agents** lists registered agents with their pool, version, heartbeat, running attempts and
+free capacity. Operators can **Drain** an agent (it finishes its tasks and claims no more),
+**Resume** it, or **Stop** it, the same requests as `etl-craft agent drain|resume|stop`.
+
+**Scheduled runs** lists a project's scheduled pipelines by their next run, and separately the
+scheduled pipelines that will not run, with the reason: paused (by whom and why) or a schedule
+with no next run.
+
+**Maintenance** (admins) previews each task before it runs: **Preview purge** lists the history
+rows that would be removed, **Preview SQL** shows the rehash or audit-column upgrade
+statements, and the second button runs the task after you confirm. **Clone now** copies the
+Engine DB tables into the warehouse when cloning is enabled.
+
 ## Upgrade
 
 Run `etl-craft migrate` before starting the new server. Normal login and UI startup refuse

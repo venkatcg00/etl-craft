@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from etl_craft import __version__
 from etl_craft.core.errors import MetadataError
+from etl_craft.core.time import as_utc
 from etl_craft.engine.connection import read_snapshot
 from etl_craft.engine.queries import statement
 from etl_craft.services.operations.context import OperationContext
@@ -19,6 +20,7 @@ class ControllerVersion:
 
     controller_id: int
     version: str
+    heartbeat_at: datetime
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,7 @@ def read_about(ctx: OperationContext, request: NoInput) -> About:
     with read_snapshot(ctx.engine) as conn:
         schema = conn.execute(statement(conn, "about_schema")).scalar_one_or_none()
         controllers = tuple(
-            ControllerVersion(**row._mapping)
+            ControllerVersion(row.controller_id, row.version, as_utc(row.heartbeat_at))
             for row in conn.execute(
                 statement(conn, "about_controllers"),
                 {"since": datetime.now(UTC) - timedelta(seconds=60)},
