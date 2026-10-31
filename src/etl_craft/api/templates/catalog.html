@@ -1,1 +1,12 @@
-{% extends 'base.html' %}{% block content %}<h1>{{ project.project_name }} catalog</h1><p>Generated project catalog. Metadata changes require a new <code>generate-docs</code> build.</p><iframe id="catalog-frame" title="{{ project.project_name }} generated catalog" src="/ui/projects/{{ project.project|urlencode }}/catalog/files/{{ frame_path }}"></iframe>{% endblock %}
+{% extends 'base.html' %}
+{% block scripts %}<script type="module" src="/static/ui/admin.js"></script>{% endblock %}
+{% block content %}<h1>{{ project.project_name }} catalog</h1>
+<p>Generated project catalog. It shows the last build; rebuild it after metadata changes.</p>
+<div class="catalog-actions" role="group" aria-label="Catalog actions">
+<form method="post" data-api-form data-show-result data-url="{{ api }}/validation"><button type="submit" data-method="get">Validate metadata</button></form>
+{% if can_develop %}<form method="post" data-api-form data-show-result data-url="{{ api }}/docs"><button type="submit" class="primary">Rebuild catalog</button></form>
+<form method="post" data-api-form data-show-result data-url="{{ api }}/lineage/refresh"><button type="submit">Refresh lineage</button></form>{% endif %}
+{% if is_admin %}<form method="post" data-api-form data-show-result data-url="{{ api }}/docs/versions"><button type="submit" data-confirm="Record the current definitions as the published catalog versions?">Record catalog versions</button></form>{% endif %}
+</div>
+<div id="admin-result" aria-live="polite"></div>
+{% if missing %}<p class="notice" role="status">{{ missing }}.{% if can_develop %} Use <strong>Rebuild catalog</strong> above.{% endif %}</p>{% else %}<iframe id="catalog-frame" title="{{ project.project_name }} generated catalog" src="/ui/projects/{{ project.project|urlencode }}/catalog/files/{{ frame_path }}"></iframe>{% endif %}{% endblock %}

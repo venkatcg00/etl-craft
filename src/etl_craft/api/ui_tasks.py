@@ -19,6 +19,7 @@ from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import HistoryView, PipelineView, TaskRunView
 from etl_craft.services.operations.offsets import TaskInput, TaskOffset
 from etl_craft.services.operations.requests import HistoryInput, NoInput, PipelineInput
+from etl_craft.services.operations.tasks import TaskDefinition
 from etl_craft.services.operations.uploads import UploadHistory, UploadPipelines, UploadRequest
 
 TASK_RUNS = 50
@@ -61,8 +62,9 @@ def _task_values(
         HistoryInput(pipeline_code=code, task_code=task_code, all=True, limit=TASK_RUNS),
     )
     offset = invoke(caller, ActionName.OFFSET, TaskInput(pipeline_code=code, task_code=task_code))
+    task = invoke(caller, ActionName.TASK, TaskInput(pipeline_code=code, task_code=task_code))
     assert isinstance(definition, PipelineView) and isinstance(history, HistoryView)
-    assert isinstance(offset, TaskOffset)
+    assert isinstance(offset, TaskOffset) and isinstance(task, TaskDefinition)
     runs = [entry for entry in history.entries if isinstance(entry, TaskRunView)]
     ended = [r for r in runs if r.start_date and r.end_date]
     seconds = {
@@ -78,6 +80,10 @@ def _task_values(
         "average": sum(seconds.values()) / len(seconds) if seconds else None,
         "succeeded": sum(r.status == RunStatus.SUCCESS for r in runs),
         "offset": offset,
+        "task": task,
+        "merge": (task.merge_key, task.merge_columns) if task.merge_key else None,
+        "is_admin": caller.role == ApiRole.ADMIN,
+        "values_api": f"/api/v1/projects/{quote(project, safe='')}/values",
         "may_reset": has_role(caller.role, ApiRole.OPERATOR),
         "marks_api": f"/api/v1/projects/{quote(project, safe='')}/marks",
         "pipeline_url": pipeline_url(project, code),

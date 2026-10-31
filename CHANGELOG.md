@@ -261,6 +261,15 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- The browser catalog page has **Validate metadata**, **Rebuild catalog**, **Refresh lineage**
+  and (admins) **Record catalog versions**, and before the first build it says so instead of
+  failing. The Pipelines list has **Refresh all** for developers. A task page shows the task's
+  definition, and an SCD merge task's page has a **Data** panel: look up a business key's value
+  provenance and locks, and (admins) edit values or unlock them. `etl-craft task
+  --pipeline-code P --task-code T` and `GET /api/v1/projects/{project}/task` read a task's
+  handler, parameters and merge columns. Every action people can request now has a browser
+  place or is listed with the reason it stays in the CLI.
+
 - **Held and paused** page: holds still in force on queued and running runs (with Release),
   paused pipelines, and paused tasks with their standing outcome and end (with Resume task).
   `etl-craft holds` and `GET /api/v1/projects/{project}/holds` list the holds. A pipeline's Runs

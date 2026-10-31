@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
-{% from 'monitor/_status.html' import status, recent_runs, next_run %}
+{% from 'monitor/_status.html' import status, recent_runs, next_run, post_button %}
 {% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
 {% block content %}
 <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/ui/projects/{{ project.project|urlencode }}">{{ project.project_name }}</a> › <span aria-current="page">Pipelines</span></nav>
-<h1>Pipelines</h1>
+<header class="object-header"><h1>Pipelines</h1>{% if can_develop %}<div class="header-actions">{{ post_button("Refresh all", refresh_url, {}, "every pipeline in " ~ project.project_name, "Validate each pipeline's current definition and pin passing versions for their next runs; findings are listed per pipeline, and nothing runs.") }}</div>{% endif %}</header>
 {% include 'monitor/_live_state.html' %}
 <div class="monitor" id="live" data-live-url="/ui/projects/{{ project.project|urlencode }}/live">
   <nav class="navigator panel" aria-label="Tags">
