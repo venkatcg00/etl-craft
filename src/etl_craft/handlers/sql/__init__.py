@@ -37,7 +37,7 @@ from etl_craft.handlers.sql.protection import (
     refuse_evidence_target,
 )
 from etl_craft.handlers.sql.session import Session
-from etl_craft.handlers.sql.spec import SqlTask, read_sql_task
+from etl_craft.handlers.sql.spec import MERGES, SqlTask, read_sql_task
 from etl_craft.handlers.sql.watermarks import source_pipelines
 from etl_craft.warehouse.connection import open_warehouse, task_warehouse_dialect, warehouse_task
 
@@ -49,14 +49,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
     store = task_store(context, engine_db)
     task = read_sql_task(context)
     config = context.config
-    if config.warehouse is None:
-        raise ConfigurationError("a SQL task needs a Warehouse section in craft-connector.yml")
-    dialect = task_dialect(context)
-    problem = dialect.unsupported_storage_problem(
-        context.task_params
-    ) or dialect.task_storage_problem(context.task_params)
-    if problem is not None:
-        raise SqlGuardError(problem)
+    dialect = _checked_dialect(context, task)
     catalog = active_catalog(config)
     logger.info(
         "%s %s from %s on %s",
@@ -201,6 +194,35 @@ def _apply(session: Session, action: ActionContext) -> HandlerResult | SqlGuardE
         return error
     finally:
         session.sweep()
+
+
+def _checked_dialect(context: TaskContext, task: SqlTask) -> WarehouseDialect:
+    """Return the task's warehouse dialect once its storage and upload protection are usable."""
+    if context.config.warehouse is None:
+        raise ConfigurationError("a SQL task needs a Warehouse section in craft-connector.yml")
+    dialect = task_dialect(context)
+    problem = (
+        dialect.unsupported_storage_problem(context.task_params)
+        or dialect.task_storage_problem(context.task_params)
+        or _unprotected_upload(context, task, dialect)
+    )
+    if problem is not None:
+        raise SqlGuardError(problem)
+    return dialect
+
+
+def _unprotected_upload(
+    context: TaskContext, task: SqlTask, dialect: WarehouseDialect
+) -> str | None:
+    """Refuse an uploaded merge where human-write protection cannot commit with the data."""
+    if context.uploads and task.action in MERGES and not dialect.atomic_protection:
+        return (
+            f"pipeline {context.pipeline_code}, task {context.task_code}: target "
+            f"{task.target_object}: protected writes unsupported on {dialect.spec.display_name}; "
+            "expected atomic data and evidence commits; use native PostgreSQL or DuckDB, "
+            "or a non-protected target"
+        )
+    return None
 
 
 def _uploaded_merge(session: Session, action: ActionContext) -> HandlerResult:

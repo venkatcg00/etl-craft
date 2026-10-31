@@ -149,10 +149,7 @@ def test_read_routes_record_only_named_admin_access_or_explicit_refusals(api):
         response = client.get(path, params=query, headers=headers(creds[ApiRole.ADMIN]))
         answered[action.name] = response.status_code
         expected = dict(before)
-        if action.name in audited or action.name in {
-            ActionName.CONTROL_REQUEST,
-            ActionName.AGENT_UPLOAD_CONTENT,
-        }:
+        if action.name in audited or action.name == ActionName.CONTROL_REQUEST:
             table = next(name for name in before if name.upper() == "AUD_ACTIONS")
             expected[table] += 1
             with ctx.engine.connect() as conn:

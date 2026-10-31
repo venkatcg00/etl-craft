@@ -403,7 +403,7 @@ def test_api_only_agent_runs_upload_validation_and_load(cluster, monkeypatch):
             SCRIPT_FILE="validation_scripts/check.py",
             FILE_FORMAT="CSV",
         )
-        add_dependency(conn, pipeline, load, validation)
+        add_dependency(conn, pipeline, load, validation, "HAS_DATA")
         conn.execute(text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='Y'"))
     publish_project(p, agent_dir)
     ctx = OperationContext(

@@ -135,11 +135,12 @@ def test_all_project_routes_refuse_without_project_grants(isolation):
             )
             values = {key: value for key, value in values.items() if value is not None}
             headers = {"Authorization": "Bearer " + tokens["reader"]}
-            response = (
-                api.get(path, params=values, headers=headers)
-                if action.method == HttpMethod.GET
-                else api.post(path, json=values, headers=headers)
-            )
+            if action.method == HttpMethod.GET:
+                response = api.get(path, params=values, headers=headers)
+            elif name == ActionName.UPLOAD:
+                response = api.post(path, params=values, headers=headers)
+            else:
+                response = api.post(path, json=values, headers=headers)
             assert response.status_code == 404, (name, response.text)
             replies.append(response.text.replace(repr(project), "'selected'"))
         assert replies[0] == replies[1], name

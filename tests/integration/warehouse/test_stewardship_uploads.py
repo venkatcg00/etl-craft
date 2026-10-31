@@ -152,7 +152,7 @@ def run(task):
                 f"SELECT id,name,UPLOAD_ID FROM {source} WHERE UPLOAD_ID IN ($$upload_ids)"
             ),
         )
-        add_dependency(conn, w.pipeline_id, load, validation)
+        add_dependency(conn, w.pipeline_id, load, validation, "HAS_DATA")
         add_dependency(conn, w.pipeline_id, append, load)
         conn.execute(
             text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='Y' WHERE PIPELINE_ID=:id"),
@@ -383,3 +383,55 @@ def test_one_refused_file_does_not_prevent_another_file_loading(upload_world):
         (0, "alice", "alice"),
         (1, "bob", "bob"),
     ]
+
+
+@warehouses("duckdb")
+def test_a_run_without_uploads_validates_nothing_and_skips_downstream(upload_world):
+    w, _ = upload_world
+    with acting_as(SYSTEM_ACTOR), w.engine_db.begin() as conn:
+        run_id = transitions.create_run(conn, w.pipeline_id, SYSTEM_ACTOR)
+    result = drive_upload(w, run_id)
+    assert result.status == RunStatus.SUCCESS, result.message
+    with w.engine_db.connect() as conn:
+        tasks = dict(
+            conn.execute(
+                text(
+                    "SELECT t.TASK_CODE AS task_code,l.STATUS AS status FROM AUD_TASK_RUN_LOG l "
+                    "JOIN CFG_TASKS t ON t.TASK_ID=l.TASK_ID WHERE l.PIPELINE_RUN_ID=:run"
+                ),
+                {"run": run_id},
+            ).all()
+        )
+    assert tasks["validate_file"] == RunStatus.SUCCESS
+    assert tasks["land"] == RunStatus.SKIPPED and tasks["apply"] == RunStatus.SKIPPED
+    assert w.rows(f"SELECT COUNT(*) FROM {w.name('uploaded')}") == [(0,)]
+
+
+@warehouses("duckdb")
+def test_a_marked_validation_does_not_release_unvalidated_files(upload_world):
+    w, owner = upload_world
+    receipt = submit(owner, "alice", b"id|name\n1|never validated\n")
+    act(
+        owner,
+        ActionName.MARK,
+        pipeline_code="P",
+        task_code="validate_file",
+        run_id=receipt["pipeline_run_id"],
+        status=RunStatus.SUCCESS,
+        rows=1,
+        reason="try to skip validation",
+    )
+    result = drive_upload(w, receipt["pipeline_run_id"])
+    assert result.status == RunStatus.FAILED
+    with w.engine_db.connect() as conn:
+        error = conn.execute(
+            text(
+                "SELECT a.ERROR_MESSAGE AS error FROM AUD_TASK_ATTEMPTS a "
+                "JOIN AUD_TASK_RUN_LOG l ON l.TASK_RUN_ID=a.TASK_RUN_ID "
+                "JOIN CFG_TASKS t ON t.TASK_ID=l.TASK_ID WHERE t.TASK_CODE='land' "
+                "AND l.PIPELINE_RUN_ID=:run"
+            ),
+            {"run": receipt["pipeline_run_id"]},
+        ).scalar_one()
+    assert "FILE_VALIDATION has not accepted" in error
+    assert w.rows(f"SELECT COUNT(*) FROM {w.name('landed')}") == [(0,)]

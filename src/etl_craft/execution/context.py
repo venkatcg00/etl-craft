@@ -6,7 +6,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.definitions import Definition, using
-from etl_craft.core.enums import Handler, YesNo
+from etl_craft.core.enums import YesNo
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import run_scopes
@@ -62,19 +62,7 @@ def build_task_context(
                 selection=(selected, row.exclusive_run),
             )
         event_data = run_event_data(conn, row.pipeline_run_id)
-        uploads = (
-            run_uploads(conn, row.pipeline_run_id, detail.handler)
-            if pipeline.get("stewardable_flag") == YesNo.YES
-            else ()
-        )
-        if (
-            uploads or pipeline.get("stewardable_flag") == YesNo.YES
-        ) and detail.handler != Handler.FILE_VALIDATION:
-            from etl_craft.engine.stewardship import require_validation
-
-            require_validation(
-                conn, definition, row.pipeline_run_id, detail.task_code, detail.pipeline_id
-            )
+        uploads = run_uploads(conn, row.pipeline_run_id, detail.handler) if row.has_uploads else ()
     return TaskContext(
         config=config,
         bundle_id=row.bundle_id,

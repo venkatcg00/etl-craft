@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from sqlalchemy.engine import Connection
 
 from etl_craft.core.enums import DependencyType, Handler, SqlAction, YesNo
+from etl_craft.dialects.engine import for_engine
 from etl_craft.dialects.query_analysis import output_columns
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.validation import ActiveTask, DependencyEdge
@@ -13,90 +14,50 @@ from etl_craft.handlers.sql import task_dialect
 from etl_craft.handlers.sql.spec import MERGES, WRITERS, SqlTask
 
 
+def _stewardship_schema(conn: Connection) -> bool:
+    """Whether the Engine DB has stewardship; before its migration no pipeline is stewardable."""
+    return for_engine(conn).has_table(conn, "AUD_UPLOADS")
+
+
 def graph_problems(
     conn: Connection, pipeline_id: int, tasks: Sequence[ActiveTask], edges: Sequence[DependencyEdge]
 ) -> list[tuple[str, str]]:
-    """Require one mandatory successful validation root for every stewardable pipeline."""
-    row = conn.execute(statement(conn, "stewardship_pipeline"), {"pipeline_id": pipeline_id}).one()
-    mine = [task for task in tasks if task.pipeline_id == pipeline_id]
-    validators = [task for task in mine if task.handler == Handler.FILE_VALIDATION]
-    if row.stewardable_flag != YesNo.YES:
-        return [
-            (
-                task.label,
-                "FILE_VALIDATION requires STEWARDABLE_FLAG=Y; move the task to a "
-                "stewardable pipeline or remove the handler",
-            )
-            for task in validators
-        ]
-    problems = []
-    code = row.pipeline_code
-    if row.run_schedule is not None:
-        problems.append(
-            (
-                code,
-                f"RUN_SCHEDULE={row.run_schedule!r}; expected no schedule on a "
-                "stewardable pipeline; remove the schedule and upload a file",
-            )
+    """Require HAS_DATA after validation, and one validation task where uploads arrive."""
+    if not _stewardship_schema(conn):
+        return []
+    validators = {
+        task.task_code
+        for task in tasks
+        if task.pipeline_id == pipeline_id and task.handler == Handler.FILE_VALIDATION
+    }
+    problems = [
+        (
+            f"{edge.pipeline_code}.{edge.task_code}",
+            f"depends on FILE_VALIDATION task {edge.depends_on_task_code} with "
+            f"{edge.dependency_type}; expected HAS_DATA, so a run with no accepted files skips "
+            "it; change the dependency to HAS_DATA",
         )
-    if len(validators) != 1:
-        return [
-            *problems,
-            (
-                code,
-                f"FILE_VALIDATION tasks={len(validators)}; expected exactly "
-                "one validation root; configure it before uploading a file",
-            ),
-        ]
-    validator = validators[0].task_code
-    local = [
-        edge
         for edge in edges
-        if edge.pipeline_code == code and edge.depends_on_pipeline_code == code
+        if edge.depends_on_pipeline_id == pipeline_id
+        and edge.depends_on_handler == Handler.FILE_VALIDATION
+        and edge.dependency_type == DependencyType.SUCCESS
     ]
-    roots = {task.task_code for task in mine} - {edge.task_code for edge in local}
-    if roots != {validator}:
+    row = conn.execute(statement(conn, "stewardship_pipeline"), {"pipeline_id": pipeline_id}).one()
+    if row.stewardable_flag == YesNo.YES and len(validators) != 1:
         problems.append(
             (
-                code,
-                f"roots={sorted(roots)}; expected only FILE_VALIDATION task "
-                f"{validator}; make every other task depend on it with SUCCESS",
+                row.pipeline_code,
+                f"FILE_VALIDATION tasks={len(validators)} on a pipeline that takes uploads; "
+                "expected exactly one to accept uploaded files; add one validation task",
             )
         )
-    problems.extend(_success_paths(validator, mine, local))
-    return problems
-
-
-def _success_paths(
-    validator: str, mine: Sequence[ActiveTask], local: Sequence[DependencyEdge]
-) -> list[tuple[str, str]]:
-    """Find tasks lacking a successful dependency path from the validation root."""
-    problems: list[tuple[str, str]] = []
-    reached = {validator}
-    while True:
-        following = reached | {
-            edge.task_code
-            for edge in local
-            if edge.dependency_type == DependencyType.SUCCESS
-            and edge.depends_on_task_code in reached
-        }
-        if following == reached:
-            break
-        reached = following
-    for task in mine:
-        if task.task_code not in reached:
-            problems.append(
-                (
-                    task.label,
-                    f"no SUCCESS path from FILE_VALIDATION task {validator}; "
-                    "expected validation before processing; add the SUCCESS dependencies",
-                )
-            )
     return problems
 
 
 def sql_problems(conn: Connection, context: TaskContext, spec: SqlTask) -> list[str]:
     """Refuse unsupported protection and writes that lose their file identity."""
+    if not _stewardship_schema(conn):
+        return []
     pipeline = conn.execute(
         statement(conn, "stewardship_pipeline"), {"pipeline_id": context.pipeline_id}
     ).one()

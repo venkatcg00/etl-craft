@@ -119,13 +119,18 @@ def run(context: TaskContext, backend: Engine | TaskStore) -> HandlerResult:
                 raise HandlerError(problem)
             store.validation_result(upload.upload_id, None)
             accepted += 1
-    if not accepted:
+    if uploads and not accepted:
         raise HandlerError(
             f"{context.pipeline_code}.{context.task_code}: accepted 0 of {len(uploads)} uploads; "
             "expected at least one file accepted by FILE_VALIDATION; no data was loaded; "
             "upload a corrected file"
         )
-    return HandlerResult(source_count=len(uploads), reject_count=len(uploads) - accepted)
+    if not uploads:
+        logger.info("no uploaded files in this run; 0 files validated")
+    # The accepted files are what this task hands on: HAS_DATA dependents skip when there are none.
+    return HandlerResult(
+        source_count=len(uploads), target_count=accepted, reject_count=len(uploads) - accepted
+    )
 
 
 def _validate(entry: Callable[..., object], task: ValidationTask) -> object:

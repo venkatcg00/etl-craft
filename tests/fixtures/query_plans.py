@@ -111,6 +111,8 @@ VALUES = {
     "max_running_tasks": 8,
     "schema_check_on_demand": "Y",
     "all": 0,
+    "validation": False,
+    "size_bytes": 1,
     "schema_check_schedule": "0 2 * * *",
     "retryable": True,
     "stopped": False,

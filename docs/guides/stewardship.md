@@ -1,18 +1,26 @@
 # Stewardship uploads
 
-A stewardable pipeline accepts business corrections through files. Developers own its metadata
-and scripts; stewards supply data using their existing accounts and pipeline permissions.
+`STEWARDABLE_FLAG=Y` marks a pipeline that accepts files from stewards: it appears in the
+upload list, and accounts with `CAN_UPLOAD` on it may send files to it. Otherwise it is an
+ordinary pipeline. It can have a schedule, run by hand and depend on other pipelines; an upload
+starts or joins a run of it. Developers own its metadata and scripts; stewards supply data using
+their existing accounts and pipeline permissions.
 
 Set `STEWARDABLE_FLAG=Y` in `config/pipelines.csv`. Existing pipelines default to `N`.
 Grant `CAN_UPLOAD` or higher on the pipeline using the normal permission delegation rules.
 `CAN_UPLOAD` sits between `CAN_VIEW` and `CAN_RUN`; on other pipelines it permits viewing only.
 There is no steward deployment role. Deployment roles other than admin do not imply a grant.
 
-Configure one `FILE_VALIDATION` task as the only root, with a SUCCESS dependency path to every
-other task. Remove its schedule. `validate` and refresh check the graph and script before use.
-Marks, standing pauses and item marks cannot turn validation into SUCCESS or SKIPPED. Standalone
-execution and starts without an upload are refused. Retry or rerun the original upload run to
-reuse its stored files.
+`FILE_VALIDATION` is an ordinary task handler that checks the files its run carries; any
+pipeline that loads files can use it. A pipeline that takes uploads needs exactly one, and
+`validate` refuses one without it. Tasks that follow a validation task depend on it with
+`HAS_DATA`: the validation task reports the files it accepted as its target count, so in a run
+with no files (a scheduled run with nothing uploaded) it succeeds with 0 and the tasks after it
+are skipped. `validate` refuses a `SUCCESS` dependency on a validation task.
+
+Only files the validation task accepted in a real attempt reach later tasks. Marking the
+validation task `SUCCESS` does not release a run's files: a task that reads them fails, naming
+the upload. Retry or rerun the original upload run to reuse its stored files.
 
 ```yaml
 Uploads:

@@ -40,7 +40,6 @@ from etl_craft.engine.rule_runs import finish_rule_run as finish_rule_run
 from etl_craft.engine.rule_runs import restart_rule_run as restart_rule_run
 from etl_craft.engine.run_creation import RunCreation
 from etl_craft.engine.run_creation import create as create_new_run
-from etl_craft.engine.stewardship import require_upload_run
 from etl_craft.engine.timestamp_windows import record_watermark_range as record_watermark_range
 from etl_craft.engine.transition_guards import actor_parameters as actor_parameters
 from etl_craft.engine.transition_guards import stale as _stale
@@ -103,7 +102,6 @@ def resolve_run(
 ) -> tuple[int, str | None]:
     """Bind to the exact selected run; force or an explicit rerun may reopen it."""
     selected = runlog.select_run(conn, pipeline_id, selector)
-    require_upload_run(conn, pipeline_id, selected.pipeline_run_id)
     if selected.status == RunStatus.IN_PROGRESS:
         return selected.pipeline_run_id, None
     if not rerun and (not force or selected.status == RunStatus.CANCELLED):
@@ -363,8 +361,6 @@ def reopen_run(
     row = conn.execute(
         statement(conn, "transition_row_run"), {"row_id": pipeline_run_id}
     ).one_or_none()
-    if row is not None:
-        require_upload_run(conn, row.pipeline_id, pipeline_run_id)
     if row is None or row.status not in FINISHED_RUN_STATUSES:
         raise _stale(conn, "run", pipeline_run_id, "terminal; no other active run", owner)
     try:

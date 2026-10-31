@@ -139,68 +139,6 @@ def test_body_ceiling_is_checked_while_streaming(upload_api):
     assert "Max_file_mb" in response.text and "corrected file" in response.text
 
 
-@pytest.mark.parametrize("operation", ["mark", "pause", "item", "standalone", "start", "rerun"])
-@pytest.mark.parametrize("outcome", ["SUCCESS", "SKIPPED"])
-def test_no_operation_can_bypass_file_validation(upload_api, operation, outcome):
-    from etl_craft.core.enums import ControlAction, ItemAction, ItemStatus, RunStatus
-    from etl_craft.core.errors import EtlCraftError
-    from etl_craft.engine import transitions
-    from fixtures.actions import act
-
-    ctx, _, _, _ = upload_api
-    with ctx.engine.begin() as conn:
-        conn.execute(text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='N'"))
-        pipeline = conn.execute(text("SELECT PIPELINE_ID AS id FROM CFG_PIPELINES")).scalar_one()
-        legacy = transitions.create_run(conn, pipeline, SYSTEM_ACTOR)
-        transitions.finalize_pipeline_run(conn, legacy, RunStatus.SUCCESS)
-        conn.execute(text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='Y'"))
-    given = {"pipeline_code": "P", "task_code": "check"}
-    calls = {
-        "mark": lambda: act(
-            ctx,
-            ActionName.MARK,
-            **given,
-            status=RunStatus(outcome),
-            run_id=legacy,
-            reason="test validation boundary",
-        ),
-        "pause": lambda: act(
-            ctx,
-            ActionName.CONTROL,
-            **given,
-            action=ControlAction.PAUSE,
-            outcome=RunStatus(outcome),
-            reason="test validation boundary",
-        ),
-        "item": lambda: act(
-            ctx,
-            ActionName.ITEM_CONTROL,
-            **given,
-            run_id=legacy,
-            action=ItemAction.MARK,
-            status=ItemStatus(outcome),
-            item_key="one",
-            reason="test validation boundary",
-        ),
-        "standalone": lambda: act(ctx, ActionName.RUN, **given, standalone=True),
-        "start": lambda: act(ctx, ActionName.RUN, pipeline_code="P", init_only=True),
-        "rerun": lambda: act(
-            ctx,
-            ActionName.RUN,
-            **given,
-            run_id=legacy,
-            rerun=True,
-            reason="test validation boundary",
-        ),
-    }
-    with pytest.raises(EtlCraftError) as failure:
-        calls[operation]()
-    message = str(failure.value)
-    assert "P" in message and "FILE_VALIDATION" in message and "corrected file" in message
-    if operation in {"mark", "pause", "item", "standalone"}:
-        assert "check" in message
-
-
 def test_concurrent_uploads_and_restarted_admission_bind_each_file_once(upload_api):
     from etl_craft.controller import uploads as controller_uploads
     from etl_craft.core.actor import Actor
@@ -294,10 +232,10 @@ def test_remote_cli_streams_upload_and_reads_its_history(upload_api, monkeypatch
 
     monkeypatch.setattr("etl_craft.core.http_client.build_opener", lambda *args: Opener())
     args = ["--api", "http://127.0.0.1:8000", "--project", "default"]
-    assert main([*args, "upload", "--pipeline-code", "P", str(path), "--json"]) == 0
+    assert main([*args, "upload", "--pipeline-code", "P", str(path), "--format", "json"]) == 0
     submitted = json.loads(capsys.readouterr().out)
     assert submitted["upload_id"] and submitted["schema"] == "etl-craft/upload/1"
-    assert main([*args, "uploads", "--pipeline-code", "P", "--json"]) == 0
+    assert main([*args, "uploads", "--pipeline-code", "P", "--format", "json"]) == 0
     history = json.loads(capsys.readouterr().out)
     assert history["uploads"][0]["upload_id"] == submitted["upload_id"]
 
@@ -340,31 +278,3 @@ def test_unsigned_upload_is_refused_and_recorded_before_reading_body(upload_api)
     with ctx.engine.connect() as conn:
         row = conn.execute(text("SELECT STATUS AS status,REASON AS reason FROM AUD_UPLOADS")).one()
     assert row.status == "REFUSED" and "pipeline P" in row.reason and "CAN_UPLOAD" in row.reason
-
-
-def test_admitted_validation_cannot_be_bypassed_by_changing_live_metadata(upload_api):
-    from etl_craft.core.enums import RunStatus
-    from etl_craft.core.errors import RunRefusedError
-    from fixtures.actions import act
-
-    ctx, client, writer, _ = upload_api
-    response = client.post(
-        "/api/v1/uploads?pipeline_code=P",
-        headers=authorization(writer),
-        files={"file": ("data.csv", b"id|name\n1|one\n", "text/csv")},
-    )
-    assert response.status_code == 200, response.text
-    run_id = response.json()["pipeline_run_id"]
-    with ctx.engine.begin() as conn:
-        conn.execute(text("UPDATE CFG_PIPELINES SET STEWARDABLE_FLAG='N'"))
-        conn.execute(text("UPDATE CFG_TASKS SET HANDLER='PYTHON'"))
-    with pytest.raises(RunRefusedError, match=r"FILE_VALIDATION.*corrected file"):
-        act(
-            ctx,
-            ActionName.MARK,
-            pipeline_code="P",
-            task_code="check",
-            run_id=run_id,
-            status=RunStatus.SUCCESS,
-            reason="try bypass after metadata changed",
-        )

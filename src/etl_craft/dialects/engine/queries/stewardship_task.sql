@@ -1,4 +1,0 @@
-SELECT p.PIPELINE_CODE AS pipeline_code,p.STEWARDABLE_FLAG AS stewardable_flag,
- t.TASK_CODE AS task_code,t.HANDLER AS handler FROM CFG_PIPELINES p
-LEFT JOIN CFG_TASKS t ON t.PIPELINE_ID=p.PIPELINE_ID AND t.TASK_ID=:task_id
-WHERE p.PIPELINE_ID=:pipeline_id

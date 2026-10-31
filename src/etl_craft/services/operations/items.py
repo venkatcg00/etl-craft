@@ -117,13 +117,6 @@ def control(ctx: OperationContext, request: ItemControl) -> ItemView:
     """Commit a mark or a truthful pending cancellation; reruns retain other successes."""
     check_reason(request.reason)
     with ctx.engine.begin() as conn:
-        from etl_craft.engine.repository.pipelines import resolve_pipeline_id
-        from etl_craft.engine.repository.tasks import resolve_task_id
-        from etl_craft.engine.stewardship import refuse_bypass
-
-        pipeline_id = resolve_pipeline_id(conn, request.pipeline_code)
-        task_id = resolve_task_id(conn, pipeline_id, request.task_code)
-        refuse_bypass(conn, pipeline_id, task_id, request.status, "item mark")
         controls.lock_run(conn, request.run_id)
         task = conn.execute(statement(conn, "item_task"), vars(request)).one_or_none()
         if task is None or task.handler != Handler.PYTHON or task.attempt_id is None:

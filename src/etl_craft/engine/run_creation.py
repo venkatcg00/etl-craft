@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.actor import Actor, sso_groups
-from etl_craft.core.enums import Handler, RunStatus, TriggerKind, YesNo
+from etl_craft.core.enums import RunStatus, TriggerKind, YesNo
 from etl_craft.core.errors import ConfigurationError, RunStateError, StaleTransitionError
 from etl_craft.engine import runlog, standing_pauses
 from etl_craft.engine.metrics import lifecycle
@@ -107,18 +107,13 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
 
 
 def _upload_admission(conn: Connection, pipeline_id: int, options: RunCreation) -> None:
-    """Refuse every new stewardable execution that lacks admitted file identities."""
+    """Admit uploaded files only to an active pipeline that takes uploads."""
+    if not options.upload_ids:
+        return
     pipeline = conn.execute(
         statement(conn, "stewardship_pipeline"), {"pipeline_id": pipeline_id}
     ).one_or_none()
-    if pipeline is not None and pipeline.stewardable_flag == YesNo.YES and not options.upload_ids:
-        raise RunStateError(
-            f"pipeline {pipeline.pipeline_code}, "
-            f"task {pipeline.validation_task or Handler.FILE_VALIDATION} "
-            "(FILE_VALIDATION): start has no upload; "
-            "expected an upload-bound run; upload a corrected file"
-        )
-    if options.upload_ids and (pipeline is None or pipeline.stewardable_flag != YesNo.YES):
+    if pipeline is None or pipeline.stewardable_flag != YesNo.YES:
         raise RunStateError(
             f"pipeline {pipeline_id}: upload ids={options.upload_ids} on a non-stewardable "
             "pipeline; expected STEWARDABLE_FLAG=Y; select an active stewardable pipeline"

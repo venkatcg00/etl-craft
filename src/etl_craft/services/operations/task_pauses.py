@@ -9,7 +9,6 @@ from etl_craft.engine import standing_pauses
 from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.pipelines import resolve_pipeline_id
 from etl_craft.engine.repository.tasks import resolve_task_id
-from etl_craft.engine.stewardship import refuse_bypass
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.models import OperationResult
 from etl_craft.services.operations.requests import ControlRequest
@@ -46,8 +45,6 @@ def change(ctx: OperationContext, request: ControlRequest) -> OperationResult:
             if previous is not None
             else resolve_task_id(conn, pipeline_id, request.task_code)
         )
-        if request.action == ControlAction.PAUSE:
-            refuse_bypass(conn, pipeline_id, task_id, request.outcome, "standing task pause")
         active = previous is not None and previous.active(now)
         identity = f"{request.pipeline_code}.{request.task_code}"
         if request.action == ControlAction.PAUSE:

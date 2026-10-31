@@ -1,6 +1,7 @@
 """Streamed upload verification and hostile workbook boundaries."""
 
 import hashlib
+import re
 import zipfile
 
 import pytest
@@ -139,7 +140,8 @@ def test_workbook_reader_uses_selected_sheet_and_saved_formula_values(tmp_path, 
     with zipfile.ZipFile(path, "w") as archive:
         for item, data in parts:
             if item.filename == "xl/worksheets/sheet1.xml":
-                data = data.replace(b"<f>1+1</f><v></v>", b"<f>1+1</f><v>2</v>")
+                data = re.sub(rb"<f>1\+1</f><v\s*(?:/>|></v>)", b"<f>1+1</f><v>2</v>", data)
+                assert b"<v>2</v>" in data
             archive.writestr(item, data)
     upload = file_info(path)
     check_file(upload, "XLSX", 100000)

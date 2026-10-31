@@ -188,6 +188,7 @@ def test_unsupported_stewarded_scd_is_refused_before_run_and_at_runtime(sql_worl
     from etl_craft.services.stewardship_checks import sql_problems
 
     w = sql_world
+    w.setup("protected", "SELECT 1 AS id,'x' AS name,1 AS UPLOAD_ID", kind)
     context = w.task(
         "protected_upload",
         SQL_ACTION=kind,
