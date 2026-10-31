@@ -15,3 +15,5 @@ form[data-api-form]>button{justify-self:start}
 .result-document{max-height:24rem;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:.5rem 0}
 .nav-group+.nav-group{margin-top:1rem;padding-top:.75rem;border-top:1px solid var(--border)}.nav-title{display:block;padding:0 .5rem .25rem;color:var(--muted);font-size:.75rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;overflow-wrap:anywhere}
 @media(max-width:650px){.sidebar{display:block}.nav-group{display:flex;flex-wrap:wrap;align-items:center;gap:0 .25rem}.nav-group+.nav-group{margin-top:.4rem;padding-top:.4rem}.nav-title{width:100%;padding-bottom:0}}
+form label.check{display:flex;align-items:center;gap:.4rem}form label.check input[type=checkbox]{display:inline;width:auto;margin:0}
+.catalog-actions{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0 1rem}.catalog-actions form{margin:0}

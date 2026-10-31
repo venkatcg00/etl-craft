@@ -235,6 +235,22 @@ validates and loads it, or which run it waits behind. The table below lists the 
 recent files with their state, run and the validation reason for a refused file. See
 [Stewardship uploads](stewardship.md).
 
+## Task definitions and data
+
+A task's page also shows its **Definition**: the handler and every parameter, as new runs use
+them (`etl-craft task` prints the same). On an SCD1 or SCD2 merge task, the **Data** panel looks
+up one business key in the target and shows who last wrote each value and which values are
+locked against the next merge. Administrators can **Save values** (edited values stay locked)
+and **Unlock** values so the next merge applies source values again. Every lookup, edit and
+unlock is recorded.
+
+## Catalog and refresh actions
+
+The **Catalog** page offers **Validate metadata** to everyone, **Rebuild catalog** and
+**Refresh lineage** to developers, and **Record catalog versions** to administrators; before the
+first build it says the catalog is not generated yet. The **Pipelines** list has **Refresh all**
+for developers, which validates every pipeline's current definition and pins passing versions.
+
 ## Held and paused work
 
 **Held and paused** lists what is waiting on a person: runs or tasks on hold (operators can

@@ -56,6 +56,7 @@ from etl_craft.core.text import (
     is_safe_identifier,
     is_safe_object_ref,
     is_safe_order_term,
+    pipe_list,
     split_statements,
     sql_parts,
     substitute_task_tokens,
@@ -363,7 +364,7 @@ def _columns(
     params: Mapping[str, str], name: str, action: SqlAction, context: TaskContext
 ) -> tuple[str, ...]:
     value = params.get(name) or ""
-    columns = tuple(part.strip() for part in value.split("|") if part.strip())
+    columns = pipe_list(value)
     if not columns:
         raise SqlGuardError(f"{name} is required for SQL_ACTION={action}: '|'-separated columns")
     bad = [column for column in columns if not is_safe_identifier(column)]

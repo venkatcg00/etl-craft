@@ -6,7 +6,7 @@
 <h1>{{ task_code }}</h1>
 {% if standing_pause %}<p><span class="status PAUSED"><span aria-hidden="true">⏸</span> Paused</span> {{ standing_pause.describe() }}</p>{% endif %}
 <div id="admin-result" aria-live="polite"></div>
-<section class="panel" aria-labelledby="stats-title"><h2 id="stats-title">Last {{ runs|length }} runs</h2>
+<section class="panel" aria-labelledby="stats-title"><h2 id="stats-title">{% if runs %}Last {{ runs|length }} runs{% else %}Runs{% endif %}</h2>
 <dl class="facts"><dt>Succeeded</dt><dd>{{ succeeded }} of {{ runs|length }}</dd><dt>Average duration</dt><dd>{{ duration(average|int) if average is not none else "No finished runs" }}</dd></dl>
 {% if runs %}
 <div class="toolbar"><button type="button" data-csv="task-runs" data-csv-name="{{ pipeline.pipeline_code }}-{{ task_code }}-runs.csv">Export CSV</button></div>
@@ -19,6 +19,31 @@
 </tbody></table></div>
 {% else %}<p>This task has not run yet.</p>{% endif %}
 </section>
+<section class="panel" aria-labelledby="params-title"><h2 id="params-title">Definition</h2>
+<dl class="facts"><dt>Handler</dt><dd>{{ task.handler }}</dd>{% for name, value in task.parameters|dictsort %}<dt>{{ name }}</dt><dd>{% if value|length > 120 or "\n" in value %}<details><summary>{{ value|truncate(60) }}</summary><pre class="result-document">{{ value }}</pre></details>{% else %}<code>{{ value }}</code>{% endif %}</dd>{% endfor %}</dl>
+<p class="note">Change the definition in the project's config files; <code>etl-craft task --pipeline-code {{ pipeline.pipeline_code }} --task-code {{ task_code }}</code> prints it.</p></section>
+{% if merge %}{% set keys, columns = merge %}
+<section class="panel" aria-labelledby="data-title"><h2 id="data-title">Data</h2>
+<p class="note">Look up one business key in this task's target to see who last wrote each value and which values are locked against the next merge. Lookups, edits and unlocks are recorded.</p>
+<div class="admin-forms">
+<form class="panel" method="post" data-api-form data-show-result data-url="{{ values_api }}/provenance"><h3>Look up a key</h3>
+<input type="hidden" name="pipeline_code" value="{{ pipeline.pipeline_code }}"><input type="hidden" name="task_code" value="{{ task_code }}">
+{% for k in keys %}<label>{{ k }}<input name="key.{{ k }}" required autocomplete="off"></label>{% endfor %}
+<button type="submit">Look up</button></form>
+{% if is_admin %}<form class="panel" method="post" data-api-form data-show-result data-url="{{ values_api }}"><h3>Edit values</h3>
+<input type="hidden" name="pipeline_code" value="{{ pipeline.pipeline_code }}"><input type="hidden" name="task_code" value="{{ task_code }}">
+{% for k in keys %}<label>{{ k }} (key)<input name="key.{{ k }}" required autocomplete="off"></label>{% endfor %}
+{% for c in columns %}<label>{{ c }}<input name="values.{{ c }}" autocomplete="off" placeholder="Unchanged"></label>{% endfor %}
+<label class="check"><input type="checkbox" name="row_lock"> Lock the whole row against the next merge</label>
+<label>Reason (recorded)<input name="reason" required autocomplete="off"></label>
+<button type="submit" class="danger" data-confirm="Write these values to the target now? Edited values stay locked until unlocked.">Save values</button></form>
+<form class="panel" method="post" data-api-form data-show-result data-url="{{ values_api }}/unlock"><h3>Unlock values</h3>
+<input type="hidden" name="pipeline_code" value="{{ pipeline.pipeline_code }}"><input type="hidden" name="task_code" value="{{ task_code }}">
+{% for k in keys %}<label>{{ k }} (key)<input name="key.{{ k }}" required autocomplete="off"></label>{% endfor %}
+<label>Columns (comma-separated; empty unlocks all)<input name="columns" data-list autocomplete="off" placeholder="{{ columns|join(', ') }}"></label>
+<label>Reason (recorded)<input name="reason" required autocomplete="off"></label>
+<button type="submit" class="danger" data-confirm="Unlock these values? The next merge may overwrite them with source values.">Unlock</button></form>{% endif %}
+</div></section>{% endif %}
 {% if offset.kind %}
 <section class="panel" aria-labelledby="offset-title"><h2 id="offset-title">{{ "Offset" if offset.kind == "OFFSET" else "Watermark" }}</h2>
 {% if offset.offset_type %}<dl class="facts"><dt>Stored</dt><dd><code>{{ offset.offset_value if offset.offset_value is not none else "None" }}</code> <span class="note">{{ offset.offset_type }}</span></dd>

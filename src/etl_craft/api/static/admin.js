@@ -5,18 +5,28 @@
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || "";
 const result = document.querySelector("#admin-result");
 
+// A name such as `key.id` fills a nested object; checkboxes send booleans and `data-list`
+// fields send their comma-separated entries.
+function value(field) {
+  if (field.type === "checkbox") return field.checked;
+  if (field.type === "number") return Number(field.value);
+  if (field.type === "datetime-local") return new Date(field.value).toISOString();
+  if ("list" in field.dataset) return field.value.split(",").map((part) => part.trim()).filter(Boolean);
+  return field.value;
+}
+
 function body(form) {
   const values = {};
   for (const field of form.querySelectorAll("input, select, textarea")) {
-    if (!field.name || field.value === "") continue;
-    if (field.type === "number") values[field.name] = Number(field.value);
-    else if (field.type === "datetime-local") values[field.name] = new Date(field.value).toISOString();
-    else values[field.name] = field.value;
+    if (!field.name || (field.type !== "checkbox" && field.value === "")) continue;
+    const [outer, inner] = field.name.split(".");
+    if (inner === undefined) values[outer] = value(field);
+    else (values[outer] ??= {})[inner] = value(field);
   }
   return values;
 }
 
-function show(kind, text, token, returned) {
+function show(kind, text, token, returned, changed = true) {
   const notice = document.createElement("section");
   notice.className = `notice ${kind}`;
   notice.setAttribute("role", kind === "error" ? "alert" : "status");
@@ -39,10 +49,12 @@ function show(kind, text, token, returned) {
     detail.textContent = JSON.stringify(returned, null, 2);
     notice.append(detail);
   }
-  const reload = document.createElement("a");
-  reload.href = location.pathname + location.search;
-  reload.textContent = "Reload to see the change";
-  notice.append(reload);
+  if (changed && kind !== "error") {
+    const reload = document.createElement("a");
+    reload.href = location.pathname + location.search;
+    reload.textContent = "Reload to see the change";
+    notice.append(reload);
+  }
   result.replaceChildren(notice);
   notice.scrollIntoView({ block: "nearest" });
 }
@@ -73,7 +85,8 @@ document.addEventListener("submit", async (event) => {
       return;
     }
     const shown = "showResult" in form.dataset ? answer : undefined;
-    show("done", read || values.dry_run ? "Preview only: nothing changed." : "Request recorded.", answer.token, shown);
+    const text = read ? "Read only: nothing changed." : values.dry_run ? "Preview only: nothing changed." : "Request recorded.";
+    show("done", text, answer.token, shown, !read && !values.dry_run);
     if (!answer.token && !read && !values.dry_run) form.reset();
   } finally {
     buttons.forEach((each) => { each.disabled = false; });

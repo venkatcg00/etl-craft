@@ -14,11 +14,11 @@ from fastapi.responses import Response
 from etl_craft.api.ui_graph import run_graph, run_timeline
 from etl_craft.api.ui_pages import page_values
 from etl_craft.api.ui_templates import render
-from etl_craft.core.enums import ActionName, FailureClass
+from etl_craft.core.enums import ActionName, ApiRole, FailureClass
 from etl_craft.core.enums_ui import SearchKind
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
 from etl_craft.engine.logs import LIVE_ATTEMPTS
-from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.actions import has_role, invoke
 from etl_craft.services.operations.capabilities import CapabilitiesView
 from etl_craft.services.operations.context import OperationContext
 from etl_craft.services.operations.items import ItemInput, ItemView
@@ -176,6 +176,8 @@ def _list_values(caller: OperationContext, request: Request, project: str) -> di
         "navigator": sorted({tag for p in everything.pipelines for tag in p.tags}),
         "selected_tags": tags,
         "controls_url": controls_url(project),
+        "refresh_url": f"/api/v1/projects/{quote(project, safe='')}/pipelines/refresh",
+        "can_develop": has_role(caller.role, ApiRole.DEVELOPER),
         "pipeline_url": lambda code: pipeline_url(project, code),
     }
 

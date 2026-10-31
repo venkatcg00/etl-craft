@@ -250,6 +250,7 @@ class ActionName(StrEnum):
     SEARCH = "search"
     OFFSET = "offset"
     HOLDS = "holds"
+    TASK = "task"
     PIPELINE_REFRESH = "pipelines refresh"
     PIPELINE_REFRESH_HISTORY = "pipeline refresh history"
     PIPELINE = "pipeline"

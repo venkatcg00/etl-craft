@@ -35,6 +35,11 @@ SECRET_KEYS = frozenset(
 )
 
 
+def pipe_list(value: str | None) -> tuple[str, ...]:
+    """Split a ``|``-separated column list parameter, dropping blanks."""
+    return tuple(part.strip() for part in (value or "").split("|") if part.strip())
+
+
 def is_secret_name(name: str) -> bool:
     """Whether a name contains a credential label that must not expose its value."""
     return any(word in name.lower() for word in SECRET_KEYS)

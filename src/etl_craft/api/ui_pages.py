@@ -13,9 +13,9 @@ from starlette.staticfiles import StaticFiles
 from etl_craft.api import browser_sessions as browser
 from etl_craft.api.ui_templates import render
 from etl_craft.core.actor import SYSTEM_ACTOR
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, ApiRole
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError
-from etl_craft.services.operations.actions import invoke
+from etl_craft.services.operations.actions import has_role, invoke
 from etl_craft.services.operations.announcements import AnnouncementFilter, Announcements
 from etl_craft.services.operations.catalog_pages import CatalogInput, CatalogPage
 from etl_craft.services.operations.context import OperationContext
@@ -189,9 +189,14 @@ def _catalog_pages(app: FastAPI, ctx: OperationContext) -> None:
     def catalog(request: Request) -> Response:
         caller, values = page_values(ctx, request)
         shown = CatalogInput(path=request.query_params.get("page", "index.html"))
-        page = invoke(caller, ActionName.CATALOG_PAGE, shown)
-        assert isinstance(page, CatalogPage)
-        page.close()
+        try:
+            page = invoke(caller, ActionName.CATALOG_PAGE, shown)
+        except ResourceNotFoundError as missing:
+            # Show the refusal in place of the frame so Rebuild catalog stays reachable.
+            values = values | {"missing": str(missing)}
+        else:
+            assert isinstance(page, CatalogPage)
+            page.close()
         return render(
             request,
             "catalog.html",
@@ -200,6 +205,9 @@ def _catalog_pages(app: FastAPI, ctx: OperationContext) -> None:
                 "title": request.path_params["project"] + " catalog · etl-craft",
                 "view": "catalog",
                 "frame_path": shown.path,
+                "api": "/api/v1/projects/" + quote(request.path_params["project"], safe=""),
+                "can_develop": has_role(caller.role, ApiRole.DEVELOPER),
+                "is_admin": caller.role == ApiRole.ADMIN,
             },
         )
 
