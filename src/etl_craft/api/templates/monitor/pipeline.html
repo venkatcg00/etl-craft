@@ -25,6 +25,15 @@
 </nav>
 <div class="monitor with-panel">
   <section class="listing">
+  {% if tab in ('runs', 'matrix') %}
+    <form class="run-filters" method="get" action="{{ base_url }}" aria-label="Filter runs">
+      {% if tab == 'matrix' %}<input type="hidden" name="tab" value="matrix">{% endif %}
+      <label>Pool<input name="pool" value="{{ filters.pool or '' }}" autocomplete="off"></label>
+      <label>Agent id<input name="agent" type="number" min="1" value="{{ filters.agent or '' }}"></label>
+      <label>Failure class<select name="failure_class"><option value="">Any</option>{% for c in failure_classes %}<option value="{{ c }}" {% if filters.failure_class == c %}selected{% endif %}>{{ c|capitalize }}</option>{% endfor %}</select></label>
+      <button type="submit">Filter</button>{% if filter_query %} <a href="{{ base_url }}{% if tab == 'matrix' %}?tab=matrix{% endif %}">Clear filters</a>{% endif %}
+    </form>
+  {% endif %}
   {% if tab == 'runs' %}
     {% if runs %}
     <figure class="bars">
@@ -53,9 +62,9 @@
       {% endfor %}
       </tbody>
     </table></div>
-    {% if before %}<p><a href="{{ base_url }}?before={{ before }}">Older runs</a></p>{% endif %}
+    {% if before %}<p><a href="{{ base_url }}?before={{ before }}{% if filter_query %}&{{ filter_query }}{% endif %}">Older runs</a></p>{% endif %}
     {% else %}
-    <p class="panel">This pipeline has no runs yet. It runs on its schedule, or an operator can start it with <code>etl-craft run --pipeline-code {{ pipeline.pipeline_code }}</code>.</p>
+    {% if filter_query %}<p class="panel">No runs match these filters.</p>{% else %}<p class="panel">This pipeline has no runs yet. It runs on its schedule, or an operator can start it with <code>etl-craft run --pipeline-code {{ pipeline.pipeline_code }}</code>.</p>{% endif %}
     {% endif %}
   {% elif tab == 'matrix' %}
     {% if runs %}
@@ -72,8 +81,8 @@
       {% endfor %}{% endfor %}
       </tbody>
     </table></div>
-    {% if before %}<p><a href="{{ base_url }}?tab=matrix&before={{ before }}">Older runs</a></p>{% endif %}
-    {% else %}<p class="panel">This pipeline has no runs yet.</p>{% endif %}
+    {% if before %}<p><a href="{{ base_url }}?tab=matrix&before={{ before }}{% if filter_query %}&{{ filter_query }}{% endif %}">Older runs</a></p>{% endif %}
+    {% else %}<p class="panel">{% if filter_query %}No runs match these filters.{% else %}This pipeline has no runs yet.{% endif %}</p>{% endif %}
   {% else %}
     <div class="scroll"><table class="list">
       <thead><tr><th scope="col">Wave</th><th scope="col">Task</th><th scope="col">Waits for</th></tr></thead>

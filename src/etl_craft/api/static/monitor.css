@@ -120,3 +120,6 @@ table.list td > a, table.list th > a { display: inline-block; min-height: 24px; 
 main p a, .selection a, .note a, .why-list a { text-decoration: underline; text-underline-offset: 2px; }
 .navigator a[aria-current=true] { color: var(--text); }
 #recent-list a, #console-history li, .command-list code { display: inline-block; min-height: 24px; line-height: 24px; }
+.run-filters { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: flex-end; margin: 0 0 1rem; }
+.run-filters label { margin: 0; }
+form.run-filters input:not([type=hidden]), form.run-filters select { display: block; width: 10rem; margin: .25rem 0 0; }

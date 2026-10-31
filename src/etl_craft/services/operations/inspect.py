@@ -232,6 +232,9 @@ def _pipeline_history(ctx: OperationContext, request: HistoryInput) -> HistoryVi
             "limit": limit + 1,
             "run_id": None if selected is None else selected.pipeline_run_id,
             "before": before,
+            "pool": request.pool,
+            "agent": None if request.agent is None else str(request.agent),
+            "failure_class": request.failure_class,
         }
         entries: tuple[RunView | TaskRunView, ...]
         if task_code is None:
