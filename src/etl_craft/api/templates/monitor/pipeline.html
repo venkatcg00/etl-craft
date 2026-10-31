@@ -82,7 +82,7 @@
         {% for code in wave %}
         <tr>
           <td>{{ wave_number }}</td>
-          <th scope="row">{{ code }}{% if code in graph.conditional %} <span class="badge">conditional</span>{% endif %}</th>
+          <th scope="row"><a href="{{ task_url(code) }}">{{ code }}</a>{% if code in graph.conditional %} <span class="badge">conditional</span>{% endif %}</th>
           <td>{% for upstream, kind in graph.depends_on.get(code, ()) %}{{ upstream }} <span class="note">({{ kind }})</span>{% if not loop.last %}, {% endif %}{% else %}<span class="note">Nothing</span>{% endfor %}</td>
         </tr>
         {% endfor %}

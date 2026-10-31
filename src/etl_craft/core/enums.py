@@ -36,6 +36,13 @@ class BusinessRuleLevel(StrEnum):
     TABLE = "TABLE"
 
 
+class PositionKind(StrEnum):
+    """What a task keeps between runs: an ingestion offset or a SQL watermark."""
+
+    OFFSET = "OFFSET"
+    WATERMARK = "WATERMARK"
+
+
 class ScriptKind(StrEnum):
     """Whether Python reports ingestion positions or performs utility work."""
 
@@ -241,6 +248,7 @@ class ActionName(StrEnum):
     HEALTH = "health"
     PIPELINES = "pipelines"
     SEARCH = "search"
+    OFFSET = "offset"
     PIPELINE_REFRESH = "pipelines refresh"
     PIPELINE_REFRESH_HISTORY = "pipeline refresh history"
     PIPELINE = "pipeline"

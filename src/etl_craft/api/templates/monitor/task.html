@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import status, duration %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/admin.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="{{ pipeline_url }}">{{ pipeline.pipeline_code }}</a> › <a href="{{ pipeline_url }}?tab=tasks">Tasks</a> › <span aria-current="page">{{ task_code }}</span></nav>
+<h1>{{ task_code }}</h1>
+{% if standing_pause %}<p><span class="status PAUSED"><span aria-hidden="true">⏸</span> Paused</span> {{ standing_pause.describe() }}</p>{% endif %}
+<div id="admin-result" aria-live="polite"></div>
+<section class="panel" aria-labelledby="stats-title"><h2 id="stats-title">Last {{ runs|length }} runs</h2>
+<dl class="facts"><dt>Succeeded</dt><dd>{{ succeeded }} of {{ runs|length }}</dd><dt>Average duration</dt><dd>{{ duration(average|int) if average is not none else "No finished runs" }}</dd></dl>
+{% if runs %}
+<div class="toolbar"><button type="button" data-csv="task-runs" data-csv-name="{{ pipeline.pipeline_code }}-{{ task_code }}-runs.csv">Export CSV</button></div>
+<div class="scroll"><table class="list" id="task-runs"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Duration</th><th scope="col">Rows in</th><th scope="col">Inserted</th><th scope="col">Updated</th><th scope="col">Deleted</th><th scope="col">Rejected</th><th scope="col">Rows per second</th><th scope="col">Attempts</th></tr></thead><tbody>
+{% for r in runs %}{% set took = seconds.get(r.task_run_id) %}<tr>
+<th scope="row"><a href="{{ run_url(r.pipeline_run_id) }}?task={{ task_code|urlencode }}">{{ r.pipeline_run_id }}</a></th><td>{{ status(r.status) }}</td><td>{{ r.start_date|zoned(settings.timezone) if r.start_date else "Not started" }}</td>
+<td>{{ duration(took|int) if took is not none else "Running" if r.start_date else "" }}</td>
+{% for count in (r.source_count, r.insert_count, r.update_count, r.delete_count, r.reject_count) %}<td>{{ "{:,}".format(count) if count is not none else '<span class="note">Not measured</span>'|safe }}</td>{% endfor %}
+<td>{{ "{:,.0f}".format(r.rows_written / took) if took and took >= 1 and r.rows_written else "" }}</td><td>{{ r.attempt_count }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<p>This task has not run yet.</p>{% endif %}
+</section>
+{% if offset.kind %}
+<section class="panel" aria-labelledby="offset-title"><h2 id="offset-title">{{ "Offset" if offset.kind == "OFFSET" else "Watermark" }}</h2>
+{% if offset.offset_type %}<dl class="facts"><dt>Stored</dt><dd><code>{{ offset.offset_value if offset.offset_value is not none else "None" }}</code> <span class="note">{{ offset.offset_type }}</span></dd>
+{% if offset.pending_task_run_id %}<dt>Pending window</dt><dd>Up to {{ offset.pending_upper_bound|zoned(settings.timezone) }}, held by task run {{ offset.pending_task_run_id }}</dd>{% endif %}</dl>
+{% else %}<p>Nothing stored yet; the first run starts it.</p>{% endif %}
+{% if may_reset %}<form class="panel" method="post" data-api-form data-show-result data-url="{{ marks_api }}"><h3>Reset the {{ offset.kind|lower }}</h3>
+<p class="note">The next run starts from the new value. Runs that already finished keep their data. Same as <code>etl-craft mark --{{ offset.kind|lower }}</code>.</p>
+<input type="hidden" name="pipeline_code" value="{{ pipeline.pipeline_code }}"><input type="hidden" name="task_code" value="{{ task_code }}">
+<label>New value<input name="{{ offset.kind|lower }}" type="text" required autocomplete="off" value="{{ offset.offset_value or '' }}"></label>
+<label>Reason (recorded)<input name="reason" type="text" required autocomplete="off"></label>
+<button type="submit" class="danger" data-confirm="Reset this task's {{ offset.kind|lower }}? The next run starts from the new value.">Reset</button></form>{% endif %}
+</section>{% endif %}
+{% endblock %}

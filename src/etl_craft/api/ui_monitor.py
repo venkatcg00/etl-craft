@@ -59,6 +59,11 @@ def run_url(project: str, pipeline_code: str, run_id: int) -> str:
     return f"{pipeline_url(project, pipeline_code)}/runs/{run_id}"
 
 
+def task_url(project: str, pipeline_code: str, task_code: str) -> str:
+    """Return the page of one task across its runs."""
+    return f"{pipeline_url(project, pipeline_code)}/tasks/{quote(task_code, safe='')}"
+
+
 def controls_url(project: str) -> str:
     """Return the project's control route, the same one the CLI calls against a server."""
     return f"/api/v1/projects/{quote(project, safe='')}/controls"
@@ -154,7 +159,7 @@ def hit_url(project: str, hit: SearchHit) -> str:
     if hit.kind == SearchKind.RUN and hit.run_id is not None:
         return run_url(project, code, hit.run_id)
     if hit.kind == SearchKind.TASK:
-        return f"{pipeline_url(project, code)}?tab=tasks"
+        return task_url(project, code, hit.label)
     return pipeline_url(project, code)
 
 
@@ -213,6 +218,7 @@ def _pipeline_values(
         "runs_api": f"/api/v1/projects/{quote(project, safe='')}/runs",
         "project_api": f"/api/v1/projects/{quote(project, safe='')}",
         "run_url": lambda run_id: run_url(project, code, run_id),
+        "task_url": lambda task_code: task_url(project, code, task_code),
     }
 
 
