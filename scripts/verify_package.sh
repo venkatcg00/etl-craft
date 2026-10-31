@@ -61,6 +61,7 @@ required = [
     "etl_craft/api/templates/operations/agents.html",
     "etl_craft/api/templates/operations/scheduled.html",
     "etl_craft/api/templates/operations/maintenance.html",
+    "etl_craft/api/templates/operations/held.html",
     "etl_craft/api/templates/monitor/items.html",
     "etl_craft/api/static/console.js",
     "etl_craft/api/static/admin.js",

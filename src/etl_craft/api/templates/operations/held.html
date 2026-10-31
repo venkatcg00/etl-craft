@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% from 'monitor/_status.html' import post_button %}
+{% block scripts %}<link rel="stylesheet" href="/static/ui/monitor.css"><script type="module" src="/static/ui/monitor.js"></script>{% endblock %}
+{% block content %}
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="{{ pipelines_url }}">{{ project.project_name }}</a> › <span aria-current="page">Held and paused</span></nav>
+<h1>Held and paused</h1>
+<p class="note">Everything that is waiting on a person. Pause stops new runs of a pipeline or task; hold stops one run or one task in a run from starting.</p>
+<section class="panel" aria-labelledby="holds-title"><h2 id="holds-title">Held runs and tasks · {{ holds|length }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Pipeline</th><th scope="col">Run</th><th scope="col">Held</th><th scope="col">By</th><th scope="col">Since</th><th scope="col">Reason</th>{% if may_control %}<th scope="col">Actions</th>{% endif %}</tr></thead><tbody>
+{% for h in holds %}{% set scope = ("task " ~ h.task_code ~ " in run " ~ h.pipeline_run_id) if h.task_code else ("the whole run " ~ h.pipeline_run_id) %}<tr><th scope="row"><a href="{{ pipelines_url }}/{{ h.pipeline_code|urlencode }}">{{ h.pipeline_code }}</a></th><td><a href="{{ pipelines_url }}/{{ h.pipeline_code|urlencode }}/runs/{{ h.pipeline_run_id }}">{{ h.pipeline_run_id }}</a></td><td>{{ h.task_code or "Whole run" }}</td><td>{{ h.requested_by }}</td><td>{{ h.requested_at|zoned(settings.timezone) }}</td><td class="wrap">{{ h.reason or "" }}</td>
+{% if may_control %}<td>{{ post_button("Release", controls_url, {"pipeline_code": h.pipeline_code, "action": "RELEASE", "run_id": h.pipeline_run_id, "task_code": h.task_code}, scope, "Let the held work start again; nothing that already ran is repeated.") }}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="7">Nothing is held.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel" aria-labelledby="paused-title"><h2 id="paused-title">Paused pipelines · {{ paused|length }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Pipeline</th><th scope="col">Paused</th></tr></thead><tbody>
+{% for p in paused %}<tr><th scope="row"><a href="{{ pipelines_url }}/{{ p.pipeline_code|urlencode }}">{{ p.pipeline_code }}</a></th><td class="wrap">Since {{ p.paused.paused_at|zoned(settings.timezone) }} by {{ p.paused.paused_by }}{% if p.paused.reason %}: {{ p.paused.reason }}{% endif %}</td></tr>
+{% else %}<tr><td colspan="2">No pipeline is paused.</td></tr>{% endfor %}
+</tbody></table></div><p class="note">Resume a pipeline from its page, where you choose whether to run now, catch up or wait for the next scheduled run.</p></section>
+<section class="panel" aria-labelledby="tasks-title"><h2 id="tasks-title">Paused tasks · {{ task_pauses|length }}</h2>
+<div class="scroll"><table class="list"><thead><tr><th scope="col">Pipeline</th><th scope="col">Task</th><th scope="col">Pause</th>{% if may_control %}<th scope="col">Actions</th>{% endif %}</tr></thead><tbody>
+{% for code, t in task_pauses %}<tr><td><a href="{{ pipelines_url }}/{{ code|urlencode }}">{{ code }}</a></td><th scope="row"><a href="{{ pipelines_url }}/{{ code|urlencode }}/tasks/{{ t.task_code|urlencode }}">{{ t.task_code }}</a></th><td class="wrap">Since {{ t.paused_at|zoned(settings.timezone) }} by {{ t.actor }}{% if t.reason %}: {{ t.reason }}{% endif %}<br><span class="note">{% if t.outcome %}Downstream tasks treat it as {{ t.outcome }}{% else %}Downstream tasks wait{% endif %} · {% if t.expires_at %}until {{ t.expires_at|zoned(settings.timezone) }}{% else %}until resumed{% endif %}</span></td>
+{% if may_control %}<td>{{ post_button("Resume task", controls_url, {"pipeline_code": code, "action": "RESUME", "task_code": t.task_code}, "task " ~ t.task_code ~ " of " ~ code, "Remove the standing pause; the task runs in the next run that reaches it.") }}</td>{% endif %}</tr>
+{% else %}<tr><td colspan="4">No task is paused.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% with pipeline_code=None, run_id=None, task_code=None %}{% include 'monitor/_control_dialog.html' %}{% endwith %}
+{% endblock %}

@@ -261,6 +261,13 @@ All notable changes are recorded here. The format follows
 
 ### Added
 
+- **Held and paused** page: holds still in force on queued and running runs (with Release),
+  paused pipelines, and paused tasks with their standing outcome and end (with Resume task).
+  `etl-craft holds` and `GET /api/v1/projects/{project}/holds` list the holds. A pipeline's Runs
+  and Matrix tabs filter runs by pool, agent id and failure class; `etl-craft history --all`
+  takes `--pool`, `--agent` and `--failure-class`, and the API `pool`, `agent` and
+  `failure_class`. A failure class matches failed, timed-out or lost attempts only.
+
 - Browser task page (from a pipeline's Tasks tab or search): the task's last runs with rows in,
   inserted, updated, deleted and rejected, duration and rows per second, and its stored offset
   or watermark with a Reset for operators (the same request as `mark --offset|--watermark`).

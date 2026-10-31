@@ -14,6 +14,7 @@ from etl_craft.core.enums import (
     DEFINITION_CONTROLS,
     MARKABLE_STATUSES,
     ControlAction,
+    FailureClass,
     LineageDirection,
     ResumeChoice,
     RunStatus,
@@ -232,11 +233,22 @@ class HistoryInput(RunFilter):
     all: bool = False
     limit: int = 20
     before: int | None = None
+    pool: str | None = None
+    agent: int | None = None
+    failure_class: FailureClass | None = None
 
     def __post_init__(self) -> None:
         """Bound the page before reading it."""
         super().__post_init__()
         optional_text("task_code", self.task_code)
+        optional_text("pool", self.pool)
+        if (self.pool, self.agent, self.failure_class) != (None, None, None) and (
+            self.task_code is not None or not self.all
+        ):
+            raise UsageError(
+                "`pool`, `agent` and `failure_class` filter a list of pipeline runs; "
+                "give `all` and omit `task_code`"
+            )
         if self.task_code is not None and self.pipeline_code is None:
             raise UsageError("`task_code` needs `pipeline_code`; choose its pipeline")
         if not 1 <= self.limit <= 100:

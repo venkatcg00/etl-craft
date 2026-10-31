@@ -14,7 +14,7 @@ from fastapi.responses import Response
 from etl_craft.api.ui_graph import run_graph, run_timeline
 from etl_craft.api.ui_pages import page_values
 from etl_craft.api.ui_templates import render
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, FailureClass
 from etl_craft.core.enums_ui import SearchKind
 from etl_craft.core.errors import ResourceNotFoundError, UsageError
 from etl_craft.engine.logs import LIVE_ATTEMPTS
@@ -197,6 +197,9 @@ def _pipeline_values(
             all=True,
             limit=identity.settings.page_size,
             before=_positive(request, "before"),
+            pool=(filters := _run_filters(request))[0],
+            agent=filters[1],
+            failure_class=filters[2],
         ),
     )
     assert isinstance(definition, PipelineView) and isinstance(graph, GraphView)
@@ -219,7 +222,30 @@ def _pipeline_values(
         "project_api": f"/api/v1/projects/{quote(project, safe='')}",
         "run_url": lambda run_id: run_url(project, code, run_id),
         "task_url": lambda task_code: task_url(project, code, task_code),
+        "filters": dict(zip(("pool", "agent", "failure_class"), filters, strict=True)),
+        "filter_query": urlencode(
+            {
+                k: v
+                for k, v in zip(("pool", "agent", "failure_class"), filters, strict=True)
+                if v is not None
+            }
+        ),
+        "failure_classes": tuple(FailureClass),
     }
+
+
+def _run_filters(request: Request) -> tuple[str | None, int | None, FailureClass | None]:
+    """Read the Runs tab's pool, agent and failure-class filters; empty fields do not filter."""
+    value = request.query_params.get("failure_class") or None
+    if value is not None and value not in tuple(FailureClass):
+        raise UsageError(
+            f"failure_class={value!r}; expected {', '.join(FailureClass)}; choose one or none"
+        )
+    return (
+        request.query_params.get("pool") or None,
+        _positive(request, "agent"),
+        None if value is None else FailureClass(value),
+    )
 
 
 def _matrix(
@@ -413,7 +439,7 @@ def _task_runs(
 def _positive(request: Request, name: str) -> int | None:
     """Read an optional positive whole-number query parameter, refusing anything else."""
     value = request.query_params.get(name)
-    if value is None:
+    if not value:
         return None
     if not value.isdigit() or int(value) < 1:
         raise UsageError(f"{name}={value!r}; expected a positive run id; open the first page")

@@ -18,6 +18,7 @@ from etl_craft.services.operations.about import About
 from etl_craft.services.operations.actions import has_role, invoke
 from etl_craft.services.operations.agents import AgentsView
 from etl_craft.services.operations.context import OperationContext
+from etl_craft.services.operations.holds import Holds
 from etl_craft.services.operations.models import PipelineListView
 from etl_craft.services.operations.requests import NoInput, TagFilter
 
@@ -51,6 +52,11 @@ def add_operations_pages(app: FastAPI, ctx: OperationContext) -> None:
         return render(
             request, "operations/scheduled.html", values | _scheduled_values(caller, project)
         )
+
+    @app.get("/ui/projects/{project}/held", include_in_schema=False)
+    def held(request: Request, project: str) -> Response:
+        caller, values = page_values(ctx, request)
+        return render(request, "operations/held.html", values | _held_values(caller, project))
 
     @app.get("/ui/projects/{project}/maintenance", include_in_schema=False)
     def maintenance(request: Request, project: str) -> Response:
@@ -113,4 +119,22 @@ def _scheduled_values(caller: OperationContext, project: str) -> dict[str, objec
         "upcoming": [p for *_, p in sorted(upcoming, key=lambda row: row[:2])],
         "not_running": [p for p in timed if p.next_run is None],
         "pipelines_url": f"/ui/projects/{quote(project, safe='')}/pipelines",
+    }
+
+
+def _held_values(caller: OperationContext, project: str) -> dict[str, object]:
+    """Paused pipelines, paused tasks and held runs or tasks, each with its way back."""
+    listed = invoke(caller, ActionName.PIPELINES, TagFilter())
+    holds = invoke(caller, ActionName.HOLDS, NoInput())
+    assert isinstance(listed, PipelineListView) and isinstance(holds, Holds)
+    base = f"/ui/projects/{quote(project, safe='')}/pipelines"
+    return {
+        "title": f"Held and paused · {project} · etl-craft",
+        "view": "held",
+        "paused": [p for p in listed.pipelines if p.paused],
+        "task_pauses": [(p.pipeline_code, t) for p in listed.pipelines for t in p.task_pauses],
+        "holds": holds.holds,
+        "pipelines_url": base,
+        "controls_url": f"/api/v1/projects/{quote(project, safe='')}/controls",
+        "may_control": has_role(caller.role, ApiRole.OPERATOR),
     }

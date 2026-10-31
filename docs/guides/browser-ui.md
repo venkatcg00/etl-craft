@@ -235,6 +235,18 @@ validates and loads it, or which run it waits behind. The table below lists the 
 recent files with their state, run and the validation reason for a refused file. See
 [Stewardship uploads](stewardship.md).
 
+## Held and paused work
+
+**Held and paused** lists what is waiting on a person: runs or tasks on hold (operators can
+**Release** them), paused pipelines (resume them from the pipeline's page, where you choose to
+run now, catch up or wait), and paused tasks with what downstream tasks see meanwhile (operators
+can **Resume task**). `etl-craft holds` lists the holds.
+
+On a pipeline's **Runs** and **Matrix** tabs, filter runs by **Pool**, **Agent id** or
+**Failure class** to find, for example, the runs that failed permanently or ran on one agent;
+the filters stay on the older-runs links. `etl-craft history --pipeline-code P --all
+--failure-class PERMANENT` returns the same runs.
+
 ## Operations
 
 **System health** in the sidebar shows whether a controller is running (no heartbeat in the

@@ -14,7 +14,7 @@ from etl_craft.cli.commands.common import (
     request_from,
 )
 from etl_craft.cli.output import Output
-from etl_craft.core.enums import ActionName
+from etl_craft.core.enums import ActionName, FailureClass
 from etl_craft.core.errors import ExitCode
 from etl_craft.engine.repository.intervention_rows import Intervention
 from etl_craft.services.operations.models import HistoryView, RunView, TaskRunView
@@ -29,6 +29,16 @@ def _configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--task-code", help="Show this task's runs instead of the pipeline's.")
     parser.add_argument("--all", action="store_true", help="List runs instead of selecting one.")
     parser.add_argument("--limit", type=int, default=20, help="How many runs, newest first.")
+    parser.add_argument("--pool", help="With --all: only runs with an attempt in this pool.")
+    parser.add_argument(
+        "--agent", type=int, help="With --all: only runs with an attempt on this agent id."
+    )
+    parser.add_argument(
+        "--failure-class",
+        type=FailureClass,
+        choices=list(FailureClass),
+        help="With --all: only runs with an attempt that failed with this class.",
+    )
 
 
 def _run(args: argparse.Namespace, out: Output) -> int:
