@@ -35,6 +35,7 @@ class ActionRequest:
     actor: Actor = field(default_factory=current_actor)
     engine: Engine | None = None
     recorded: bool = False
+    action_id: int | None = None
     outcome: ActionOutcome = ActionOutcome.REQUESTED
     exit_code: int | None = None
     project_id: int | None = None
@@ -68,7 +69,7 @@ class ActionRequest:
             ).scalar_one_or_none()
         actor = self.actor
         payload = json.dumps(self.arguments, default=str)
-        conn.execute(
+        result = conn.execute(
             statement(conn, "action_insert"),
             {
                 "started": self.requested_at,
@@ -87,6 +88,7 @@ class ActionRequest:
                 "exit_code": self.exit_code,
             },
         )
+        self.action_id = int(result.scalar_one())
         self.recorded = True
 
 

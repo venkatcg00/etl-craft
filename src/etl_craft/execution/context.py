@@ -6,7 +6,7 @@ from sqlalchemy.engine import Engine
 
 from etl_craft.config import ConnectorConfig
 from etl_craft.core.definitions import Definition, using
-from etl_craft.core.enums import YesNo
+from etl_craft.core.enums import Handler, YesNo
 from etl_craft.core.errors import RunStateError
 from etl_craft.core.time import as_utc
 from etl_craft.engine import run_scopes
@@ -14,6 +14,7 @@ from etl_craft.engine.queries import statement
 from etl_craft.engine.repository.events import run_event_data
 from etl_craft.engine.repository.tasks import TaskExecutionDetail, fetch_task_parameters
 from etl_craft.engine.runlog import as_date
+from etl_craft.engine.uploads import run_uploads
 from etl_craft.handlers.registry import TaskContext
 
 
@@ -61,6 +62,19 @@ def build_task_context(
                 selection=(selected, row.exclusive_run),
             )
         event_data = run_event_data(conn, row.pipeline_run_id)
+        uploads = (
+            run_uploads(conn, row.pipeline_run_id, detail.handler)
+            if pipeline.get("stewardable_flag") == YesNo.YES
+            else ()
+        )
+        if (
+            uploads or pipeline.get("stewardable_flag") == YesNo.YES
+        ) and detail.handler != Handler.FILE_VALIDATION:
+            from etl_craft.engine.stewardship import require_validation
+
+            require_validation(
+                conn, definition, row.pipeline_run_id, detail.task_code, detail.pipeline_id
+            )
     return TaskContext(
         config=config,
         bundle_id=row.bundle_id,
@@ -84,5 +98,7 @@ def build_task_context(
         event_keys=event_data.keys,
         event_rows=event_data.rows,
         writer=row.writer,
+        uploads=uploads,
+        upload_inputs=uploads,
         started_at=as_utc(row.started_at),
     )

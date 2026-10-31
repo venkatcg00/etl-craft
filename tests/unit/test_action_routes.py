@@ -14,7 +14,7 @@ from etl_craft.api import routes
 from etl_craft.api.app import create_app
 from etl_craft.cli.client import ApiClient
 from etl_craft.core.actor import Actor, ActorKind
-from etl_craft.core.enums import ActionScope, ApiRole, Audit, HttpMethod, TokenKind
+from etl_craft.core.enums import ActionName, ActionScope, ApiRole, Audit, HttpMethod, TokenKind
 from etl_craft.core.enums_access import Permission
 from etl_craft.core.errors import PermissionDeniedError, ResourceNotFoundError, UsageError
 from etl_craft.services.operations import OperationContext, actions
@@ -82,7 +82,11 @@ def test_the_app_has_exactly_one_route_per_routed_action():
     table = {(ACTIONS[name].method, action_path(ACTIONS[name])) for name in ROUTED}
     assert len(table) == len(ROUTED)
     # FastAPI serves its own contract and its interactive page beside the actions.
-    assert generated - {("GET", "/api/v1/openapi.json"), ("GET", "/api/v1/docs")} == table
+    aliases = {
+        (ACTIONS[name].method, ACTIONS[name].path)
+        for name in (ActionName.UPLOAD, ActionName.UPLOADS, ActionName.UPLOAD_PIPELINES)
+    }
+    assert generated - {("GET", "/api/v1/openapi.json"), ("GET", "/api/v1/docs")} == table | aliases
     contract = app.openapi()["paths"]
     for method, path in table:
         if "{project}" in path:
@@ -121,6 +125,16 @@ def test_the_client_and_the_route_hand_the_operation_the_same_request(server, mo
 
     monkeypatch.setattr("etl_craft.core.http_client.build_opener", lambda *handlers: Opener())
     request = build(ACTIONS[name].request)
+    if name == ActionName.UPLOAD:
+        from etl_craft.api import uploads
+
+        monkeypatch.setattr(uploads, "invoke", routes.invoke)
+        with pytest.raises(CapturedError):
+            client.post(
+                "/api/v1/uploads?pipeline_code=x", headers={"Authorization": "Bearer token"}
+            )
+        assert calls == [(name, request)]
+        return
     with pytest.raises(CapturedError):
         result = ApiClient("http://127.0.0.1:8000", "default").invoke(name, request)
         list(result)  # a streamed action sends its request when read
@@ -140,6 +154,8 @@ def test_an_unknown_field_is_refused_by_name_before_the_operation_runs(server, n
     headers = {"Authorization": "Bearer token"}
     if action.method == HttpMethod.GET:
         response = client.get(path, params=given, headers=headers)
+    elif name == ActionName.UPLOAD:
+        response = client.post(path, params=given, headers=headers)
     else:
         response = client.post(path, json=given, headers=headers)
     assert response.status_code == 400, response.text
@@ -167,6 +183,8 @@ def test_a_malformed_value_is_refused_by_name_before_the_operation_runs(server, 
     headers = {"Authorization": "Bearer token"}
     if action.method == HttpMethod.GET:
         response = client.get(path, params=given, headers=headers)
+    elif name == ActionName.UPLOAD:
+        response = client.post(path, params=given, headers=headers)
     else:
         response = client.post(path, json=given, headers=headers)
     assert response.status_code == 400, response.text

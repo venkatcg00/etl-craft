@@ -230,7 +230,9 @@ source-schema-drift = [
     "tests/integration/warehouse/test_source_definitions.py::test_export_seeds_sources_and_validate_names_all_drift",
     "tests/integration/warehouse/test_sql_evolution.py::test_evolution_retains_full_types_rows_and_keys",
 ]
-bad-stewardship-file = "open: S7.M"
+bad-stewardship-file = [
+    "tests/integration/warehouse/test_stewardship_uploads.py::test_bad_stewardship_file_never_reaches_a_project_table",
+]
 hung-task = [
     "tests/unit/test_supervisor.py::test_a_child_past_its_time_limit_is_stopped",
     "tests/unit/test_supervisor.py::test_a_timeout_stops_everything_the_child_started",

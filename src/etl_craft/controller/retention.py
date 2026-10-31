@@ -69,7 +69,10 @@ def maintain(
     deadlines: tuple[dict[int, datetime], dict[int, datetime]],
 ) -> None:
     """Share the maintenance worker; coalesce elapsed clone and check ticks, never queue them."""
+    from etl_craft.controller.uploads import admit_pending
+
     refresh_due(ctx, stop)
+    admit_pending(ctx)
     try:
         purge_due(ctx, now, stop)
     finally:

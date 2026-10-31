@@ -83,7 +83,7 @@
       "src/etl_craft/core/text.py": 3,
       "src/etl_craft/engine/repository/source_contracts.py": 7,
       "src/etl_craft/execution/gates.py": 11,
-      "src/etl_craft/execution/interventions.py": 7,
+      "src/etl_craft/execution/interventions.py": 4,
       "src/etl_craft/execution/pipeline.py": 2,
       "src/etl_craft/execution/scheduler.py": 37,
       "src/etl_craft/services/catalog/collect.py": 25,
@@ -99,9 +99,6 @@
       "src/etl_craft/execution/connections.py": 1,
       "src/etl_craft/services/catalog/collect.py": 1,
       "src/etl_craft/services/cloning.py": 2
-    },
-    "module-lines": {
-      "src/etl_craft/engine/transitions.py": 2
     },
     "no-cover": {
       "src/etl_craft/execution/child.py": 1

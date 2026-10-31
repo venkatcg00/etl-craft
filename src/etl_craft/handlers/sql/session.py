@@ -25,6 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from etl_craft.core.enums import SqlAction, TableFormat
 from etl_craft.core.errors import HandlerError, SqlGuardError
 from etl_craft.core.text import qualify, split_object_ref
+from etl_craft.core.uploads import UploadWriter
 from etl_craft.dialects.warehouse import WarehouseDialect
 from etl_craft.dialects.warehouse.metadata import ddl_tables, projection_names
 from etl_craft.engine.repository.offsets import StoredOffset
@@ -60,6 +61,8 @@ class Session:
         self.task_run_id = task_run_id
         self.params = params
         self.protection: Protection | None = None
+        self.uploads: tuple[UploadWriter, ...] = ()
+        self.bindings: dict[str, object] = {}
         database, self.schema, self.table = split_object_ref(target_object)
         # A target that names its database is written there; otherwise in the active one.
         self.catalog = database or catalog
@@ -178,7 +181,7 @@ class Session:
         logger.debug("%s: %s", step, sql)
         started = time.monotonic()
         try:
-            result = self.conn.execute(text(sql), dict(params or {}))
+            result = self.conn.execute(text(sql), self.bindings | dict(params or {}))
         except SQLAlchemyError as error:
             logger.error("%s failed; the statement was:\n%s", step, sql)
             raise self._failure(step, error) from error

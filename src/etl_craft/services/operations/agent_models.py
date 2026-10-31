@@ -57,6 +57,7 @@ class AgentTask(AgentRequest):
 
     attempt_id: int
     bundle_path: str | None = None
+    upload_id: int | None = None
     operation: AgentReport
     item: ItemRecord | None = None
     item_keys: tuple[str, ...] = ()

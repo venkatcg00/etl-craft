@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from etl_craft.core.actor import Actor, sso_groups
-from etl_craft.core.enums import RunStatus, TriggerKind, YesNo
+from etl_craft.core.enums import Handler, RunStatus, TriggerKind, YesNo
 from etl_craft.core.errors import ConfigurationError, RunStateError, StaleTransitionError
 from etl_craft.engine import runlog, standing_pauses
 from etl_craft.engine.metrics import lifecycle
@@ -25,6 +25,7 @@ class RunCreation:
     trigger_kind: str = TriggerKind.MANUAL
     run_key: str | None = None
     status: str = RunStatus.IN_PROGRESS
+    upload_ids: tuple[int, ...] = ()
 
 
 def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreation) -> int:
@@ -39,6 +40,7 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
     )
     _validate(pipeline_id, status, trigger_kind)
     standing_pauses.lock(conn, pipeline_id)
+    _upload_admission(conn, pipeline_id, options)
     refresh = (
         admitted(conn, pipeline_id)
         if conn.engine.get_execution_options().get("refresh_required")
@@ -78,6 +80,10 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
                     f"bundle is published; "
                     "expected an admitted project bundle; run `etl-craft bundle publish` first"
                 )
+            if options.upload_ids:
+                from etl_craft.engine.uploads import take_uploads
+
+                take_uploads(conn, pipeline_id, int(run_id), options.upload_ids)
             if status != RunStatus.SKIPPED:
                 standing_pauses.pin(conn, pipeline_id, int(run_id), actor)
             if status == RunStatus.SKIPPED:
@@ -98,6 +104,25 @@ def create(conn: Connection, pipeline_id: int, actor: Actor, options: RunCreatio
             f"pipeline_id={pipeline_id}, run_key={key!r}: expected no active run and a new key, "
             f"owner=None; found {state}. Check run history before retrying."
         ) from error
+
+
+def _upload_admission(conn: Connection, pipeline_id: int, options: RunCreation) -> None:
+    """Refuse every new stewardable execution that lacks admitted file identities."""
+    pipeline = conn.execute(
+        statement(conn, "stewardship_pipeline"), {"pipeline_id": pipeline_id}
+    ).one_or_none()
+    if pipeline is not None and pipeline.stewardable_flag == YesNo.YES and not options.upload_ids:
+        raise RunStateError(
+            f"pipeline {pipeline.pipeline_code}, "
+            f"task {pipeline.validation_task or Handler.FILE_VALIDATION} "
+            "(FILE_VALIDATION): start has no upload; "
+            "expected an upload-bound run; upload a corrected file"
+        )
+    if options.upload_ids and (pipeline is None or pipeline.stewardable_flag != YesNo.YES):
+        raise RunStateError(
+            f"pipeline {pipeline_id}: upload ids={options.upload_ids} on a non-stewardable "
+            "pipeline; expected STEWARDABLE_FLAG=Y; select an active stewardable pipeline"
+        )
 
 
 def _validate(pipeline_id: int, status: str, trigger_kind: str) -> None:

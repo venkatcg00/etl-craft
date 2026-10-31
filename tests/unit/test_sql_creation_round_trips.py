@@ -20,6 +20,7 @@ pytestmark = pytest.mark.unit
 def test_identity_candidate_is_populated_before_rename_or_clone(key, publication, insert_fails):
     session = Mock(spec=Session)
     session.conn = Mock()
+    session.uploads = ()
     session.dialect = for_key(key)
     session.target = "c.s.target"
     session.token = "test"
@@ -53,6 +54,7 @@ def test_identity_candidate_is_populated_before_rename_or_clone(key, publication
     session.rename.side_effect = lambda before, after: events.append(f"rename {before} to {after}")
     session.drop.side_effect = lambda name: events.append(f"drop {name}")
     action = Mock(spec=ActionContext)
+    action.uploads = ()
     action.task = SimpleNamespace(watermark=None, allow_empty=True)
     action.staged = None
     action.build_stage.return_value = "stage"

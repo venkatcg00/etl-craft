@@ -22,6 +22,7 @@ from etl_craft.core.actor import SYSTEM_ACTOR
 from etl_craft.core.counts import Counts
 from etl_craft.core.definitions import Definition
 from etl_craft.core.errors import HandlerError
+from etl_craft.core.uploads import UploadInfo, UploadWriter
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import LocalTaskStore, TaskIdentity, TaskStore
 from etl_craft.handlers.resources import LocalLocker
@@ -61,6 +62,8 @@ class TaskContext:
     writer: str = SYSTEM_ACTOR.name
     bundle_id: str | None = None
     metadata_version: str | None = None
+    uploads: tuple[UploadWriter, ...] = ()
+    upload_inputs: tuple[UploadInfo, ...] = ()
     _definition: Definition | None = None
 
 
@@ -99,6 +102,7 @@ HANDLERS: dict[str, str] = {
     enums.Handler.SQL_SCRIPT: "etl_craft.handlers.sql_script:run",
     enums.Handler.SQL: "etl_craft.handlers.sql:run",
     enums.Handler.BUSINESS_RULES: "etl_craft.handlers.business_rules:run",
+    enums.Handler.FILE_VALIDATION: "etl_craft.handlers.file_validation:run",
     enums.Handler.PYTHON: "etl_craft.handlers.python_scripts:run",
     enums.Handler.EMAIL_ALERT: "etl_craft.handlers.email_alert:run",
 }

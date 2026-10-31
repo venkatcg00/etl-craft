@@ -33,6 +33,7 @@ from etl_craft.core.enums import (
 from etl_craft.core.errors import ConfigurationError, EtlCraftError, RunStateError, ServerError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.ownership import attempt_holder
+from etl_craft.core.placement import slot_kind
 from etl_craft.core.resources import Ceilings
 from etl_craft.core.text import sha256_hex
 from etl_craft.engine.resource_locks import holder_tag
@@ -275,7 +276,7 @@ class AgentLoop:
         attempt_id = int(str(work.task["attempt_id"]))
         temporary = tempfile.TemporaryDirectory(prefix=f"etl-craft-agent-{attempt_id}-")
         folder = Path(temporary.name)
-        kind = SlotKind.PYTHON if work.task["handler"] == Handler.PYTHON else SlotKind.WAREHOUSE
+        kind = slot_kind(str(work.task["handler"]))
         task = RunningTask(
             attempt_id, kind, folder, temporary, started + work.lease_seconds - FENCE_MARGIN
         )

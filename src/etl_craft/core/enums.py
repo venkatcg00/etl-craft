@@ -8,6 +8,22 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TypeVar
 
+from etl_craft.core.enums_access import AccountKind as AccountKind
+from etl_craft.core.enums_access import ActorKind as ActorKind
+from etl_craft.core.enums_access import ApiRole as ApiRole
+from etl_craft.core.enums_access import ConnectionUse as ConnectionUse
+from etl_craft.core.enums_access import ManagedProvider as ManagedProvider
+from etl_craft.core.enums_access import ProcessRole as ProcessRole
+from etl_craft.core.enums_access import TokenKind as TokenKind
+from etl_craft.core.enums_agents import (
+    AgentCommand as AgentCommand,
+)
+from etl_craft.core.enums_agents import (
+    AgentStatus as AgentStatus,
+)
+from etl_craft.core.enums_agents import (
+    SlotKind as SlotKind,
+)
 from etl_craft.core.errors import EtlCraftError
 
 E = TypeVar("E", bound=StrEnum)
@@ -163,65 +179,6 @@ class TriggerKind(StrEnum):
     PIPELINE_TASK = "PIPELINE_TASK"
 
 
-class ActorKind(StrEnum):
-    """The kind of account responsible for an action."""
-
-    USER = "USER"
-    SERVICE = "SERVICE"
-    SYSTEM = "SYSTEM"
-
-
-class TokenKind(StrEnum):
-    """What a stored credential is for: automation, a request, or renewing a user's access."""
-
-    AGENT = "AGENT"
-    ATTEMPT = "ATTEMPT"
-    SERVICE = "SERVICE"
-    ACCESS = "ACCESS"
-    REFRESH = "REFRESH"
-
-
-class AccountKind(StrEnum):
-    """Whether a registered account represents a person or an automated caller."""
-
-    USER = "USER"
-    SERVICE = "SERVICE"
-
-
-class ConnectionUse(StrEnum):
-    """Separately bounded Engine DB sessions in one serving process."""
-
-    TASK = "TASK"
-    PROBE = "PROBE"
-    HEALTH = "HEALTH"
-
-
-class ManagedProvider(StrEnum):
-    """Platforms that mint short-lived PostgreSQL database credentials."""
-
-    NONE = "NONE"
-    SNOWFLAKE = "SNOWFLAKE"
-    DATABRICKS = "DATABRICKS"
-
-
-class ProcessRole(StrEnum):
-    """Processes that reserve Engine DB capacity; API-only agents reserve none."""
-
-    CONTROLLER = "CONTROLLER"
-    UI = "UI"
-    RUN = "RUN"
-
-
-class ApiRole(StrEnum):
-    """A deployment account role, each including the ones before it."""
-
-    AGENT = "agent"
-    VIEWER = "viewer"
-    OPERATOR = "operator"
-    DEVELOPER = "developer"
-    ADMIN = "admin"
-
-
 class HttpScheme(StrEnum):
     """HTTP schemes accepted from explicitly trusted proxies."""
 
@@ -249,6 +206,10 @@ class ActionName(StrEnum):
     AGENT_RENEW = "agent renew"
     AGENT_REPORT = "agent report"
     AGENT_LOG = "agent log"
+    AGENT_UPLOAD_CONTENT = "agent upload content"
+    UPLOAD = "upload"
+    UPLOADS = "uploads"
+    UPLOAD_PIPELINES = "upload pipelines"
     AGENT_CONTROL = "agent control"
     AGENTS = "agents"
     ITEMS = "items"
@@ -395,21 +356,6 @@ class ActionOutcome(StrEnum):
     FAILURE = "FAILURE"
 
 
-class InterventionAction(StrEnum):
-    """What an operator did to a run, as ``AUD_RUN_INTERVENTIONS.ACTION`` records it."""
-
-    MARK = "MARK"
-    NEW_RUN = "NEW_RUN"
-    CANCEL = "CANCEL"
-    REOPEN = "REOPEN"
-    RESET = "RESET"
-    GATE_BYPASS = "GATE_BYPASS"
-    IGNORE_DEPENDENCIES = "IGNORE_DEPENDENCIES"
-    PAUSE_ADMISSION = "PAUSE_ADMISSION"
-    PAUSE_APPLIED = "PAUSE_APPLIED"
-    RERUN = "RERUN"
-
-
 class SlaStatus(StrEnum):
     """Whether a pipeline run finished within its SLA."""
 
@@ -438,6 +384,7 @@ class Handler(StrEnum):
 
     PYTHON = "PYTHON"
     SQL = "SQL"
+    FILE_VALIDATION = "FILE_VALIDATION"
     SQL_SCRIPT = "SQL_SCRIPT"
     BUSINESS_RULES = "BUSINESS_RULES"
     EMAIL_ALERT = "EMAIL_ALERT"
@@ -651,51 +598,6 @@ class TaskType(StrEnum):
     ETL = "ETL"
 
 
-class AgentStatus(StrEnum):
-    """Whether an agent accepts claims, is draining, or has departed."""
-
-    ACTIVE = "ACTIVE"
-    DRAINING = "DRAINING"
-    GONE = "GONE"
-
-
-class AgentCommand(StrEnum):
-    """Durable operator requests acknowledged by their agent."""
-
-    DRAIN = "DRAIN"
-    RESUME = "RESUME"
-    STOP = "STOP"
-
-
-class SlotKind(StrEnum):
-    """The process capacity an entire attempt consumes."""
-
-    PYTHON = "python"
-    WAREHOUSE = "warehouse"
-
-
-class AgentReport(StrEnum):
-    """Fenced task progress sent through the agent report action."""
-
-    START = "START"
-    END = "END"
-    CANCEL = "CANCEL"
-    STATE = "STATE"
-    TARGET = "TARGET"
-    PUBLISH = "PUBLISH"
-    WATERMARK = "WATERMARK"
-    ITEMS = "ITEMS"
-    ITEM_EVENT = "ITEM_EVENT"
-    ITEM_PREPARE = "ITEM_PREPARE"
-    BUNDLE = "BUNDLE"
-    RULE_BEGIN = "RULE_BEGIN"
-    RULE_KEYS = "RULE_KEYS"
-    RULE_END = "RULE_END"
-    ALERT = "ALERT"
-    LOCK = "LOCK"
-    UNLOCK = "UNLOCK"
-
-
 class DatabricksQueryStatus(StrEnum):
     """Databricks Query History states, including compilation before execution."""
 
@@ -776,3 +678,42 @@ class IcebergMaintenance(StrEnum):
 
     EXPIRE_SNAPSHOTS = "expire_snapshots"
     REMOVE_ORPHAN_FILES = "remove_orphan_files"
+
+
+class InterventionAction(StrEnum):
+    """What an operator did to a run, as ``AUD_RUN_INTERVENTIONS.ACTION`` records it."""
+
+    MARK = "MARK"
+    NEW_RUN = "NEW_RUN"
+    CANCEL = "CANCEL"
+    REOPEN = "REOPEN"
+    RESET = "RESET"
+    GATE_BYPASS = "GATE_BYPASS"
+    IGNORE_DEPENDENCIES = "IGNORE_DEPENDENCIES"
+    PAUSE_ADMISSION = "PAUSE_ADMISSION"
+    PAUSE_APPLIED = "PAUSE_APPLIED"
+    RERUN = "RERUN"
+
+
+class AgentReport(StrEnum):
+    """Fenced task progress sent through the agent report action."""
+
+    START = "START"
+    END = "END"
+    CANCEL = InterventionAction.CANCEL
+    STATE = "STATE"
+    TARGET = "TARGET"
+    PUBLISH = "PUBLISH"
+    WATERMARK = "WATERMARK"
+    ITEMS = "ITEMS"
+    ITEM_EVENT = "ITEM_EVENT"
+    ITEM_PREPARE = "ITEM_PREPARE"
+    BUNDLE = "BUNDLE"
+    UPLOADS = "UPLOADS"
+    UPLOAD_VALIDATION = "UPLOAD_VALIDATION"
+    RULE_BEGIN = "RULE_BEGIN"
+    RULE_KEYS = "RULE_KEYS"
+    RULE_END = "RULE_END"
+    ALERT = "ALERT"
+    LOCK = "LOCK"
+    UNLOCK = "UNLOCK"

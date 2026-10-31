@@ -74,6 +74,9 @@ def pin(conn: Connection, pipeline_id: int, run_id: int, actor: Actor) -> None:
     now = datetime.now(UTC)
     for pause in current(conn, pipeline_id):
         if pause.active(now):
+            from etl_craft.engine.stewardship import refuse_bypass
+
+            refuse_bypass(conn, pipeline_id, pause.task_id, pause.outcome, "standing task pause")
             record_intervention(
                 conn,
                 pipeline_id=pipeline_id,

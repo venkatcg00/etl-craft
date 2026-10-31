@@ -31,6 +31,7 @@ from etl_craft.engine.repository.pipelines import (
 )
 from etl_craft.engine.repository.tasks import fetch_task_codes
 from etl_craft.engine.run_definitions import for_admission, for_run
+from etl_craft.engine.stewardship import require_upload_run
 from etl_craft.execution.attempt_records import run_cancelled
 from etl_craft.execution.connections import check_run_connections
 from etl_craft.execution.gates import (
@@ -206,6 +207,8 @@ def start_steps(
     reconcile(engine, pipeline_id=pipeline_id)
     selected, kind = _select_run(engine, pipeline_code, pipeline_id, options)
     if selected is not None and kind is not None:
+        with engine.connect() as conn:
+            require_upload_run(conn, pipeline_id, selected.pipeline_run_id)
         return _resume_run(pipeline_code, selected.pipeline_run_id, kind, options)
     queued = selected.pipeline_run_id if selected is not None else None
     logical_date = (

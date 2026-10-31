@@ -144,7 +144,7 @@ def parse_input_params(value: str | None) -> dict[str, Any]:
     return parsed
 
 
-def load_script(path: Path, name: str) -> Callable[..., Any]:
+def load_script(path: Path, name: str, entry_name: str = "run") -> Callable[..., Any]:
     """Import the script and return its ``run``; ``HandlerError`` saying what is wrong."""
     # Scripts may import helper modules kept beside them.
     folder = str(path.parent)
@@ -169,16 +169,16 @@ def load_script(path: Path, name: str) -> Callable[..., Any]:
         raise HandlerError(
             f"SCRIPT_FILE={name!r}: importing it failed: {type(error).__name__}: {error}"
         ) from error
-    entry = getattr(module, "run", None)
+    entry = getattr(module, entry_name, None)
     if not callable(entry):
         sys.modules.pop(module_name, None)
         raise HandlerError(
-            f"SCRIPT_FILE={name!r} defines no run(task) function; see etl_craft.scripting"
+            f"SCRIPT_FILE={name!r} defines no {entry_name}(task) function; see etl_craft.scripting"
         )
     return entry  # type: ignore[no-any-return]
 
 
-def script_definition_problem(path: Path, name: str) -> str | None:
+def script_definition_problem(path: Path, name: str, entry_name: str = "run") -> str | None:
     """Read the script without running it; return why its ``run`` cannot be called, or ``None``.
 
     The script is parsed, not imported, so nothing in it runs. A ``run`` that is not a plain
@@ -193,7 +193,7 @@ def script_definition_problem(path: Path, name: str) -> str | None:
     functions = [
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "run"
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == entry_name
     ]
     if not functions:
         bound = {
@@ -208,15 +208,20 @@ def script_definition_problem(path: Path, name: str) -> str | None:
             if isinstance(node, ast.Import | ast.ImportFrom)
             for alias in node.names
         }
-        if "run" in bound:
+        if entry_name in bound:
             return None
-        return f"SCRIPT_FILE={name!r} defines no run(task) function; see etl_craft.scripting"
+        return (
+            f"SCRIPT_FILE={name!r} defines no {entry_name}(task) function; see etl_craft.scripting"
+        )
     if isinstance(functions[-1], ast.AsyncFunctionDef):
-        return f"{name}: run is async; it must be a plain function that returns a ScriptResult"
+        return (
+            f"{name}: {entry_name} is async; it must be a plain function "
+            "that returns a ScriptResult"
+        )
     args = functions[-1].args
     positional = len(args.posonlyargs) + len(args.args) - len(args.defaults)
     if positional > 1:
-        return f"{name}: run takes {positional} arguments; it takes the task, or nothing"
+        return f"{name}: {entry_name} takes {positional} arguments; it takes the task, or nothing"
     return None
 
 
@@ -346,6 +351,7 @@ def script_task(
     """Bind the script helper to the exact admitted attempt and shared store."""
     params = context.task_params
     return ScriptTask(
+        uploads=store.upload_files() if context.uploads else (),
         pipeline_code=context.pipeline_code,
         task_code=context.task_code,
         pipeline_run_id=context.pipeline_run_id,

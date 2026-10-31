@@ -265,3 +265,7 @@ Cloning:
 #   Config_history_days: 365            # closed project metadata versions; current rows survive
 #   Daily_at: "03:00"                    # optional daily purge in each project's time zone
 # Periods are whole days from 1 to 36500; review purge --dry-run before enabling.
+
+# Stewardship blanket ceiling; FILE_VALIDATION.MAX_FILE_MB may lower it.
+Uploads:
+  Max_file_mb: 50

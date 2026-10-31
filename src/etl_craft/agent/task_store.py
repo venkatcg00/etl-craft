@@ -4,6 +4,7 @@ import base64
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from etl_craft import __version__
 from etl_craft.agent.client import AgentClient
@@ -11,13 +12,15 @@ from etl_craft.config import ConnectorConfig
 from etl_craft.core.enums import ActionName, AgentReport
 from etl_craft.core.errors import ServerError
 from etl_craft.core.items import ItemRecord, ItemState
+from etl_craft.core.upload_copy import verified_upload
+from etl_craft.core.uploads import UploadFile, UploadInfo
 from etl_craft.engine.alerts import AlertState
 from etl_craft.engine.repository.business_rules import RuleRunBinding
 from etl_craft.engine.resource_locks import confirm_stale, holder_tag
 from etl_craft.engine.task_store import RuleEnding, TargetPublication, TargetState, TaskState
 from etl_craft.engine.timestamp_windows import TimestampWindow, WindowDefinition
 from etl_craft.services.operations.agent_models import AgentTask
-from etl_craft.services.operations.serialization import from_json
+from etl_craft.services.operations.serialization import decode, from_json
 
 
 @dataclass
@@ -34,6 +37,32 @@ class RemoteTaskStore:
     holder_id: str
     held: set[int] = field(default_factory=set)
     contracts: dict[str, TargetState] = field(default_factory=dict)
+    files_dir: Path = field(default_factory=Path.cwd)
+
+    def upload_files(self) -> tuple[UploadFile, ...]:
+        """Stream and hash-check each file before giving a script its local cache path."""
+        uploads = decode(tuple[UploadInfo, ...], self.call(self.request(AgentReport.UPLOADS)))
+        assert isinstance(uploads, tuple)
+        assert all(isinstance(upload, UploadInfo) for upload in uploads)
+        root = self.files_dir / "uploads" / str(self.attempt_id)
+        return tuple(
+            verified_upload(
+                root,
+                upload,
+                self.client.upload_content(upload.upload_id, self.attempt_id, __version__),
+            )
+            for upload in uploads
+        )
+
+    def validation_result(self, upload_id: int, reason: str | None) -> None:
+        """Send the validator's per-file outcome through its fenced task report."""
+        self.call(
+            replace(
+                self.request(AgentReport.UPLOAD_VALIDATION),
+                upload_id=upload_id,
+                error_message=reason,
+            )
+        )
 
     @property
     def session_tag(self) -> str:

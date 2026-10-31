@@ -754,6 +754,7 @@ all = [
     { name = "databricks-sqlalchemy" },
     { name = "fastapi" },
     { name = "jinja2" },
+    { name = "openpyxl" },
     { name = "pydantic" },
     { name = "snowflake-sqlalchemy" },
     { name = "sqlalchemy" },
@@ -768,6 +769,9 @@ databricks = [
     { name = "databricks-sql-connector" },
     { name = "databricks-sqlalchemy" },
     { name = "sqlalchemy" },
+]
+excel = [
+    { name = "openpyxl" },
 ]
 publish = [
     { name = "ngrok", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -823,10 +827,11 @@ requires-dist = [
     { name = "databricks-sqlalchemy", marker = "extra == 'databricks'", specifier = ">=2,<3" },
     { name = "duckdb", specifier = ">=1.5.5,<2" },
     { name = "duckdb-engine", specifier = ">=0.13,<1" },
-    { name = "etl-craft", extras = ["ui", "aws", "databricks", "snowflake", "trino"], marker = "extra == 'all'", editable = "." },
+    { name = "etl-craft", extras = ["ui", "aws", "databricks", "snowflake", "trino", "excel"], marker = "extra == 'all'", editable = "." },
     { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.115,<1" },
     { name = "jinja2", marker = "extra == 'ui'", specifier = ">=3.1,<4" },
     { name = "ngrok", marker = "extra == 'publish'", specifier = ">=1.4,<2" },
+    { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1.5,<4" },
     { name = "psutil", specifier = ">=6.0,<7" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6,<4" },
     { name = "pydantic", marker = "extra == 'ui'", specifier = ">=2.9.2,<3" },
@@ -840,7 +845,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.35,<1" },
     { name = "watchdog", specifier = ">=6,<7" },
 ]
-provides-extras = ["ui", "all", "aws", "databricks", "publish", "snowflake", "trino"]
+provides-extras = ["excel", "ui", "all", "aws", "databricks", "publish", "snowflake", "trino"]
 
 [package.metadata.requires-dev]
 dev = [

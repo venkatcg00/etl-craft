@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import re
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from http.client import HTTPResponse
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request
+from uuid import uuid4
 
 from etl_craft.config.remote import server_url as server_url
 from etl_craft.core.api_errors import response_error
@@ -68,6 +71,48 @@ class ApiClient:
         except ValueError as error:
             raise ServerError(f"{self.url}{path}: response is not JSON; check the URL") from error
         return decode(action.result, document)
+
+    def upload(self, pipeline_code: str, path: Path) -> object:
+        """Send multipart bytes from disk without materializing the file in memory."""
+        route = action_path(ACTIONS[ActionName.UPLOAD]).format(project=quote(self.project, safe=""))
+        boundary = "etl-craft-" + uuid4().hex
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        head = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+            f"filename*=utf-8''{quote(path.name, safe='')}\r\nContent-Type: {mime}\r\n\r\n"
+        ).encode()
+        tail = f"\r\n--{boundary}--\r\n".encode()
+        with path.open("rb") as stream:
+
+            def chunks() -> Iterator[bytes]:
+                yield head
+                while chunk := stream.read(65536):
+                    yield chunk
+                yield tail
+
+            message = Request(
+                self.url + route + "?" + urlencode({"pipeline_code": pipeline_code}),
+                data=chunks(),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {self._token()}",
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "Content-Length": str(
+                        len(head) + os.fstat(stream.fileno()).st_size + len(tail)
+                    ),
+                },
+            )
+            try:
+                with open_request(message, 60) as response:
+                    return json.loads(response.read(65536))
+            except HTTPError as error:
+                raise response_error(error.code, error.read(65536), self.url) from error
+            except (URLError, OSError) as error:
+                raise ServerError(
+                    f"upload {path.name!r}: API unavailable ({type(error).__name__}); "
+                    "expected a complete upload response; restore the API or network "
+                    "and check uploads before retrying"
+                ) from error
 
     def _stream(self, path: str, query: Mapping[str, object]) -> Iterator[bytes]:
         """Yield a text response in chunks, such as an attempt's log."""

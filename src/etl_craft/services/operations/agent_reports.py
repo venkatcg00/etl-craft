@@ -239,6 +239,10 @@ def report(ctx: OperationContext, request: AgentTask) -> AgentReply | Awaitable[
             "report only this task's admitted work"
         )
     progress: dict[AgentReport, Callable[[], object]] = {
+        AgentReport.UPLOADS: lambda: task.upload_inputs,
+        AgentReport.UPLOAD_VALIDATION: lambda: store.validation_result(
+            required(request.upload_id, "upload_id"), request.error_message
+        ),
         AgentReport.BUNDLE: lambda: bundle_report(ctx, task, request),
         AgentReport.STATE: lambda: store.state(task.task_params.get("SQL_ACTION")),
         AgentReport.ALERT: lambda: store.alert(task.task_params.get("EMAIL_PIPELINES")),

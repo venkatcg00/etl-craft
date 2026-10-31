@@ -46,6 +46,7 @@ from etl_craft.cli.commands import (
     token,
     ui,
     upgrade_targets,
+    uploads,
     validate,
 )
 from etl_craft.cli.commands.common import Command as Command
@@ -64,6 +65,8 @@ COMMANDS: tuple[Command, ...] = (
     admin_metadata.PROJECT,
     admin_metadata.POOL,
     run.COMMAND,
+    uploads.UPLOAD,
+    uploads.HISTORY,
     controller.COMMAND,
     ui.COMMAND,
     agent.COMMAND,

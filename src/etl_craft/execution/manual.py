@@ -130,6 +130,9 @@ def select_tasks(
     """Validate the requested graph and handler isolation before creating a run."""
     ignore = ignore_dependencies
     task_id = resolve_task_id(conn, pipeline_id, task_code)
+    from etl_craft.engine.stewardship import refuse_bypass
+
+    refuse_bypass(conn, pipeline_id, task_id, None, "standalone execution")
     if fetch_pipeline_dependency_edges(conn, pipeline_id) and not ignore:
         raise RunRefusedError(
             f"pipeline_id={pipeline_id}: pipeline dependencies exist outside the manual selection; "

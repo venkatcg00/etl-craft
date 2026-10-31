@@ -1,4 +1,4 @@
-SELECT p.PROJECT_ID AS project_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
+SELECT p.PIPELINE_ID AS pipeline_id, t.TASK_ID AS task_id, p.PROJECT_ID AS project_id, r.PIPELINE_RUN_ID AS pipeline_run_id,
 r.STARTED_BY_KIND AS started_by_kind, r.TRIGGER_KIND AS trigger_kind,
 a.TASK_RUN_ID AS task_run_id, a.FORCE_FLAG AS force_flag,
 a.RERUN_FLAG AS rerun_flag, a.STATUS AS status, a.OWNER_ID AS owner_id,

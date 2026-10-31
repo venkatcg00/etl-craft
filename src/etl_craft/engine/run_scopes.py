@@ -158,7 +158,10 @@ def create_manual_run(
     from etl_craft.engine import transitions
     from etl_craft.engine.repository.dependencies import fetch_pipeline_graph
     from etl_craft.engine.run_definitions import for_run
+    from etl_craft.engine.stewardship import refuse_bypass
 
+    for task_id in scope.task_ids:
+        refuse_bypass(conn, pipeline_id, task_id, None, "standalone execution")
     with conn.begin_nested():
         run_id = transitions.create_run(
             conn, pipeline_id, actor, run_key=run_key, run_date=run_date, status=RunStatus.QUEUED

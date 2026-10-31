@@ -193,7 +193,7 @@ def run_handler(
             context.task_run_id,
             error,
             context.config,
-            script=context.handler == Handler.PYTHON,
+            script=context.handler in {Handler.PYTHON, Handler.FILE_VALIDATION},
         )
         return error.exit_code
     except Exception as error:
@@ -203,7 +203,7 @@ def run_handler(
             context.task_run_id,
             error,
             context.config,
-            script=context.handler == Handler.PYTHON,
+            script=context.handler in {Handler.PYTHON, Handler.FILE_VALIDATION},
         )
         return ExitCode.UNEXPECTED
     with engine.begin() as conn:
@@ -218,7 +218,8 @@ def run_handler(
             owner=None if identity is None else identity[1],
         )
         if identity is not None and (
-            context.handler != Handler.PYTHON or process_local_queries(context.config)
+            context.handler not in {Handler.PYTHON, Handler.FILE_VALIDATION}
+            or process_local_queries(context.config)
         ):
             controls.acknowledge(conn, identity[0], ControlAcknowledgement.QUERIES)
     fault_point("child.after_outcome")

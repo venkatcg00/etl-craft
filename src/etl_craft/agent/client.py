@@ -2,7 +2,9 @@
 
 import json
 import os
+from collections.abc import Iterator
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request
 
 from etl_craft.config.remote import server_url
@@ -59,4 +61,24 @@ class AgentClient:
         except ValueError as error:
             raise ServerError(
                 f"{self.url}: agent response is not JSON; check the API address"
+            ) from error
+
+    def upload_content(self, upload_id: int, attempt_id: int, version: str) -> Iterator[bytes]:
+        """Read only this attempt's upload stream, never host paths or storage secrets."""
+        query = urlencode({"attempt_id": attempt_id, "version": version})
+        message = Request(
+            f"{self.url}/api/v1/agent/uploads/{upload_id}/content?{query}",
+            headers={"Authorization": f"Bearer {self.token}", "Accept": "application/octet-stream"},
+        )
+        try:
+            with open_request(message, 30) as response:
+                while chunk := response.read(65536):
+                    yield chunk
+        except HTTPError as error:
+            raise response_error(error.code, error.read(65536), self.url) from error
+        except (URLError, OSError) as error:
+            raise ServerError(
+                f"upload {upload_id}, attempt {attempt_id}: API stream interrupted "
+                f"({type(error).__name__}); expected complete recorded bytes; restore "
+                "the API or network and retry"
             ) from error

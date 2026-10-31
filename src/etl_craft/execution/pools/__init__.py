@@ -16,18 +16,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
-from etl_craft.core.enums import Handler
+from etl_craft.core.enums import Handler as Handler
+from etl_craft.core.placement import slot_kind as slot_kind
 
 if TYPE_CHECKING:
     from etl_craft.execution.attempt_types import TaskOutcome
 
 SLOT_KINDS = ("python", "warehouse")
 """Python scripts take ``python`` slots; every other handler, ``warehouse`` ones."""
-
-
-def slot_kind(handler: str) -> str:
-    """Return the kind of slot a task with ``handler`` runs in."""
-    return "python" if handler == Handler.PYTHON else "warehouse"
 
 
 @dataclass(frozen=True)

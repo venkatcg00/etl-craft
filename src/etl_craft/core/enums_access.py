@@ -28,6 +28,7 @@ class Permission(StrEnum):
     """Increasing permissions on a pipeline or tag."""
 
     CAN_VIEW = "CAN_VIEW"
+    CAN_UPLOAD = "CAN_UPLOAD"
     CAN_RUN = "CAN_RUN"
     CAN_MANAGE = "CAN_MANAGE"
 
@@ -48,3 +49,62 @@ class Governance(StrEnum):
 
     STRICT = "STRICT"
     RELAXED = "RELAXED"
+
+
+class ActorKind(StrEnum):
+    """The kind of account responsible for an action."""
+
+    USER = "USER"
+    SERVICE = "SERVICE"
+    SYSTEM = "SYSTEM"
+
+
+class TokenKind(StrEnum):
+    """What a stored credential is for: automation, a request, or renewing a user's access."""
+
+    AGENT = "AGENT"
+    ATTEMPT = "ATTEMPT"
+    SERVICE = "SERVICE"
+    ACCESS = "ACCESS"
+    REFRESH = "REFRESH"
+
+
+class AccountKind(StrEnum):
+    """Whether a registered account represents a person or an automated caller."""
+
+    USER = "USER"
+    SERVICE = "SERVICE"
+
+
+class ApiRole(StrEnum):
+    """A deployment account role, each including the ones before it."""
+
+    AGENT = "agent"
+    VIEWER = "viewer"
+    OPERATOR = "operator"
+    DEVELOPER = "developer"
+    ADMIN = "admin"
+
+
+class ConnectionUse(StrEnum):
+    """Separately bounded Engine DB sessions in one serving process."""
+
+    TASK = "TASK"
+    PROBE = "PROBE"
+    HEALTH = "HEALTH"
+
+
+class ManagedProvider(StrEnum):
+    """Platforms that mint short-lived PostgreSQL database credentials."""
+
+    NONE = "NONE"
+    SNOWFLAKE = "SNOWFLAKE"
+    DATABRICKS = "DATABRICKS"
+
+
+class ProcessRole(StrEnum):
+    """Processes that reserve Engine DB capacity; API-only agents reserve none."""
+
+    CONTROLLER = "CONTROLLER"
+    UI = "UI"
+    RUN = "RUN"

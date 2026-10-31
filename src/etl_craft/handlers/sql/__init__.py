@@ -21,6 +21,7 @@ from etl_craft.core.errors import ConfigurationError, SqlGuardError
 from etl_craft.core.faults import fault_point
 from etl_craft.core.text import qualify as qualify
 from etl_craft.dialects.warehouse import WarehouseDialect
+from etl_craft.dialects.warehouse.uploads import writer_parameters
 from etl_craft.engine import locks
 from etl_craft.engine.repository.offsets import StoredOffset
 from etl_craft.engine.task_store import TargetPublication, TaskState, TaskStore
@@ -29,6 +30,7 @@ from etl_craft.handlers.registry import HandlerResult, TaskContext, task_store
 from etl_craft.handlers.sql.actions import ACTIONS
 from etl_craft.handlers.sql.context import ActionContext
 from etl_craft.handlers.sql.protection import (
+    Protection,
     ProtectionRequest,
     evidence_names,
     for_task,
@@ -103,6 +105,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                 task_run_id=context.task_run_id,
                 params=context.task_params,
             )
+            session.uploads, session.bindings = context.uploads, writer_parameters(context.uploads)
             action = ActionContext(
                 task=task,
                 context=context,
@@ -110,6 +113,7 @@ def run(context: TaskContext, engine_db: Engine | TaskStore) -> HandlerResult:
                 user=context.writer,
                 now=context.started_at,
                 state=state,
+                uploads=context.uploads,
             )
             outcome = _apply(session, action)
         if task.action == SqlAction.SCD1_MERGE:
@@ -167,6 +171,8 @@ def _apply(session: Session, action: ActionContext) -> HandlerResult | SqlGuardE
             and session.target_columns()
         ):
             session.check_target_format()
+        if action.uploads and task.action in {SqlAction.SCD1_MERGE, SqlAction.SCD2_MERGE}:
+            return _uploaded_merge(session, action)
         session.protection = for_task(session, task)
         result = ACTIONS[task.action](session, action)
         if session.protection is not None:
@@ -195,6 +201,78 @@ def _apply(session: Session, action: ActionContext) -> HandlerResult | SqlGuardE
         return error
     finally:
         session.sweep()
+
+
+def _uploaded_merge(session: Session, action: ActionContext) -> HandlerResult:
+    """Apply each uploader's statement and human evidence in one warehouse transaction."""
+    context = action.context
+    inputs = context.upload_inputs
+    if tuple(u.upload_id for u in inputs) != tuple(u.upload_id for u in action.uploads):
+        raise SqlGuardError(
+            f"{context.pipeline_code}.{context.task_code}: upload account metadata differs; "
+            "expected the run's recorded upload ids and accounts; reload the admitted task"
+        )
+    guard = Protection(session, action.task)
+    try:
+        guard.acquire()
+    except SqlGuardError as error:
+        raise SqlGuardError(
+            f"pipeline {context.pipeline_code}, task {context.task_code}: {error}; "
+            "or use a non-protected target"
+        ) from error
+    full = action.build_stage(session)
+    if existing := for_task(session, action.task):
+        guard = existing
+    else:
+        from etl_craft.core.actor import SYSTEM_ACTOR
+
+        guard.enable(ProtectionRequest.create(SYSTEM_ACTOR, "enable upload protection"))
+    session.protection = guard
+    results = []
+    columns = ", ".join(name for name, _ in session.columns(full))
+    for i, upload in enumerate(inputs):
+        staged = session.scratch("upload")
+        staged = session.create_scratch(
+            staged,
+            f"SELECT {columns} FROM {full} WHERE UPLOAD_ID=:upload_id_{i}",
+            step=f"stage upload {upload.upload_id}",
+        )
+        results.append(
+            ACTIONS[action.task.action](
+                session,
+                replace(
+                    action,
+                    staged=staged,
+                    user=upload.account,
+                    respect_protection=upload.actor_kind != ActorKind.USER,
+                ),
+            )
+        )
+        guard.finish(
+            ProtectionRequest(
+                Actor(upload.account, upload.actor_kind),
+                f"upload {upload.upload_id}",
+                f"upload:{upload.upload_id}/attempt:{context.attempt_id}",
+                action.now,
+            )
+        )
+    return _uploaded_counts(results, guard)
+
+
+def _uploaded_counts(results: list[HandlerResult], guard: Protection) -> HandlerResult:
+    """Sum per-file changes while reporting the final target size once."""
+    counts = {}
+    for name in ("source_count", "insert_count", "update_count", "delete_count", "reject_count"):
+        values = [getattr(result, name) for result in results]
+        counts[name] = None if any(value is None for value in values) else sum(values)
+    return HandlerResult(
+        **counts,
+        target_count=results[-1].target_count if results else None,
+        variables={
+            "PROTECTED_ROWS": guard.prevented_rows,
+            "PROTECTED_VALUES": guard.prevented_values,
+        },
+    )
 
 
 def _watermarked_task(

@@ -60,7 +60,14 @@ from etl_craft.engine.timestamp_windows import source_pipeline_ids
 from etl_craft.execution.event_probe import probe_sql
 from etl_craft.execution.limits import task_timeout_seconds
 from etl_craft.execution.retries import task_retry_policy
-from etl_craft.handlers import email_alert, event_wait, python_scripts, run_pipeline, sql_script
+from etl_craft.handlers import (
+    email_alert,
+    event_wait,
+    file_validation,
+    python_scripts,
+    run_pipeline,
+    sql_script,
+)
 from etl_craft.handlers.business_rules import check_output, check_rule
 from etl_craft.handlers.registry import COMMON_PARAMETERS, TaskContext
 from etl_craft.handlers.resources import LocalLocker
@@ -83,6 +90,7 @@ from etl_craft.services.lineage import (
 )
 from etl_craft.services.placement import Placement, placement
 from etl_craft.services.source_columns import definition_problem, drift, warehouse_columns
+from etl_craft.services.stewardship_checks import graph_problems, sql_problems
 from etl_craft.services.trigger_validation import trigger_definition, trigger_graph_problems
 from etl_craft.warehouse.connection import open_warehouse
 
@@ -93,6 +101,7 @@ FULL_REPLACE = frozenset({SqlAction.CREATE_TABLE, SqlAction.OVERWRITE_TABLE})
 """The SQL actions that rebuild every row of their target, and so every ``ROW_ID``."""
 
 KNOWN_PARAMETERS: dict[str, frozenset[str]] = {
+    Handler.FILE_VALIDATION: file_validation.PARAMETERS,
     Handler.EVENT_WAIT: event_wait.PARAMETERS,
     Handler.RUN_PIPELINE: run_pipeline.PARAMETERS,
     Handler.SQL: SQL_PARAMETERS,
@@ -286,6 +295,8 @@ def _pipelines(conn: Connection, config: ConnectorConfig, data: _Metadata, repor
             pipeline_id = resolve_pipeline_id(
                 conn, code, before_projects=not for_engine(conn).has_table(conn, "CFG_PROJECTS")
             )
+            for where, message in graph_problems(conn, pipeline_id, data.tasks, data.edges):
+                report.fail(where, message)
             graph = fetch_pipeline_graph(conn, pipeline_id)
             build_graph(graph.tasks, graph.same_pipeline_edges)
         except EtlCraftError as error:
@@ -531,6 +542,8 @@ def _sql(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
     if context.config.warehouse is None:
         return ["a SQL task needs a Warehouse section in craft-connector.yml"]
     dialect = task_dialect(context)
+    if problems := sql_problems(conn, context, spec):
+        return problems
     problem = dialect.unsupported_storage_problem(
         context.task_params
     ) or dialect.task_storage_problem(context.task_params)
@@ -650,7 +663,13 @@ def _sql_script(conn: Connection, context: TaskContext, data: _Metadata) -> list
     return []
 
 
+def _file_validation(conn: Connection, context: TaskContext, data: _Metadata) -> list[str]:
+    file_validation.settings(context)
+    return []
+
+
 CHECKS: dict[str, Callable[[Connection, TaskContext, _Metadata], list[str]]] = {
+    Handler.FILE_VALIDATION: _file_validation,
     Handler.EVENT_WAIT: _event_wait,
     Handler.RUN_PIPELINE: _run_pipeline,
     Handler.SQL: _sql,

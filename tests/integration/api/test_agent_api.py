@@ -41,6 +41,7 @@ def agent_scene(engine_db, tmp_path):
     )
     config = replace(
         engine_db.config,
+        config_path=tmp_path / "craft-connector.yml",
         deployment=DeploymentProfile.CONTROLLER_AGENTS,
         warehouse=warehouse,
         log_dir=tmp_path / "logs",
@@ -1816,3 +1817,78 @@ def test_agent_start_returns_the_exact_recorded_microsecond_clock(agent_scene):
             {"id": attempt},
         ).one()
         assert row.started_at == recorded and row.status == AttemptStatus.RUNNING
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        "none",
+        "wrong-attempt",
+        "other-run",
+        "expired",
+        "user-token",
+        "pool-token",
+        "refused-downstream",
+    ],
+)
+def test_upload_content_is_fenced_to_its_attempt_and_run(agent_scene, refusal):
+    db, client, pool, user, _, config = agent_scene
+    attempt = queue(db, "PYTHON" if refusal == "refused-downstream" else "FILE_VALIDATION")
+    response = client.post(
+        "/api/v1/agent/claim", headers=pool, json={"version": __version__, "free_kinds": ["python"]}
+    )
+    assert response.status_code == 200, response.text
+    credential = response.json()["data"]["credential"]
+    headers = {"Authorization": f"Bearer {credential}"}
+    with db.engine.begin() as conn:
+        run = conn.execute(
+            text("SELECT PIPELINE_RUN_ID AS run_id FROM AUD_PIPELINES_RUN_LOG")
+        ).scalar_one()
+        pipeline = conn.execute(
+            text("SELECT PIPELINE_ID AS pipeline_id FROM CFG_PIPELINES")
+        ).scalar_one()
+        upload_run = run
+        if refusal == "other-run":
+            other = add_pipeline(conn, "Other")
+            upload_run = transitions.create_run(conn, other, SYSTEM_ACTOR)
+        conn.execute(
+            text(
+                "INSERT INTO AUD_UPLOADS "
+                "(UPLOAD_ID,PIPELINE_ID,ACCOUNT,FILE_NAME,SHA256,SIZE_BYTES,"
+                "PIPELINE_RUN_ID,STATUS,UPLOADED_AT) VALUES (901,:pipeline,'person','data.csv',"
+                ":sha,8,:run,:status,:now)"
+            ),
+            {
+                "pipeline": pipeline,
+                "run": upload_run,
+                "sha": sha256_hex(b"id|name\n"),
+                "status": "REFUSED" if refusal == "refused-downstream" else "QUEUED",
+                "now": datetime.now(UTC),
+            },
+        )
+        if refusal == "expired":
+            conn.execute(
+                text("UPDATE AUD_TASK_ATTEMPTS SET LEASE_EXPIRES_AT=:past"),
+                {"past": datetime.now(UTC) - timedelta(seconds=1)},
+            )
+    folder = config.host_dir / "uploads" / "901"
+    folder.mkdir(parents=True)
+    (folder / "content").write_bytes(b"id|name\n")
+    if refusal == "wrong-attempt":
+        attempt += 1
+    if refusal == "user-token":
+        headers = user
+    if refusal == "pool-token":
+        headers = pool
+    response = client.get(
+        f"/api/v1/agent/uploads/901/content?version={__version__}&attempt_id={attempt}",
+        headers=headers,
+    )
+    if refusal == "none":
+        assert response.status_code == 200, response.text
+        assert response.content == b"id|name\n"
+        assert str(config.host_dir) not in str(response.headers)
+    else:
+        assert response.status_code in {401, 403}, response.text
+        for expected in ["901", str(attempt), "run", "expected"]:
+            assert expected in response.text

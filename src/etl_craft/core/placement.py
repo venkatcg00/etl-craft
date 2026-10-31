@@ -19,7 +19,7 @@ class ResourceRequest:
 
 def resource_request(handler: str, parameters: Mapping[str, str], task: str) -> ResourceRequest:
     """Resolve defaults and refuse malformed requests before creating a task run."""
-    kind = SlotKind.PYTHON if handler == Handler.PYTHON else SlotKind.WAREHOUSE
+    kind = slot_kind(handler)
     cpu, memory = TASK_COST[kind]
     values = {"CPU_REQUEST": cpu, "MEMORY_REQUEST_MB": math.ceil(memory / MIB)}
     for name in values:
@@ -33,3 +33,12 @@ def resource_request(handler: str, parameters: Mapping[str, str], task: str) -> 
             )
         values[name] = int(raw)
     return ResourceRequest(values["CPU_REQUEST"], int(values["MEMORY_REQUEST_MB"]))
+
+
+def slot_kind(handler: str) -> SlotKind:
+    """Classify validation scripts with Python work, without consuming a warehouse slot."""
+    return (
+        SlotKind.PYTHON
+        if handler in {Handler.PYTHON, Handler.FILE_VALIDATION}
+        else SlotKind.WAREHOUSE
+    )

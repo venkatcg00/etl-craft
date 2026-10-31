@@ -54,6 +54,7 @@ from etl_craft.engine.repository.tasks import (
     fetch_task_parameters,
     resolve_task_id,
 )
+from etl_craft.engine.stewardship import refuse_bypass
 from etl_craft.execution.reconcile import reconcile
 from etl_craft.handlers.registry import TaskContext
 from etl_craft.handlers.sql.spec import read_sql_task
@@ -83,11 +84,7 @@ def mark_task(
     requested_by: str | None = None,
     selector: runlog.RunSelector = runlog.ACTIVE_RUN,
 ) -> Intervened:
-    """Mark the exact task, refusing a live attempt and closing a handed-off child wait.
-
-    Ended runs reopen and engine-skipped downstream tasks reset. A marked trigger leaves
-    its child running. Stale attempts must be reconciled before their outcomes can change.
-    """
+    """Mark the selected task; refuse live attempts and reconcile stale ones first."""
     status = _check(config, "mark", reason, status, rows)
     who = requested_by or current_actor().name
     lost = []
@@ -99,6 +96,7 @@ def mark_task(
     with engine.begin() as conn:
         pipeline_id = resolve_pipeline_id(conn, pipeline_code)
         task_id = resolve_task_id(conn, pipeline_id, task_code)
+        refuse_bypass(conn, pipeline_id, task_id, status, "mark")
         run_id, run_status = _selected_run(conn, pipeline_id, selector)
         before = runlog.fetch_task_run_status(conn, task_id, run_id)
         handed_off = conn.execute(

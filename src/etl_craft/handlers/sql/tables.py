@@ -227,9 +227,17 @@ def require_target(session: Session) -> list[tuple[str, str]]:
     return columns
 
 
+def audit_columns(session: Session, action: str) -> tuple[str, ...]:
+    """Upload writes always retain both account columns, including ordinary targets."""
+    columns = AUDIT_COLUMNS[action]
+    if session.uploads:
+        columns = tuple(dict.fromkeys((*columns, "CREATED_BY", "UPDATED_BY")))
+    return columns
+
+
 def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
     """Refuse an absent target or missing action-managed columns before any write."""
-    audit = AUDIT_COLUMNS[action]
+    audit = audit_columns(session, action)
     target_columns = require_target(session)
     required = ("PIPELINE_RUN_ID", *audit)
     have = {name.lower() for name, _ in target_columns}
@@ -250,7 +258,7 @@ def check_target_audit(session: Session, action: str) -> list[tuple[str, str]]:
 def check_or_evolve(session: Session, stage: str, action: str, *, schema_evolution: bool) -> None:
     """Check the existing target against the stage, adding new columns when allowed."""
     target_columns = check_target_audit(session, action)
-    required = ("PIPELINE_RUN_ID", *AUDIT_COLUMNS[action])
+    required = ("PIPELINE_RUN_ID", *audit_columns(session, action))
     managed = {column.lower() for column in required} | {ROW_ID_COLUMN.lower()}
     stage_columns = [
         (name, kind) for name, kind in session.columns(stage) if name.upper() != "HASH_KEY"

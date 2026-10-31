@@ -6,6 +6,20 @@ All notable changes are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Stewardship upload service, `etl-craft upload` and `etl-craft uploads`, multipart upload,
+  history and eligible-pipeline API reads, durable batching and per-file `AUD_UPLOADS` feedback.
+- Pipeline `STEWARDABLE_FLAG` (default N), `CAN_UPLOAD` permission and mandatory
+  `FILE_VALIDATION` scripts with streaming pipe-delimited CSV/TXT and XLSX readers.
+- `Uploads.Max_file_mb` (`uploads.max_file_mb`, default 50) and the optional `excel` extra
+  (`openpyxl>=3.1.5,<4`). Upload bytes and workbook expansion are bounded before scripts run.
+- Per-row upload attribution through managed SQL actions, later-upload-wins merge ordering,
+  and human SCD protection on native PostgreSQL/DuckDB. Iceberg/Trino refuse protected SCD
+  upload pipelines during validate and refresh; ordinary upload targets remain supported.
+- Attempt-token-only `GET /api/v1/agent/uploads/{upload_id}/content` for API-only agents,
+  with live-lease/run admission and SHA-256 verification shared with local execution.
+
 ### Security
 
 - Pending Engine migrations now refuse normal login and UI startup with applied/required
