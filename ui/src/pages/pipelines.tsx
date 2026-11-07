@@ -1,3 +1,4 @@
+import { TagFilter } from "@/components/tag-filter";
 import { useQuery } from "@tanstack/react-query";
 import { createColumnHelper } from "@tanstack/react-table";
 import { Pause, Play } from "lucide-react";
@@ -14,7 +15,6 @@ import { useCanRun, useProjectInfo, useRoleAtLeast, useTimezone } from "@/hooks"
 import { getJson, project } from "@/lib/api";
 import { pipelinePath } from "@/lib/routes";
 import type { BulkOutcome, Pipeline } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { useDocumentTitle } from "@/title";
 
 const columns = createColumnHelper<Pipeline>();
@@ -89,22 +89,7 @@ export function Pipelines() {
           </div>
         }
       />
-      {known.length ? (
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by tag">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Tags</span>
-          {known.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              aria-pressed={tags.includes(tag)}
-              onClick={() => toggleTag(tag)}
-              className={cn("cursor-pointer rounded-full border px-2.5 py-1 text-xs max-sm:py-2", tags.includes(tag) ? "border-accent bg-accent text-accent-fg" : "border-border-strong bg-surface text-fg hover:bg-surface-2")}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <TagFilter known={known} selected={tags} onToggle={toggleTag} />
       {list.isError ? <Notice>{(list.error as Error).message}</Notice> : null}
       <Card>
         {selected.length && canRun ? (

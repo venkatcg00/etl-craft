@@ -37,10 +37,10 @@ export function useRuns(code: string, pipeline?: string, filters: RunFilters = {
 
 /** The runs of the project, or of one pipeline, as a table. A run opens its own page from a pipeline's list, and
  * its pipeline's list with the run highlighted from the project's. */
-export function RunsTable({ code, pipeline, status, filters = {}, highlight }: { code: string; pipeline?: string; status?: string; filters?: RunFilters; highlight?: number }) {
+export function RunsTable({ code, pipeline, status, codes, filters = {}, highlight }: { code: string; pipeline?: string; status?: string; codes?: ReadonlySet<string>; filters?: RunFilters; highlight?: number }) {
   const tz = useTimezone();
   const { runs, all } = useRuns(code, pipeline, filters);
-  const rows = React.useMemo(() => (status ? all.filter((run) => run.status === status) : all), [all, status]);
+  const rows = React.useMemo(() => all.filter((run) => (!status || run.status === status) && (!codes || codes.has(run.pipeline_code))), [all, status, codes]);
   return (
     <>
       {runs.isError ? <Notice>{(runs.error as Error).message}</Notice> : null}
@@ -50,7 +50,7 @@ export function RunsTable({ code, pipeline, status, filters = {}, highlight }: {
           data={rows}
           highlight={highlight === undefined ? undefined : (run) => run.pipeline_run_id === highlight}
           initialSort={[{ id: "id", desc: true }]}
-          empty={runs.isSuccess && !runs.hasNextPage ? (status ? `None of the ${all.length} runs is ${status.toLowerCase()}. Clear the status filter.` : "No runs yet.") : undefined}
+          empty={runs.isSuccess && !runs.hasNextPage ? (status || codes ? `None of the ${all.length} runs matches the filters. Clear a filter.` : "No runs yet.") : undefined}
           more={{ hasMore: Boolean(runs.hasNextPage), loading: runs.isFetchingNextPage, load: () => void runs.fetchNextPage() }}
           columns={[
             columns.accessor("pipeline_run_id", {

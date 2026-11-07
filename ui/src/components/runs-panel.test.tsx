@@ -23,7 +23,7 @@ const run = (id: number, pipeline: string) => ({
   newer_metadata_available: false,
 });
 
-function panel(pipeline: string | undefined, highlight?: number) {
+function panel(pipeline: string | undefined, highlight?: number, codes?: ReadonlySet<string>) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   client.setQueryData(["runs", "demo", pipeline ?? "", "", "", ""], {
     pages: [{ entries: [run(6, "REF"), run(5, "SETUP")], before: null }],
@@ -33,7 +33,7 @@ function panel(pipeline: string | undefined, highlight?: number) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <RunsPanel code="demo" pipeline={pipeline} highlight={highlight} />
+        <RunsPanel code="demo" pipeline={pipeline} highlight={highlight} codes={codes} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -63,5 +63,11 @@ describe("the shared runs layout", () => {
     const marked = screen.getAllByRole("row").filter((row) => row.getAttribute("aria-current") === "true");
     expect(marked).toHaveLength(1);
     expect(within(marked[0] as HTMLElement).getByText("#5")).toBeTruthy();
+  });
+
+  it("lists only the runs of pipelines that carry the selected tags", () => {
+    panel(undefined, undefined, new Set(["REF"]));
+    expect(screen.getByText("REF-2026-11-07 02:27:37-6")).toBeTruthy();
+    expect(screen.queryByText("SETUP-2026-11-07 02:27:37-5")).toBeNull();
   });
 });
